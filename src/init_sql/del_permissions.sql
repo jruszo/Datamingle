@@ -1,4 +1,4 @@
--- 用于删除非自定义权限，如果不需要使用model权限管理，可以执行该脚本，仅保留自定义权限
+-- Used to delete non-custom permissions. If model-level permission management is not needed, run this script to keep only custom permissions.
 set @content_type_id=(select id from django_content_type where app_label='sql' and model='permission');
 
 -- delete auth_group_permissions
