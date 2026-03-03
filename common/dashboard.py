@@ -19,7 +19,7 @@ CurrentConfig.ONLINE_HOST = "/static/echarts/"
 
 @permission_required("sql.menu_dashboard", raise_exception=True)
 def pyecharts(request):
-    # 获取统计数据
+    # Count statistics
     dashboard_count_stats = {
         "sql_wf_cnt": SqlWorkflow.objects.count(),
         "query_wf_cnt": QueryPrivilegesApply.objects.count(),
@@ -40,8 +40,8 @@ def pyecharts(request):
         "pie6": pie6.render_embed(),
         "bar4": bar4.render_embed(),
     }
-    # 获取图表数据
-    # 字符串，近7天日期 "%Y-%m-%d"
+    # Chart data
+    # String dates for the last 7 days: "%Y-%m-%d"
     today = (date.today() - relativedelta(days=-1)).strftime("%Y-%m-%d")
     one_week_before = (date.today() - relativedelta(days=+6)).strftime("%Y-%m-%d")
     dashboard_chart = get_chart_data(one_week_before, today)
@@ -66,7 +66,7 @@ def DashboardApi(request):
         start_date = validate_date(start_date_str)
         end_date = validate_date(end_date_str)
     except ValidationError as e:
-        return JsonResponse({"error: 日期有误"}, status=400)
+        return JsonResponse({"error": "Invalid date"}, status=400)
 
     dashboard_chart = get_chart_data(start_date, end_date)
 
@@ -87,7 +87,7 @@ def get_chart_data(start_date, end_date):
     logging.info("Dashboard: start_date: %s, end_date: %s", start_date, end_date)
     chart_dao = ChartDao()
 
-    # SQL上线数量
+    # SQL deployment count
     data = chart_dao.workflow_by_date(start_date, end_date)
     attr = chart_dao.get_date_list(
         datetime.strptime(start_date, "%Y-%m-%d"),
@@ -97,25 +97,25 @@ def get_chart_data(start_date, end_date):
     value = [_dict.get(day, 0) for day in attr]
     bar1 = create_bar_chart(attr, value)
 
-    # SQL上线统计
+    # SQL deployment breakdown
     data = chart_dao.workflow_by_group(start_date, end_date)
     attr = [row[0] for row in data["rows"]]
     value = [row[1] for row in data["rows"]]
     pie1 = create_pie_chart(attr, value)
 
-    # SQL语法类型
+    # SQL syntax type
     data = chart_dao.syntax_type(start_date, end_date)
     attr = [row[0] for row in data["rows"]]
     value = [row[1] for row in data["rows"]]
     pie2 = create_pie_chart(attr, value)
 
-    # SQL上线用户
+    # SQL deployment by user
     data = chart_dao.workflow_by_user(start_date, end_date)
     attr = [row[0] for row in data["rows"]]
     value = [row[1] for row in data["rows"]]
     bar2 = create_bar_chart(attr, value)
 
-    # SQL查询统计
+    # SQL query statistics
     attr = chart_dao.get_date_list(
         datetime.strptime(start_date, "%Y-%m-%d"),
         datetime.strptime(end_date, "%Y-%m-%d"),
@@ -133,13 +133,13 @@ def get_chart_data(start_date, end_date):
     )
     line1.add_xaxis(attr)
     line1.add_yaxis(
-        "检索行数",
+        "Rows scanned",
         effect_value,
         is_smooth=True,
         markpoint_opts=opts.MarkPointOpts(data=[opts.MarkPointItem(type_="average")]),
     )
     line1.add_yaxis(
-        "检索次数",
+        "Query count",
         count_value,
         is_smooth=True,
         markline_opts=opts.MarkLineOpts(
@@ -147,31 +147,31 @@ def get_chart_data(start_date, end_date):
         ),
     )
 
-    # SQL查询用户
+    # SQL query users
     data = chart_dao.querylog_effect_row_by_user(start_date, end_date)
     attr = [row[0] for row in data["rows"]]
     value = [int(row[1]) for row in data["rows"]]
     pie4 = create_pie_chart(attr, value)
 
-    # DB检索行数
+    # DB scanned rows
     data = chart_dao.querylog_effect_row_by_db(start_date, end_date)
     attr = [row[0] for row in data["rows"]]
     value = [int(row[1]) for row in data["rows"]]
     pie5 = create_pie_chart(attr, value)
 
-    # 慢查询db/user维度统计
+    # Slow query stats by db/user
     data = chart_dao.slow_query_count_by_db_by_user(start_date, end_date)
     attr = [row[0] for row in data["rows"]]
     value = [int(row[1]) for row in data["rows"]]
     pie3 = create_pie_chart(attr, value)
 
-    # 慢查询db维度统计
+    # Slow query stats by db
     data = chart_dao.slow_query_count_by_db(start_date, end_date)
     attr = [row[0] for row in data["rows"]]
     value = [row[1] for row in data["rows"]]
     bar3 = create_bar_chart(attr, value)
 
-    # SQL上线工单
+    # SQL deployment workflows
     data = chart_dao.query_sql_prod_bill(start_date, end_date)
     attr = [row[0] for row in data["rows"]]
     value = [row[1] for row in data["rows"]]
@@ -193,7 +193,7 @@ def get_chart_data(start_date, end_date):
     return chart
 
 
-# 创建柱状图
+# Build bar chart
 def create_bar_chart(attr, value, width="600", height="380px"):
     bar = Bar(init_opts=opts.InitOpts(width=width, height=height, bg_color="white"))
     bar.add_xaxis(attr)
@@ -221,7 +221,7 @@ def create_bar_chart(attr, value, width="600", height="380px"):
     return bar
 
 
-# 创建饼图
+# Build pie chart
 def create_pie_chart(attr, value, width="600", height="380px"):
     pie = Pie(init_opts=opts.InitOpts(width=width, height=height, bg_color="white"))
     pie.set_global_opts(
@@ -235,32 +235,32 @@ def create_pie_chart(attr, value, width="600", height="380px"):
     return pie
 
 
-# 生成堆叠图
+# Build stacked chart
 def gen_stack_chart(data):
     rows = data.get("rows", [])
-    envs = list(set(row[0] for row in rows if len(row) >= 1))  # X轴
-    db_types = list(set(row[1] for row in rows if len(row) >= 2))  # 堆叠1
-    env_dict = {env: {db_type: 0 for db_type in db_types} for env in envs}  # 堆叠2
+    envs = list(set(row[0] for row in rows if len(row) >= 1))  # X-axis
+    db_types = list(set(row[1] for row in rows if len(row) >= 2))  # Stack category 1
+    env_dict = {env: {db_type: 0 for db_type in db_types} for env in envs}  # Stack data
 
-    # 填充
+    # Fill data
     for row in rows:
         if len(row) == 3:
             env, db_type, count = row
             if env in env_dict and db_type in env_dict[env]:
                 env_dict[env][db_type] = count
 
-    # 将环境-数据库类型的计数转化为数据列表
+    # Convert env/db-type counts into series lists
     db_data = {db_type: [] for db_type in db_types}
     for env in envs:
         for db_type in db_types:
             db_data[db_type].append(env_dict[env][db_type])
 
-    # 绘制堆叠柱状图
+    # Render stacked bar chart
     stack_bar = Bar(
         init_opts=opts.InitOpts(width="800px", height="380px", bg_color="white")
     ).add_xaxis(
         envs
-    )  # 设置X轴数据（环境）
+    )  # Set X-axis data (environment)
 
     for db_type in db_types:
         y_values = db_data[db_type]
@@ -272,7 +272,7 @@ def gen_stack_chart(data):
             label_opts=opts.LabelOpts(is_show=False),
         )
 
-    # 隐藏Y轴的刻度标签
+    # Hide Y-axis tick labels
     stack_bar.set_global_opts(
         xaxis_opts=opts.AxisOpts(axislabel_opts=opts.LabelOpts(rotate=-10)),
         legend_opts=opts.LegendOpts(pos_left="right"),

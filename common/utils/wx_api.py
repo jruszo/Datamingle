@@ -9,15 +9,15 @@ logger = logging.getLogger("default")
 
 
 def get_wx_access_token():
-    # 优先获取缓存
+    # Read from cache first
     try:
         token = cache.get("wx_access_token")
     except Exception as e:
-        logger.error(f"获取企业微信token缓存出错:{e}")
+        logger.error(f"Failed to read WeCom token from cache: {e}")
         token = None
     if token:
         return token
-    # 请求企业微信接口获取
+    # Request token from WeCom API
     sys_config = SysConfig()
     corp_id = sys_config.get("wx_corpid")
     corp_secret = sys_config.get("wx_app_secret")
@@ -29,5 +29,5 @@ def get_wx_access_token():
         cache.set("wx_access_token", access_token, timeout=expires_in - 60)
         return access_token
     else:
-        logger.error(f"获取企业微信access_token出错:{resp}")
+        logger.error(f"Failed to fetch WeCom access_token: {resp}")
         return None

@@ -5,7 +5,7 @@ from django.db import connection
 
 
 class ChartDao(object):
-    # 直接在Archery数据库查询数据，用于报表
+    # Query data directly from Archery DB for dashboards
     @staticmethod
     def __query(sql):
         cursor = connection.cursor()
@@ -18,7 +18,7 @@ class ChartDao(object):
                 column_list.append(i[0])
         return {"column_list": column_list, "rows": rows}
 
-    # 获取连续时间
+    # Generate continuous date range
     @staticmethod
     def get_date_list(begin_date, end_date):
         dates = []
@@ -28,7 +28,7 @@ class ChartDao(object):
             this_day += timedelta(days=1)
         return dates
 
-    # 语法类型
+    # SQL syntax type distribution
     def syntax_type(self, start_date, end_date):
         sql = """
         select
@@ -36,7 +36,7 @@ class ChartDao(object):
             then 'DDL'
           when syntax_type = 2
             then 'DML'
-          else '其他'
+          else 'Other'
           end as syntax_type,
           count(*)
         from sql_workflow 
@@ -44,7 +44,7 @@ class ChartDao(object):
         group by syntax_type;""".format(start_date, end_date)
         return self.__query(sql)
 
-    # 工单数量统计
+    # Workflow volume by date
     def workflow_by_date(self, start_date, end_date):
         sql = """
         select
@@ -56,7 +56,7 @@ class ChartDao(object):
         order by 1 asc;""".format(start_date, end_date)
         return self.__query(sql)
 
-    # 工单按组统计
+    # Workflow count by group
     def workflow_by_group(self, start_date, end_date):
         sql = """
         select
@@ -69,8 +69,8 @@ class ChartDao(object):
         return self.__query(sql)
 
     def workflow_by_user(self, start_date, end_date):
-        """工单按人统计"""
-        # TODO select 的对象应该为engineer ID, 查询时应作联合查询查出用户中文名
+        """Workflow count by user."""
+        # TODO select engineer ID and join user table for display name
         sql = """
         select
           engineer_display,
@@ -81,7 +81,7 @@ class ChartDao(object):
         order by count(*) desc;""".format(start_date, end_date)
         return self.__query(sql)
 
-    # SQL查询统计(每日检索行数)
+    # SQL query stats (daily scanned rows)
     def querylog_effect_row_by_date(self, start_date, end_date):
         sql = """
         select
@@ -93,7 +93,7 @@ class ChartDao(object):
         order by sum(effect_row) desc;""".format(start_date, end_date)
         return self.__query(sql)
 
-    # SQL查询统计(每日检索次数)
+    # SQL query stats (daily query count)
     def querylog_count_by_date(self, start_date, end_date):
         sql = """
         select
@@ -105,7 +105,7 @@ class ChartDao(object):
         order by count(*) desc;""".format(start_date, end_date)
         return self.__query(sql)
 
-    # SQL查询统计(用户检索行数)
+    # SQL query stats (scanned rows by user)
     def querylog_effect_row_by_user(self, start_date, end_date):
         sql = """
         select 
@@ -118,7 +118,7 @@ class ChartDao(object):
         limit 20;""".format(start_date, end_date)
         return self.__query(sql)
 
-    # SQL查询统计(DB检索行数)
+    # SQL query stats (scanned rows by DB)
     def querylog_effect_row_by_db(self, start_date, end_date):
         sql = """
        select
@@ -131,7 +131,7 @@ class ChartDao(object):
         limit 20;""".format(start_date, end_date)
         return self.__query(sql)
 
-    # 慢日志历史趋势图(按次数)
+    # Slow log trend (by execution count)
     def slow_query_review_history_by_cnt(self, checksum):
         sql = f"""select sum(ts_cnt),date(date_add(ts_min, interval 8 HOUR))
 from mysql_slow_query_review_history
@@ -139,7 +139,7 @@ where checksum = '{checksum}'
 group by date(date_add(ts_min, interval 8 HOUR));"""
         return self.__query(sql)
 
-    # 慢日志历史趋势图(按时长)
+    # Slow log trend (by duration)
     def slow_query_review_history_by_pct_95_time(self, checksum):
         sql = f"""select truncate(Query_time_pct_95,6),date(date_add(ts_min, interval 8 HOUR))
 from mysql_slow_query_review_history
@@ -147,7 +147,7 @@ where checksum = '{checksum}'
 group by date(date_add(ts_min, interval 8 HOUR));"""
         return self.__query(sql)
 
-    # 慢日志db/user维度统计
+    # Slow log stats by db/user
     def slow_query_count_by_db_by_user(self, start_date, end_date):
         sql = """
         select
@@ -159,7 +159,7 @@ group by date(date_add(ts_min, interval 8 HOUR));"""
         """.format(start_date, end_date)
         return self.__query(sql)
 
-    # 慢日志db维度统计
+    # Slow log stats by db
     def slow_query_count_by_db(self, start_date, end_date):
         sql = """
         select
@@ -171,7 +171,7 @@ group by date(date_add(ts_min, interval 8 HOUR));"""
         """.format(start_date, end_date)
         return self.__query(sql)
 
-    # 数据库实例类型统计
+    # DB instance type distribution
     def instance_count_by_type(self):
         sql = """
         select db_type,count(1) as cn 
@@ -186,21 +186,21 @@ group by date(date_add(ts_min, interval 8 HOUR));"""
                 CASE
                         a.STATUS 
                         WHEN 'workflow_finish' THEN
-                        '已正常结束' 
+                        'Finished' 
                         WHEN 'workflow_autoreviewwrong' THEN
-                        '自动审核不通过' 
+                        'Auto-review rejected' 
                         WHEN 'workflow_abort' THEN
-                        '人工终止流程' 
+                        'Manually aborted' 
                         WHEN 'workflow_exception' THEN
-                        '执行有异常' 
+                        'Execution exception' 
                         WHEN 'workflow_review_pass' THEN
-                        '审核通过' 
+                        'Review passed' 
                         WHEN 'workflow_queuing' THEN
-                        '排队中' 
+                        'Queued' 
                         WHEN 'workflow_executing' THEN
-                        '确认中' 
+                        'Executing' 
                         WHEN 'workflow_manreviewing' THEN
-                        '等待审核人审核' ELSE '未知状态' 
+                        'Waiting for reviewer' ELSE 'Unknown status' 
                     END AS status_desc,
                     COUNT( 1 ) AS count 
                 FROM sql_workflow a

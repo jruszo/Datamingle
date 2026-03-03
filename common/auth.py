@@ -21,11 +21,11 @@ logger = logging.getLogger("default")
 
 def init_user(user):
     """
-    给用户关联默认资源组和权限组
+    Attach the default resource groups and permission groups to a user.
     :param user:
     :return:
     """
-    # 添加到默认权限组
+    # Add to default permission groups
     default_auth_group = SysConfig().get("default_auth_group", "")
     if default_auth_group:
         default_auth_group = default_auth_group.split(",")
@@ -34,7 +34,7 @@ def init_user(user):
             for group in Group.objects.filter(name__in=default_auth_group)
         ]
 
-    # 添加到默认资源组
+    # Add to default resource groups
     default_resource_group = SysConfig().get("default_resource_group", "")
     if default_resource_group:
         default_resource_group = default_resource_group.split(",")
@@ -53,11 +53,11 @@ class ArcheryAuth(object):
 
     @staticmethod
     def challenge(username=None, password=None):
-        # 仅验证密码, 验证成功返回 user 对象, 清空计数器
+        # Validate credentials only; return the user object on success and clear counters
         user = authenticate(username=username, password=password)
-        # 登录成功
+        # Login success
         if user:
-            # 如果登录成功, 登录失败次数重置为0
+            # Reset failed login count on successful login
             user.failed_login_count = 0
             user.save()
             return user
@@ -65,30 +65,34 @@ class ArcheryAuth(object):
     def authenticate(self):
         username = self.request.POST.get("username")
         password = self.request.POST.get("password")
-        # 确认用户是否已经存在
+        # Check whether the user already exists
         try:
             user = Users.objects.get(username=username)
         except Users.DoesNotExist:
             authenticated_user = self.challenge(username=username, password=password)
             if authenticated_user:
-                # ldap 首次登录逻辑
+                # First-login initialization for LDAP users
                 init_user(authenticated_user)
                 return {"status": 0, "msg": "ok", "data": authenticated_user}
             else:
                 return {
                     "status": 1,
-                    "msg": "用户名或密码错误，请重新输入！",
+                    "msg": "Incorrect username or password. Please try again.",
                     "data": "",
                 }
         except:
-            logger.error("验证用户密码时报错")
+            logger.error("Error while validating user credentials")
             logger.error(traceback.format_exc())
-            return {"status": 1, "msg": f"服务异常，请联系管理员处理", "data": ""}
-        # 已存在用户, 验证是否在锁期间
-        # 读取配置文件
+            return {
+                "status": 1,
+                "msg": "Service error. Please contact the administrator.",
+                "data": "",
+            }
+        # Existing user: check whether the account is currently locked
+        # Load lock configuration
         lock_count = int(self.sys_config.get("lock_cnt_threshold", 5))
         lock_time = int(self.sys_config.get("lock_time_threshold", 60 * 5))
-        # 验证是否在锁, 分了几个if 防止代码太长
+        # Check lock status
         if user.failed_login_count and user.last_login_failed_at:
             if user.failed_login_count >= lock_count:
                 now = datetime.datetime.now()
@@ -98,11 +102,14 @@ class ArcheryAuth(object):
                 ):
                     return {
                         "status": 3,
-                        "msg": f"登录失败超过限制，该账号已被锁定！请等候大约{lock_time}秒再试",
+                        "msg": (
+                            f"Too many failed login attempts. "
+                            f"This account is locked. Please retry in about {lock_time} seconds."
+                        ),
                         "data": "",
                     }
                 else:
-                    # 如果锁已超时, 重置失败次数
+                    # Lock period expired: reset failure count
                     user.failed_login_count = 0
                     user.save()
         authenticated_user = self.challenge(username=username, password=password)
@@ -113,25 +120,29 @@ class ArcheryAuth(object):
         user.failed_login_count += 1
         user.last_login_failed_at = datetime.datetime.now()
         user.save()
-        return {"status": 1, "msg": "用户名或密码错误，请重新输入！", "data": ""}
+        return {
+            "status": 1,
+            "msg": "Incorrect username or password. Please try again.",
+            "data": "",
+        }
 
 
-# ajax接口，登录页面调用，用来验证用户名密码
+# AJAX endpoint called by the login page to validate credentials
 def authenticate_entry(request):
-    """接收http请求，然后把请求中的用户名密码传给ArcherAuth去验证"""
+    """Receive an HTTP request and validate credentials via `ArcheryAuth`."""
     new_auth = ArcheryAuth(request)
     result = new_auth.authenticate()
     if result["status"] == 0:
         authenticated_user = result["data"]
         twofa_enabled = TwoFactorAuthConfig.objects.filter(user=authenticated_user)
-        # 是否开启全局2fa
+        # Whether global 2FA enforcement is enabled
         if SysConfig().get("enforce_2fa"):
-            # 用户是否配置过2fa
+            # Whether the user already configured 2FA
             if twofa_enabled:
                 verify_mode = "verify_only"
             else:
                 verify_mode = "verify_config"
-            # 设置无登录状态session
+            # Create a non-authenticated session for 2FA flow
             s = SessionStore()
             s["user"] = authenticated_user.username
             s["verify_mode"] = verify_mode
@@ -139,9 +150,9 @@ def authenticate_entry(request):
             s.create()
             result = {"status": 0, "msg": "ok", "data": s.session_key}
         else:
-            # 用户是否配置过2fa
+            # Whether user has configured 2FA
             if twofa_enabled:
-                # 设置无登录状态session
+                # Create a non-authenticated session for 2FA verification
                 s = SessionStore()
                 s["user"] = authenticated_user.username
                 s["verify_mode"] = "verify_only"
@@ -149,9 +160,9 @@ def authenticate_entry(request):
                 s.create()
                 result = {"status": 0, "msg": "ok", "data": s.session_key}
             else:
-                # 未设置2fa直接登录
+                # No 2FA configured; log in directly
                 login(request, authenticated_user)
-                # 从钉钉获取该用户的 dingding_id，用于单独给他发消息
+                # Fetch DingTalk user ID for direct notifications
                 if SysConfig().get(
                     "ding_to_person"
                 ) is True and "admin" not in request.POST.get("username"):
@@ -161,11 +172,11 @@ def authenticate_entry(request):
     return HttpResponse(json.dumps(result), content_type="application/json")
 
 
-# 注册用户
+# Register user
 def sign_up(request):
     sign_up_enabled = SysConfig().get("sign_up_enabled", False)
     if not sign_up_enabled:
-        result = {"status": 1, "msg": "注册未启用,请联系管理员开启", "data": None}
+        result = {"status": 1, "msg": "Sign-up is disabled. Contact admin.", "data": None}
         return HttpResponse(json.dumps(result), content_type="application/json")
     username = request.POST.get("username")
     password = request.POST.get("password")
@@ -176,18 +187,18 @@ def sign_up(request):
 
     if not (username and password):
         result["status"] = 1
-        result["msg"] = "用户名和密码不能为空"
+        result["msg"] = "Username and password cannot be empty."
     elif len(Users.objects.filter(username=username)) > 0:
         result["status"] = 1
-        result["msg"] = "用户名已存在"
+        result["msg"] = "Username already exists."
     elif password != password2:
         result["status"] = 1
-        result["msg"] = "两次输入密码不一致"
+        result["msg"] = "The two password entries do not match."
     elif not display:
         result["status"] = 1
-        result["msg"] = "请填写中文名"
+        result["msg"] = "Display name is required."
     else:
-        # 验证密码
+        # Validate password
         try:
             validate_password(password)
             Users.objects.create_user(
@@ -204,11 +215,11 @@ def sign_up(request):
     return HttpResponse(json.dumps(result), content_type="application/json")
 
 
-# 退出登录
+# Sign out
 def sign_out(request):
     user = request.user
     logout(request)
-    # 如果开启了钉钉认证，重定向到钉钉退出登录页面
+    # If DingTalk auth is enabled, redirect to DingTalk logout page
     if user.ding_user_id and settings.ENABLE_DINGDING:
         return HttpResponseRedirect(
             redirect_to="https://login.dingtalk.com/oauth2/logout"

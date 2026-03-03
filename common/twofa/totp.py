@@ -12,14 +12,14 @@ logger = logging.getLogger("default")
 
 
 class TOTP(TwoFactorAuthBase):
-    """Time-based One-time Password，适用Google身份验证器等App"""
+    """Time-based One-time Password for apps such as Google Authenticator."""
 
     def __init__(self, user=None):
         super(TOTP, self).__init__(user=user)
         self.user = user
 
     def verify(self, otp, key=None):
-        """校验一次性验证码"""
+        """Verify one-time password."""
         result = {"status": 0, "msg": "ok"}
         if key:
             secret_key = key
@@ -30,28 +30,28 @@ class TOTP(TwoFactorAuthBase):
         t = pyotp.TOTP(secret_key)
         status = t.verify(otp)
         result["status"] = 0 if status else 1
-        result["msg"] = "ok" if status else "验证码不正确！"
+        result["msg"] = "ok" if status else "Invalid verification code."
         return result
 
     def generate_key(self):
-        """生成secret key"""
+        """Generate secret key."""
         result = {"status": 0, "msg": "ok", "data": {}}
 
-        # 生成用户secret_key
+        # Generate user secret key
         secret_key = pyotp.random_base32(32)
         result["data"] = {"auth_type": self.auth_type, "key": secret_key}
 
         return result
 
     def save(self, secret_key):
-        """保存2fa配置"""
+        """Save 2FA configuration."""
         result = {"status": 0, "msg": "ok"}
 
         try:
             with transaction.atomic():
-                # 删除旧的2fa配置
+                # Remove old 2FA config
                 self.disable(self.auth_type)
-                # 创建新的2fa配置
+                # Create new 2FA config
                 TwoFactorAuthConfig.objects.create(
                     username=self.user.username,
                     auth_type=self.auth_type,
@@ -67,18 +67,18 @@ class TOTP(TwoFactorAuthBase):
 
     @property
     def auth_type(self):
-        """返回认证类型"""
+        """Return auth type code."""
         return "totp"
 
 
 def generate_qrcode(request, data):
-    """生成并返回二维码图片流"""
+    """Generate and return QR-code image stream."""
     user = request.user
 
     username = user.username if user.is_authenticated else request.session.get("user")
     secret_key = data
 
-    # 生成二维码
+    # Generate QR code
     qr_data = pyotp.totp.TOTP(secret_key).provisioning_uri(
         username, issuer_name="Archery"
     )

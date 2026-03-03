@@ -13,7 +13,7 @@ __author__ = "hhyo"
 
 class FuncTimer(object):
     """
-    获取执行时间的上下文管理器
+    Context manager for measuring execution time.
     """
 
     def __init__(self):

@@ -2,7 +2,7 @@ from django.db import models
 
 
 class Const(object):
-    # 定时任务id的前缀
+    # Prefixes used for scheduled task IDs
     workflowJobprefix = {
         "query": "query",
         "sqlreview": "sqlreview",
@@ -11,28 +11,28 @@ class Const(object):
 
 
 class WorkflowType(models.IntegerChoices):
-    QUERY = 1, "查询权限申请"
-    SQL_REVIEW = 2, "SQL上线申请"
-    ARCHIVE = 3, "数据归档申请"
+    QUERY = 1, "Query privilege request"
+    SQL_REVIEW = 2, "SQL deployment request"
+    ARCHIVE = 3, "Data archive request"
 
 
 class WorkflowStatus(models.IntegerChoices):
-    WAITING = 0, "待审核"
-    PASSED = 1, "审核通过"
-    REJECTED = 2, "审核不通过"
-    ABORTED = 3, "审核取消"
+    WAITING = 0, "Pending review"
+    PASSED = 1, "Approved"
+    REJECTED = 2, "Rejected"
+    ABORTED = 3, "Canceled"
 
 
 class WorkflowAction(models.IntegerChoices):
-    """工单操作列表, 必须是动词, 不是一种状态"""
+    """Workflow actions. Values should be verbs, not states."""
 
-    SUBMIT = 0, "提交"
-    PASS = 1, "审核通过"
-    REJECT = 2, "审核不通过"
-    ABORT = 3, "审核取消"
-    EXECUTE_SET_TIME = 4, "设置定时执行"
-    EXECUTE_START = 5, "开始执行"
-    EXECUTE_END = 6, "执行结束"
+    SUBMIT = 0, "Submit"
+    PASS = 1, "Approve"
+    REJECT = 2, "Reject"
+    ABORT = 3, "Cancel"
+    EXECUTE_SET_TIME = 4, "Set scheduled execution"
+    EXECUTE_START = 5, "Start execution"
+    EXECUTE_END = 6, "Execution finished"
 
 
 class SQLTuning:

@@ -52,5 +52,5 @@ class AliyunSMS:
 
     @property
     def provider(self):
-        """返回服务商代码"""
+        """Return provider code."""
         return "aliyun"

@@ -28,17 +28,17 @@ class MsgSender(object):
             self.MAIL_SSL = kwargs.get("ssl")
         else:
             sys_config = SysConfig()
-            # email信息
+            # Email settings
             self.MAIL_REVIEW_SMTP_SERVER = sys_config.get("mail_smtp_server")
             self.MAIL_REVIEW_SMTP_PORT = sys_config.get("mail_smtp_port", 0)
             self.MAIL_SSL = sys_config.get("mail_ssl")
             self.MAIL_REVIEW_FROM_ADDR = sys_config.get("mail_smtp_user")
             self.MAIL_REVIEW_FROM_PASSWORD = sys_config.get("mail_smtp_password")
-            # 钉钉信息
+            # DingTalk settings
             self.ding_agent_id = sys_config.get("ding_agent_id")
-            # 企业微信信息
+            # WeCom settings
             self.wx_agent_id = sys_config.get("wx_agent_id")
-            # 飞书信息
+            # Feishu settings
             self.feishu_appid = sys_config.get("feishu_appid")
             self.feishu_app_secret = sys_config.get("feishu_app_secret")
 
@@ -52,13 +52,13 @@ class MsgSender(object):
     @staticmethod
     def _add_attachment(filename):
         """
-        添加附件
+        Add email attachment.
         :param filename:
         :return:
         """
         file_msg = email.mime.base.MIMEBase("application", "octet-stream")
         file_msg.set_payload(open(filename, "rb").read())
-        # 附件如果有中文会出现乱码问题，加入gbk
+        # Use gbk for attachment filenames to avoid garbled Chinese names
         file_msg.add_header(
             "Content-Disposition",
             "attachment",
@@ -70,42 +70,41 @@ class MsgSender(object):
 
     def send_email(self, subject, body, to, **kwargs):
         """
-        发送邮件
+        Send email.
         :param subject:
         :param body:
         :param to:
         :param kwargs:
-        :return: str: 成功为 'success'
-                      有异常为 traceback信息
+        :return: str: 'success' on success, traceback text on error
         """
 
         try:
             if not to:
-                logger.warning("收件人为空，无法发送邮件")
+                logger.warning("Recipient list is empty; unable to send email")
                 return
             if not isinstance(to, list):
-                raise TypeError("收件人需要为列表")
+                raise TypeError("Recipients must be provided as a list")
             list_cc = kwargs.get("list_cc_addr", [])
             if not isinstance(list_cc, list):
-                raise TypeError("抄送人需要为列表")
+                raise TypeError("CC recipients must be provided as a list")
 
-            # 构造MIMEMultipart对象做为根容器
+            # Build root MIME container
             main_msg = email.mime.multipart.MIMEMultipart()
 
-            # 添加文本内容
+            # Add plain-text body
             text_msg = email.mime.text.MIMEText(body, "plain", "utf-8")
             main_msg.attach(text_msg)
 
-            # 添加附件
+            # Add attachments
             filename_list = kwargs.get("filename_list")
             if filename_list:
                 for filename in kwargs["filename_list"]:
                     file_msg = self._add_attachment(filename)
                     main_msg.attach(file_msg)
 
-            # 消息内容:
+            # Message headers
             main_msg["Subject"] = Header(subject, "utf-8").encode()
-            main_msg["From"] = formataddr(["Archery 通知", self.MAIL_REVIEW_FROM_ADDR])
+            main_msg["From"] = formataddr(["Archery Notification", self.MAIL_REVIEW_FROM_ADDR])
             main_msg["To"] = ",".join(list(set(to)))
             main_msg["Cc"] = ", ".join(str(cc) for cc in list(set(list_cc)))
             main_msg["Date"] = email.utils.formatdate()
@@ -119,7 +118,7 @@ class MsgSender(object):
                     self.MAIL_REVIEW_SMTP_SERVER, self.MAIL_REVIEW_SMTP_PORT, timeout=3
                 )
 
-                # 如果提供的密码为空，则不需要登录
+                # Skip SMTP login when password is empty
             if self.MAIL_REVIEW_FROM_PASSWORD:
                 server.login(self.MAIL_REVIEW_FROM_ADDR, self.MAIL_REVIEW_FROM_PASSWORD)
             server.sendmail(
@@ -127,18 +126,18 @@ class MsgSender(object):
             )
             server.quit()
             logger.debug(
-                f"邮件推送成功\n消息标题:{subject}\n通知对象：{to + list_cc}\n消息内容：{body}"
+                f"Email sent successfully\nSubject:{subject}\nRecipients:{to + list_cc}\nContent:{body}"
             )
             return "success"
         except Exception:
-            errmsg = "邮件推送失败\n{}".format(traceback.format_exc())
+            errmsg = "Email push failed\n{}".format(traceback.format_exc())
             logger.error(errmsg)
             return errmsg
 
     @staticmethod
     def send_ding(url, content):
         """
-        发送钉钉Webhook消息
+        Send DingTalk webhook message.
         :param url:
         :param content:
         :return:
@@ -150,15 +149,15 @@ class MsgSender(object):
         r = requests.post(url=url, json=data)
         r_json = r.json()
         if r_json["errcode"] == 0:
-            logger.debug(f"钉钉Webhook推送成功\n通知对象：{url}\n消息内容：{content}")
+            logger.debug(f"DingTalk webhook sent successfully\nTarget:{url}\nContent:{content}")
         else:
             logger.error(
-                f"钉钉Webhook推送失败错误码\n请求url:{url}\n请求data:{data}\n请求响应:{r_json}"
+                f"DingTalk webhook failed\nRequest url:{url}\nRequest data:{data}\nResponse:{r_json}"
             )
 
     def send_ding2user(self, userid_list, content):
         """
-        发送钉钉消息到个人
+        Send DingTalk message to specific users.
         :param userid_list:
         :param content:
         :return:
@@ -173,15 +172,17 @@ class MsgSender(object):
         r = requests.post(url=send_url, json=data, timeout=5)
         r_json = r.json()
         if r_json["errcode"] == 0:
-            logger.debug(f"钉钉推送成功\n通知对象：{userid_list}\n消息内容：{content}")
+            logger.debug(
+                f"DingTalk message sent successfully\nTargets:{userid_list}\nContent:{content}"
+            )
         else:
             logger.error(
-                f"钉钉推送失败\n请求连接:{send_url}\n请求参数:{data}\n请求响应:{r_json}"
+                f"DingTalk message failed\nRequest url:{send_url}\nRequest data:{data}\nResponse:{r_json}"
             )
 
     def send_wx2user(self, msg, user_list):
         if not user_list:
-            logger.error(f"企业微信推送失败,无法获取到推送的用户.")
+            logger.error("WeCom push failed: unable to determine target users.")
             return
         to_user = "|".join(list(set(user_list)))
         access_token = get_wx_access_token()
@@ -195,21 +196,22 @@ class MsgSender(object):
         res = requests.post(url=send_url, json=data, timeout=5)
         r_json = res.json()
         if r_json["errcode"] == 0:
-            logger.debug(f"企业微信推送成功\n通知对象：{to_user}")
+            logger.debug(f"WeCom push sent successfully\nTarget:{to_user}")
         else:
             logger.error(
-                f"企业微信推送失败\n请求连接:{send_url}\n请求参数:{data}\n请求响应:{r_json}"
+                f"WeCom push failed\nRequest url:{send_url}\nRequest data:{data}\nResponse:{r_json}"
             )
 
     def send_qywx_webhook(self, qywx_webhook, msg):
         send_url = qywx_webhook
 
-        # 对链接进行转换
+        # Convert links
+        # Convert plain links to markdown links
         _msg = re.findall("https://.+(?=\n)|http://.+(?=\n)", msg)
         for url in _msg:
-            # 防止如 [xxx](http://www.a.com)\n 的字符串被再次替换
+            # Prevent re-replacement of existing markdown links
             if url.strip()[-1] != ")":
-                msg = msg.replace(url, "[请点击链接](%s)" % url)
+                msg = msg.replace(url, "[Please click the link](%s)" % url)
 
         data = {
             "msgtype": "markdown",
@@ -218,10 +220,10 @@ class MsgSender(object):
         res = requests.post(url=send_url, json=data, timeout=5)
         r_json = res.json()
         if r_json["errcode"] == 0:
-            logger.debug(f"企业微信机器人推送成功\n通知对象：机器人")
+            logger.debug("WeCom bot push sent successfully\nTarget:bot")
         else:
             logger.error(
-                f"企业微信机器人推送失败\n请求连接:{send_url}\n请求参数:{data}\n请求响应:{r_json}"
+                f"WeCom bot push failed\nRequest url:{send_url}\nRequest data:{data}\nResponse:{r_json}"
             )
 
     @staticmethod
@@ -247,10 +249,10 @@ class MsgSender(object):
             or ("StatusCode" in r_json and r_json["StatusCode"] == 0)
             or ("code" in r_json and r_json["code"] == 0)
         ):
-            logger.debug(f"飞书Webhook推送成功\n通知对象：{url}\n消息内容：{content}")
+            logger.debug(f"Feishu webhook sent successfully\nTarget:{url}\nContent:{content}")
         else:
             logger.error(
-                f"飞书Webhook推送失败错误码\n请求url:{url}\n请求data:{data}\n请求响应:{r_json}"
+                f"Feishu webhook failed\nRequest url:{url}\nRequest data:{data}\nResponse:{r_json}"
             )
 
     @staticmethod
@@ -271,8 +273,10 @@ class MsgSender(object):
             headers={"Authorization": "Bearer " + get_feishu_access_token()},
         ).json()
         if r["code"] == 0:
-            logger.debug(f"飞书单推推送成功\n通知对象：{url}\n消息内容：{content}")
+            logger.debug(
+                f"Feishu direct message sent successfully\nTarget:{url}\nContent:{content}"
+            )
         else:
             logger.error(
-                f"飞书单推推送失败错误码\n请求url:{url}\n请求data:{data}\n请求响应:{r}"
+                f"Feishu direct message failed\nRequest url:{url}\nRequest data:{data}\nResponse:{r}"
             )

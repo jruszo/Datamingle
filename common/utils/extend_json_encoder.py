@@ -105,15 +105,16 @@ class ExtendJSONEncoderFTime(json.JSONEncoder):
             return super(ExtendJSONEncoderFTime, self).default(obj)
 
 
-# 使用simplejson处理形如 b'\xaa' 的bytes类型数据会失败，但使用json模块构造这个对象时不能使用bigint_as_string方法
+# simplejson may fail on bytes like b'\xaa', while stdlib json does not support
+# simplejson-specific options like bigint_as_string.
 import json
 
 
 class ExtendJSONEncoderBytes(json.JSONEncoder):
     def default(self, obj):
         try:
-            # 使用convert.register处理会报错 ValueError: Circular reference detected
-            # 不是utf-8格式的bytes格式需要先进行base64编码转换
+            # convert.register here may raise ValueError: Circular reference detected.
+            # Non-utf8 bytes are base64-encoded first.
             if isinstance(obj, bytes):
                 try:
                     return o.decode("utf-8")

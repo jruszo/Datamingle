@@ -6,11 +6,11 @@ from sql.models import TwoFactorAuthConfig
 
 
 def global_info(request):
-    """存放用户，菜单信息等."""
+    """Provide global context: user/menu metadata, badges, and config flags."""
     twofa_type = "disabled"
     try:
         if request.user and request.user.is_authenticated:
-            # 获取待办数量
+            # Get pending task count
             todo = Audit.todo(request.user)
             twofa_config = TwoFactorAuthConfig.objects.filter(user=request.user)
             if twofa_config:
@@ -22,7 +22,7 @@ def global_info(request):
 
     sys_config = SysConfig()
     watermark_enabled = sys_config.get("watermark_enabled", False)
-    # 添加公告
+    # Announcement
     announcement_content_enabled = sys_config.get("announcement_content_enabled", False)
     announcement_content = sys_config.get("announcement_content", "")
     custom_title_suffix = sys_config.get("custom_title_suffix", "")
