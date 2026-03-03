@@ -12,19 +12,19 @@
             "parm_name" : "CHECKSUM"
         }, 
         {
-            "parm_desc" : "执行次数", 
+            "parm_desc" : "Execution Count", 
             "parm_name" : "ts_cnt"
         }, 
         {
-            "parm_desc" : "平均执行时间", 
+            "parm_desc" : "Average Execution Time", 
             "parm_name" : "query_time_avg"
         }, 
         {
-            "parm_desc" : "平均返回记录数", 
+            "parm_desc" : "Average Returned Rows", 
             "parm_name" : "rows_sent_avg"
         }, 
         {
-            "parm_desc" : "扫描命中率", 
+            "parm_desc" : "Scan Hit Ratio", 
             "parm_name" : "index_ratio"
         }
     ], 
@@ -36,8 +36,8 @@
     "rule_summary" : "", 
     "rule_type" : "SQLPLAN", 
     "solution" : [
-        "1.使用连接查询", 
-        "2.避免大的结果集"
+        "1.Use JOIN queries", 
+        "2.Avoid large result sets"
     ], 
     "weight" : 0.1
 }
@@ -55,19 +55,19 @@
             "parm_name" : "CHECKSUM"
         }, 
         {
-            "parm_desc" : "执行次数", 
+            "parm_desc" : "Execution Count", 
             "parm_name" : "ts_cnt"
         }, 
         {
-            "parm_desc" : "平均执行时间", 
+            "parm_desc" : "Average Execution Time", 
             "parm_name" : "query_time_avg"
         }, 
         {
-            "parm_desc" : "平均返回记录数", 
+            "parm_desc" : "Average Returned Rows", 
             "parm_name" : "rows_sent_avg"
         }, 
         {
-            "parm_desc" : "扫描命中率", 
+            "parm_desc" : "Scan Hit Ratio", 
             "parm_name" : "index_ratio"
         }
     ], 
@@ -79,7 +79,7 @@
     "rule_summary" : "", 
     "rule_type" : "SQLPLAN", 
     "solution" : [
-        "使用连接查询"
+        "Use JOIN queries"
     ], 
     "weight" : 0.1
 }
@@ -97,19 +97,19 @@
             "parm_name" : "CHECKSUM"
         }, 
         {
-            "parm_desc" : "执行次数", 
+            "parm_desc" : "Execution Count", 
             "parm_name" : "ts_cnt"
         }, 
         {
-            "parm_desc" : "平均执行时间", 
+            "parm_desc" : "Average Execution Time", 
             "parm_name" : "query_time_avg"
         }, 
         {
-            "parm_desc" : "平均返回记录数", 
+            "parm_desc" : "Average Returned Rows", 
             "parm_name" : "rows_sent_avg"
         }, 
         {
-            "parm_desc" : "扫描命中率", 
+            "parm_desc" : "Scan Hit Ratio", 
             "parm_name" : "index_ratio"
         }
     ], 
@@ -121,7 +121,7 @@
     "rule_summary" : "", 
     "rule_type" : "SQLPLAN", 
     "solution" : [
-        "子查询改写为表关联"
+        "Rewrite subqueries as table joins"
     ], 
     "weight" : 0.1
 }
@@ -139,19 +139,19 @@
             "parm_name" : "CHECKSUM"
         }, 
         {
-            "parm_desc" : "执行次数", 
+            "parm_desc" : "Execution Count", 
             "parm_name" : "ts_cnt"
         }, 
         {
-            "parm_desc" : "平均执行时间", 
+            "parm_desc" : "Average Execution Time", 
             "parm_name" : "query_time_avg"
         }, 
         {
-            "parm_desc" : "平均返回记录数", 
+            "parm_desc" : "Average Returned Rows", 
             "parm_name" : "rows_sent_avg"
         }, 
         {
-            "parm_desc" : "扫描命中率", 
+            "parm_desc" : "Scan Hit Ratio", 
             "parm_name" : "index_ratio"
         }
     ], 
@@ -163,7 +163,7 @@
     "rule_summary" : "", 
     "rule_type" : "SQLPLAN", 
     "solution" : [
-        "无后续补充"
+        "No Additional Suggestion"
     ], 
     "weight" : 0.1
 }
@@ -181,44 +181,44 @@
             "parm_name" : "CHECKSUM"
         }, 
         {
-            "parm_desc" : "扫描行数", 
+            "parm_desc" : "Rows Scanned", 
             "parm_name" : "ROWS"
         }, 
         {
-            "parm_desc" : "执行次数", 
+            "parm_desc" : "Execution Count", 
             "parm_name" : "ts_cnt"
         }, 
         {
-            "parm_desc" : "平均执行时间", 
+            "parm_desc" : "Average Execution Time", 
             "parm_name" : "query_time_avg"
         }, 
         {
-            "parm_desc" : "平均返回记录数", 
+            "parm_desc" : "Average Returned Rows", 
             "parm_name" : "rows_sent_avg"
         }, 
         {
-            "parm_desc" : "扫描命中率", 
+            "parm_desc" : "Scan Hit Ratio", 
             "parm_name" : "index_ratio"
         }
     ], 
     "rule_complexity" : "simple", 
     "rule_cmd" : "db.planitem.find({\"schemas\":\"@schema_name@\",\"access_type\" : \"ALL\",\"$or\": [{\"rows\" : {\"$gt\":1}}, {\"rows_examined_per_scan\": {\"$gt\":1}}],\"citem_type\":{\"$ne\":\"materialized_from_subquery\"}}).forEach(function(x){db.sqlinfo.find({checksum:x.checksum}).forEach(function(y){if(x.rows){rows=x.rows}else{rows=x.rows_examined_per_scan}db.@tmp@.save({\"checksum\" :y.checksum,\"ts_cnt\" :y.ts_cnt,\"query_time_avg\" :y.query_time_avg,\"rows_sent_avg\" :y.rows_sent_avg,\"index_ratio\" :y.index_ratio,\"rows\":rows})})})", 
-    "rule_desc" : "全表扫描", 
+    "rule_desc" : "Full Table Scan", 
     "rule_name" : "TABLE_FULL_SCAN", 
     "rule_status" : "ON", 
-    "rule_summary" : "大表全表扫描，行数超过阀值，扫描了多余的数据，建议使用索引来避免", 
+    "rule_summary" : "Large-table full table scan: row count exceeds the threshold and scans unnecessary data; use indexes to avoid this.", 
     "rule_type" : "SQLPLAN", 
     "solution" : [
-        "1.缺索引评估创建索引", 
-        "2.取max、min值评估创建索引", 
-        "3.索引失效重建索引，分区表维护记得维护索引", 
-        "4.对条件字段使用函数或表达式a.函数、表达式放到等于号的右边b.创建函数索引(下策)", 
-        "5.出现隐式转换a.不同类型的谓词匹配先显式转换b.表定义根据数据选择正确的数据类型", 
-        "6.使用不等运算符<>!=做查询条件a.尽量少用不等判断；b.如果列值是连续，可把否定操作更改为两个区间；c.如果列值不多，可用inlist枚举其他所有值", 
-        "7.模糊匹配％a％,％a建议精确匹配", 
-        "8.sql逻辑，比如最大值，改用窗口函数", 
-        "9.弱选择sql，返回结果集较大建议a.添加更多的谓词减少数据的访问，比如时间b.改造分区表c.使用覆盖索引", 
-        "10.统计信息不准确数据批量加载程序触发收集统计信息"
+        "1.Evaluate and create missing indexes", 
+        "2.Evaluate index creation for MAX/MIN queries", 
+        "3.Rebuild invalid indexes; maintain indexes when maintaining partitioned tables", 
+        "4.For condition columns using functions or expressions: a.put functions/expressions on the right side of '='; b.create function-based indexes (last resort)", 
+        "5.If implicit conversion occurs: a.explicitly cast different predicate types first; b.choose correct data types based on stored data", 
+        "6.When using inequality operators <> or != in predicates: a.use them sparingly; b.if values are continuous, replace negation with two ranges; c.if values are limited, use IN list to enumerate alternatives", 
+        "7.For fuzzy matches like %a% or %a, prefer precise matching when possible", 
+        "8.Rewrite SQL logic (for example MAX value logic) using window functions", 
+        "9.For low-selectivity SQL with large result sets: a.add more predicates (for example time filters); b.redesign with partitioned tables; c.use covering indexes", 
+        "10.If statistics are inaccurate, trigger statistics collection after bulk data loads"
     ], 
     "weight" : 0.1
 }
@@ -236,31 +236,31 @@
             "parm_name" : "CHECKSUM"
         }, 
         {
-            "parm_desc" : "执行次数", 
+            "parm_desc" : "Execution Count", 
             "parm_name" : "ts_cnt"
         }, 
         {
-            "parm_desc" : "平均执行时间", 
+            "parm_desc" : "Average Execution Time", 
             "parm_name" : "query_time_avg"
         }, 
         {
-            "parm_desc" : "平均返回记录数", 
+            "parm_desc" : "Average Returned Rows", 
             "parm_name" : "rows_sent_avg"
         }, 
         {
-            "parm_desc" : "扫描命中率", 
+            "parm_desc" : "Scan Hit Ratio", 
             "parm_name" : "index_ratio"
         }
     ], 
     "rule_complexity" : "simple", 
     "rule_cmd" : "db.planitem.find({\"schemas\":\"@schema_name@\",\"using_temporary_table\" : true}).forEach(function(x){db.sqlinfo.find({checksum:x.checksum}).forEach(function(y){db.@tmp@.save({\"checksum\" :y.checksum,\"ts_cnt\" :y.ts_cnt,\"query_time_avg\" :y.query_time_avg,\"rows_sent_avg\" :y.rows_sent_avg,\"index_ratio\" :y.index_ratio})})})", 
-    "rule_desc" : "临时表排序", 
+    "rule_desc" : "Temporary Table Sorting", 
     "rule_name" : "USING_TEMPORARY_TABLE", 
     "rule_status" : "ON", 
     "rule_summary" : "", 
     "rule_type" : "SQLPLAN", 
     "solution" : [
-        "避免大排序"
+        "Avoid large sorts"
     ], 
     "weight" : 0.1
 }
@@ -278,31 +278,31 @@
             "parm_name" : "CHECKSUM"
         }, 
         {
-            "parm_desc" : "执行次数", 
+            "parm_desc" : "Execution Count", 
             "parm_name" : "ts_cnt"
         }, 
         {
-            "parm_desc" : "平均执行时间", 
+            "parm_desc" : "Average Execution Time", 
             "parm_name" : "query_time_avg"
         }, 
         {
-            "parm_desc" : "平均返回记录数", 
+            "parm_desc" : "Average Returned Rows", 
             "parm_name" : "rows_sent_avg"
         }, 
         {
-            "parm_desc" : "扫描命中率", 
+            "parm_desc" : "Scan Hit Ratio", 
             "parm_name" : "index_ratio"
         }
     ], 
     "rule_complexity" : "simple", 
     "rule_cmd" : "db.planitem.find({\"schemas\":\"@schema_name@\",\"using_filesort\" : true}).forEach(function(x){db.sqlinfo.find({checksum:x.checksum}).forEach(function(y){db.@tmp@.save({\"checksum\" :y.checksum,\"ts_cnt\" :y.ts_cnt,\"query_time_avg\" :y.query_time_avg,\"rows_sent_avg\" :y.rows_sent_avg,\"index_ratio\" :y.index_ratio})})})", 
-    "rule_desc" : "磁盘排序", 
+    "rule_desc" : "Disk Sorting", 
     "rule_name" : "USING_FILESORT", 
     "rule_status" : "ON", 
     "rule_summary" : "", 
     "rule_type" : "SQLPLAN", 
     "solution" : [
-        "避免大排序"
+        "Avoid large sorts"
     ], 
     "weight" : 0.1
 }
@@ -320,19 +320,19 @@
             "parm_name" : "CHECKSUM"
         }, 
         {
-            "parm_desc" : "执行次数", 
+            "parm_desc" : "Execution Count", 
             "parm_name" : "ts_cnt"
         }, 
         {
-            "parm_desc" : "平均执行时间", 
+            "parm_desc" : "Average Execution Time", 
             "parm_name" : "query_time_avg"
         }, 
         {
-            "parm_desc" : "平均返回记录数", 
+            "parm_desc" : "Average Returned Rows", 
             "parm_name" : "rows_sent_avg"
         }, 
         {
-            "parm_desc" : "扫描命中率", 
+            "parm_desc" : "Scan Hit Ratio", 
             "parm_name" : "index_ratio"
         }
     ], 
@@ -344,7 +344,7 @@
     "rule_summary" : "", 
     "rule_type" : "SQLPLAN", 
     "solution" : [
-        "不建议使用全文索引，大字段使用外部存储方式"
+        "Full-text indexes are not recommended; store large fields externally"
     ], 
     "weight" : 0.1
 }
@@ -362,19 +362,19 @@
             "parm_name" : "CHECKSUM"
         }, 
         {
-            "parm_desc" : "执行次数", 
+            "parm_desc" : "Execution Count", 
             "parm_name" : "ts_cnt"
         }, 
         {
-            "parm_desc" : "平均执行时间", 
+            "parm_desc" : "Average Execution Time", 
             "parm_name" : "query_time_avg"
         }, 
         {
-            "parm_desc" : "平均返回记录数", 
+            "parm_desc" : "Average Returned Rows", 
             "parm_name" : "rows_sent_avg"
         }, 
         {
-            "parm_desc" : "扫描命中率", 
+            "parm_desc" : "Scan Hit Ratio", 
             "parm_name" : "index_ratio"
         }
     ], 
@@ -386,7 +386,7 @@
     "rule_summary" : "", 
     "rule_type" : "SQLPLAN", 
     "solution" : [
-        "创建复合索引"
+        "Create composite indexes"
     ], 
     "weight" : 0.1
 }
@@ -404,19 +404,19 @@
             "parm_name" : "CHECKSUM"
         }, 
         {
-            "parm_desc" : "执行次数", 
+            "parm_desc" : "Execution Count", 
             "parm_name" : "ts_cnt"
         }, 
         {
-            "parm_desc" : "平均执行时间", 
+            "parm_desc" : "Average Execution Time", 
             "parm_name" : "query_time_avg"
         }, 
         {
-            "parm_desc" : "平均返回记录数", 
+            "parm_desc" : "Average Returned Rows", 
             "parm_name" : "rows_sent_avg"
         }, 
         {
-            "parm_desc" : "扫描命中率", 
+            "parm_desc" : "Scan Hit Ratio", 
             "parm_name" : "index_ratio"
         }
     ], 
@@ -428,7 +428,7 @@
     "rule_summary" : "", 
     "rule_type" : "SQLPLAN", 
     "solution" : [
-        "sql逻辑改写，减少表关联"
+        "Rewrite SQL logic to reduce table joins"
     ], 
     "weight" : 0.1
 }
@@ -446,19 +446,19 @@
             "parm_name" : "CHECKSUM"
         }, 
         {
-            "parm_desc" : "执行次数", 
+            "parm_desc" : "Execution Count", 
             "parm_name" : "ts_cnt"
         }, 
         {
-            "parm_desc" : "平均执行时间", 
+            "parm_desc" : "Average Execution Time", 
             "parm_name" : "query_time_avg"
         }, 
         {
-            "parm_desc" : "平均返回记录数", 
+            "parm_desc" : "Average Returned Rows", 
             "parm_name" : "rows_sent_avg"
         }, 
         {
-            "parm_desc" : "扫描命中率", 
+            "parm_desc" : "Scan Hit Ratio", 
             "parm_name" : "index_ratio"
         }
     ], 
@@ -470,7 +470,7 @@
     "rule_summary" : "", 
     "rule_type" : "SQLPLAN", 
     "solution" : [
-        "sql过于复杂，无法得到json格式执行计划，建议在逻辑和业务上避免此类复杂sql"
+        "SQL is too complex to generate a JSON execution plan; avoid this complexity in logic and business design"
     ], 
     "weight" : 0.1
 }
@@ -488,23 +488,23 @@
             "parm_name" : "CHECKSUM"
         }, 
         {
-            "parm_desc" : "执行次数", 
+            "parm_desc" : "Execution Count", 
             "parm_name" : "ts_cnt"
         }, 
         {
-            "parm_desc" : "平均执行时间", 
+            "parm_desc" : "Average Execution Time", 
             "parm_name" : "query_time_avg"
         }, 
         {
-            "parm_desc" : "平均返回记录数", 
+            "parm_desc" : "Average Returned Rows", 
             "parm_name" : "rows_sent_avg"
         }, 
         {
-            "parm_desc" : "扫描命中率", 
+            "parm_desc" : "Scan Hit Ratio", 
             "parm_name" : "index_ratio"
         }, 
         {
-            "parm_desc" : "锁定时间总和", 
+            "parm_desc" : "Total Lock Time", 
             "parm_name" : "Lock_time_sum"
         }
     ], 
@@ -513,10 +513,10 @@
     "rule_desc" : "Lock_time_sum", 
     "rule_name" : "LOCK_TIME_SUM", 
     "rule_status" : "ON", 
-    "rule_summary" : "锁定时间过长", 
+    "rule_summary" : "Lock Time Too Long", 
     "rule_type" : "SQLSTAT", 
     "solution" : [
-        "对sql消耗资源评估是否合理，能否优化"
+        "Assess whether SQL resource usage is reasonable and can be optimized"
     ], 
     "weight" : 0.1
 }
@@ -534,23 +534,23 @@
             "parm_name" : "CHECKSUM"
         }, 
         {
-            "parm_desc" : "执行次数", 
+            "parm_desc" : "Execution Count", 
             "parm_name" : "ts_cnt"
         }, 
         {
-            "parm_desc" : "平均执行时间", 
+            "parm_desc" : "Average Execution Time", 
             "parm_name" : "query_time_avg"
         }, 
         {
-            "parm_desc" : "平均返回记录数", 
+            "parm_desc" : "Average Returned Rows", 
             "parm_name" : "rows_sent_avg"
         }, 
         {
-            "parm_desc" : "扫描命中率", 
+            "parm_desc" : "Scan Hit Ratio", 
             "parm_name" : "index_ratio"
         }, 
         {
-            "parm_desc" : "锁定时间总和", 
+            "parm_desc" : "Total Lock Time", 
             "parm_name" : "Lock_time_sum"
         }
     ], 
@@ -559,10 +559,10 @@
     "rule_desc" : "index_ratio", 
     "rule_name" : "INDEX_RATIO", 
     "rule_status" : "ON", 
-    "rule_summary" : "扫描命中率过低", 
+    "rule_summary" : "Scan Hit Ratio is too low", 
     "rule_type" : "SQLSTAT", 
     "solution" : [
-        "对sql消耗资源评估是否合理，能否优化"
+        "Assess whether SQL resource usage is reasonable and can be optimized"
     ], 
     "weight" : 0.1
 }
@@ -579,13 +579,13 @@
     ], 
     "rule_complexity" : "simple", 
     "rule_cmd" : "(cross join)|(outer join)", 
-    "rule_desc" : "存在全连接或外连接,cross join或outer join情况", 
+    "rule_desc" : "Contains full or outer joins (cross join or outer join)", 
     "rule_name" : "BAD_JOIN", 
     "rule_status" : "ON", 
-    "rule_summary" : "存在全连接或外连接,cross join或outer join情况", 
+    "rule_summary" : "Contains full or outer joins (cross join or outer join)", 
     "rule_type" : "TEXT", 
     "solution" : [
-        "改写为innerjoin"
+        "Rewrite as INNER JOIN"
     ], 
     "weight" : NumberInt(2)
 }
@@ -602,14 +602,14 @@
     ], 
     "rule_complexity" : "complex", 
     "rule_cmd" : "default", 
-    "rule_desc" : "delete或update中必须出现where子句，防止出现意外的全部删除或更新动作", 
+    "rule_desc" : "DELETE or UPDATE must include a WHERE clause to prevent accidental full-table changes", 
     "rule_name" : "DML_ALLDATA", 
     "rule_status" : "ON", 
-    "rule_summary" : "delete或update中必须出现where子句，防止出现意外的全部删除或更新动作", 
+    "rule_summary" : "DELETE or UPDATE must include a WHERE clause to prevent accidental full-table changes", 
     "rule_type" : "TEXT", 
     "solution" : [
-        "1.建议加where条件", 
-        "2.全表删除用truncate"
+        "1.Add a WHERE condition", 
+        "2.Use TRUNCATE for full-table deletion"
     ], 
     "weight" : NumberInt(2)
 }
@@ -619,7 +619,7 @@
     "exclude_obj_type" : "", 
     "input_parms" : [
         {
-            "parm_desc" : "or个数", 
+            "parm_desc" : "OR Count", 
             "parm_name" : "or_num", 
             "parm_value" : NumberInt(5), 
             "parm_unit" : ""
@@ -629,15 +629,15 @@
     "output_parms" : [
 
     ], 
-    "rule_desc" : "多个过滤条件通过or连接", 
+    "rule_desc" : "Multiple filter conditions connected by OR", 
     "rule_complexity" : "complex", 
     "rule_cmd" : "default", 
     "rule_name" : "TOOMANY_OR", 
     "rule_status" : "ON", 
-    "rule_summary" : "多个过滤条件通过or连接,防止优化器出现选择异常", 
+    "rule_summary" : "Multiple filter conditions connected by OR may cause abnormal optimizer choices", 
     "rule_type" : "TEXT", 
     "solution" : [
-        "改用临时表存入变量"
+        "Use a temporary table to store variables"
     ], 
     "weight" : NumberInt(2)
 }
@@ -654,13 +654,13 @@
     ], 
     "rule_complexity" : "simple", 
     "rule_cmd" : "like .\\%", 
-    "rule_desc" : "谓词条件使用like %xxx,无法使用索引", 
+    "rule_desc" : "Predicate uses LIKE %xxx and cannot use indexes", 
     "rule_name" : "LIKE_UNINDEX", 
     "rule_status" : "ON", 
-    "rule_summary" : "谓词条件使用like %xxx,无法使用索引", 
+    "rule_summary" : "Predicate uses LIKE %xxx and cannot use indexes", 
     "rule_type" : "TEXT", 
     "solution" : [
-        "从业务角度出发，分析是否可使用精确运算符或类似like'xx%'"
+        "From a business perspective, evaluate whether exact operators or patterns like LIKE 'xx%' can be used"
     ], 
     "weight" : NumberInt(2)
 }
@@ -675,15 +675,15 @@
     "output_parms" : [
 
     ], 
-    "rule_desc" : "select段出现子查询", 
+    "rule_desc" : "Subquery appears in SELECT clause", 
     "rule_name" : "SUBQUERY_SELECT", 
     "rule_complexity" : "complex", 
     "rule_cmd" : "default", 
     "rule_status" : "OFF", 
-    "rule_summary" : "select段出现子查询", 
+    "rule_summary" : "Subquery appears in SELECT clause", 
     "rule_type" : "TEXT", 
     "solution" : [
-        "改写为表关联"
+        "Rewrite as table join"
     ], 
     "weight" : NumberInt(2)
 }
@@ -693,7 +693,7 @@
     "exclude_obj_type" : "", 
     "input_parms" : [
         {
-            "parm_desc" : "inlist元素个数", 
+            "parm_desc" : "IN-list Element Count", 
             "parm_name" : "in_list_num", 
             "parm_value" : NumberInt(20), 
             "parm_unit" : ""
@@ -703,15 +703,15 @@
     "output_parms" : [
 
     ], 
-    "rule_desc" : "IN List元素过多", 
+    "rule_desc" : "Too many IN-list elements", 
     "rule_name" : "TOOMANY_IN_LIST", 
     "rule_complexity" : "complex", 
     "rule_cmd" : "default", 
     "rule_status" : "ON", 
-    "rule_summary" : "IN List元素过多", 
+    "rule_summary" : "Too many IN-list elements", 
     "rule_type" : "TEXT", 
     "solution" : [
-        "改用临时表存入变量"
+        "Use a temporary table to store variables"
     ], 
     "weight" : NumberInt(2)
 }
@@ -721,7 +721,7 @@
     "exclude_obj_type" : "", 
     "input_parms" : [
         {
-            "parm_desc" : "SQL字符数量", 
+            "parm_desc" : "SQL Character Count", 
             "parm_name" : "char_num", 
             "parm_value" : NumberInt(1000), 
             "parm_unit" : ""
@@ -731,15 +731,15 @@
     "output_parms" : [
 
     ], 
-    "rule_desc" : "SQL文本过长", 
+    "rule_desc" : "SQL text is too long", 
     "rule_name" : "LONG_TEXT", 
     "rule_complexity" : "complex", 
     "rule_cmd" : "default", 
     "rule_status" : "ON", 
-    "rule_summary" : "SQL文本过长", 
+    "rule_summary" : "SQL text is too long", 
     "rule_type" : "TEXT", 
     "solution" : [
-        "sql改写为精简语句"
+        "Rewrite SQL into a simpler statement"
     ], 
     "weight" : NumberInt(2)
 }
@@ -756,14 +756,14 @@
     ], 
     "rule_complexity" : "complex", 
     "rule_cmd" : "default", 
-    "rule_desc" : "重复查询子句", 
+    "rule_desc" : "Repeated query clause", 
     "rule_name" : "SUBQUERY_REP", 
     "rule_status" : "ON", 
-    "rule_summary" : "禁止使用重复的查询子句，应使用with as替换子句(仅限Oracle)来提升SQL执行效率", 
+    "rule_summary" : "Do not use repeated query clauses; use WITH AS (Oracle only) to improve SQL execution efficiency", 
     "rule_type" : "TEXT", 
     "solution" : [
         "1.withas", 
-        "2.改写sql避免重复查询"
+        "2.Rewrite SQL to avoid repeated queries"
     ], 
     "weight" : NumberInt(2)
 }
@@ -778,15 +778,15 @@
     "output_parms" : [
 
     ], 
-    "rule_desc" : "where段出现子查询", 
+    "rule_desc" : "Subquery appears in WHERE clause", 
     "rule_name" : "SUBQUERY_WHERE", 
     "rule_complexity" : "complex", 
     "rule_cmd" : "", 
     "rule_status" : "OFF", 
-    "rule_summary" : "where段出现子查询", 
+    "rule_summary" : "Subquery appears in WHERE clause", 
     "rule_type" : "TEXT", 
     "solution" : [
-        "改写为表关联"
+        "Rewrite as table join"
     ], 
     "weight" : NumberInt(2)
 }
@@ -801,16 +801,16 @@
     "output_parms" : [
 
     ], 
-    "rule_desc" : "谓词中存在负向操作符,!=,<>,!<,!>,not exists,not", 
+    "rule_desc" : "Predicate contains negative operators: !=, <>, !<, !>, NOT EXISTS, NOT", 
     "rule_complexity" : "simple", 
     "rule_cmd" : "(!=)|(<>)|(!>)|(!<)", 
     "rule_name" : "WHERE_NOT", 
     "rule_status" : "ON", 
-    "rule_summary" : "谓词中存在负向操作符,!=,<>,!<,!>,not exists,not", 
+    "rule_summary" : "Predicate contains negative operators: !=, <>, !<, !>, NOT EXISTS, NOT", 
     "rule_type" : "TEXT", 
     "solution" : [
-        "1.如果列值是连续，可把否定操作，更改为两个区间", 
-        "2.不建议使用不等值运算"
+        "1.If column values are continuous, replace negation with two ranges", 
+        "2.Inequality comparisons are not recommended"
     ], 
     "weight" : NumberInt(2)
 }
@@ -827,13 +827,13 @@
     ], 
     "rule_complexity" : "simple", 
     "rule_cmd" : "(select \\*)|(select .*\\.\\*)", 
-    "rule_desc" : "禁止使用select *，必须明确选择所需的列。", 
+    "rule_desc" : "Do not use SELECT *; explicitly select required columns.", 
     "rule_name" : "SELECT_ANY", 
     "rule_status" : "ON", 
-    "rule_summary" : "禁止使用select *，必须明确选择所需的列", 
+    "rule_summary" : "Do not use SELECT *; explicitly select required columns", 
     "rule_type" : "TEXT", 
     "solution" : [
-        "使用明确的列"
+        "Use explicit columns"
     ], 
     "weight" : NumberInt(2)
 }
@@ -850,13 +850,13 @@
     ], 
     "rule_complexity" : "complex", 
     "rule_cmd" : "default", 
-    "rule_desc" : "having段出现子查询", 
+    "rule_desc" : "Subquery appears in HAVING clause", 
     "rule_name" : "SUBQUERY_HAVING", 
     "rule_status" : "OFF", 
-    "rule_summary" : "having段出现子查询", 
+    "rule_summary" : "Subquery appears in HAVING clause", 
     "rule_type" : "TEXT", 
     "solution" : [
-        "改写为表关联"
+        "Rewrite as table join"
     ], 
     "weight" : NumberInt(2)
 }
@@ -871,15 +871,15 @@
     "output_parms" : [
 
     ], 
-    "rule_desc" : "delete或update中出现order by子句,防止删除或更新过程中出现不必要的排序", 
+    "rule_desc" : "ORDER BY appears in DELETE or UPDATE; avoid unnecessary sorting during delete/update", 
     "rule_name" : "DML_SORT", 
     "rule_complexity" : "simple", 
     "rule_cmd" : "(\\s)?((update )|(delete )).*order by", 
     "rule_status" : "ON", 
-    "rule_summary" : "delete或update中出现order by子句,防止删除或更新过程中出现不必要的排序", 
+    "rule_summary" : "ORDER BY appears in DELETE or UPDATE; avoid unnecessary sorting during delete/update", 
     "rule_type" : "TEXT", 
     "solution" : [
-        "dml操作不需排序"
+        "DML operations do not need sorting"
     ], 
     "weight" : NumberInt(2)
 }
@@ -894,15 +894,15 @@
     "output_parms" : [
 
     ], 
-    "rule_desc" : "出现union.防止出现不必要的排序动作", 
+    "rule_desc" : "UNION is used; prevent unnecessary sorting", 
     "rule_name" : "UNION", 
     "rule_complexity" : "complex", 
     "rule_cmd" : "default", 
     "rule_status" : "ON", 
-    "rule_summary" : "出现union,防止出现不必要的排序动作", 
+    "rule_summary" : "UNION is used; prevent unnecessary sorting", 
     "rule_type" : "TEXT", 
     "solution" : [
-        "改写unionall和sql逻辑中去重"
+        "Rewrite as UNION ALL and deduplicate in SQL logic"
     ], 
     "weight" : NumberInt(2)
 }
@@ -917,16 +917,16 @@
     "output_parms" : [
 
     ], 
-    "rule_desc" : "查询字段引用函数", 
+    "rule_desc" : "Function is used on queried column", 
     "rule_complexity" : "simple", 
     "rule_cmd" : "\\)\\s?[<>=]{1,2}", 
     "rule_name" : "WHERE_FUNC", 
     "rule_status" : "ON", 
-    "rule_summary" : "禁止在查询字段中引用函数", 
+    "rule_summary" : "Do not use functions on queried columns", 
     "rule_type" : "TEXT", 
     "solution" : [
-        "1.函数写在表达式右边", 
-        "2.应用程序实现函数功能"
+        "1.Write functions on the right side of expressions", 
+        "2.Implement function logic in the application"
     ], 
     "weight" : NumberInt(2)
 }
@@ -941,15 +941,15 @@
     "output_parms" : [
 
     ], 
-    "rule_desc" : "from段出现子查询", 
+    "rule_desc" : "Subquery appears in FROM clause", 
     "rule_complexity" : "complex", 
     "rule_cmd" : "default", 
     "rule_name" : "SUBQUERY_FROM", 
     "rule_status" : "OFF", 
-    "rule_summary" : "from段出现子查询", 
+    "rule_summary" : "Subquery appears in FROM clause", 
     "rule_type" : "TEXT", 
     "solution" : [
-        "改写为表关联"
+        "Rewrite as table join"
     ], 
     "weight" : NumberInt(2)
 }
@@ -963,27 +963,27 @@
     "max_score" : NumberInt(6), 
     "output_parms" : [
         {
-            "parm_desc" : "表名", 
+            "parm_desc" : "Table Name", 
             "parm_name" : "title1"
         }, 
         {
-            "parm_desc" : "字段名", 
+            "parm_desc" : "Column Name", 
             "parm_name" : "title2"
         }, 
         {
-            "parm_desc" : "数据类型", 
+            "parm_desc" : "Data Type", 
             "parm_name" : "title3"
         }
     ], 
-    "rule_desc" : "大对象字段将影响存取性能、耗费较多空间，建议在数据库之外存储。", 
+    "rule_desc" : "Large object fields affect access performance and consume more space; store them outside the database.", 
     "rule_complexity" : "simple", 
     "rule_cmd" : "SELECT TABLE_NAME,column_name , DATA_TYPE FROM information_schema.COLUMNS where TABLE_SCHEMA='@username@' and DATA_TYPE in ('blob','mediumblob','longblob','text','mediumblob','longtext') order by table_name", 
     "rule_name" : "EXIST_LOB_COLUMN", 
     "rule_status" : "ON", 
-    "rule_summary" : "存在大对象字段", 
+    "rule_summary" : "Large object fields exist", 
     "rule_type" : "OBJ", 
     "solution" : [
-        "建议在数据库外部进行存储大字段"
+        "Store large fields outside the database"
     ], 
     "weight" : NumberInt(2)
 }
@@ -993,7 +993,7 @@
     "exclude_obj_type" : "", 
     "input_parms" : [
         {
-            "parm_desc" : "提取做正则判断记录数上限", 
+            "parm_desc" : "Extracted Row Count upper limit for regex check", 
             "parm_name" : "num_row", 
             "parm_value" : NumberInt(10000), 
             "parm_unit" : ""
@@ -1002,31 +1002,31 @@
     "max_score" : NumberInt(20), 
     "output_parms" : [
         {
-            "parm_desc" : "表名", 
+            "parm_desc" : "Table Name", 
             "parm_name" : "title1"
         }, 
         {
-            "parm_desc" : "字段名", 
+            "parm_desc" : "Column Name", 
             "parm_name" : "title2"
         }, 
         {
-            "parm_desc" : "字段定义类型", 
+            "parm_desc" : "Defined Column Type", 
             "parm_name" : "title3"
         }, 
         {
-            "parm_desc" : "字段实际类型", 
+            "parm_desc" : "Actual Column Type", 
             "parm_name" : "title4"
         }
     ], 
-    "rule_desc" : "根据字段保存内容判断，字段类型定义异常，建议选择适合的数据类型。", 
+    "rule_desc" : "Based on stored column content, the column type definition is abnormal; choose an appropriate data type.", 
     "rule_complexity" : "complex", 
     "rule_cmd" : "default", 
     "rule_name" : "COLUMN_WRONG_TYPE", 
     "rule_status" : "ON", 
-    "rule_summary" : "字段数据类型定义错误", 
+    "rule_summary" : "Incorrect column data type definition", 
     "rule_type" : "OBJ", 
     "solution" : [
-        "合理定义字段类型"
+        "Define column types appropriately"
     ], 
     "weight" : NumberInt(2)
 }
@@ -1036,7 +1036,7 @@
     "exclude_obj_type" : "", 
     "input_parms" : [
         {
-            "parm_desc" : "字段长度(字节)", 
+            "parm_desc" : "Column Length (bytes)", 
             "parm_name" : "primarykey_length", 
             "parm_value" : NumberInt(16), 
             "parm_unit" : ""
@@ -1045,31 +1045,31 @@
     "max_score" : NumberInt(20), 
     "output_parms" : [
         {
-            "parm_desc" : "表名", 
+            "parm_desc" : "Table Name", 
             "parm_name" : "table_name"
         }, 
         {
-            "parm_desc" : "主键字段<br>(如果有多个字段，逗号分开)", 
+            "parm_desc" : "Primary Key Columns<br>(comma-separated if multiple)", 
             "parm_name" : "primary_type"
         }, 
         {
-            "parm_desc" : "字段类型<br>(如果有多个字段，逗号分开)", 
+            "parm_desc" : "Column Types<br>(comma-separated if multiple)", 
             "parm_name" : "title3"
         }, 
         {
-            "parm_desc" : "字段总长度(字节)", 
+            "parm_desc" : "Total Column Length (bytes)", 
             "parm_name" : "title4"
         }
     ], 
-    "rule_desc" : "应控制主键字段长度，过长的主键字段会造成索引空间消耗过大。", 
+    "rule_desc" : "Primary key column length should be controlled; overly long primary keys consume excessive index space.", 
     "rule_complexity" : "complex", 
     "rule_cmd" : "default", 
     "rule_name" : "TABLE_PRIMARYKEY_LENGTH", 
     "rule_status" : "ON", 
-    "rule_summary" : "单表主键字段定义长度过长", 
+    "rule_summary" : "Primary key definition is too long for a single table", 
     "rule_type" : "OBJ", 
     "solution" : [
-        "主键设计是否合理"
+        "Review whether the primary key design is reasonable"
     ], 
     "weight" : NumberInt(2)
 }
@@ -1083,19 +1083,19 @@
     "max_score" : NumberInt(10), 
     "output_parms" : [
         {
-            "parm_desc" : "表名", 
+            "parm_desc" : "Table Name", 
             "parm_name" : "table_name"
         }
     ], 
-    "rule_desc" : "时间戳字段是获取增量数据的最佳方法，请为表定义时间戳字段。", 
+    "rule_desc" : "Timestamp columns are the best way to capture incremental data; define timestamp columns for tables.", 
     "rule_complexity" : "simple", 
     "rule_cmd" : "select t.table_name from information_schema.`TABLES` t where t.TABLE_SCHEMA ='@username@' and t.TABLE_NAME not in(select c.table_name from information_schema.`COLUMNS` c where (c.COLUMN_NAME like '%UPDATE%' OR c.COLUMN_NAME like '%CREATE%') and c.DATA_TYPE in ('datetime','date','timestamp','time') and c.table_schema ='@username@')", 
     "rule_name" : "TABLE_WITHOUT_TIMESTAMP", 
     "rule_status" : "ON", 
-    "rule_summary" : "表没有定义时间戳字段", 
+    "rule_summary" : "Table has no timestamp column", 
     "rule_type" : "OBJ", 
     "solution" : [
-        "添加时间字段(比如插入、更新的时间戳"
+        "Add time columns (for example insert/update timestamps)"
     ], 
     "weight" : NumberInt(2)
 }
@@ -1105,7 +1105,7 @@
     "exclude_obj_type" : "", 
     "input_parms" : [
         {
-            "parm_desc" : "字段数", 
+            "parm_desc" : "Column Count", 
             "parm_name" : "column_num", 
             "parm_value" : NumberInt(40), 
             "parm_unit" : ""
@@ -1114,23 +1114,23 @@
     "max_score" : NumberInt(10), 
     "output_parms" : [
         {
-            "parm_desc" : "表名", 
+            "parm_desc" : "Table Name", 
             "parm_name" : "title1"
         }, 
         {
-            "parm_desc" : "字段数", 
+            "parm_desc" : "Column Count", 
             "parm_name" : "title2"
         }
     ], 
-    "rule_desc" : "表字段数过多，将造成记录过长，单页存储记录数减少。可考虑拆表处理。", 
+    "rule_desc" : "Too many columns in a table can make rows too long and reduce rows per page; consider splitting the table.", 
     "rule_complexity" : "simple", 
     "rule_cmd" : "SELECT table_name,count(1) FROM information_schema.columns WHERE table_schema = '@username@' GROUP BY table_name HAVING count(1)>@column_num@", 
     "rule_name" : "TABLE_COLUMN_NUM", 
     "rule_status" : "ON", 
-    "rule_summary" : "单表字段数过多", 
+    "rule_summary" : "Too many columns in a single table", 
     "rule_type" : "OBJ", 
     "solution" : [
-        "表设计时尽量符合三范式来避免数据冗余,使用频率低的字段拆到另外一张表，必要时做表关联取数"
+        "During table design, follow 3NF to avoid redundancy; split infrequently used columns into another table and join only when needed"
     ], 
     "weight" : NumberInt(1)
 }
@@ -1140,7 +1140,7 @@
     "exclude_obj_type" : "", 
     "input_parms" : [
         {
-            "parm_desc" : "字段长度(字节)", 
+            "parm_desc" : "Column Length (bytes)", 
             "parm_name" : "record_length", 
             "parm_value" : "1000", 
             "parm_unit" : ""
@@ -1149,27 +1149,27 @@
     "max_score" : NumberInt(20), 
     "output_parms" : [
         {
-            "parm_desc" : "表名", 
+            "parm_desc" : "Table Name", 
             "parm_name" : "title1"
         }, 
         {
-            "parm_desc" : "字段内容平均长度<br>(取自avg_row_length，有失真情况)", 
+            "parm_desc" : "Average Column Content Length<br>(from avg_row_length, may be distorted)", 
             "parm_name" : "title2"
         }, 
         {
-            "parm_desc" : "字段定义长度", 
+            "parm_desc" : "Defined Column Length", 
             "parm_name" : "title3"
         }
     ], 
-    "rule_desc" : "应控制单表定义长度，避免过长记录。", 
+    "rule_desc" : "Control defined single-table length to avoid overly long rows.", 
     "rule_complexity" : "complex", 
     "rule_cmd" : "default", 
     "rule_name" : "TABLE_RECORD_LENGTH", 
     "rule_status" : "ON", 
-    "rule_summary" : "单表字段定义长度过长", 
+    "rule_summary" : "Defined column length is too long for a single table", 
     "rule_type" : "OBJ", 
     "solution" : [
-        "按需定义字段长度"
+        "Define column lengths as needed"
     ], 
     "weight" : NumberInt(2)
 }
@@ -1183,19 +1183,19 @@
     "max_score" : NumberInt(20), 
     "output_parms" : [
         {
-            "parm_desc" : "表名", 
+            "parm_desc" : "Table Name", 
             "parm_name" : "title1"
         }
     ], 
-    "rule_desc" : "没有定义主键，MySQL会自动创建主键。这不是一种好的设计方法。", 
+    "rule_desc" : "No primary key is defined; MySQL will create one automatically. This is not a good design approach.", 
     "rule_complexity" : "simple", 
     "rule_cmd" : "select table_name from information_schema.tables where table_schema='@username@' and table_name not in(select table_name from information_schema.statistics where table_schema='@username@' and index_name='PRIMARY')", 
     "rule_name" : "TABLE_NO_DEF_PRIMARYKEY", 
     "rule_status" : "ON", 
-    "rule_summary" : "表没有定义主键", 
+    "rule_summary" : "Table has no primary key defined", 
     "rule_type" : "OBJ", 
     "solution" : [
-        "必须定义主键"
+        "A primary key must be defined"
     ], 
     "weight" : NumberInt(5)
 }
@@ -1209,27 +1209,27 @@
     "max_score" : NumberInt(20), 
     "output_parms" : [
         {
-            "parm_desc" : "类别", 
+            "parm_desc" : "Category", 
             "parm_name" : "title1"
         }, 
         {
-            "parm_desc" : "对象名", 
+            "parm_desc" : "Object Name", 
             "parm_name" : "title2"
         }, 
         {
-            "parm_desc" : "依赖表", 
+            "parm_desc" : "Dependent Table", 
             "parm_name" : "title3"
         }
     ], 
-    "rule_desc" : "存储过程、函数、触发器等都将消耗数据库的计算能力，建议通过应用层保证数据约束。", 
+    "rule_desc" : "Stored procedures, functions, and triggers consume database compute resources; enforce data constraints in the application layer.", 
     "rule_complexity" : "simple", 
     "rule_cmd" : "select 'TRIGGER',trigger_name,event_object_table from information_schema.triggers where event_object_schema='@username@' union all (select type,specific_name,''from mysql.proc where db='@username@' order by type)", 
     "rule_name" : "EXIST_FUNC_PROC_TRIGGER", 
     "rule_status" : "ON", 
-    "rule_summary" : "单表存在函数、存储过程、触发器", 
+    "rule_summary" : "Single table has functions, stored procedures, or triggers", 
     "rule_type" : "OBJ", 
     "solution" : [
-        "用应用端程序实现将存储过程、函数、触发器"
+        "Implement logic in the application instead of stored procedures, functions, and triggers"
     ], 
     "weight" : NumberInt(5)
 }
@@ -1239,7 +1239,7 @@
     "exclude_obj_type" : "", 
     "input_parms" : [
         {
-            "parm_desc" : "表大小(GB)", 
+            "parm_desc" : "Table Size (GB)", 
             "parm_name" : "table_size", 
             "parm_value" : NumberInt(10), 
             "parm_unit" : "GB"
@@ -1248,24 +1248,24 @@
     "max_score" : NumberInt(10), 
     "output_parms" : [
         {
-            "parm_desc" : "表名称", 
+            "parm_desc" : "Table Name", 
             "parm_name" : "title1"
         }, 
         {
-            "parm_desc" : "表大小(GB)", 
+            "parm_desc" : "Table Size (GB)", 
             "parm_name" : "title2"
         }
     ], 
-    "rule_desc" : "表的规模过大，将影响表的访问效率、增加维护成本等。常见的解决方案就是使用分区表，将大表转换为分区表。对于大表的访问，可采取分片方式处理。", 
+    "rule_desc" : "An oversized table impacts access efficiency and increases maintenance cost. A common solution is partitioning: convert large tables to partitioned tables. For very large tables, sharding can also be used.", 
     "rule_name" : "BIG_TABLE_BY_SIZE", 
     "rule_complexity" : "complex", 
     "rule_cmd" : "default", 
     "rule_status" : "ON", 
-    "rule_summary" : "超过指定规模且没有分区的表", 
+    "rule_summary" : "Tables exceeding specified size without partitioning", 
     "rule_type" : "OBJ", 
     "solution" : [
-        "1.建议分库，分表，分区", 
-        "2.历史数据归档"
+        "1.Recommend database/table splitting and partitioning", 
+        "2.Archive historical data"
     ], 
     "weight" : NumberInt(1)
 }
@@ -1275,7 +1275,7 @@
     "exclude_obj_type" : "", 
     "input_parms" : [
         {
-            "parm_desc" : "表个数", 
+            "parm_desc" : "Number of Tables", 
             "parm_name" : "table_size", 
             "parm_value" : NumberInt(5000), 
             "parm_unit" : ""
@@ -1284,24 +1284,24 @@
     "max_score" : NumberInt(1), 
     "output_parms" : [
         {
-            "parm_desc" : "库名称", 
+            "parm_desc" : "Database Name", 
             "parm_name" : "title1"
         }, 
         {
-            "parm_desc" : "数据表个数", 
+            "parm_desc" : "Number of Tables", 
             "parm_name" : "title2"
         }
     ], 
-    "rule_desc" : "单库数据表过多，将影响整体性能。必要时，进行业务逻辑的垂直拆分。", 
+    "rule_desc" : "Too many tables in a single database affect overall performance; when necessary, vertically split business logic.", 
     "rule_name" : "BIG_SCHEMA_BY_TABLE_NUM", 
     "rule_complexity" : "complex", 
     "rule_cmd" : "default", 
     "rule_status" : "ON", 
-    "rule_summary" : "单库数据表过多", 
+    "rule_summary" : "Too many tables in a single database", 
     "rule_type" : "OBJ", 
     "solution" : [
-        "1.建议分库，分表，分区", 
-        "2.历史数据归档"
+        "1.Recommend database/table splitting and partitioning", 
+        "2.Archive historical data"
     ], 
     "weight" : NumberInt(1)
 }
@@ -1311,7 +1311,7 @@
     "exclude_obj_type" : "", 
     "input_parms" : [
         {
-            "parm_desc" : "数据量规模", 
+            "parm_desc" : "Data Volume Threshold", 
             "parm_name" : "row_num", 
             "parm_value" : NumberInt(20000000), 
             "parm_unit" : ""
@@ -1320,24 +1320,24 @@
     "max_score" : NumberInt(10), 
     "output_parms" : [
         {
-            "parm_desc" : "表(分区)名称", 
+            "parm_desc" : "Table (Partition) Name", 
             "parm_name" : "title1"
         }, 
         {
-            "parm_desc" : "记录数", 
+            "parm_desc" : "Row Count", 
             "parm_name" : "title2"
         }
     ], 
-    "rule_desc" : "单表(分区)数据表过多，将影响整体性能。必要时，进行分库、分表或定期清理、归档数据。", 
+    "rule_desc" : "Too much data in a single table (partition) affects overall performance. If needed, split databases/tables or periodically clean and archive data.", 
     "rule_complexity" : "simple", 
     "rule_cmd" : "select table_name,table_rows from information_schema.tables where table_schema='@username@' and CREATE_OPTIONS<>'partitioned' and table_rows>@row_num@ union all select concat(table_name,':',partition_name),table_rows from information_schema.partitions where table_schema='@username@' and table_name not in (select table_name from information_schema.tables where table_schema='@username@' and CREATE_OPTIONS<>'partitioned') and table_rows>@row_num@", 
     "rule_name" : "BIG_TABLE_BY_ROW_NUM", 
     "rule_status" : "ON", 
-    "rule_summary" : "单表(分区)数据量过大", 
+    "rule_summary" : "Single table (partition) data volume is too large", 
     "rule_type" : "OBJ", 
     "solution" : [
-        "1.建议分库，分表，分区", 
-        "2.历史数据归档"
+        "1.Recommend database/table splitting and partitioning", 
+        "2.Archive historical data"
     ], 
     "weight" : NumberInt(1)
 }
@@ -1347,7 +1347,7 @@
     "exclude_obj_type" : "", 
     "input_parms" : [
         {
-            "parm_desc" : "选择率百分比<br>(接近100最好)", 
+            "parm_desc" : "Selectivity Percentage<br>(closer to 100 is better)", 
             "parm_name" : "selectivity", 
             "parm_value" : 0.001, 
             "parm_unit" : ""
@@ -1356,35 +1356,35 @@
     "max_score" : NumberInt(10), 
     "output_parms" : [
         {
-            "parm_desc" : "表名", 
+            "parm_desc" : "Table Name", 
             "parm_name" : "title1"
         }, 
         {
-            "parm_desc" : "索引名", 
+            "parm_desc" : "Index Name", 
             "parm_name" : "title2"
         }, 
         {
-            "parm_desc" : "索引唯一值数量", 
+            "parm_desc" : "Number of Distinct Index Values", 
             "parm_name" : "title3"
         }, 
         {
-            "parm_desc" : "表记录数", 
+            "parm_desc" : "Table Row Count", 
             "parm_name" : "title4"
         }, 
         {
-            "parm_desc" : "索引选择率(~100%，越高越好)", 
+            "parm_desc" : "Index Selectivity (~100%, higher is better)", 
             "parm_name" : "title5"
         }
     ], 
-    "rule_desc" : "索引选择率不高，将导致索引低效，请调整索引字段。", 
+    "rule_desc" : "Low index selectivity leads to inefficient indexes; adjust index columns.", 
     "rule_cmd" : "default", 
     "rule_complexity" : "complex", 
     "rule_name" : "INDEX_SELECTIVITY", 
     "rule_status" : "ON", 
-    "rule_summary" : "索引选择率不高", 
+    "rule_summary" : "Index selectivity is low", 
     "rule_type" : "OBJ", 
     "solution" : [
-        "调整索引字段，索引是否合理"
+        "Adjust index columns and verify index design"
     ], 
     "weight" : NumberInt(1)
 }
@@ -1398,23 +1398,23 @@
     "max_score" : NumberInt(20), 
     "output_parms" : [
         {
-            "parm_desc" : "表名称", 
+            "parm_desc" : "Table Name", 
             "parm_name" : "title1"
         }, 
         {
-            "parm_desc" : "外键名", 
+            "parm_desc" : "Foreign Key Name", 
             "parm_name" : "title2"
         }
     ], 
-    "rule_desc" : "外键资源将消耗数据库的计算能力，建议通过应用层保证数据约束。", 
+    "rule_desc" : "Foreign keys consume database compute resources; enforce data constraints in the application layer.", 
     "rule_complexity" : "simple", 
     "rule_cmd" : "select table_name,constraint_name from information_schema.table_constraints where CONSTRAINT_SCHEMA='@username@' and table_schema='@username@' and constraint_type='FOREIGN KEY'", 
     "rule_name" : "TABLE_EXIST_FOREIGN_KEY", 
     "rule_status" : "ON", 
-    "rule_summary" : "单表存在外键", 
+    "rule_summary" : "Single table has foreign keys", 
     "rule_type" : "OBJ", 
     "solution" : [
-        "应用程序实现外键约束，删除表的外键约束"
+        "Enforce foreign key constraints in the application and remove table foreign keys"
     ], 
     "weight" : NumberInt(5)
 }
@@ -1424,7 +1424,7 @@
     "exclude_obj_type" : "", 
     "input_parms" : [
         {
-            "parm_desc" : "索引数量", 
+            "parm_desc" : "Index Count", 
             "parm_name" : "index_num", 
             "parm_value" : NumberInt(7), 
             "parm_unit" : ""
@@ -1433,23 +1433,23 @@
     "max_score" : NumberInt(10), 
     "output_parms" : [
         {
-            "parm_desc" : "表名称", 
+            "parm_desc" : "Table Name", 
             "parm_name" : "title1"
         }, 
         {
-            "parm_desc" : "索引数量", 
+            "parm_desc" : "Index Count", 
             "parm_name" : "title2"
         }
     ], 
-    "rule_desc" : "单表索引数量过多，不仅维护成本高，而且占用更多的空间。", 
+    "rule_desc" : "Too many indexes on a single table increase maintenance cost and consume more space.", 
     "rule_complexity" : "simple", 
     "rule_cmd" : "select * from (select table_name,count(distinct index_name) cnt from information_schema.STATISTICS where table_schema='@username@' and index_name<>'PRIMARY' group by table_name) v where cnt>@index_num@", 
     "rule_name" : "BIG_TABLE_BY_INDEX_NUM", 
     "rule_status" : "ON", 
-    "rule_summary" : "单表索引数量过多", 
+    "rule_summary" : "Too many indexes on a single table", 
     "rule_type" : "OBJ", 
     "solution" : [
-        "构建战略性索引结构，不要针对每个需求都通过创建索引解决"
+        "Build a strategic index structure; do not create indexes for every requirement"
     ], 
     "weight" : NumberInt(2)
 }
