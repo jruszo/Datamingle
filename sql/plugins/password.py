@@ -1,10 +1,11 @@
 """
-本文件存放一些和密码相关的插件
+This module contains plugins related to password retrieval.
 
-插件提供两个方法, 获取用户名和密码, 用于连接数据库
-插件在使用时, 会和 Instance 一起使用, 可以用 self 对象获取 instance 的各种信息
+Plugins provide methods to get usernames and passwords for database connections.
+When used together with Instance, plugins can read instance details via self.
 
-包括名字, 类型, 等等. 通过这些信息, 插件可以获取数据库的用户名和密码
+Including name, type, and other fields, these values can be used to retrieve
+database credentials.
 """
 
 import time
@@ -12,8 +13,8 @@ import requests
 
 
 class DummyMixin:
-    """mixin 模板, 用于提供一些基础的方法, 给其他 mixin 继承
-    默认从schema 中直接提取 username 和 password
+    """Mixin template that provides basic methods for other mixins.
+    By default, username and password are read directly from schema.
     """
 
     def get_username_password(self):
@@ -31,10 +32,10 @@ password_cache = {
 
 class VaultMixin(DummyMixin):
     """
-    和 sqlinstance 搭配使用
-    从 vault 中获取用户名和密码, 调用的是 localhost 8000 端口的 vault 服务
-    不使用任何 token, 适合 vault-proxy 部署方式, 如需其他部署方式, 可继承后修改配置
-    使用的是 static secret, 如需其他获取方式, 可继承后修改配置
+    Used together with sqlinstance.
+    Fetches username and password from Vault using a localhost vault service.
+    No token is used, which is suitable for vault-proxy deployments.
+    For other deployment or secret strategies, inherit this mixin and override config.
     """
 
     vault_server = "localhost:8200"
