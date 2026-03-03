@@ -13,7 +13,8 @@ import io
 
 class SSHConnection(object):
     """
-    ssh隧道连接类，用于映射ssh隧道端口到本地，连接结束时需要清理
+    SSH tunnel connection class for mapping remote ports to local ports.
+    The tunnel must be cleaned up when the connection is closed.
     """
 
     def __init__(
@@ -61,7 +62,7 @@ class SSHConnection(object):
 
     def get_ssh(self):
         """
-        获取ssh映射的端口
+        Get the local port mapped by SSH forwarding.
         :param request:
         :return:
         """
