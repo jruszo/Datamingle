@@ -1,7 +1,7 @@
 alter table sql_config add unique index uniq_item(item),drop primary key,
     add id bigint unsigned not null auto_increment primary key first ;
 
-# 2fa配置表重构
+# 2FA configuration table refactor
 CREATE TABLE `2fa_config_new` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `username` varchar(200) NOT NULL,
