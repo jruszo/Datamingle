@@ -85,16 +85,16 @@ configMap:
       backup_port=3306
       backup_user="root"
       backup_password="BACKUP_PASSWORD_PLACEHOLDER"
-      #安全更新是否开启.
-      #-1表示不做操作,基于远端数据库[默认值]
-      #0表示关闭安全更新
-      #1表示开启安全更新
+      # Whether SQL safe updates are enabled
+      # -1 means no override, using remote database default value
+      # 0 means disable SQL safe updates
+      # 1 means enable SQL safe updates
       sql_safe_updates=0
       #lang="en-US"
       lang="zh-CN"
-      #是否记录全量日志
+      # Whether to record full logs
       general_log=false
-      #开启统计功能
+      # Enable statistics
       enable_sql_statistic=true
       [inc_level]
       er_cant_set_engine=2
@@ -147,4 +147,3 @@ nodeSelector: {}
 tolerations: []
 
 affinity: {}
-
