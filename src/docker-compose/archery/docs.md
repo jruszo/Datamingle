@@ -1,1 +1,1 @@
-# 请替换docs目录下的Markdown文件
+# Please replace the Markdown files in the `docs` directory.
