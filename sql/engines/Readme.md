@@ -1,13 +1,13 @@
-# Engine 说明
+# Engine Notes
 
 ## Cassandra
-当前连接时, 使用参数基本为写死参数, 具体可以参照代码.
+The current connection setup mostly uses hardcoded parameters. See the code for details.
 
-如果需要覆盖, 可以自行继承
+If you need to override this behavior, create a custom subclass.
 
-具体方法为:
-1. 新增一个文件夹`extras`在根目录, 和`sql`, `sql_api`等文件夹平级 可以docker 打包时加入, 也可以使用卷挂载的方式
-2. 新增一个文件, `mycassandra.py`
+Steps:
+1. Add an `extras` directory at the project root (same level as `sql`, `sql_api`, etc.). You can include it in Docker build context or mount it as a volume.
+2. Add a new file: `mycassandra.py`
 ```python
 from sql.engines.cassandra import CassandraEngine
 
@@ -19,22 +19,22 @@ class MyCassandraEngine(CassandraEngine):
                 self.conn.execute(f"use {db_name}")
             return self.conn
         hosts = self.host.split(",")
-        # 在这里更改你获取 session 的方式
+        # Customize how the session is created here.
         auth_provider = PlainTextAuthProvider(
             username=self.user, password=self.password
         )
         cluster = Cluster(hosts, port=self.port, auth_provider=auth_provider,
                           load_balancing_policy=RoundRobinPolicy(), protocol_version=5)
         self.conn = cluster.connect(keyspace=db_name)
-        # 下面这一句最好是不要动.
+        # Keep the following line unchanged if possible.
         self.conn.row_factory = tuple_factory
         return self.conn
 ```
-3. 修改settings , 加载你刚写的 engine
+3. Update settings to load your custom engine:
 ```python
 AVAILABLE_ENGINES = {
     "mysql": {"path": "sql.engines.mysql:MysqlEngine"},
-    # 这里改成你的 engine
+    # Replace this with your custom engine.
     "cassandra": {"path": "extras.mycassandra:MyCassandraEngine"},
     "clickhouse": {"path": "sql.engines.clickhouse:ClickHouseEngine"},
     "goinception": {"path": "sql.engines.goinception:GoInceptionEngine"},
