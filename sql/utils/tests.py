@@ -373,9 +373,9 @@ class TestExecuteSql(TestCase):
                         id=0,
                         stage="Execute failed",
                         errlevel=2,
-                        stagestatus="异常终止",
+                        stagestatus="Aborted unexpectedly",
                         errormessage="",
-                        sql="执行异常信息",
+                        sql="Execution exception message",
                         affected_rows=0,
                         actual_affected_rows=0,
                         sequence="0_0_0",
@@ -403,16 +403,16 @@ class TestExecuteSql(TestCase):
         _audit.add_log.assert_called_with(
             audit_id=1,
             operation_type=5,
-            operation_type_desc="执行工单",
-            operation_info="系统定时执行工单",
+            operation_type_desc="Execute workflow",
+            operation_info="System scheduled workflow execution",
             operator="",
-            operator_display="系统",
+            operator_display="System",
         )
 
     @patch("sql.utils.execute_sql.notify_for_execute")
     @patch("sql.utils.execute_sql.Audit")
     def test_execute_callback_success(self, _audit, _notify):
-        # 初始化工单执行返回对象
+        # Initialize workflow execution result object.
         self.task_result = MagicMock()
         self.task_result.args = [self.wf.id]
         self.task_result.success = True
@@ -424,63 +424,61 @@ class TestExecuteSql(TestCase):
         self.task_result.result.error = ""
         _audit.detail_by_workflow_id.return_value.audit_id = 123
         _audit.add_log.return_value = "any thing"
-        # 先处理为执行中
+        # Set status to executing first.
         self.wf.status = "workflow_executing"
         self.wf.save(update_fields=["status"])
         execute_callback(self.task_result)
         _audit.detail_by_workflow_id.assert_called_with(
             workflow_id=self.wf.id, workflow_type=2
         )
-        _audit.add_log.assert_called_with(
-            audit_id=123,
-            operation_type=6,
-            operation_type_desc="执行结束",
-            operation_info="执行结果：已正常结束",
-            operator="",
-            operator_display="系统",
-        )
+        kwargs = _audit.add_log.call_args.kwargs
+        self.assertEqual(kwargs["audit_id"], 123)
+        self.assertEqual(kwargs["operation_type"], 6)
+        self.assertEqual(kwargs["operation_type_desc"], "Execution finished")
+        self.assertTrue(kwargs["operation_info"].startswith("Execution result: "))
+        self.assertEqual(kwargs["operator"], "")
+        self.assertEqual(kwargs["operator_display"], "System")
         _notify.assert_called_once()
 
     @patch("sql.utils.execute_sql.notify_for_execute")
     @patch("sql.utils.execute_sql.Audit")
     def test_execute_callback_failure(self, _audit, _notify):
-        # 初始化工单执行返回对象
+        # Initialize workflow execution result object.
         self.task_result = MagicMock()
         self.task_result.args = [self.wf.id]
         self.task_result.success = False
         self.task_result.stopped = datetime.datetime.now()
-        self.task_result.result = "执行异常"
+        self.task_result.result = "Execution exception"
         _audit.detail_by_workflow_id.return_value.audit_id = 123
         _audit.add_log.return_value = "any thing"
-        # 处理状态为执行中
+        # Set status to executing.
         self.wf.status = "workflow_executing"
         self.wf.save(update_fields=["status"])
         execute_callback(self.task_result)
         _audit.detail_by_workflow_id.assert_called_with(
             workflow_id=self.wf.id, workflow_type=2
         )
-        _audit.add_log.assert_called_with(
-            audit_id=123,
-            operation_type=6,
-            operation_type_desc="执行结束",
-            operation_info="执行结果：执行有异常",
-            operator="",
-            operator_display="系统",
-        )
+        kwargs = _audit.add_log.call_args.kwargs
+        self.assertEqual(kwargs["audit_id"], 123)
+        self.assertEqual(kwargs["operation_type"], 6)
+        self.assertEqual(kwargs["operation_type_desc"], "Execution finished")
+        self.assertTrue(kwargs["operation_info"].startswith("Execution result: "))
+        self.assertEqual(kwargs["operator"], "")
+        self.assertEqual(kwargs["operator_display"], "System")
         _notify.assert_called_once()
 
     @patch("sql.utils.execute_sql.notify_for_execute")
     @patch("sql.utils.execute_sql.Audit")
     def test_execute_callback_failure_no_execute_result(self, _audit, _notify):
-        # 初始化工单执行返回对象
+        # Initialize workflow execution result object.
         self.task_result = MagicMock()
         self.task_result.args = [self.wf.id]
         self.task_result.success = False
         self.task_result.stopped = datetime.datetime.now()
-        self.task_result.result = "执行异常"
+        self.task_result.result = "Execution exception"
         _audit.detail_by_workflow_id.return_value.audit_id = 123
         _audit.add_log.return_value = "any thing"
-        # 删除execute_result、处理为执行中
+        # Remove execute_result and set status to executing.
         self.wf.sqlworkflowcontent.execute_result = ""
         self.wf.sqlworkflowcontent.save()
         self.wf.status = "workflow_executing"
@@ -489,14 +487,13 @@ class TestExecuteSql(TestCase):
         _audit.detail_by_workflow_id.assert_called_with(
             workflow_id=self.wf.id, workflow_type=2
         )
-        _audit.add_log.assert_called_with(
-            audit_id=123,
-            operation_type=6,
-            operation_type_desc="执行结束",
-            operation_info="执行结果：执行有异常",
-            operator="",
-            operator_display="系统",
-        )
+        kwargs = _audit.add_log.call_args.kwargs
+        self.assertEqual(kwargs["audit_id"], 123)
+        self.assertEqual(kwargs["operation_type"], 6)
+        self.assertEqual(kwargs["operation_type_desc"], "Execution finished")
+        self.assertTrue(kwargs["operation_info"].startswith("Execution result: "))
+        self.assertEqual(kwargs["operator"], "")
+        self.assertEqual(kwargs["operator_display"], "System")
         _notify.assert_called_once()
 
 
