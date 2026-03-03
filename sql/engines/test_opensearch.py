@@ -8,7 +8,7 @@ from sql.models import Instance
 
 class TestOpenSearchEngine(unittest.TestCase):
     def setUp(self):
-        # 创建一个模拟的 instance 对象，包含必要的属性
+        # Create a mock instance object with required attributes.
         self.mock_instance = Instance()
         self.mock_instance.host = "localhost"
         self.mock_instance.port = 9200
@@ -16,7 +16,7 @@ class TestOpenSearchEngine(unittest.TestCase):
         self.mock_instance.password = "pass"
         self.mock_instance.is_ssl = True
 
-        # 初始化 OpenSearchEngine
+        # Initialize OpenSearchEngine.
         self.engine = OpenSearchEngine(instance=self.mock_instance)
 
     @patch("sql.engines.elasticsearch.OpenSearch")
@@ -40,7 +40,7 @@ class TestOpenSearchEngine(unittest.TestCase):
 
     @patch("sql.engines.elasticsearch.OpenSearch")
     def test_query_sql(self, mockElasticsearch):
-        """SQL语句测试"""
+        """Test SQL statements."""
         mock_conn = Mock()
         mock_response = {
             "schema": [
@@ -68,11 +68,11 @@ class TestOpenSearchEngine(unittest.TestCase):
 
     @patch("sql.engines.elasticsearch.OpenSearch")
     def test_security_role(self, mockElasticsearch):
-        """测试 _security_role 方法"""
+        """Test _security_role method."""
         mock_conn = Mock()
         mockElasticsearch.return_value = mock_conn
 
-        # 模拟 OpenSearch 返回的角色信息
+        # Mock OpenSearch role response.
         mock_response = {
             "kibana_user": {
                 "reserved": True,
@@ -174,11 +174,11 @@ class TestOpenSearchEngine(unittest.TestCase):
 
     @patch("sql.engines.elasticsearch.OpenSearch")
     def test_security_user(self, mockElasticsearch):
-        """测试 _security_user 方法"""
+        """Test _security_user method."""
         mock_conn = Mock()
         mockElasticsearch.return_value = mock_conn
 
-        # 模拟 OpenSearch 返回的用户信息
+        # Mock OpenSearch user response.
         mock_response = {
             "admin": {
                 "hash": "abc123hash",
