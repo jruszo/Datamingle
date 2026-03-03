@@ -9,7 +9,7 @@ logger = logging.getLogger("default")
 
 
 def add_sql_schedule(name, run_date, workflow_id):
-    """添加/修改sql定时任务"""
+    """Add or update a scheduled SQL task."""
     del_schedule(name)
     schedule(
         "sql.utils.execute_sql.execute",
@@ -21,11 +21,11 @@ def add_sql_schedule(name, run_date, workflow_id):
         repeats=1,
         timeout=-1,
     )
-    logger.debug(f"添加SQL定时执行任务：{name} 执行时间：{run_date}")
+    logger.debug(f"Added scheduled SQL execution task: {name}, run time: {run_date}")
 
 
 def add_kill_conn_schedule(name, run_date, instance_id, thread_id):
-    """添加/修改终止数据库连接的定时任务"""
+    """Add or update a scheduled task to terminate database connections."""
     del_schedule(name)
     cluster_name = settings.Q_CLUSTER.get("name", "archery")
     schedule(
@@ -42,11 +42,11 @@ def add_kill_conn_schedule(name, run_date, instance_id, thread_id):
 
 
 def add_sync_ding_user_schedule():
-    """添加钉钉同步用户定时任务"""
-    del_schedule(name="同步钉钉用户ID")
+    """Add a scheduled task to sync DingTalk user IDs."""
+    del_schedule(name="Sync DingTalk User IDs")
     schedule(
         "common.utils.ding_api.sync_ding_user_id",
-        name="同步钉钉用户ID",
+        name="Sync DingTalk User IDs",
         schedule_type="D",
         repeats=-1,
         timeout=-1,
@@ -54,17 +54,17 @@ def add_sync_ding_user_schedule():
 
 
 def del_schedule(name):
-    """删除schedule"""
+    """Delete a schedule."""
     try:
         sql_schedule = Schedule.objects.get(name=name)
         Schedule.delete(sql_schedule)
-        logger.debug(f"删除schedule：{name}")
+        logger.debug(f"Deleted schedule: {name}")
     except Schedule.DoesNotExist:
         pass
 
 
 def task_info(name):
-    """获取定时任务详情"""
+    """Get schedule details."""
     try:
         sql_schedule = Schedule.objects.get(name=name)
         return sql_schedule
