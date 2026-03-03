@@ -545,7 +545,7 @@ class TestPgSQL(TestCase):
         self.assertDictEqual(
             check_result,
             {
-                "msg": "不支持的查询语法类型!",
+                "msg": "Unsupported query syntax type!",
                 "bad_query": True,
                 "filtered_sql": sql.strip(),
                 "has_star": False,
@@ -559,7 +559,7 @@ class TestPgSQL(TestCase):
         self.assertDictEqual(
             check_result,
             {
-                "msg": "SQL语句中含有 * ",
+                "msg": "SQL statement contains * ",
                 "bad_query": False,
                 "filtered_sql": sql.strip(),
                 "has_star": True,
@@ -611,8 +611,11 @@ class TestPgSQL(TestCase):
         row = ReviewResult(
             id=1,
             errlevel=2,
-            stagestatus="驳回不支持语句",
-            errormessage="仅支持DML和DDL语句，查询语句请使用SQL查询功能！",
+            stagestatus="Rejected unsupported statement",
+            errormessage=(
+                "Only DML and DDL statements are supported. "
+                "Use SQL query feature for SELECT statements."
+            ),
             sql=sql,
         )
         new_engine = PgSQLEngine(instance=self.ins)
@@ -627,8 +630,12 @@ class TestPgSQL(TestCase):
         row = ReviewResult(
             id=1,
             errlevel=2,
-            stagestatus="驳回高危SQL",
-            errormessage="禁止提交匹配" + "^|update" + "条件的语句！",
+            stagestatus="Rejected high-risk SQL",
+            errormessage=(
+                "Submitting statements that match "
+                + "^|update"
+                + " is prohibited!"
+            ),
             sql=sql,
         )
         new_engine = PgSQLEngine(instance=self.ins)

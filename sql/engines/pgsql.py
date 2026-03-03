@@ -49,7 +49,7 @@ class PgSQLEngine(EngineBase):
 
     def get_all_databases(self):
         """
-        获取数据库列表
+        Get database list.
         :return:
         """
         result = self.query(sql=f"SELECT datname FROM pg_database;")
@@ -61,7 +61,7 @@ class PgSQLEngine(EngineBase):
 
     def get_all_schemas(self, db_name, **kwargs):
         """
-        获取模式列表
+        Get schema list.
         :return:
         """
         result = self.query(
@@ -84,7 +84,7 @@ class PgSQLEngine(EngineBase):
 
     def get_all_tables(self, db_name, **kwargs):
         """
-        获取表列表
+        Get table list.
         :param db_name:
         :param schema_name:
         :return:
@@ -102,7 +102,7 @@ class PgSQLEngine(EngineBase):
 
     def get_all_columns_by_tb(self, db_name, tb_name, **kwargs):
         """
-        获取字段列表
+        Get column list.
         :param db_name:
         :param tb_name:
         :param schema_name:
@@ -124,7 +124,7 @@ class PgSQLEngine(EngineBase):
 
     def describe_table(self, db_name, tb_name, **kwargs):
         """
-        获取表结构信息
+        Get table schema information.
         :param db_name:
         :param tb_name:
         :param schema_name:
@@ -156,22 +156,22 @@ class PgSQLEngine(EngineBase):
         return result
 
     def query_check(self, db_name=None, sql=""):
-        # 查询语句的检查、注释去除、切分
+        # Check query statement, strip comments, and split.
         result = {"msg": "", "bad_query": False, "filtered_sql": sql, "has_star": False}
-        # 删除注释语句，进行语法判断，执行第一条有效sql
+        # Remove comments, validate syntax, and keep the first valid SQL.
         try:
             sql = sqlparse.format(sql, strip_comments=True)
             sql = sqlparse.split(sql)[0]
             result["filtered_sql"] = sql.strip()
         except IndexError:
             result["bad_query"] = True
-            result["msg"] = "没有有效的SQL语句"
+            result["msg"] = "No valid SQL statement found"
         if re.match(r"^select|^explain", sql, re.I) is None:
             result["bad_query"] = True
-            result["msg"] = "不支持的查询语法类型!"
+            result["msg"] = "Unsupported query syntax type!"
         if "*" in sql:
             result["has_star"] = True
-            result["msg"] += "SQL语句中含有 * "
+            result["msg"] += "SQL statement contains * "
         return result
 
     def query(
@@ -183,7 +183,7 @@ class PgSQLEngine(EngineBase):
         parameters=None,
         **kwargs,
     ):
-        """返回 ResultSet"""
+        """Return a ResultSet."""
         schema_name = kwargs.get("schema_name")
         result_set = ResultSet(full_sql=sql)
         try:
@@ -209,24 +209,24 @@ class PgSQLEngine(EngineBase):
             conn.commit()
             fields = cursor.description
             column_type_codes = [i[1] for i in fields] if fields else []
-            # 定义 JSON 和 JSONB 的 type_code,# 114 是 json，3802 是 jsonb
+            # JSON/JSONB type codes: 114 for json, 3802 for jsonb.
             JSON_TYPE_CODE = 114
             JSONB_TYPE_CODE = 3802
-            # 对 rows 进行循环处理，判断是否是 jsonb 或 json 类型
+            # Iterate rows and convert json/jsonb columns where needed.
             converted_rows = []
             for row in rows:
                 new_row = []
                 for idx, col_value in enumerate(row):
-                    # 理论上, 下标不会越界的
+                    # Index should not go out of range.
                     column_type_code = (
                         column_type_codes[idx] if idx < len(column_type_codes) else None
                     )
-                    # 只在列类型为 json 或 jsonb 时转换
+                    # Convert only for json/jsonb columns.
                     if column_type_code in [JSON_TYPE_CODE, JSONB_TYPE_CODE]:
                         if isinstance(col_value, (dict, list)):
                             new_row.append(
                                 json.dumps(col_value, ensure_ascii=False)
-                            )  # 转为 JSON 字符串
+                            )  # Convert to JSON string.
                         else:
                             new_row.append(col_value)
                     else:
@@ -239,7 +239,7 @@ class PgSQLEngine(EngineBase):
         except Exception as e:
             conn.rollback()
             logger.warning(
-                f"PgSQL命令执行报错，语句：{sql}， 错误信息：{traceback.format_exc()}"
+                f"PgSQL command execution failed, statement: {sql}, details: {traceback.format_exc()}"
             )
             result_set.error = str(e)
         finally:
@@ -248,7 +248,7 @@ class PgSQLEngine(EngineBase):
         return result_set
 
     def filter_sql(self, sql="", limit_num=0):
-        # 对查询sql增加limit限制，# TODO limit改写待优化
+        # Add LIMIT for query SQL. TODO: optimize limit rewriting.
         sql_lower = sql.lower().rstrip(";").strip()
         if re.match(r"^select", sql_lower):
             if re.search(r"limit\s+(\d+)$", sql_lower) is None:
@@ -257,7 +257,7 @@ class PgSQLEngine(EngineBase):
         return f"{sql.rstrip(';')};"
 
     def query_masking(self, db_name=None, sql="", resultset=None):
-        """简单字段脱敏规则, 仅对select有效"""
+        """Simple field masking rule, only effective for SELECT."""
         if re.match(r"^select", sql, re.I):
             filtered_result = simple_column_mask(self.instance, resultset)
             filtered_result.is_masked = True
@@ -266,36 +266,43 @@ class PgSQLEngine(EngineBase):
         return filtered_result
 
     def execute_check(self, db_name=None, sql=""):
-        """上线单执行前的检查, 返回Review set"""
+        """Run checks before workflow execution and return a ReviewSet."""
         config = SysConfig()
         check_result = ReviewSet(full_sql=sql)
-        # 禁用/高危语句检查
+        # Check disabled/high-risk statements.
         line = 1
         critical_ddl_regex = config.get("critical_ddl_regex", "")
         p = re.compile(critical_ddl_regex)
-        check_result.syntax_type = 2  # TODO 工单类型 0、其他 1、DDL，2、DML
+        check_result.syntax_type = 2  # TODO Workflow type: 0 others, 1 DDL, 2 DML
         for statement in sqlparse.split(sql):
             statement = sqlparse.format(statement, strip_comments=True)
-            # 禁用语句
+            # Disabled statements.
             if re.match(r"^select", statement.lower()):
                 result = ReviewResult(
                     id=line,
                     errlevel=2,
-                    stagestatus="驳回不支持语句",
-                    errormessage="仅支持DML和DDL语句，查询语句请使用SQL查询功能！",
+                    stagestatus="Rejected unsupported statement",
+                    errormessage=(
+                        "Only DML and DDL statements are supported. "
+                        "Use SQL query feature for SELECT statements."
+                    ),
                     sql=statement,
                 )
-            # 高危语句
+            # High-risk statements.
             elif critical_ddl_regex and p.match(statement.strip().lower()):
                 result = ReviewResult(
                     id=line,
                     errlevel=2,
-                    stagestatus="驳回高危SQL",
-                    errormessage="禁止提交匹配" + critical_ddl_regex + "条件的语句！",
+                    stagestatus="Rejected high-risk SQL",
+                    errormessage=(
+                        "Submitting statements that match "
+                        + critical_ddl_regex
+                        + " is prohibited!"
+                    ),
                     sql=statement,
                 )
 
-            # 正常语句
+            # Valid statements.
             else:
                 result = ReviewResult(
                     id=line,
@@ -306,12 +313,12 @@ class PgSQLEngine(EngineBase):
                     affected_rows=0,
                     execute_time=0,
                 )
-            # 判断工单类型
+            # Determine workflow syntax type.
             if get_syntax_type(statement) == "DDL":
                 check_result.syntax_type = 1
             check_result.rows += [result]
             line += 1
-        # 统计警告和错误数量
+        # Count warnings and errors.
         for r in check_result.rows:
             if r.errlevel == 1:
                 check_result.warning_count += 1
@@ -320,10 +327,10 @@ class PgSQLEngine(EngineBase):
         return check_result
 
     def execute_workflow(self, workflow, close_conn=True):
-        """执行上线单，返回Review set"""
+        """Execute workflow and return a ReviewSet."""
         sql = workflow.sqlworkflowcontent.sql_content
         execute_result = ReviewSet(full_sql=sql)
-        # 删除注释语句，切分语句，将切换CURRENT_SCHEMA语句增加到切分结果中
+        # Strip comments and split statements.
         sql = sqlparse.format(sql, strip_comments=True)
         split_sql = sqlparse.split(sql)
         line = 1
@@ -334,7 +341,7 @@ class PgSQLEngine(EngineBase):
             conn.autocommit = False
             cursor = conn.cursor()
             cursor.execute("SET transaction ISOLATION LEVEL READ COMMITTED READ WRITE;")
-            # 逐条执行切分语句，追加到执行结果中
+            # Execute split statements one by one and append results.
             for statement in split_sql:
                 statement = statement.rstrip(";")
                 with FuncTimer() as t:
@@ -355,30 +362,30 @@ class PgSQLEngine(EngineBase):
         except Exception as e:
             conn.rollback()
             logger.warning(
-                f"PGSQL命令执行报错，语句：{statement or sql}， 错误信息：{traceback.format_exc()}"
+                f"PGSQL command execution failed, statement: {statement or sql}, details: {traceback.format_exc()}"
             )
             execute_result.error = str(e)
-            # 追加当前报错语句信息到执行结果中
+            # Append current failed statement to execution results.
             execute_result.rows.append(
                 ReviewResult(
                     id=line,
                     errlevel=2,
                     stagestatus="Execute Failed",
-                    errormessage=f"异常信息：{e}",
+                    errormessage=f"Exception: {e}",
                     sql=statement or sql,
                     affected_rows=0,
                     execute_time=0,
                 )
             )
             line += 1
-            # 报错语句后面的语句标记为审核通过、未执行，追加到执行结果中
+            # Mark following statements as skipped due to previous failure.
             for statement in split_sql[line - 1 :]:
                 execute_result.rows.append(
                     ReviewResult(
                         id=line,
                         errlevel=0,
                         stagestatus="Audit completed",
-                        errormessage=f"前序语句失败, 未执行",
+                        errormessage="Previous statement failed, not executed",
                         sql=statement,
                         affected_rows=0,
                         execute_time=0,
@@ -396,7 +403,7 @@ class PgSQLEngine(EngineBase):
             self.conn = None
 
     def processlist(self, command_type, **kwargs):
-        """获取连接信息"""
+        """Get connection information."""
         sql = """
             select psa.pid
                                 ,concat('{',array_to_string(pg_blocking_pids(psa.pid),','),'}') block_pids
@@ -433,6 +440,6 @@ class PgSQLEngine(EngineBase):
         if command_type == "Not Idle":
             sql = sql.replace("$state_not_idle$", "and psa.state<>'idle'")
 
-        # 所有的模板进行替换
+        # Apply all template replacements.
         sql = sql.replace("$state_not_idle$", "")
         return self.query("postgres", sql)
