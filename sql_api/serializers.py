@@ -97,16 +97,16 @@ class ResourceGroupSerializer(serializers.ModelSerializer):
 
 
 class UserAuthSerializer(serializers.Serializer):
-    engineer = serializers.CharField(label="用户名")
-    password = serializers.CharField(label="密码")
+    engineer = serializers.CharField(label="Username")
+    password = serializers.CharField(label="Password")
 
 
 class TwoFASerializer(serializers.Serializer):
-    engineer = serializers.CharField(label="用户名")
-    enable = serializers.ChoiceField(choices=["true", "false"], label="启用or禁用")
-    phone = serializers.CharField(required=False, label="手机号码")
+    engineer = serializers.CharField(label="Username")
+    enable = serializers.ChoiceField(choices=["true", "false"], label="Enable or disable")
+    phone = serializers.CharField(required=False, label="Phone number")
     auth_type = serializers.ChoiceField(
-        choices=["totp", "sms"], label="验证类型：totp-Google身份验证器，sms-短信验证码"
+        choices=["totp", "sms"], label="Verification type: totp-Google Authenticator, sms-SMS code"
     )
 
     def validate(self, attrs):
@@ -117,17 +117,17 @@ class TwoFASerializer(serializers.Serializer):
         try:
             Users.objects.get(username=engineer)
         except Users.DoesNotExist:
-            raise serializers.ValidationError({"errors": "不存在该用户"})
+            raise serializers.ValidationError({"errors": "User does not exist."})
 
         if auth_type == "sms" and enable == "true":
             if not attrs.get("phone"):
-                raise serializers.ValidationError({"errors": "缺少 phone"})
+                raise serializers.ValidationError({"errors": "Missing phone."})
 
         return attrs
 
 
 class TwoFAStateSerializer(serializers.Serializer):
-    engineer = serializers.CharField(label="用户名")
+    engineer = serializers.CharField(label="Username")
 
     def validate(self, attrs):
         engineer = attrs.get("engineer")
@@ -135,18 +135,18 @@ class TwoFAStateSerializer(serializers.Serializer):
         try:
             Users.objects.get(username=engineer)
         except Users.DoesNotExist:
-            raise serializers.ValidationError({"errors": "不存在该用户"})
+            raise serializers.ValidationError({"errors": "User does not exist."})
 
         return attrs
 
 
 class TwoFASaveSerializer(serializers.Serializer):
-    engineer = serializers.CharField(label="用户名")
-    key = serializers.CharField(required=False, label="密钥")
-    phone = serializers.CharField(required=False, label="手机号码")
+    engineer = serializers.CharField(label="Username")
+    key = serializers.CharField(required=False, label="Secret key")
+    phone = serializers.CharField(required=False, label="Phone number")
     auth_type = serializers.ChoiceField(
         choices=["disabled", "totp", "sms"],
-        label="验证类型：disabled-关闭，totp-Google身份验证器，sms-短信验证码",
+        label="Verification type: disabled-off, totp-Google Authenticator, sms-SMS code",
     )
 
     def validate(self, attrs):
@@ -157,26 +157,26 @@ class TwoFASaveSerializer(serializers.Serializer):
 
         if auth_type == "sms":
             if not phone:
-                raise serializers.ValidationError({"errors": "缺少 phone"})
+                raise serializers.ValidationError({"errors": "Missing phone."})
 
         if auth_type == "totp":
             if not key:
-                raise serializers.ValidationError({"errors": "缺少 key"})
+                raise serializers.ValidationError({"errors": "Missing key."})
 
         try:
             Users.objects.get(username=engineer)
         except Users.DoesNotExist:
-            raise serializers.ValidationError({"errors": "不存在该用户"})
+            raise serializers.ValidationError({"errors": "User does not exist."})
 
         return attrs
 
 
 class TwoFAVerifySerializer(serializers.Serializer):
-    engineer = serializers.CharField(label="用户名")
-    otp = serializers.IntegerField(label="一次性密码/验证码")
-    key = serializers.CharField(required=False, label="密钥")
-    phone = serializers.CharField(required=False, label="手机号码")
-    auth_type = serializers.CharField(label="验证方式")
+    engineer = serializers.CharField(label="Username")
+    otp = serializers.IntegerField(label="One-time password / code")
+    key = serializers.CharField(required=False, label="Secret key")
+    phone = serializers.CharField(required=False, label="Phone number")
+    auth_type = serializers.CharField(label="Verification method")
 
     def validate(self, attrs):
         engineer = attrs.get("engineer")
@@ -184,12 +184,12 @@ class TwoFAVerifySerializer(serializers.Serializer):
 
         if auth_type == "sms":
             if not attrs.get("phone"):
-                raise serializers.ValidationError({"errors": "缺少 phone"})
+                raise serializers.ValidationError({"errors": "Missing phone."})
 
         try:
             Users.objects.get(username=engineer)
         except Users.DoesNotExist:
-            raise serializers.ValidationError({"errors": "不存在该用户"})
+            raise serializers.ValidationError({"errors": "User does not exist."})
 
         return attrs
 
@@ -231,7 +231,7 @@ class AliyunRdsSerializer(serializers.ModelSerializer):
     ak = CloudAccessKeySerializer()
 
     def create(self, validated_data):
-        """创建包含accesskey的aliyunrds实例"""
+        """Create an Aliyun RDS instance including an access key."""
         rds_data = validated_data.pop("ak")
 
         try:
@@ -239,7 +239,7 @@ class AliyunRdsSerializer(serializers.ModelSerializer):
                 ak = CloudAccessKey.objects.create(**rds_data)
                 rds = AliyunRdsConfig.objects.create(ak=ak, **validated_data)
         except Exception as e:
-            logger.error(f"创建AliyunRds报错，错误信息：{traceback.format_exc()}")
+            logger.error(f"Error creating AliyunRds: {traceback.format_exc()}")
             raise serializers.ValidationError({"errors": str(e)})
         else:
             return rds
@@ -262,13 +262,13 @@ class ArchiveConfigSerializer(serializers.ModelSerializer):
 
 
 class InstanceResourceSerializer(serializers.Serializer):
-    instance_id = serializers.IntegerField(label="实例id")
+    instance_id = serializers.IntegerField(label="Instance ID")
     resource_type = serializers.ChoiceField(
-        choices=["database", "schema", "table", "column"], label="资源类型"
+        choices=["database", "schema", "table", "column"], label="Resource type"
     )
-    db_name = serializers.CharField(required=False, label="数据库名")
-    schema_name = serializers.CharField(required=False, label="schema名")
-    tb_name = serializers.CharField(required=False, label="表名")
+    db_name = serializers.CharField(required=False, label="Database name")
+    schema_name = serializers.CharField(required=False, label="Schema name")
+    tb_name = serializers.CharField(required=False, label="Table name")
 
     def validate(self, attrs):
         instance_id = attrs.get("instance_id")
@@ -276,7 +276,7 @@ class InstanceResourceSerializer(serializers.Serializer):
         try:
             Instance.objects.get(id=instance_id)
         except Instance.DoesNotExist:
-            raise serializers.ValidationError({"errors": "不存在该实例"})
+            raise serializers.ValidationError({"errors": "Instance does not exist."})
 
         return attrs
 
@@ -287,16 +287,16 @@ class InstanceResourceListSerializer(serializers.Serializer):
 
 
 class ExecuteCheckSerializer(serializers.Serializer):
-    instance_id = serializers.IntegerField(label="实例id")
-    db_name = serializers.CharField(label="数据库名")
-    full_sql = serializers.CharField(label="SQL内容")
+    instance_id = serializers.IntegerField(label="Instance ID")
+    db_name = serializers.CharField(label="Database name")
+    full_sql = serializers.CharField(label="SQL content")
 
     def validate_instance_id(self, instance_id):
         try:
             Instance.objects.get(pk=instance_id)
         except Instance.DoesNotExist:
             raise serializers.ValidationError(
-                {"errors": f"不存在该实例：{instance_id}"}
+                {"errors": f"Instance does not exist: {instance_id}"}
             )
         return instance_id
 
@@ -332,7 +332,7 @@ class WorkflowSerializer(serializers.ModelSerializer):
         try:
             ResourceGroup.objects.get(pk=group_id)
         except ResourceGroup.DoesNotExist:
-            raise serializers.ValidationError({"errors": f"不存在该资源组：{group_id}"})
+            raise serializers.ValidationError({"errors": f"Resource group does not exist: {group_id}"})
         return group_id
 
     class Meta:
@@ -358,33 +358,33 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
     workflow = WorkflowSerializer()
 
     def create(self, validated_data):
-        """使用原工单submit流程创建工单"""
+        """Create workflow using the original submit flow."""
         workflow_data = validated_data.pop("workflow")
         instance = workflow_data["instance"]
         sql_content = validated_data["sql_content"].strip()
         group = ResourceGroup.objects.get(pk=workflow_data["group_id"])
         engineer = workflow_data.get("engineer")
 
-        # 管理员可以指定提交人信息
+        # Admins can specify submitter info
         if self.context["request"].user.is_superuser and engineer:
             try:
                 user = Users.objects.get(username=engineer)
             except Users.DoesNotExist:
-                raise serializers.ValidationError({"errors": f"不存在用户：{engineer}"})
-        # 提交人只能是自己
+                raise serializers.ValidationError({"errors": f"User does not exist: {engineer}"})
+        # Submitter can only be self for non-admins
         else:
             user = self.context["request"].user
 
-        # 验证提交用户的组权限（用户是否在该组、该组是否有指定实例）
+        # Validate group permissions of submitting user
         try:
             user_instances(user, tag_codes=["can_write"]).get(id=instance.id)
         except instance.DoesNotExist:
             if workflow_data["is_offline_export"]:
                 pass
             else:
-                raise serializers.ValidationError({"errors": "你所在组未关联该实例！"})
+                raise serializers.ValidationError({"errors": "The instance is not associated with your group."})
 
-        # 再次交给engine进行检测，防止绕过
+        # Run engine check again to prevent bypass
         try:
             check_engine = get_engine(instance=instance)
             sql_export = OffLineDownLoad()
@@ -399,7 +399,7 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
         except Exception as e:
             raise serializers.ValidationError({"errors": str(e)})
 
-        # 未开启备份选项，并且engine支持备份，强制设置备份
+        # If backup switch is off but engine supports backup, force backup on
         is_backup = (
             workflow_data["is_backup"] if "is_backup" in workflow_data.keys() else False
         )
@@ -428,13 +428,13 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                 workflow_content = SqlWorkflowContent.objects.create(
                     workflow=workflow, **validated_data
                 )
-                # 自动创建工作流
+                # Auto-create workflow audit chain
                 auditor = get_auditor(workflow=workflow)
                 auditor.create_audit()
         except Exception as e:
-            logger.error(f"提交工单报错，错误信息：{traceback.format_exc()}")
+            logger.error(f"Error submitting workflow: {traceback.format_exc()}")
             raise serializers.ValidationError({"errors": str(e)})
-        # 有时候提交后自动审批通过, 在这里改写一下 workflow 状态
+        # In some cases auto-approval happens on submit; rewrite workflow status here
         if auditor.audit.current_status == WorkflowStatus.REJECTED:
             auditor.workflow.status = "workflow_autoreviewwrong"
         elif auditor.audit.current_status == WorkflowStatus.PASSED:
@@ -456,14 +456,14 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
 
 
 class AuditWorkflowSerializer(serializers.Serializer):
-    engineer = serializers.CharField(label="操作用户")
-    workflow_id = serializers.IntegerField(label="工单id")
-    audit_remark = serializers.CharField(label="审批备注")
+    engineer = serializers.CharField(label="Operator")
+    workflow_id = serializers.IntegerField(label="Workflow ID")
+    audit_remark = serializers.CharField(label="Approval remark")
     workflow_type = serializers.ChoiceField(
         choices=WorkflowType.choices,
-        label="工单类型：1-查询权限申请，2-SQL上线申请，3-数据归档申请",
+        label="Workflow type: 1-query privilege apply, 2-SQL release apply, 3-data archive apply",
     )
-    audit_type = serializers.ChoiceField(choices=["pass", "cancel"], label="审核类型")
+    audit_type = serializers.ChoiceField(choices=["pass", "cancel"], label="Audit type")
 
     def validate(self, attrs):
         engineer = attrs.get("engineer")
@@ -473,26 +473,26 @@ class AuditWorkflowSerializer(serializers.Serializer):
         try:
             Users.objects.get(username=engineer)
         except Users.DoesNotExist:
-            raise serializers.ValidationError({"errors": f"不存在该用户：{engineer}"})
+            raise serializers.ValidationError({"errors": f"User does not exist: {engineer}"})
 
         try:
             WorkflowAudit.objects.get(
                 workflow_id=workflow_id, workflow_type=workflow_type
             )
         except WorkflowAudit.DoesNotExist:
-            raise serializers.ValidationError({"errors": "不存在该工单"})
+            raise serializers.ValidationError({"errors": "Workflow does not exist."})
 
         return attrs
 
 
 class WorkflowAuditSerializer(serializers.Serializer):
-    engineer = serializers.CharField(label="操作用户")
+    engineer = serializers.CharField(label="Operator")
 
     def validate_engineer(self, engineer):
         try:
             Users.objects.get(username=engineer)
         except Users.DoesNotExist:
-            raise serializers.ValidationError({"errors": f"不存在该用户：{engineer}"})
+            raise serializers.ValidationError({"errors": f"User does not exist: {engineer}"})
         return engineer
 
 
@@ -510,10 +510,10 @@ class WorkflowAuditListSerializer(serializers.ModelSerializer):
 
 
 class WorkflowLogSerializer(serializers.Serializer):
-    workflow_id = serializers.IntegerField(label="工单id")
+    workflow_id = serializers.IntegerField(label="Workflow ID")
     workflow_type = serializers.ChoiceField(
         choices=[1, 2, 3],
-        label="工单类型：1-查询权限申请，2-SQL上线申请，3-数据归档申请",
+        label="Workflow type: 1-query privilege apply, 2-SQL release apply, 3-data archive apply",
     )
 
     def validate(self, attrs):
@@ -525,7 +525,7 @@ class WorkflowLogSerializer(serializers.Serializer):
                 workflow_id=workflow_id, workflow_type=workflow_type
             )
         except WorkflowAudit.DoesNotExist:
-            raise serializers.ValidationError({"errors": "不存在该工单"})
+            raise serializers.ValidationError({"errors": "Workflow does not exist."})
 
         return attrs
 
@@ -542,14 +542,14 @@ class WorkflowLogListSerializer(serializers.ModelSerializer):
 
 
 class ExecuteWorkflowSerializer(serializers.Serializer):
-    engineer = serializers.CharField(required=False, label="操作用户")
-    workflow_id = serializers.IntegerField(label="工单id")
+    engineer = serializers.CharField(required=False, label="Operator")
+    workflow_id = serializers.IntegerField(label="Workflow ID")
     workflow_type = serializers.ChoiceField(
-        choices=[2, 3], label="工单类型：1-查询权限申请，2-SQL上线申请，3-数据归档申请"
+        choices=[2, 3], label="Workflow type: 1-query privilege apply, 2-SQL release apply, 3-data archive apply"
     )
     mode = serializers.ChoiceField(
         choices=["auto", "manual"],
-        label="执行模式：auto-线上执行，manual-已手动执行",
+        label="Execution mode: auto-online execution, manual-already executed manually",
         required=False,
     )
 
@@ -559,18 +559,18 @@ class ExecuteWorkflowSerializer(serializers.Serializer):
         workflow_type = attrs.get("workflow_type")
         mode = attrs.get("mode")
 
-        # SQL上线工单的mode和engineer为必需字段
+        # mode and engineer are required for SQL release workflows
         if workflow_type == 2:
             if not mode:
-                raise serializers.ValidationError({"errors": "缺少 mode"})
+                raise serializers.ValidationError({"errors": "Missing mode."})
             if not engineer:
-                raise serializers.ValidationError({"errors": "缺少 engineer"})
+                raise serializers.ValidationError({"errors": "Missing engineer."})
 
             try:
                 Users.objects.get(username=engineer)
             except Users.DoesNotExist:
                 raise serializers.ValidationError(
-                    {"errors": f"不存在该用户：{engineer}"}
+                    {"errors": f"User does not exist: {engineer}"}
                 )
 
         try:
@@ -578,6 +578,6 @@ class ExecuteWorkflowSerializer(serializers.Serializer):
                 workflow_id=workflow_id, workflow_type=workflow_type
             )
         except WorkflowAudit.DoesNotExist:
-            raise serializers.ValidationError({"errors": "不存在该工单"})
+            raise serializers.ValidationError({"errors": "Workflow does not exist."})
 
         return attrs
