@@ -2,31 +2,33 @@
 DIR="$( cd "$( dirname "$0"  )" && pwd  )"
 cd ${DIR}
 
-#配置Archery数据库的连接地址
+# Configure Archery database connection
 archery_db_host="127.0.0.1"
 archery_db_port=3306
 archery_db_user="root"
 archery_db_password="123456"
 archery_db_database="archery"
 
-#被分析实例的慢日志位置，建议定期清理日志文件，否则会影响分析效率
+# Slow log path of the analyzed instance.
+# Periodically clean log files to keep analysis efficient.
 slowquery_file="/home/mysql/log_slow.log"
 
-#pt-query-digest可执行文件路径
+# Path to pt-query-digest executable
 pt_query_digest="/usr/bin/pt-query-digest"
 
-#被分析实例的连接信息
-hostname="mysql_host:mysql_port" # 需要和Archery实例配置中的内容保持一致，用于筛选，配置错误会导致数据无法展示
+# Connection identifier of the analyzed instance
+hostname="mysql_host:mysql_port" # Must match the value configured in Archery for filtering; mismatches will prevent data display
 
-#获取上次分析时间，初始化时请删除last_analysis_time_$hostname文件，可分析全部日志数据
+# Get last analysis time.
+# For initial full analysis, remove last_analysis_time_$hostname.
 if [[ -s last_analysis_time_${hostname} ]]; then
     last_analysis_time=`cat last_analysis_time_${hostname}`
 else
     last_analysis_time='1000-01-01 00:00:00'
 fi
 
-#收集日志
-#RDS需要增加--no-version-check选项
+# Collect logs
+# Add --no-version-check for RDS
 ${pt_query_digest} \
 --user=${archery_db_user} --password=${archery_db_password} --host=${archery_db_host} --port=${archery_db_port} \
 --review h=${archery_db_host},D=${archery_db_database},t=mysql_slow_query_review  \
