@@ -1,5 +1,5 @@
 # -*- coding: UTF-8 -*-
-"""engine 结果集定义"""
+"""Engine result set definitions."""
 
 import json
 
@@ -15,9 +15,9 @@ class SqlItem:
         object_name="",
     ):
         """
-        :param id:  SQL序号,从0开始
+        :param id: SQL sequence number, starting from 0
         :param statement:  SQL Statement
-        :param stmt_type:  SQL类型(SQL, PLSQL), 默认为SQL
+        :param stmt_type: SQL type (SQL, PLSQL), default is SQL
         :param object_owner: PLSQL Object Owner
         :param object_type: PLSQL Object Type
         :param object_name: PLSQL Object Name
@@ -31,14 +31,14 @@ class SqlItem:
 
 
 class ReviewResult:
-    """审核的单条结果"""
+    """Single review result."""
 
     def __init__(self, inception_result=None, **kwargs):
         """
-        inception的结果列 = ['ID', 'stage', 'errlevel', 'stagestatus', 'errormessage', 'SQL', 'Affected_rows',
-                           'sequence','backup_dbname', 'execute_time', 'sqlsha1']
-        go_inception的结果列 = ['order_id', 'stage', 'error_level', 'stage_status', 'error_message', 'sql',
-                              'affected_rows', 'sequence', 'backup_dbname', 'execute_time', 'sqlsha1', 'backup_time']
+        Inception result columns = ['ID', 'stage', 'errlevel', 'stagestatus', 'errormessage', 'SQL', 'Affected_rows',
+                                    'sequence','backup_dbname', 'execute_time', 'sqlsha1']
+        go_inception result columns = ['order_id', 'stage', 'error_level', 'stage_status', 'error_message', 'sql',
+                                       'affected_rows', 'sequence', 'backup_dbname', 'execute_time', 'sqlsha1', 'backup_time']
         """
         if inception_result:
             self.id = inception_result[0] or 0
@@ -71,14 +71,14 @@ class ReviewResult:
             self.backup_time = kwargs.get("backup_time", "")
             self.actual_affected_rows = kwargs.get("actual_affected_rows", "")
 
-        # 自定义属性
+        # Custom attributes.
         for key, value in kwargs.items():
             if not hasattr(self, key):
                 setattr(self, key, value)
 
 
 class ReviewSet:
-    """review和执行后的结果集, rows中是review result, 有设定好的字段"""
+    """Review/execution result set with predefined ReviewResult fields."""
 
     def __init__(
         self,
@@ -94,11 +94,11 @@ class ReviewSet:
         self.checked = None
         self.warning = None
         self.error = None
-        self.warning_count = 0  # 检测结果警告数
-        self.error_count = 0  # 检测结果错误数
+        self.warning_count = 0  # Warning count in check result.
+        self.error_count = 0  # Error count in check result.
         self.is_critical = False
-        self.syntax_type = 0  # 语法类型
-        # rows 为普通列表
+        self.syntax_type = 0  # Syntax type.
+        # Rows is a plain list.
         self.rows = rows or []
         self.column_list = column_list
         self.status = status
@@ -122,7 +122,7 @@ class ReviewSet:
 
 
 class ResultSet:
-    """查询的结果集, rows 内只有值, column_list 中的是key"""
+    """Query result set; rows contain values, column_list contains keys."""
 
     def __init__(
         self,
@@ -144,7 +144,7 @@ class ResultSet:
         self.warning = None
         self.error = None
         self.is_critical = False
-        # rows 为普通列表
+        # Rows is a plain list.
         self.rows = rows or []
         self.column_list = column_list if column_list else []
         self.column_type = column_type if column_type else []
