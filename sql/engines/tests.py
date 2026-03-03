@@ -2137,7 +2137,7 @@ class TestClickHouse(TestCase):
         self.assertDictEqual(
             check_result,
             {
-                "msg": "不支持的查询语法类型!",
+                "msg": "Unsupported query syntax type!",
                 "bad_query": True,
                 "filtered_sql": "-- 测试",
                 "has_star": False,
@@ -2151,7 +2151,7 @@ class TestClickHouse(TestCase):
         self.assertDictEqual(
             check_result,
             {
-                "msg": "不支持的查询语法类型!",
+                "msg": "Unsupported query syntax type!",
                 "bad_query": True,
                 "filtered_sql": "update user set id=0",
                 "has_star": False,
@@ -2178,7 +2178,7 @@ class TestClickHouse(TestCase):
         check_result = new_engine.execute_check(db_name="some_db", sql=select_sql)
         self.assertEqual(
             check_result.rows[0].errormessage,
-            "仅支持DML和DDL语句，查询语句请使用SQL查询功能！",
+            "Only DML and DDL statements are supported. Use SQL query feature for SELECT statements.",
         )
 
     @patch.object(ClickHouseEngine, "query")
@@ -2193,7 +2193,7 @@ class TestClickHouse(TestCase):
         check_result = new_engine.execute_check(db_name="some_db", sql=alter_sql)
         self.assertEqual(
             check_result.rows[0].errormessage,
-            "ALTER TABLE仅支持*MergeTree，Merge以及Distributed等引擎表！",
+            "ALTER TABLE only supports *MergeTree, Merge and Distributed table engines!",
         )
 
     @patch.object(ClickHouseEngine, "query")
@@ -2208,7 +2208,7 @@ class TestClickHouse(TestCase):
         check_result = new_engine.execute_check(db_name="some_db", sql=alter_sql)
         self.assertEqual(
             check_result.rows[0].errormessage,
-            "TRUNCATE不支持View,File,URL,Buffer和Null表引擎！",
+            "TRUNCATE does not support View, File, URL, Buffer, or Null table engines!",
         )
 
     @patch.object(ClickHouseEngine, "query")
