@@ -19,10 +19,10 @@ __author__ = "hhyo"
 
 def get_syntax_type(sql, parser=True, db_type="mysql"):
     """
-    返回SQL语句类型，仅判断DDL和DML
+    Return SQL statement type, only distinguishing DDL and DML.
     :param sql:
-    :param parser: 是否使用sqlparse解析
-    :param db_type: 不使用sqlparse解析时需要提供该参数
+    :param parser: Whether to use sqlparse for parsing.
+    :param db_type: Required when sqlparse parsing is disabled.
     :return:
     """
     sql = remove_comments(sql=sql, db_type=db_type)
@@ -44,7 +44,7 @@ def get_syntax_type(sql, parser=True, db_type="mysql"):
             ddl_re = r"^alter|^create|^drop|^rename|^truncate"
             dml_re = r"^delete|^exec|^insert|^select|^update|^with|^merge"
         else:
-            # TODO 其他数据库的解析正则
+            # TODO: parsing regex for other databases.
             return None
         if re.match(ddl_re, sql, re.I):
             syntax_type = "DDL"
@@ -57,8 +57,8 @@ def get_syntax_type(sql, parser=True, db_type="mysql"):
 
 def remove_comments(sql, db_type="mysql"):
     """
-    去除SQL语句中的注释信息
-    来源:https://stackoverflow.com/questions/35647841/parse-sql-file-with-comments-into-sqlite-with-python
+    Remove comments from SQL statements.
+    Source: https://stackoverflow.com/questions/35647841/parse-sql-file-with-comments-into-sqlite-with-python
     :param sql:
     :param db_type:
     :return:
@@ -87,7 +87,7 @@ def remove_comments(sql, db_type="mysql"):
 
 def extract_tables(sql):
     """
-    获取sql语句中的库、表名
+    Get schema/table names referenced in SQL.
     :param sql:
     :return:
     """
@@ -104,22 +104,22 @@ def extract_tables(sql):
 
 def generate_sql(text):
     """
-    从SQL文本、MyBatis3 Mapper XML file文件中解析出sql 列表
+    Parse SQL list from SQL text or MyBatis3 Mapper XML file.
     :param text:
     :return: [{"sql_id": key, "sql": soar.compress(value)}]
     """
-    # 尝试XML解析
+    # Try XML parsing first.
     try:
         mapper, xml_raw_text = mybatis_mapper2sql.create_mapper(xml_raw_text=text)
         statements = mybatis_mapper2sql.get_statement(mapper, result_type="list")
         rows = []
-        # 压缩SQL语句，方便展示
+        # Compress SQL for display convenience.
         for statement in statements:
             for key, value in statement.items():
                 row = {"sql_id": key, "sql": value}
                 rows.append(row)
     except xml.etree.ElementTree.ParseError:
-        # 删除注释语句
+        # Remove comment lines.
         text = sqlparse.format(text, strip_comments=True)
         statements = sqlparse.split(text)
         rows = []
@@ -132,9 +132,10 @@ def generate_sql(text):
 
 
 def get_base_sqlitem_list(full_sql):
-    """把参数 full_sql 转变为 SqlItem列表
-    :param full_sql: 完整sql字符串, 每个SQL以分号;间隔, 不包含plsql执行块和plsql对象定义块
-    :return: SqlItem对象列表
+    """Convert full_sql parameter into a SqlItem list.
+    :param full_sql: Full SQL string. Each SQL is separated by ";" and does not
+        include PLSQL execution blocks or PLSQL object definition blocks.
+    :return: List of SqlItem objects.
     """
     list = []
     for statement in sqlparse.split(full_sql):
@@ -149,25 +150,30 @@ def get_base_sqlitem_list(full_sql):
 
 
 def get_full_sqlitem_list(full_sql, db_name):
-    """获取Sql对应的SqlItem列表, 包括PLSQL部分
-    :param full_sql: 全部sql内容
-    :return: SqlItem 列表
+    """Get SqlItem list for SQL content, including PLSQL parts.
+    :param full_sql: Full SQL content.
+    :return: SqlItem list.
     """
 
-    """预处理SQL文本，第一步：自动添加PLSQL块结尾标识符
-    根据PLSQL书写语法，识别结尾符号，在PLSQL语句结尾添加$$符号（单独一行），作为该平台处理PLSQL块结尾标识符
-    同时需要过滤掉PLSQL块中间可能存在的注释 /* 注释内容 */ 干扰
+    """SQL preprocessing step 1: automatically add PLSQL block end marker.
+    Based on PLSQL syntax, detect end markers and append "$$" at block end
+    (as a standalone line) so the platform can identify PLSQL block endings.
+    Also avoid interference from comments inside PLSQL blocks.
     """
     pattern = r"(;(\s)*\n(/$|/\s))"
     full_sql = re.sub(pattern, ";\n/\n$$", full_sql, flags=re.I)
 
-    """预处理SQL文本，第二步：自动添加PLSQL块开始标识符
-    根据PLSQL书写语法，识别开始符号，在PLSQL语句开始前添加delimiter $$符号（单独一行），作为该平台处理PLSQL块开始标识符
-    PLSQL块包括：以declare开始的匿名块、以begin开始的匿名块、存储过程、函数、触发器、包以及包体、对象类型以及对象类型体
+    """SQL preprocessing step 2: automatically add PLSQL block start marker.
+    Based on PLSQL syntax, detect start markers and insert "delimiter $$"
+    (as a standalone line) before PLSQL blocks.
+    PLSQL blocks include:
+    anonymous blocks starting with declare/begin, procedures, functions,
+    triggers, packages/package bodies, and type/type bodies.
     """
 
-    """1、调整PLSQL开始部分语句，对于开始部分（如：create or replace procedure）中间可能存在换行的调整为一行，
-    保证下一步处理中，使用换行分割时，PLSQL开始标识完整的落在一行内
+    """1) Normalize PLSQL block-start statements.
+    For start clauses such as "create or replace procedure", collapse potential
+    line breaks so the full start marker stays on one line for later processing.
     """
     pattern_dict = {
         r"(create\s+or\s+replace\s+procedure)": "create or replace procedure",
@@ -185,80 +191,83 @@ def get_full_sqlitem_list(full_sql, db_name):
     for pattern in pattern_dict:
         full_sql = re.sub(pattern, pattern_dict[pattern], full_sql, flags=re.I)
 
-    """2、使用换行符分割SQL文本，逐行处理SQL文本：
-    识别PLSQL开始语法标识符，在开始标识符前加delimiter $$（独立一行），作为该平台识别PLSQL开始位置的标识符，
-    同时通过引入is_inside_plsqlblock参数，排除掉那些可能存在于PLSQL程序块内部的开始标识符（declare，begin,create [or replace] xx等）
+    """2) Split SQL text by newline and process line by line.
+    Detect PLSQL start markers and prepend "delimiter $$" (standalone line)
+    as block-start marker.
+    The is_inside_plsqlblock flag prevents false positives for markers that
+    may appear inside PLSQL blocks.
     """
     pre_sql_list = full_sql.split("\n")
     full_sql_new = ""
     is_inside_plsqlblock = 0
 
-    # 逐行处理SQL文本
+    # Process SQL text line by line.
     for line in pre_sql_list:
-        # 匹配到declare和begin开始的行，同时该行SQL不是处于PLSQL程序块内部的，前面添加delimiter $$标识符（独立一行）
+        # If line starts with declare/begin and we are outside a PLSQL block,
+        # prepend "delimiter $$" marker (standalone line).
         pattern = r"^(declare|begin)"
         groups = re.match(pattern, line.lstrip(), re.IGNORECASE)
         if groups and is_inside_plsqlblock == 0:
             line = "delimiter $$" + "\n" + line
-            # 修改is_inside_plsqlblock参数为1，标识文本进入PLSQL块内部
+            # Mark that parser is now inside a PLSQL block.
             is_inside_plsqlblock = 1
 
-        # 匹配到create [or replace] function|procedure|trigger|package|type开始的行，同时该行SQL不是处于PLSQL程序块内部的，
-        # 前面添加delimiter $$标识符（独立一行）
+        # If line starts with create [or replace] function/procedure/trigger/
+        # package/type and we are outside a PLSQL block, prepend marker.
         pattern = (
             r"^create\s+(or\s+replace\s+)?(function|procedure|trigger|package|type)\s"
         )
         groups = re.match(pattern, line.lstrip(), re.IGNORECASE)
         if groups and is_inside_plsqlblock == 0:
             line = "delimiter $$" + "\n" + line
-            # 修改is_inside_plsqlblock参数为1，标识文本进入PLSQL块内部
+            # Mark that parser is now inside a PLSQL block.
             is_inside_plsqlblock = 1
 
-        # 匹配到内容为$$的行，修改is_inside_plsqlblock参数为0，标识文本跳出PLSQL块
+        # If line equals "$$", mark that parser exits PLSQL block.
         if line.strip() == "$$":
             is_inside_plsqlblock = 0
         full_sql_new = full_sql_new + line + "\n"
 
     list = []
 
-    # 定义开始分隔符，两端用括号，是为了re.split()返回列表包含分隔符
+    # Define start delimiter; parentheses keep delimiter in re.split result.
     regex_delimiter = r"(delimiter\s*\$\$)"
-    # 注意：必须把package body置于package之前，否则将永远匹配不上package body
+    # package body must appear before package, otherwise it will never match.
     regex_objdefine = r'create\s+or\s+replace\s+(function|procedure|trigger|package\s+body|package|type\s+body|type)\s+("?\w+"?\.)?"?\w+"?[\s+|\(]'
-    # 对象命名，两端有双引号
+    # Object naming pattern with double quotes on both sides.
     regex_objname = r'^".+"$'
 
     sql_list = re.split(pattern=regex_delimiter, string=full_sql_new, flags=re.I)
 
-    # delimiter_flag => 分隔符标记, 0:不是, 1:是
-    # 遇到分隔符标记为1, 则本块SQL要去判断是否有PLSQL内容
-    # PLSQL内容存在判定依据, 本块SQL包含'$$'
+    # delimiter_flag => delimiter marker, 0: no, 1: yes
+    # When delimiter marker is seen, this SQL block should be checked for PLSQL.
+    # PLSQL existence criterion: block contains "$$".
 
     delimiter_flag = 0
     for sql in sql_list:
-        # 截去首尾空格和多余空字符
+        # Trim leading/trailing spaces and extra whitespace.
         sql = sql.strip()
 
-        # 如果字符串长度为0, 跳过该字符串
+        # Skip empty strings.
         if len(sql) <= 0:
             continue
 
-        # 表示这一行是分隔符, 跳过该字符串
+        # This line is a delimiter marker; skip it.
         if re.match(regex_delimiter, sql):
             delimiter_flag = 1
             continue
 
         if delimiter_flag == 1:
-            # 表示SQL块为delimiter $$标记之后的内容
+            # SQL block after delimiter $$ marker.
 
-            # 查找是否存在'$$'结束符
+            # Find "$$" end marker.
             pos = sql.find("$$")
             length = len(sql)
             if pos > -1:
-                # 该sqlitem包含结束符$$
-                # 处理PLSQL语句块, 这里需要先去判定语句块的类型
+                # This sqlitem contains "$$" end marker.
+                # Process PLSQL block and determine block type first.
                 plsql_block = sql[0:pos].strip()
-                # 如果plsql_area字符串最后一个字符为/,则把/给去掉
+                # Remove trailing "/" from PLSQL block if present.
                 while True:
                     if plsql_block[-1:] == "/":
                         plsql_block = plsql_block[:-1].strip()
@@ -267,12 +276,12 @@ def get_full_sqlitem_list(full_sql, db_name):
 
                 search_result = re.search(regex_objdefine, plsql_block, flags=re.I)
 
-                # 检索关键字, 分为两个情况
-                # 情况1：plsql block 为对象定义执行块
-                # 情况2：plsql block 为匿名执行块
+                # Keyword search with two cases:
+                # Case 1: object-definition execution block
+                # Case 2: anonymous execution block
 
                 if search_result:
-                    # 检索到关键字, 属于情况1
+                    # Keyword found: case 1.
 
                     str_plsql_match = search_result.group()
                     str_plsql_type = search_result.groups()[0]
@@ -285,31 +294,31 @@ def get_full_sqlitem_list(full_sql, db_name):
                     nm_list = nm_str.split(".")
 
                     if len(nm_list) > 1:
-                        # 带有属主的对象名, 形如object_owner.object_name
+                        # Object name with owner, e.g. object_owner.object_name.
 
-                        # 获取object_owner
+                        # Get object_owner.
                         if re.match(regex_objname, nm_list[0]):
-                            # object_owner两端带有双引号
+                            # object_owner with double quotes.
                             object_owner = nm_list[0].strip().strip('"')
                         else:
-                            # object_owner两端不带有双引号
+                            # object_owner without double quotes.
                             object_owner = nm_list[0].upper().strip().strip("'")
 
-                        # 获取object_name
+                        # Get object_name.
                         if re.match(regex_objname, nm_list[1]):
-                            # object_name两端带有双引号
+                            # object_name with double quotes.
                             object_name = nm_list[1].strip().strip('"')
                         else:
-                            # object_name两端不带有双引号
+                            # object_name without double quotes.
                             object_name = nm_list[1].upper().strip()
                     else:
-                        # 不带属主
+                        # Without owner.
                         object_owner = db_name
                         if re.match(regex_objname, nm_list[0]):
-                            # object_name两端带有双引号
+                            # object_name with double quotes.
                             object_name = nm_list[0].strip().strip('"')
                         else:
-                            # object_name两端不带有双引号
+                            # object_name without double quotes.
                             object_name = nm_list[0].upper().strip()
 
                     tmp_object_type = str_plsql_type.upper()
@@ -326,7 +335,7 @@ def get_full_sqlitem_list(full_sql, db_name):
                     )
                     list.append(item)
                 else:
-                    # 未检索到关键字, 属于情况2, 匿名可执行块 it's ANONYMOUS
+                    # No keyword found: case 2, anonymous executable block.
                     item = SqlItem(
                         statement=plsql_block.strip(),
                         stmt_type="PLSQL",
@@ -337,25 +346,24 @@ def get_full_sqlitem_list(full_sql, db_name):
                     list.append(item)
 
                 if length > pos + 2:
-                    # 处理$$之后的那些语句, 默认为单条可执行SQL的集合
-                    # 创建视图、序列、表，语句作为SQL处理最后如果加了 / ，预处理中会在 / 后一行加$$，
-                    # 这里需要将SQL文本中 /\n$$ 去除后再传给get_base_sqlitem_list函数
+                    # Process statements after "$$" as executable SQL statements.
+                    # For create view/sequence/table statements where trailing "/"
+                    # was followed by "$$" in preprocessing, remove "/\n$$" first.
                     sql_area = sql[pos + 2 :].replace("/\n$$", "").strip()
                     if len(sql_area) > 0:
                         tmp_list = get_base_sqlitem_list(sql_area)
                         list.extend(tmp_list)
 
             else:
-                # 没有匹配到$$标记, 默认为单条可执行SQL集合
+                # No "$$" marker found, treat as executable SQL statement set.
                 tmp_list = get_base_sqlitem_list(sql)
                 list.extend(tmp_list)
 
-            # 处理完本次delimiter标记的内容，把delimiter_flag重置
+            # Reset delimiter flag after processing current delimiter block.
             delimiter_flag = 0
         else:
-            # 表示当前为以;结尾的正常sql
-            # 创建视图、序列、表，语句作为SQL处理最后如果加了 / ，预处理中会在 / 后一行加$$，
-            # 这里需要将SQL文本中 /\n$$ 去除后再传给get_base_sqlitem_list函数
+            # Current block is normal SQL ending with ";".
+            # Remove "/\n$$" artifact before sending to get_base_sqlitem_list.
             sql = sql.replace("/\n$$", "")
             tmp_list = get_base_sqlitem_list(sql)
             list.extend(tmp_list)
@@ -363,8 +371,8 @@ def get_full_sqlitem_list(full_sql, db_name):
 
 
 def get_exec_sqlitem_list(reviewResult, db_name):
-    """根据审核结果生成新的SQL列表
-    :param reviewResult: SQL审核结果列表
+    """Generate new SQL list based on review results.
+    :param reviewResult: SQL review result list.
     :param db_name:
     :return:
     """
@@ -385,33 +393,33 @@ def get_exec_sqlitem_list(reviewResult, db_name):
 
 def filter_db_list(db_list, db_name_regex: str, is_match_regex: bool, key="value"):
     """
-    根据配置的数据库列表过滤数据库名称列表。
+    Filter database names according to configured regex rules.
 
-    :param db_list: 待过滤的数据库名称列表，可能是字符串列表或字典列表。
-    示例数据：
+    :param db_list: Database list to filter; may be a list of strings or dicts.
+    Sample data:
     1. db_list=[{"value": 0, "text": 0, "value": 1, "text": 1}]
     2. db_list=["a_db","b_db"]
-    :param db_name_regex: 配置的数据库正则。
-    :param is_match_regex 是匹配还是不匹配的正则
-    :param key: 当 db_list 包含字典时，指定用于匹配的键。默认值为 'value'。
-    :return: 过滤后的数据库名称列表或字典列表。
+    :param db_name_regex: Configured database regex.
+    :param is_match_regex: Whether regex should match (True) or not match (False).
+    :param key: If db_list contains dicts, key used for matching. Default is 'value'.
+    :return: Filtered database name list or dict list.
     """
     if not db_name_regex:
-        return db_list  # 如果没有指定 db_name_regex，返回原始 db_list
+        return db_list  # Return original db_list when no regex is provided.
 
     try:
-        db_regex = re.compile(db_name_regex)  # 编译正则表达式
+        db_regex = re.compile(db_name_regex)  # Compile regex.
     except re.error:
-        raise ValueError(f"正则表达式解析异常: {db_name_regex}")
+        raise ValueError(f"Regex parsing error: {db_name_regex}")
 
     filtered_list = []
 
-    # 根据类型处理 db_list
+    # Process db_list by item type.
     for db in db_list:
-        # 确定要检查的值（字符串或字典中的特定键）
+        # Determine value to test (string or specific key in dict).
         db_value = str(db[key]) if isinstance(db, dict) else db
         is_match = bool(db_regex.match(db_value))
-        # 根据 is_match_regex 参数过滤
+        # Filter by is_match_regex.
         if (is_match_regex and is_match) or (not is_match_regex and not is_match):
             filtered_list.append(db)
     return filtered_list

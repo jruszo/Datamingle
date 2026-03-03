@@ -17,7 +17,7 @@ __author__ = "hhyo"
 class TestSQLUtils(TestCase):
     def test_get_syntax_type(self):
         """
-        测试语法判断
+        Test syntax detection.
         :return:
         """
         dml_sql = "select * from users;"
@@ -27,7 +27,7 @@ class TestSQLUtils(TestCase):
 
     def test_get_syntax_type_by_re(self):
         """
-        测试语法判断，不使用sqlparse解析,直接正则匹配判断
+        Test syntax detection using regex without sqlparse.
         :return:
         """
         dml_sql = "select * from users;"
@@ -39,7 +39,7 @@ class TestSQLUtils(TestCase):
 
     def test_remove_comments(self):
         """
-        测试去除SQL注释
+        Test SQL comment removal.
         :return:
         """
         sql1 = """   # This comment continues to the end of line
@@ -60,7 +60,7 @@ class TestSQLUtils(TestCase):
 
     def test_extract_tables_by_sql_parse(self):
         """
-        测试表解析
+        Test table extraction.
         :return:
         """
         sql = "select * from user.users a join logs.log b on a.id=b.id;"
@@ -71,7 +71,7 @@ class TestSQLUtils(TestCase):
 
     def test_generate_sql_from_sql(self):
         """
-        测试从SQl文本中解析SQL
+        Test parsing SQL from SQL text.
         :return:
         """
         text = "select * from sql_user;select * from sql_workflow;"
@@ -86,7 +86,7 @@ class TestSQLUtils(TestCase):
 
     def test_generate_sql_from_xml(self):
         """
-        测试从XML文本中解析SQL
+        Test parsing SQL from XML text.
         :return:
         """
         text = """<?xml version="1.0" encoding="UTF-8"?>
@@ -118,7 +118,7 @@ class TestSQLUtils(TestCase):
 
     def test_get_full_sqlitem_list_anonymous_plsql(self):
         """
-        测试SQL文本中plsql可执行块（匿名块）自动分割
+        Test automatic splitting of anonymous executable PLSQL blocks.
         :return:
         """
         text = """
@@ -126,13 +126,13 @@ declare
     v_rowcount integer;
 begin
     select count(1) into v_rowcount  from user_tables
-      where table_name = upper('test2'); --账户特定关系人信息历史表
+      where table_name = upper('test2'); --historical table for specific related persons
     if v_rowcount = 0 then
         execute IMMEDIATE '
         create table test2
         (
-        vc_bfcyid           int,           --受益人信息唯一标志ID
-        vc_specperid        VARCHAR2(100)  --特定关系人信息唯一标志ID
+        vc_bfcyid           int,           --beneficiary unique identifier
+        vc_specperid        VARCHAR2(100)  --specific related person unique identifier
         )
         ';
         execute IMMEDIATE '
@@ -156,13 +156,13 @@ END;
     v_rowcount integer;
 begin
     select count(1) into v_rowcount  from user_tables
-      where table_name = upper('test2'); --账户特定关系人信息历史表
+      where table_name = upper('test2'); --historical table for specific related persons
     if v_rowcount = 0 then
         execute IMMEDIATE '
         create table test2
         (
-        vc_bfcyid           int,           --受益人信息唯一标志ID
-        vc_specperid        VARCHAR2(100)  --特定关系人信息唯一标志ID
+        vc_bfcyid           int,           --beneficiary unique identifier
+        vc_specperid        VARCHAR2(100)  --specific related person unique identifier
         )
         ';
         execute IMMEDIATE '
@@ -194,7 +194,8 @@ END;""",
 
     def test_get_full_sqlitem_list_plsql(self):
         """
-        测试SQL文本中plsql对象定义语句（存储过程、函数等）自动分割
+        Test automatic splitting of PLSQL object-definition statements
+        (procedure, function, etc.).
         :return:
         """
         text = """
@@ -254,7 +255,7 @@ end;""",
 
     def test_get_full_sqlitem_list_sql_after_plsql(self):
         """
-        测试SQL文本中plsql后面普通SQL语句以;自动分割
+        Test automatic splitting of normal SQL statements after PLSQL by ";".
         :return:
         """
         text = """
@@ -309,7 +310,7 @@ create table user(
 
     def test_get_full_sqlitem_list_sql(self):
         """
-        测试普通SQL（不包含plsql执行块和plsql对象定义块）文本，以;符号进行SQL语句分割
+        Test splitting normal SQL text (without PLSQL blocks) by ";".
         :return:
         """
         text = """
@@ -356,25 +357,25 @@ create table user(
 
     def test_filter_with_string_list_match_regex(self):
         """
-        测试：当 db_list 是字符串列表时，且正则表达式匹配的情况。
+        Test: db_list is a string list and regex matches.
         """
         db_list = ["a_db", "b_db", "test_db", "prod_db"]
-        regex = r".*_db$"  # 以 "_db" 结尾的数据库名称
+        regex = r".*_db$"  # Database names ending with "_db".
         result = filter_db_list(db_list, regex, is_match_regex=True)
-        self.assertEqual(result, ["a_db", "b_db", "test_db", "prod_db"])  # 所有应该匹配
+        self.assertEqual(result, ["a_db", "b_db", "test_db", "prod_db"])  # All should match.
 
     def test_filter_with_string_list_not_match_regex(self):
         """
-        测试：当 db_list 是字符串列表时，且正则表达式不匹配的情况。
+        Test: db_list is a string list and regex does not match.
         """
         db_list = ["a_db", "b_db", "test_db", "prod_db", "invalid"]
         regex = r".*_db$"
         result = filter_db_list(db_list, regex, is_match_regex=False)
-        self.assertEqual(result, ["invalid"])  # 仅 "invalid" 不匹配正则
+        self.assertEqual(result, ["invalid"])  # Only "invalid" does not match regex.
 
     def test_filter_with_dict_list_match_regex(self):
         """
-        测试：当 db_list 是字典列表时，且根据指定键进行匹配正则表达式。
+        Test: db_list is a dict list and regex matches by specified key.
         """
         db_list = [
             {"value": "0", "text": "0(11)"},
@@ -383,21 +384,21 @@ create table user(
             {"value": "11", "text": "11(3)"},
             {"value": "44", "text": "44(3)"},
         ]
-        regex = r"^(0|4|6|11|12|13)$"  # 匹配 0, 4, 6, 11, 12, 13 的正则
+        regex = r"^(0|4|6|11|12|13)$"  # Regex matching 0, 4, 6, 11, 12, 13.
         result = filter_db_list(db_list, regex, is_match_regex=True, key="value")
 
-        # 期望返回匹配的字典项
+        # Expected matching dict items.
         expected_result = [
             {"value": "0", "text": "0(11)"},
             {"value": "4", "text": "4(3111)"},
             {"value": "11", "text": "11(3)"},
         ]
 
-        self.assertEqual(result, expected_result)  # 验证返回结果是否符合预期
+        self.assertEqual(result, expected_result)  # Verify expected result.
 
     def test_filter_with_dict_list_not_match_regex(self):
         """
-        测试：当 db_list 是字典列表时，且根据指定键不匹配正则表达式。
+        Test: db_list is a dict list and regex does not match by specified key.
         """
         db_list = [
             {"value": "a_db"},
@@ -411,15 +412,15 @@ create table user(
 
     def test_filter_without_regex(self):
         """
-        测试：当没有提供正则表达式时，函数应返回原始的 db_list。
+        Test: without regex, function should return original db_list.
         """
         db_list = ["a_db", "b_db", "invalid"]
         result = filter_db_list(db_list, "", is_match_regex=True)
-        self.assertEqual(result, db_list)  # 没有正则，应该返回原始列表
+        self.assertEqual(result, db_list)  # Without regex, return original list.
 
     def test_invalid_regex(self):
         """
-        测试：提供无效正则表达式时，函数应抛出 ValueError 异常。
+        Test: invalid regex should raise ValueError.
         """
         db_list = ["a_db", "b_db"]
         regex = r"[unclosed_bracket"
@@ -428,26 +429,26 @@ create table user(
 
     def test_filter_with_match_and_not_match(self):
         """
-        测试：使用不同的正则分别测试匹配和不匹配的情况。
+        Test matching and non-matching with different regex patterns.
         """
         db_list = ["test_db", "dmp_db", "za_db", "invalid_db", "prod_db", "no_match"]
 
-        # 匹配正则：以 "test_db", "dmp_db", 或 "za" 开头的数据库名称
+        # Match regex: database names starting with "test_db", "dmp_db", or "za".
         match_regex = r"^(test_db|dmp_db|za.*)$"
 
-        # 不匹配正则：以 "_db" 结尾的数据库名称
+        # Non-match regex: database names ending with "_db".
         not_match_regex = r".*_db$"
 
-        # 测试匹配正则的情况
+        # Test matching regex case.
         match_result = filter_db_list(db_list, match_regex, is_match_regex=True)
         self.assertEqual(
             match_result, ["test_db", "dmp_db", "za_db"]
-        )  # 仅匹配 test_db, dmp_db, za_db
+        )  # Only test_db, dmp_db, za_db should match.
 
-        # 测试不匹配正则的情况
+        # Test non-matching regex case.
         not_match_result = filter_db_list(
             db_list, not_match_regex, is_match_regex=False
         )
         self.assertEqual(
             not_match_result, ["no_match"]
-        )  # 仅 no_match 不符合 "_db$" 规则
+        )  # Only no_match does not satisfy "_db$" rule.
