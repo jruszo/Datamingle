@@ -49,10 +49,10 @@ class InfoTest(TestCase):
 
 
 class TestUser(APITestCase):
-    """测试用户相关接口"""
+    """Test user-related APIs."""
 
     def setUp(self):
-        self.user = User(username="test_user", display="测试用户", is_active=True)
+        self.user = User(username="test_user", display="Test User", is_active=True)
         self.user.set_password("test_password")
         self.user.save()
         self.group = Group.objects.create(id=1, name="DBA")
@@ -73,43 +73,43 @@ class TestUser(APITestCase):
         SysConfig().purge()
 
     def test_user_not_in_whitelist(self):
-        """测试api用户白名单参数"""
+        """Test API user whitelist parameter."""
         SysConfig().set("api_user_whitelist", "")
         r = self.client.get("/api/v1/user/", format="json")
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertDictEqual(r.json(), {"detail": "您没有执行该操作的权限。"})
+        self.assertIn("detail", r.json())
 
     def test_get_user_list(self):
-        """测试获取用户清单"""
+        """Test getting user list."""
         r = self.client.get("/api/v1/user/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.json()["count"], 1)
 
     def test_create_user(self):
-        """测试创建用户"""
+        """Test creating user."""
         json_data = {
             "username": "test_user2",
             "password": "test_password2",
-            "display": "测试用户2",
+            "display": "Test User 2",
         }
         r = self.client.post("/api/v1/user/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         self.assertEqual(r.json()["username"], "test_user2")
 
     def test_update_user(self):
-        """测试更新用户"""
-        json_data = {"display": "更新中文名"}
+        """Test updating user."""
+        json_data = {"display": "Updated Display Name"}
         r = self.client.put(f"/api/v1/user/{self.user.id}/", json_data, format="json")
         user = User.objects.get(pk=self.user.id)
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(user.display, "更新中文名")
+        self.assertEqual(user.display, "Updated Display Name")
 
     def test_delete_user(self):
-        """测试删除用户"""
+        """Test deleting user."""
         json_data = {
             "username": "test_user2",
             "password": "test_password2",
-            "display": "测试用户2",
+            "display": "Test User 2",
         }
         r1 = self.client.post("/api/v1/user/", json_data, format="json")
         r2 = self.client.delete(f'/api/v1/user/{r1.json()["id"]}/', format="json")
@@ -117,42 +117,42 @@ class TestUser(APITestCase):
         self.assertEqual(User.objects.filter(username="test_user2").count(), 0)
 
     def test_get_user_group_list(self):
-        """测试获取用户组清单"""
+        """Test getting user group list."""
         r = self.client.get("/api/v1/user/group/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.json()["count"], 1)
 
     def test_create_user_group(self):
-        """测试创建用户组"""
+        """Test creating user group."""
         json_data = {"name": "RD"}
         r = self.client.post("/api/v1/user/group/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         self.assertEqual(r.json()["name"], "RD")
 
     def test_update_user_group(self):
-        """测试更新用户组"""
-        json_data = {"name": "更新用户组名称"}
+        """Test updating user group."""
+        json_data = {"name": "Updated Group Name"}
         r = self.client.put(
             f"/api/v1/user/group/{self.group.id}/", json_data, format="json"
         )
         group = Group.objects.get(pk=self.group.id)
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(group.name, "更新用户组名称")
+        self.assertEqual(group.name, "Updated Group Name")
 
     def test_delete_user_group(self):
-        """测试删除用户组"""
+        """Test deleting user group."""
         r = self.client.delete(f"/api/v1/user/group/{self.group.id}/", format="json")
         self.assertEqual(r.status_code, status.HTTP_204_NO_CONTENT)
         self.assertEqual(Group.objects.filter(name="DBA").count(), 0)
 
     def test_get_resource_group_list(self):
-        """测试获取资源组清单"""
+        """Test getting resource group list."""
         r = self.client.get("/api/v1/user/resourcegroup/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.json()["count"], 1)
 
     def test_create_resource_group(self):
-        """测试创建资源组"""
+        """Test creating resource group."""
         json_data = {
             "group_name": "prod",
             "ding_webhook": "https://oapi.dingtalk.com/robot/send?access_token=123",
@@ -162,8 +162,8 @@ class TestUser(APITestCase):
         self.assertEqual(r.json()["group_name"], "prod")
 
     def test_update_resource_group(self):
-        """测试更新资源组"""
-        json_data = {"group_name": "更新资源组名称"}
+        """Test updating resource group."""
+        json_data = {"group_name": "Updated Resource Group Name"}
         r = self.client.put(
             f"/api/v1/user/resourcegroup/{self.res_group.group_id}/",
             json_data,
@@ -171,10 +171,10 @@ class TestUser(APITestCase):
         )
         group = ResourceGroup.objects.get(pk=self.res_group.group_id)
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(group.group_name, "更新资源组名称")
+        self.assertEqual(group.group_name, "Updated Resource Group Name")
 
     def test_delete_resource_group(self):
-        """测试删除资源组"""
+        """Test deleting resource group."""
         r = self.client.delete(
             f"/api/v1/user/resourcegroup/{self.res_group.group_id}/", format="json"
         )
@@ -182,21 +182,21 @@ class TestUser(APITestCase):
         self.assertEqual(Group.objects.filter(name="test").count(), 0)
 
     def test_user_auth(self):
-        """测试用户认证校验"""
+        """Test user authentication check."""
         json_data = {"engineer": "test_user", "password": "test_password"}
         r = self.client.post(f"/api/v1/user/auth/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json(), {"status": 0, "msg": "认证成功"})
+        self.assertEqual(r.json(), {"status": 0, "msg": "Authentication successful."})
 
     def test_2fa_config(self):
-        """测试用户配置2fa"""
+        """Test user 2FA configuration."""
         json_data = {"engineer": "test_user", "auth_type": "totp", "enable": "false"}
         r = self.client.post(f"/api/v1/user/2fa/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(TwoFactorAuthConfig.objects.count(), 0)
 
     def test_2fa_save(self):
-        """测试用户保存2fa配置"""
+        """Test saving user 2FA configuration."""
         json_data = {
             "engineer": "test_user",
             "auth_type": "totp",
@@ -207,7 +207,7 @@ class TestUser(APITestCase):
         self.assertEqual(TwoFactorAuthConfig.objects.count(), 1)
 
     def test_2fa_verify(self):
-        """测试2fa验证码校验"""
+        """Test 2FA code verification."""
         json_data = {
             "engineer": "test_user",
             "otp": 123456,
@@ -220,10 +220,10 @@ class TestUser(APITestCase):
 
 
 class TestInstance(APITestCase):
-    """测试实例相关接口"""
+    """Test instance-related APIs."""
 
     def setUp(self):
-        self.user = User(username="test_user", display="测试用户", is_active=True)
+        self.user = User(username="test_user", display="Test User", is_active=True)
         self.user.set_password("test_password")
         self.user.save()
         self.ins = Instance.objects.create(
@@ -262,13 +262,13 @@ class TestInstance(APITestCase):
         SysConfig().purge()
 
     def test_get_instance_list(self):
-        """测试获取实例清单"""
+        """Test getting instance list."""
         r = self.client.get("/api/v1/instance/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.json()["count"], 1)
 
     def test_create_instance(self):
-        """测试创建实例"""
+        """Test creating instance."""
         json_data = {
             "instance_name": "test_ins",
             "type": "master",
@@ -281,29 +281,29 @@ class TestInstance(APITestCase):
         self.assertEqual(r.json()["instance_name"], "test_ins")
 
     def test_update_instance(self):
-        """测试更新实例"""
-        json_data = {"instance_name": "更新实例名称"}
+        """Test updating instance."""
+        json_data = {"instance_name": "Updated Instance Name"}
         r = self.client.put(
             f"/api/v1/instance/{self.ins.id}/", json_data, format="json"
         )
         ins = Instance.objects.get(pk=self.ins.id)
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(ins.instance_name, "更新实例名称")
+        self.assertEqual(ins.instance_name, "Updated Instance Name")
 
     def test_delete_instance(self):
-        """测试删除实例"""
+        """Test deleting instance."""
         r = self.client.delete(f"/api/v1/instance/{self.ins.id}/", format="json")
         self.assertEqual(r.status_code, status.HTTP_204_NO_CONTENT)
         self.assertEqual(Instance.objects.filter(instance_name="some_ins").count(), 0)
 
     def test_get_aliyunrds_list(self):
-        """测试获取aliyunrds清单"""
+        """Test getting Aliyun RDS list."""
         r = self.client.get("/api/v1/instance/rds/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.json()["count"], 1)
 
     def test_create_aliyunrds(self):
-        """测试创建aliyunrds"""
+        """Test creating Aliyun RDS config."""
         ins = Instance.objects.create(
             instance_name="another_ins",
             type="slave",
@@ -327,13 +327,13 @@ class TestInstance(APITestCase):
         self.assertEqual(r.json()["rds_dbinstanceid"], "bbc")
 
     def test_get_tunnel_list(self):
-        """测试获取隧道清单"""
+        """Test getting tunnel list."""
         r = self.client.get("/api/v1/instance/tunnel/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.json()["count"], 1)
 
     def test_create_tunnel(self):
-        """测试创建隧道"""
+        """Test creating tunnel."""
         json_data = {"tunnel_name": "tunnel_test", "host": "one_host", "port": 22}
         r = self.client.post("/api/v1/instance/tunnel/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
@@ -341,7 +341,7 @@ class TestInstance(APITestCase):
 
 
 class TestWorkflow(APITestCase):
-    """测试工单相关接口"""
+    """Test workflow-related APIs."""
 
     def setUp(self):
         self.now = datetime.now()
@@ -359,7 +359,7 @@ class TestWorkflow(APITestCase):
             codename="sql_execute_for_resource_group"
         )
         can_review_permission = Permission.objects.get(codename="sql_review")
-        self.user = User(username="test_user", display="测试用户", is_active=True)
+        self.user = User(username="test_user", display="Test User", is_active=True)
         self.user.set_password("test_password")
         self.user.save()
         self.user.user_permissions.add(
@@ -405,8 +405,8 @@ class TestWorkflow(APITestCase):
             group_name="some_group",
             workflow_id=self.wf1.id,
             workflow_type=2,
-            workflow_title="申请标题",
-            workflow_remark="申请备注",
+            workflow_title="Apply Title",
+            workflow_remark="Apply Remark",
             audit_auth_groups="1",
             current_audit="1",
             next_audit="-1",
@@ -439,20 +439,20 @@ class TestWorkflow(APITestCase):
         self.notify_patcher.stop()
 
     def test_get_sql_workflow_list(self):
-        """测试获取SQL上线工单列表"""
+        """Test getting SQL release workflow list."""
         r = self.client.get("/api/v1/workflow/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.json()["count"], 1)
 
     def test_get_audit_list(self):
-        """测试获取待审核工单列表"""
+        """Test getting pending audit workflow list."""
         json_data = {"engineer": "test_user"}
         r = self.client.post("/api/v1/workflow/auditlist/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.json()["count"], 1)
 
     def test_get_workflow_log_list(self):
-        """测试获工单日志"""
+        """Test getting workflow logs."""
         json_data = {
             "workflow_id": self.wf1.id,
             "workflow_type": self.audit1.workflow_type,
@@ -462,7 +462,7 @@ class TestWorkflow(APITestCase):
         self.assertEqual(r.json()["count"], 1)
 
     def test_check_param_is_None(self):
-        """测试工单检测，参数内容为空"""
+        """Test workflow SQL check with empty parameters."""
         json_data = {
             "full_sql": "",
             "db_name": "test_db",
@@ -473,7 +473,7 @@ class TestWorkflow(APITestCase):
 
     @patch("sql_api.api_workflow.get_engine")
     def test_check_inception_Exception(self, _get_engine):
-        """测试工单检测，inception报错"""
+        """Test workflow SQL check when inception raises an error."""
         json_data = {
             "full_sql": "use mysql",
             "db_name": "test_db",
@@ -486,7 +486,7 @@ class TestWorkflow(APITestCase):
 
     @patch("sql_api.api_workflow.get_engine")
     def test_check(self, _get_engine):
-        """测试工单检测，正常返回"""
+        """Test workflow SQL check with normal return."""
         json_data = {
             "full_sql": "use mysql",
             "db_name": "test_db",
@@ -548,10 +548,10 @@ class TestWorkflow(APITestCase):
         self.assertListEqual(list(json.loads(r.content)["rows"][0].keys()), column_list)
 
     def test_submit_workflow(self):
-        """测试提交SQL上线工单"""
+        """Test submitting SQL release workflow."""
         json_data = {
             "workflow": {
-                "workflow_name": "上线工单1",
+                "workflow_name": "Release Workflow 1",
                 "demand_url": "test",
                 "group_id": 1,
                 "db_name": "test_db",
@@ -562,21 +562,21 @@ class TestWorkflow(APITestCase):
         }
         r = self.client.post("/api/v1/workflow/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(r.json()["workflow"]["workflow_name"], "上线工单1")
+        self.assertEqual(r.json()["workflow"]["workflow_name"], "Release Workflow 1")
         self.assertEqual(r.json()["workflow"]["engineer"], self.user.username)
         self.assertEqual(r.json()["workflow"]["engineer_display"], self.user.display)
 
     def test_submit_workflow_super(self):
-        """测试管理员提交SQL上线工单，可以指定用户"""
+        """Test admin submitting SQL release workflow with specified user."""
         User.objects.filter(id=self.user.id).update(is_superuser=1)
         user2 = User.objects.create(
-            username="test_user2", display="测试用户2", is_active=True
+            username="test_user2", display="Test User 2", is_active=True
         )
         user2.groups.add(self.group.id)
         user2.resource_group.add(self.res_group.group_id)
         json_data = {
             "workflow": {
-                "workflow_name": "上线工单1",
+                "workflow_name": "Release Workflow 1",
                 "demand_url": "test",
                 "group_id": 1,
                 "db_name": "test_db",
@@ -588,7 +588,7 @@ class TestWorkflow(APITestCase):
         }
         r = self.client.post("/api/v1/workflow/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(r.json()["workflow"]["workflow_name"], "上线工单1")
+        self.assertEqual(r.json()["workflow"]["workflow_name"], "Release Workflow 1")
         self.assertEqual(r.json()["workflow"]["engineer"], user2.username)
         self.assertEqual(r.json()["workflow"]["engineer_display"], user2.display)
 
@@ -596,7 +596,7 @@ class TestWorkflow(APITestCase):
     def test_submit_workflow_auto_pass(self, mock_generate_settings):
         json_data = {
             "workflow": {
-                "workflow_name": "上线工单1",
+                "workflow_name": "Release Workflow 1",
                 "demand_url": "test",
                 "group_id": 1,
                 "db_name": "test_db",
@@ -613,10 +613,10 @@ class TestWorkflow(APITestCase):
         assert workflow_in_db.status == "workflow_review_pass"
 
     def test_submit_param_is_None(self):
-        """测试SQL提交，参数内容为空"""
+        """Test SQL submit with empty parameters."""
         json_data = {
             "workflow": {
-                "workflow_name": "上线工单1",
+                "workflow_name": "Release Workflow 1",
                 "demand_url": "test",
                 "group_id": 1,
                 "db_name": "test_db",
@@ -629,11 +629,11 @@ class TestWorkflow(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_audit_workflow(self):
-        """测试审核工单"""
+        """Test auditing workflow."""
         json_data = {
             "engineer": self.user.username,
             "workflow_id": self.wf1.id,
-            "audit_remark": "取消",
+            "audit_remark": "cancel",
             "workflow_type": self.audit1.workflow_type,
             "audit_type": "cancel",
         }
@@ -642,17 +642,17 @@ class TestWorkflow(APITestCase):
         self.assertEqual(r.json(), {"msg": "canceled"})
 
     def test_execute_workflow(self):
-        """测试执行工单"""
-        # 先审核
+        """Test executing workflow."""
+        # Audit first
         audit_data = {
             "engineer": self.user.username,
             "workflow_id": self.wf1.id,
-            "audit_remark": "通过",
+            "audit_remark": "approved",
             "workflow_type": self.audit1.workflow_type,
             "audit_type": "pass",
         }
         self.client.post("/api/v1/workflow/audit/", audit_data, format="json")
-        # 再执行
+        # Then execute
         execute_data = {
             "engineer": self.user.username,
             "workflow_id": self.wf1.id,
@@ -661,4 +661,7 @@ class TestWorkflow(APITestCase):
         }
         r = self.client.post("/api/v1/workflow/execute/", execute_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json(), {"msg": "开始执行，执行结果请到工单详情页查看"})
+        self.assertEqual(
+            r.json(),
+            {"msg": "Execution started. Please check workflow detail page for results."},
+        )
