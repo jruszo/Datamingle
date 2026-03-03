@@ -5,27 +5,27 @@ const pgsqlDiagnosticInfo = {
         [
             { title: '', field: 'checkbox', checkbox: true },
             { title: 'PId', field: 'pid', sortable: true },
-            { title: '阻塞PID', field: 'block_pids', sortable: false },
-            { title: '数据库', field: 'datname', sortable: true },
-            { title: '用户', field: 'usename', sortable: true },
-            { title: '应用名称', field: 'application_name', sortable: true },
-            { title: '状态', field: 'state', sortable: true },
-            { title: '客户端地址', field: 'client_addr', sortable: true },
-            { title: '耗时(秒)', field: 'elapsed_time_seconds', sortable: true },
-            { title: '耗时', field: 'elapsed_time', sortable: true },
-            { title: '查询语句', field: 'query', sortable: true },
-            { title: '等待事件类型', field: 'wait_event_type', sortable: true },
-            { title: '等待事件', field: 'wait_event', sortable: true },
-            { title: '查询开始时间', field: 'query_start', sortable: true },
-            { title: '后端开始时间', field: 'backend_start', sortable: true },
-            { title: '父PID', field: 'leader_pid', sortable: true },
-            { title: '客户端主机名', field: 'client_hostname', sortable: true },
-            { title: '客户端端口', field: 'client_port', sortable: true },
-            { title: '事务开始时间', field: 'transaction_start_time', sortable: true },
-            { title: '状态变更时间', field: 'state_change', sortable: true },
-            { title: '后端XID', field: 'backend_xid', sortable: true },
-            { title: '后端XMIN', field: 'backend_xmin', sortable: true },
-            { title: '后端类型', field: 'backend_type', sortable: true },
+            { title: 'Blocking PID', field: 'block_pids', sortable: false },
+            { title: 'Database', field: 'datname', sortable: true },
+            { title: 'User', field: 'usename', sortable: true },
+            { title: 'Application Name', field: 'application_name', sortable: true },
+            { title: 'Status', field: 'state', sortable: true },
+            { title: 'Client Address', field: 'client_addr', sortable: true },
+            { title: 'Elapsed Time (s)', field: 'elapsed_time_seconds', sortable: true },
+            { title: 'Elapsed Time', field: 'elapsed_time', sortable: true },
+            { title: 'Query', field: 'query', sortable: true },
+            { title: 'Wait Event Type', field: 'wait_event_type', sortable: true },
+            { title: 'Wait Event', field: 'wait_event', sortable: true },
+            { title: 'Query Start Time', field: 'query_start', sortable: true },
+            { title: 'Backend Start Time', field: 'backend_start', sortable: true },
+            { title: 'Parent PID', field: 'leader_pid', sortable: true },
+            { title: 'Client Hostname', field: 'client_hostname', sortable: true },
+            { title: 'Client Port', field: 'client_port', sortable: true },
+            { title: 'Transaction Start Time', field: 'transaction_start_time', sortable: true },
+            { title: 'State Change Time', field: 'state_change', sortable: true },
+            { title: 'Backend XID', field: 'backend_xid', sortable: true },
+            { title: 'Backend XMIN', field: 'backend_xmin', sortable: true },
+            { title: 'Backend Type', field: 'backend_type', sortable: true },
         ]
     ],
 
@@ -80,20 +80,20 @@ const mysqlDiagnosticInfo = {
                 }
             }
         }, {
-            title: '完整INFO',
+            title: 'Full INFO',
             field: 'info',
             sortable: true,
-            visible: false // 默认不显示
+            visible: false // hidden by default
         }],
         function (index, row) {
             var html = [];
             $.each(row, function (key, value) {
                 if (key === 'info') {
                     var sql = window.sqlFormatter.format(value);
-                    //替换所有的换行符
+                    // Replace all newline characters
                     sql = sql.replace(/\r\n/g, "<br>");
                     sql = sql.replace(/\n/g, "<br>");
-                    //替换所有的空格
+                    // Replace all spaces
                     sql = sql.replace(/\s/g, "&nbsp;");
                     html.push('<span>' + sql + '</span>');
                 }
@@ -159,27 +159,27 @@ const dorisDiagnosticInfo = {
             title: 'QUERYID',
             field: 'query_id',
             sortable: true,
-            visible: false // 默认不显示
+            visible: false // hidden by default
         }, {
-            title: '完整INFO',
+            title: 'Full INFO',
             field: 'info',
             sortable: true,
-            visible: false // 默认不显示
+            visible: false // hidden by default
         }, {
             title: 'FE',
             field: 'fe',
             sortable: true,
-            visible: false // 默认不显示
+            visible: false // hidden by default
         }],
         function (index, row) {
             var html = [];
             $.each(row, function (key, value) {
                 if (key === 'info') {
                     var sql = window.sqlFormatter.format(value);
-                    //替换所有的换行符
+                    // Replace all newline characters
                     sql = sql.replace(/\r\n/g, "<br>");
                     sql = sql.replace(/\n/g, "<br>");
-                    //替换所有的空格
+                    // Replace all spaces
                     sql = sql.replace(/\s/g, "&nbsp;");
                     html.push('<span>' + sql + '</span>');
                 }
@@ -275,13 +275,13 @@ const mongoDiagnosticInfo = {
                 }
             }
         }, {
-            title: '完整command',
+            title: 'Full command',
             field: 'command',
             sortable: true,
             formatter: function (value, row, index) {
                 return JSON.stringify(value);
             },
-            visible: false // 默认不显示
+            visible: false // hidden by default
         }, {
             title: 'clientMetadata',
             field: 'clientMetadata',
@@ -289,7 +289,7 @@ const mongoDiagnosticInfo = {
             formatter: function (value, row, index) {
                 return JSON.stringify(value);
             },
-            visible: false // 默认不显示
+            visible: false // hidden by default
         }],
         function (index, row) {
             delete row['checkbox'];
@@ -303,7 +303,7 @@ const redisDiagnosticInfo = {
         'redis',
         ["All"],
         [{
-            title: '',  // 用于多选框
+            title: '',  // for multi-select checkbox
             field: 'checkbox',
             checkbox: true
         }, {
@@ -311,92 +311,92 @@ const redisDiagnosticInfo = {
             field: 'id',
             sortable: true
         }, {
-            title: '远程地址',
+            title: 'Remote Address',
             field: 'addr',
             sortable: true
         }, {
-            title: '本地地址',
+            title: 'Local Address',
             field: 'laddr',
             sortable: true
         }, {
-            title: '客户端名称',
+            title: 'Client Name',
             field: 'name',
             sortable: true
         }, {
-            title: '用户',
+            title: 'User',
             field: 'user',
             sortable: true
         },
         {
-            title: '数据库',
+            title: 'Database',
             field: 'db',
             sortable: true
         }, {
-            title: '连接耗时(秒)',
+            title: 'Connection Age (s)',
             field: 'age',
             sortable: true
         }, {
-            title: '空闲时间(秒)',
+            title: 'Idle Time (s)',
             field: 'idle',
             sortable: true
         }, {
-            title: '命令',
+            title: 'Command',
             field: 'cmd',
             sortable: true
         }, {
-            title: '总内存',
+            title: 'Total Memory',
             field: 'tot-mem',
             sortable: true
         }, {
-            title: '输出内存',
+            title: 'Output Memory',
             field: 'omem',
             sortable: true
         }, {
-            title: '标志',
+            title: 'Flags',
             field: 'flags',
             sortable: true
         }, {
-            title: '文件描述符',
+            title: 'File Descriptor',
             field: 'fd',
             sortable: true
         }, {
-            title: '订阅数',
+            title: 'Subscription Count',
             field: 'sub',
             sortable: true
         }, {
-            title: '模式订阅数',
+            title: 'Pattern Subscription Count',
             field: 'psub',
             sortable: true
         }, {
-            title: 'MULTI 队列长度',
+            title: 'MULTI Queue Length',
             field: 'multi',
             sortable: true
         }, {
-            title: '查询缓冲区',
+            title: 'Query Buffer',
             field: 'qbuf',
             sortable: true
         }, {
-            title: '查询缓冲区空闲',
+            title: 'Query Buffer Free',
             field: 'qbuf-free',
             sortable: true
         }, {
-            title: '参数内存',
+            title: 'Argument Memory',
             field: 'argv-mem',
             sortable: true
         }, {
-            title: '输出缓冲区长度',
+            title: 'Output Buffer Length',
             field: 'obl',
             sortable: true
         }, {
-            title: '输出链长度',
+            title: 'Output List Length',
             field: 'oll',
             sortable: true
         }, {
-            title: '事件文件',
+            title: 'Events',
             field: 'events',
             sortable: true
         }, {
-            title: '重定向',
+            title: 'Redirect',
             field: 'redir',
             sortable: true
         }],
@@ -460,10 +460,10 @@ const oracleDiagnosticInfo = {
             $.each(row, function (key, value) {
                 if (key === 'SQL_FULLTEXT') {
                     var sql = window.sqlFormatter.format(value);
-                    //替换所有的换行符
+                    // Replace all newline characters
                     sql = sql.replace(/\r\n/g, "<br>");
                     sql = sql.replace(/\n/g, "<br>");
-                    //替换所有的空格
+                    // Replace all spaces
                     sql = sql.replace(/\s/g, "&nbsp;");
                     html.push('<span>' + sql + '</span>');
                 }
