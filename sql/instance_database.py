@@ -23,9 +23,9 @@ __author__ = "hhyo"
 
 @permission_required("sql.menu_database", raise_exception=True)
 def databases(request):
-    """获取实例数据库列表"""
+    """Get database list for an instance."""
     instance_id = request.POST.get("instance_id")
-    saved = True if request.POST.get("saved") == "true" else False  # 平台是否保存
+    saved = True if request.POST.get("saved") == "true" else False  # Saved in Archery
 
     if not instance_id:
         return JsonResponse({"status": 0, "msg": "", "data": []})
@@ -35,9 +35,15 @@ def databases(request):
             id=instance_id
         )
     except Instance.DoesNotExist:
-        return JsonResponse({"status": 1, "msg": "你所在组未关联该实例", "data": []})
+        return JsonResponse(
+            {
+                "status": 1,
+                "msg": "Your group is not associated with this instance",
+                "data": [],
+            }
+        )
 
-    # 获取已录入数据库
+    # Get already configured databases.
     cnf_dbs = dict()
     for db in InstanceDatabase.objects.filter(instance=instance).values(
         "id", "db_name", "owner", "owner_display", "remark"
@@ -48,7 +54,7 @@ def databases(request):
     query_engine = get_engine(instance=instance)
     query_result = query_engine.get_all_databases_summary()
     if not query_result.error:
-        # 获取数据库关联用户信息
+        # Merge configured owner information into database list.
         rows = []
         for row in query_result.rows:
             if row["db_name"] in cnf_dbs.keys():
@@ -60,7 +66,7 @@ def databases(request):
     else:
         result = {"status": 1, "msg": query_result.error}
 
-    # 关闭连接
+    # Close connection.
     query_engine.close()
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
@@ -70,7 +76,7 @@ def databases(request):
 
 @permission_required("sql.menu_database", raise_exception=True)
 def create(request):
-    """创建数据库"""
+    """Create database."""
     instance_id = request.POST.get("instance_id", 0)
     db_name = request.POST.get("db_name")
     owner = request.POST.get("owner", "")
@@ -78,7 +84,11 @@ def create(request):
 
     if not all([db_name]):
         return JsonResponse(
-            {"status": 1, "msg": "参数不完整，请确认后提交", "data": []}
+            {
+                "status": 1,
+                "msg": "Incomplete parameters, please verify and submit",
+                "data": [],
+            }
         )
 
     try:
@@ -86,12 +96,18 @@ def create(request):
             id=instance_id
         )
     except Instance.DoesNotExist:
-        return JsonResponse({"status": 1, "msg": "你所在组未关联该实例", "data": []})
+        return JsonResponse(
+            {
+                "status": 1,
+                "msg": "Your group is not associated with this instance",
+                "data": [],
+            }
+        )
 
     try:
         owner_display = Users.objects.get(username=owner).display
     except Users.DoesNotExist:
-        return JsonResponse({"status": 1, "msg": "负责人不存在", "data": []})
+        return JsonResponse({"status": 1, "msg": "Owner does not exist", "data": []})
 
     engine = get_engine(instance=instance)
     if instance.db_type == "mysql":
@@ -107,15 +123,15 @@ def create(request):
             db = conn[db_name]
             db.create_collection(
                 name=f"archery-{db_name}"
-            )  # mongo创建数据库，需要数据库存在数据才会显示数据库名称，这里创建一个archery-{db_name}的集合
+            )  # Mongo creates a visible DB only after data exists; create a helper collection.
         except Exception as e:
-            exec_result.error = f"创建数据库失败, 错误信息：{str(e)}"
+            exec_result.error = f"Failed to create database, error: {str(e)}"
 
-    # 关闭连接
+    # Close connection.
     engine.close()
     if exec_result.error:
         return JsonResponse({"status": 1, "msg": exec_result.error})
-    # 保存到数据库
+    # Save to metadata table.
     else:
         InstanceDatabase.objects.create(
             instance=instance,
@@ -124,7 +140,7 @@ def create(request):
             owner_display=owner_display,
             remark=remark,
         )
-        # 清空实例资源缓存
+        # Clear instance-resource cache.
         r = get_redis_connection("default")
         for key in r.scan_iter(match="*insRes*", count=2000):
             r.delete(key)
@@ -134,7 +150,7 @@ def create(request):
 
 @permission_required("sql.menu_database", raise_exception=True)
 def edit(request):
-    """编辑/录入数据库"""
+    """Edit or register database metadata."""
     instance_id = request.POST.get("instance_id", 0)
     db_name = request.POST.get("db_name")
     owner = request.POST.get("owner", "")
@@ -142,7 +158,11 @@ def edit(request):
 
     if not all([db_name]):
         return JsonResponse(
-            {"status": 1, "msg": "参数不完整，请确认后提交", "data": []}
+            {
+                "status": 1,
+                "msg": "Incomplete parameters, please verify and submit",
+                "data": [],
+            }
         )
 
     try:
@@ -150,14 +170,20 @@ def edit(request):
             id=instance_id
         )
     except Instance.DoesNotExist:
-        return JsonResponse({"status": 1, "msg": "你所在组未关联该实例", "data": []})
+        return JsonResponse(
+            {
+                "status": 1,
+                "msg": "Your group is not associated with this instance",
+                "data": [],
+            }
+        )
 
     try:
         owner_display = Users.objects.get(username=owner).display
     except Users.DoesNotExist:
-        return JsonResponse({"status": 1, "msg": "负责人不存在", "data": []})
+        return JsonResponse({"status": 1, "msg": "Owner does not exist", "data": []})
 
-    # 更新或者录入信息
+    # Update or insert metadata.
     InstanceDatabase.objects.update_or_create(
         instance=instance,
         db_name=db_name,

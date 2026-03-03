@@ -50,18 +50,18 @@ class ExecuteCheck(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(
-        summary="SQL检查",
+        summary="SQL Check",
         request=ExecuteCheckSerializer,
         responses={200: ExecuteCheckResultSerializer},
-        description="对提供的SQL进行语法检查",
+        description="Perform syntax checks for the provided SQL.",
     )
     @method_decorator(permission_required("sql.sql_submit", raise_exception=True))
     def post(self, request):
-        # 参数验证
+        # Parameter validation
         serializer = ExecuteCheckSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         instance = serializer.get_instance()
-        # 交给engine进行检测
+        # Run check through engine
         try:
             db_name = request.data["db_name"]
             check_engine = get_engine(instance=instance)
@@ -78,7 +78,7 @@ class ExecuteCheck(views.APIView):
 
 class WorkflowList(generics.ListAPIView):
     """
-    列出所有的workflow或者提交一条新的workflow
+    List all workflows or submit a new workflow.
     """
 
     permission_classes = [permissions.IsAuthenticated]
@@ -89,22 +89,22 @@ class WorkflowList(generics.ListAPIView):
 
     def get_queryset(self):
         """
-        1、非管理员，拥有审核权限、资源组粒度执行权限的，可以查看组内所有工单
-        2、管理员，审计员，可查看所有工单
+        1. Non-admin users with review permission or resource-group-level execution permission can view all workflows in their groups.
+        2. Admins and auditors can view all workflows.
         """
         filter_dict = {}
         user = self.request.user
-        # 管理员，审计员，可查看所有工单
+        # Admins and auditors can view all workflows
         if user.is_superuser or user.has_perm("sql.audit_user"):
             pass
-        # 非管理员，拥有审核权限、资源组粒度执行权限的，可以查看组内所有工单
+        # Non-admin users with review/resource-group execute permission can view group workflows
         elif user.has_perm("sql.sql_review") or user.has_perm(
             "sql.sql_execute_for_resource_group"
         ):
             filter_dict["group_id__in"] = [
                 group.group_id for group in user_groups(user)
             ]
-        # 其他人只能查看自己提交的工单
+        # Others can only view workflows they submitted
         else:
             filter_dict["engineer"] = user.username
         return (
@@ -114,10 +114,10 @@ class WorkflowList(generics.ListAPIView):
         )
 
     @extend_schema(
-        summary="SQL上线工单清单",
+        summary="SQL Release Workflow List",
         request=WorkflowContentSerializer,
         responses={200: WorkflowContentSerializer},
-        description="列出所有SQL上线工单（过滤，分页）",
+        description="List all SQL release workflows (filtering, pagination).",
     )
     def get(self, request):
         workflows = self.filter_queryset(self.queryset)
@@ -127,10 +127,10 @@ class WorkflowList(generics.ListAPIView):
         return self.get_paginated_response(data)
 
     @extend_schema(
-        summary="提交SQL上线工单",
+        summary="Submit SQL Release Workflow",
         request=WorkflowContentSerializer,
         responses={201: WorkflowContentSerializer},
-        description="提交一条SQL上线工单",
+        description="Submit an SQL release workflow.",
     )
     @method_decorator(permission_required("sql.sql_submit", raise_exception=True))
     def post(self, request):
@@ -144,7 +144,7 @@ class WorkflowList(generics.ListAPIView):
             else True
         )
         if workflow_content.workflow.status == "workflow_manreviewing" and is_notified:
-            # 获取审核信息
+            # Get audit information
             workflow_audit = Audit.detail_by_workflow_id(
                 workflow_id=workflow_content.workflow.id,
                 workflow_type=WorkflowType.SQL_REVIEW,
@@ -160,7 +160,7 @@ class WorkflowList(generics.ListAPIView):
 
 class WorkflowAuditList(generics.ListAPIView):
     """
-    列出指定用户当前待自己审核的工单
+    List workflows currently waiting for review by the specified user.
     """
 
     filterset_class = WorkflowAuditFilter
@@ -172,26 +172,26 @@ class WorkflowAuditList(generics.ListAPIView):
 
     @extend_schema(exclude=True)
     def get(self, request):
-        return Response({"detail": "方法 “GET” 不被允许。"})
+        return Response({"detail": 'Method "GET" not allowed.'})
 
     @extend_schema(
-        summary="待审核清单",
+        summary="Pending Review List",
         request=WorkflowAuditSerializer,
         responses={200: WorkflowAuditListSerializer},
-        description="列出指定用户待审核清单（过滤，分页）",
+        description="List pending reviews for the specified user (filtering, pagination).",
     )
     def post(self, request):
-        # 参数验证
+        # Parameter validation
         serializer = WorkflowAuditSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        # 先获取用户所在资源组列表
+        # First get resource groups of the user
         user = Users.objects.get(username=request.data["engineer"])
         group_list = user_groups(user)
         group_ids = [group.group_id for group in group_list]
 
-        # 再获取用户所在权限组列表
+        # Then get permission groups of the user
         if user.is_superuser:
             auth_group_ids = [group.id for group in Group.objects.all()]
         else:
@@ -211,20 +211,20 @@ class WorkflowAuditList(generics.ListAPIView):
 
 class AuditWorkflow(views.APIView):
     """
-    审核workflow，包括查询权限申请、SQL上线申请、数据归档申请
+    Audit workflows, including query privilege applications, SQL release applications, and data archive applications.
     """
 
     @extend_schema(
-        summary="审核工单",
+        summary="Audit Workflow",
         request=AuditWorkflowSerializer,
-        description="审核一条工单（通过或终止）",
+        description="Audit a workflow (approve or terminate).",
     )
     def post(self, request):
-        # 参数验证
+        # Parameter validation
         serializer = AuditWorkflowSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        # 此处已经通过校验, 肯定存在, 就不 try 了
+        # Already validated, record must exist
         workflow_audit = WorkflowAudit.objects.get(
             workflow_id=serializer.data["workflow_id"],
             workflow_type=serializer.data["workflow_type"],
@@ -242,10 +242,12 @@ class AuditWorkflow(views.APIView):
             if auditor.workflow.engineer == serializer.data["engineer"]:
                 action = WorkflowAction.ABORT
             else:
-                raise serializers.ValidationError({"errors": "用户无权操作此工单"})
+                raise serializers.ValidationError(
+                    {"errors": "User is not allowed to operate this workflow."}
+                )
         else:
             raise serializers.ValidationError(
-                {"errors": "audit_type 只能是 pass 或 cancel"}
+                {"errors": "audit_type can only be pass or cancel."}
             )
 
         try:
@@ -253,9 +255,9 @@ class AuditWorkflow(views.APIView):
                 action, user, serializer.data["audit_remark"]
             )
         except AuditException as e:
-            raise serializers.ValidationError({"errors": f"操作失败, {str(e)}"})
+            raise serializers.ValidationError({"errors": f"Operation failed, {str(e)}"})
 
-        # 最后处置一下原本工单的状态
+        # Finally handle source workflow status
         if auditor.workflow_type == WorkflowType.QUERY:
             _query_apply_audit_call_back(
                 auditor.audit.workflow_id,
@@ -271,7 +273,7 @@ class AuditWorkflow(views.APIView):
             ]:
                 if auditor.workflow.status == "workflow_timingtask":
                     del_schedule(f"sqlreview-timing-{auditor.workflow.id}")
-                    # 将流程状态修改为人工终止流程
+                    # Mark workflow as manually terminated
                 auditor.workflow.status = "workflow_abort"
                 auditor.workflow.save(update_fields=["status"])
         elif auditor.workflow_type == WorkflowType.ARCHIVE:
@@ -282,7 +284,7 @@ class AuditWorkflow(views.APIView):
                 auditor.workflow.state = False
             auditor.workflow.save(update_fields=["status", "state"])
 
-        # 发消息
+        # Send notification
         is_notified = (
             notify_config_key in sys_config.get("notify_phase_control").split(",")
             if sys_config.get("notify_phase_control")
@@ -301,16 +303,16 @@ class AuditWorkflow(views.APIView):
 
 class ExecuteWorkflow(views.APIView):
     """
-    执行workflow，包括SQL上线工单、数据归档工单
+    Execute workflows, including SQL release workflows and data archive workflows.
     """
 
     @extend_schema(
-        summary="执行工单",
+        summary="Execute Workflow",
         request=ExecuteWorkflowSerializer,
-        description="执行一条工单",
+        description="Execute a workflow.",
     )
     def post(self, request):
-        # 参数验证
+        # Parameter validation
         serializer = ExecuteWorkflowSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -318,45 +320,49 @@ class ExecuteWorkflow(views.APIView):
         workflow_type = request.data["workflow_type"]
         workflow_id = request.data["workflow_id"]
 
-        # 执行SQL上线工单
+        # Execute SQL release workflow
         if workflow_type == 2:
             mode = request.data["mode"]
             engineer = request.data["engineer"]
             user = Users.objects.get(username=engineer)
 
-            # 校验多个权限
+            # Validate multiple permissions
             if not (
                 user.has_perm("sql.sql_execute")
                 or user.has_perm("sql.sql_execute_for_resource_group")
             ):
-                raise serializers.ValidationError({"errors": "你无权执行当前工单！"})
+                raise serializers.ValidationError(
+                    {"errors": "You do not have permission to execute this workflow."}
+                )
 
             if can_execute(user, workflow_id) is False:
-                raise serializers.ValidationError({"errors": "你无权执行当前工单！"})
+                raise serializers.ValidationError(
+                    {"errors": "You do not have permission to execute this workflow."}
+                )
 
             if on_correct_time_period(workflow_id) is False:
                 raise serializers.ValidationError(
                     {
-                        "errors": "不在可执行时间范围内，如果需要修改执行时间请重新提交工单!"
+                        "errors": "Current time is outside the executable window. Please resubmit the workflow if you need to change execution time."
                     }
                 )
 
-            # 获取审核信息
+            # Get audit information
             audit_id = Audit.detail_by_workflow_id(
                 workflow_id=workflow_id,
                 workflow_type=WorkflowType.SQL_REVIEW,
             ).audit_id
 
-            # 交由系统执行
+            # Execute by system
             if mode == "auto":
-                # 修改工单状态为排队中
+                # Set workflow status to queuing
                 SqlWorkflow(id=workflow_id, status="workflow_queuing").save(
                     update_fields=["status"]
                 )
-                # 删除定时执行任务
+                # Delete scheduled execution task
                 schedule_name = f"sqlreview-timing-{workflow_id}"
                 del_schedule(schedule_name)
-                # 加入执行队列
+                # Add to execution queue
                 async_task(
                     "sql.utils.execute_sql.execute",
                     workflow_id,
@@ -365,34 +371,34 @@ class ExecuteWorkflow(views.APIView):
                     timeout=-1,
                     task_name=f"sqlreview-execute-{workflow_id}",
                 )
-                # 增加工单日志
+                # Add workflow log
                 Audit.add_log(
                     audit_id=audit_id,
                     operation_type=5,
-                    operation_type_desc="执行工单",
-                    operation_info="工单执行排队中",
+                    operation_type_desc="Execute Workflow",
+                    operation_info="Workflow queued for execution",
                     operator=user.username,
                     operator_display=user.display,
                 )
 
-            # 线下手工执行
+            # Manual offline execution
             elif mode == "manual":
-                # 将流程状态修改为执行结束
+                # Set workflow status to finished
                 SqlWorkflow(
                     id=workflow_id,
                     status="workflow_finish",
                     finish_time=datetime.datetime.now(),
                 ).save(update_fields=["status", "finish_time"])
-                # 增加工单日志
+                # Add workflow log
                 Audit.add_log(
                     audit_id=audit_id,
                     operation_type=6,
-                    operation_type_desc="手工工单",
-                    operation_info="确认手工执行结束",
+                    operation_type_desc="Manual Workflow",
+                    operation_info="Confirmed manual execution completed",
                     operator=user.username,
                     operator_display=user.display,
                 )
-                # 开启了Execute阶段通知参数才发送消息通知
+                # Send notification only if Execute phase notifications are enabled
                 sys_config = SysConfig()
                 is_notified = (
                     "Execute" in sys_config.get("notify_phase_control").split(",")
@@ -403,7 +409,7 @@ class ExecuteWorkflow(views.APIView):
                     notify_for_execute(
                         workflow=SqlWorkflow.objects.get(id=workflow_id),
                     )
-        # 执行数据归档工单
+        # Execute data archive workflow
         elif workflow_type == 3:
             async_task(
                 "sql.archiver.archive",
@@ -412,12 +418,14 @@ class ExecuteWorkflow(views.APIView):
                 task_name=f"archive-{workflow_id}",
             )
 
-        return Response({"msg": "开始执行，执行结果请到工单详情页查看"})
+        return Response(
+            {"msg": "Execution started. Please check workflow detail page for results."}
+        )
 
 
 class WorkflowLogList(generics.ListAPIView):
     """
-    获取某个工单的日志
+    Get logs for a workflow.
     """
 
     pagination_class = CustomizedPagination
@@ -426,16 +434,16 @@ class WorkflowLogList(generics.ListAPIView):
 
     @extend_schema(exclude=True)
     def get(self, request):
-        return Response({"detail": "方法 “GET” 不被允许。"})
+        return Response({"detail": 'Method "GET" not allowed.'})
 
     @extend_schema(
-        summary="工单日志",
+        summary="Workflow Logs",
         request=WorkflowLogSerializer,
         responses={200: WorkflowLogListSerializer},
-        description="获取某个工单的日志（分页）",
+        description="Get logs of a workflow (pagination).",
     )
     def post(self, request):
-        # 参数验证
+        # Parameter validation
         serializer = WorkflowLogSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

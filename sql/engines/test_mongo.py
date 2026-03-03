@@ -3,7 +3,7 @@ from unittest.mock import patch, MagicMock
 from sql.engines.mongo import MongoEngine
 
 
-# 创建MongoEngine测试实例的fixture
+# Fixture for creating a MongoEngine test instance.
 @pytest.fixture
 def mongo_engine():
     engine = MongoEngine()
@@ -16,7 +16,7 @@ def mongo_engine():
     return engine
 
 
-# 测试带load参数的命令生成
+# Test command generation with load parameter.
 def test_build_cmd_with_load(mongo_engine):
     # Call the method with is_load=True
     cmd = mongo_engine._build_cmd(
@@ -37,7 +37,7 @@ def test_build_cmd_with_load(mongo_engine):
     assert cmd == expected_cmd
 
 
-# 测试不带load参数的命令生成
+# Test command generation without load parameter.
 def test_build_cmd_without_load(mongo_engine):
     # Call the method with is_load=False
     cmd = mongo_engine._build_cmd(
@@ -58,7 +58,7 @@ def test_build_cmd_without_load(mongo_engine):
     assert cmd == expected_cmd
 
 
-# 测试无认证信息时命令生成
+# Test command generation without auth info.
 def test_build_cmd_without_auth(mongo_engine):
     # Set user and password to None
     mongo_engine.user = None
@@ -83,7 +83,7 @@ def test_build_cmd_without_auth(mongo_engine):
     assert cmd == expected_cmd
 
 
-# 测试无认证信息且带load参数的命令生成
+# Test command generation without auth info and with load parameter.
 def test_build_cmd_with_load_without_auth(mongo_engine):
     # Set user and password to None
     mongo_engine.user = None
@@ -108,11 +108,11 @@ def test_build_cmd_with_load_without_auth(mongo_engine):
     assert cmd == expected_cmd
 
 
-# 参数化测试多种Mongo命令的生成
+# Parameterized tests for multiple Mongo command generation scenarios.
 @pytest.mark.parametrize(
     "params,expected_cmd",
     [
-        # 基础 find 查询
+        # Basic find query.
         (
             dict(
                 db_name="test_db",
@@ -124,7 +124,7 @@ def test_build_cmd_with_load_without_auth(mongo_engine):
             "mongo --quiet -u test_user -p 'test_password' localhost:27017/admin <<\\EOF\n"
             "db=db.getSiblingDB('test_db');db.test_collection.find({})\nEOF",
         ),
-        # find 带条件
+        # Find with condition.
         (
             dict(
                 db_name="test_db",
@@ -136,7 +136,7 @@ def test_build_cmd_with_load_without_auth(mongo_engine):
             "mongo --quiet -u test_user -p 'test_password' localhost:27017/admin <<\\EOF\n"
             "db=db.getSiblingDB('test_db');db.test_collection.find({'name':'archery'})\nEOF",
         ),
-        # aggregate 查询
+        # Aggregate query.
         (
             dict(
                 db_name="test_db",
@@ -148,7 +148,7 @@ def test_build_cmd_with_load_without_auth(mongo_engine):
             "mongo --quiet -u test_user -p 'test_password' localhost:27017/admin <<\\EOF\n"
             "db=db.getSiblingDB('test_db');db.test_collection.aggregate([{'$match':{'age':{'$gt':18}}}])\nEOF",
         ),
-        # count 查询
+        # Count query.
         (
             dict(
                 db_name="test_db",
@@ -160,7 +160,7 @@ def test_build_cmd_with_load_without_auth(mongo_engine):
             "mongo --quiet -u test_user -p 'test_password' localhost:27017/admin <<\\EOF\n"
             "db=db.getSiblingDB('test_db');db.test_collection.count({'status':'active'})\nEOF",
         ),
-        # explain 查询
+        # Explain query.
         (
             dict(
                 db_name="test_db",
@@ -172,7 +172,7 @@ def test_build_cmd_with_load_without_auth(mongo_engine):
             "mongo --quiet -u test_user -p 'test_password' localhost:27017/admin <<\\EOF\n"
             "db=db.getSiblingDB('test_db');db.test_collection.find({'score':{'$gte':90}}).explain()\nEOF",
         ),
-        # find 带 sort/limit/skip
+        # Find with sort/limit/skip.
         (
             dict(
                 db_name="test_db",
@@ -184,7 +184,7 @@ def test_build_cmd_with_load_without_auth(mongo_engine):
             "mongo --quiet -u test_user -p 'test_password' localhost:27017/admin <<\\EOF\n"
             "db=db.getSiblingDB('test_db');db.test_collection.find({}).sort({'age':-1}).limit(10).skip(5)\nEOF",
         ),
-        # findOne 查询
+        # findOne query.
         (
             dict(
                 db_name="test_db",
@@ -271,12 +271,12 @@ def test_build_cmd_with_load_without_auth(mongo_engine):
     ],
 )
 def test_build_cmd_various_queries(mongo_engine, params, expected_cmd):
-    # 测试多种Mongo命令的生成
+    # Test multiple Mongo command generation scenarios.
     cmd = mongo_engine._build_cmd(**params)
     assert cmd == expected_cmd
 
 
-# 测试带slave_ok参数的命令生成
+# Test command generation with slave_ok parameter.
 def test_build_cmd_with_slave_ok(mongo_engine):
     cmd = mongo_engine._build_cmd(
         db_name="test_db",
@@ -292,7 +292,7 @@ def test_build_cmd_with_slave_ok(mongo_engine):
     assert cmd == expected_cmd
 
 
-# 测试db_name为空时命令生成
+# Test command generation when db_name is empty.
 def test_build_cmd_with_empty_db_name(mongo_engine):
     cmd = mongo_engine._build_cmd(
         db_name="",
@@ -308,7 +308,7 @@ def test_build_cmd_with_empty_db_name(mongo_engine):
     assert cmd == expected_cmd
 
 
-# 测试user和password为None时命令生成
+# Test command generation when user and password are None.
 def test_build_cmd_with_none_user_password(mongo_engine):
     mongo_engine.user = None
     mongo_engine.password = None
@@ -326,7 +326,7 @@ def test_build_cmd_with_none_user_password(mongo_engine):
     assert cmd == expected_cmd
 
 
-# 测试带load和slave_ok参数的命令生成
+# Test command generation with both load and slave_ok parameters.
 def test_build_cmd_with_load_and_slave_ok(mongo_engine):
     cmd = mongo_engine._build_cmd(
         db_name="test_db",
@@ -342,7 +342,7 @@ def test_build_cmd_with_load_and_slave_ok(mongo_engine):
     assert cmd == expected_cmd
 
 
-# 测试无认证信息且带load和slave_ok参数的命令生成
+# Test command generation without auth info, with load and slave_ok.
 def test_build_cmd_with_load_without_auth_and_slave_ok(mongo_engine):
     mongo_engine.user = None
     mongo_engine.password = None

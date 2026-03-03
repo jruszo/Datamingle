@@ -26,7 +26,7 @@ __author__ = "hhyo"
 @permission_required("sql.sql_analyze", raise_exception=True)
 def generate(request):
     """
-    解析上传文件为SQL列表
+    Parse uploaded content into a SQL list.
     :param request:
     :return:
     """
@@ -45,7 +45,7 @@ def generate(request):
 @permission_required("sql.sql_analyze", raise_exception=True)
 def analyze(request):
     """
-    利用soar分析SQL
+    Analyze SQL using Soar.
     :param request:
     :return:
     """
@@ -63,10 +63,14 @@ def analyze(request):
                 )
             except Instance.DoesNotExist:
                 return JsonResponse(
-                    {"status": 1, "msg": "你所在组未关联该实例！", "data": []}
+                    {
+                        "status": 1,
+                        "msg": "Your group is not associated with this instance.",
+                        "data": [],
+                    }
                 )
             soar_test_dsn = SysConfig().get("soar_test_dsn")
-            # 获取实例连接信息
+            # Get instance connection info.
             user, password = instance.get_username_password()
             online_dsn = f"{user}:{password}@{instance.host}:{instance.port}/{db_name}"
         else:
@@ -81,12 +85,12 @@ def analyze(request):
         }
         rows = generate_sql(text)
         for row in rows:
-            # 验证是不是传过来的文件, 如果是文件, 报错
+            # Validate this is SQL text input, not a file path.
             try:
                 p = Path(row["sql"].strip())
                 if p.exists():
                     return JsonResponse(
-                        {"status": 1, "msg": "SQL 语句不合法", "data": []}
+                        {"status": 1, "msg": "Invalid SQL statement", "data": []}
                     )
             except OSError:
                 pass

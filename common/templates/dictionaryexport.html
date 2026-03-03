@@ -1,8 +1,8 @@
 <html>
     <meta charset="utf-8">
-    <title>数据库表结构说明文档</title>
+    <title>Database Table Schema Documentation</title>
     <style>
-        body,td,th {font-family:"宋体"; font-size:12px;}
+        body,td,th {font-family:"Times New Roman", serif; font-size:12px;}
         table,h1,p{width:960px;margin:0px auto;}
         table{border-collapse:collapse;border:1px solid #CCC;background:#efefef;}
         table caption{text-align:left; background-color:#fff; line-height:2em; font-size:14px; font-weight:bold; }
@@ -11,12 +11,12 @@
     </style>
     {% load format_tags %}
     <body>
-    <h1 style="text-align:center;">{{ db_name }} 数据字典 (共 {{ tables|length }} 个表)</h1>
-    <p style="text-align:center;margin:20px auto;">生成时间：{{ export_time }}</p>
+    <h1 style="text-align:center;">{{ db_name }} Data Dictionary ({{ tables|length }} Tables Total)</h1>
+    <p style="text-align:center;margin:20px auto;">Generated At: {{ export_time }}</p>
     {% for tb in tables %}
         <table border="1" cellspacing="0" cellpadding="0" align="center">
-            <caption>表名：{{ tb.TABLE_INFO.TABLE_NAME }}</caption>
-            <caption>注释：{{ tb.TABLE_INFO.TABLE_COMMENT }}</caption>
+            <caption>Table Name: {{ tb.TABLE_INFO.TABLE_NAME }}</caption>
+            <caption>Comment: {{ tb.TABLE_INFO.TABLE_COMMENT }}</caption>
             <tbody>
             <tr>
                 {% for key_dict in tb.ENGINE_KEYS %}

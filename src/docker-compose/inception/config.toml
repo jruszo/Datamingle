@@ -69,24 +69,24 @@ backup_user = "root"
 backup_password = "123456"
 
 
-# 设置执行SQL时，会话变量
-# 0 表示不做操作，基于远端数据库【默认值】
-# > 0 值表示，会话在执行SQL 时获取锁超时的时间
+# Session variable settings when executing SQL
+# 0 means no override, using remote database default value
+# > 0 means lock wait timeout in seconds during SQL execution
 lock_wait_timeout = 10
 
-# 安全更新是否开启.
-# -1 表示不做操作,基于远端数据库 [默认值]
-# 0  表示关闭安全更新
-# 1  表示开启安全更新
+# Whether SQL safe updates are enabled
+# -1 means no override, using remote database default value
+# 0 means disable SQL safe updates
+# 1 means enable SQL safe updates
 sql_safe_updates = -1
 
 # lang = "en-US"
 lang = "zh-CN"
 
-# 是否记录全量日志
+# Whether to record full logs
 general_log = false
 
-# 开启统计功能
+# Enable statistics
 enable_sql_statistic = true
 
 

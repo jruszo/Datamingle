@@ -13,7 +13,7 @@ logger = logging.getLogger("default")
 
 
 class SMS(TwoFactorAuthBase):
-    """短信验证码验证"""
+    """SMS one-time code verification."""
 
     def __init__(self, user=None):
         super(SMS, self).__init__(user=user)
@@ -32,7 +32,7 @@ class SMS(TwoFactorAuthBase):
             self.client = None
 
     def get_captcha(self, **kwargs):
-        """获取验证码"""
+        """Get verification code."""
         result = {"status": 0, "msg": "ok"}
         r = get_redis_connection("default")
         data = r.get(f"captcha-{kwargs['phone']}")
@@ -42,21 +42,22 @@ class SMS(TwoFactorAuthBase):
                 if self.client:
                     result = self.client.send_code(**kwargs)
                 else:
-                    result = {"status": 1, "msg": "系统未配置短信服务商！"}
+                    result = {"status": 1, "msg": "SMS provider is not configured."}
             else:
                 result["status"] = 1
                 result["msg"] = (
-                    f"获取验证码太频繁，请于{captcha['update_time'] - int(time.time()) + 60}秒后再试"
+                    "Too many requests for verification codes. "
+                    f"Please retry in {captcha['update_time'] - int(time.time()) + 60} seconds."
                 )
         else:
             if self.client:
                 result = self.client.send_code(**kwargs)
             else:
-                result = {"status": 1, "msg": "系统未配置短信服务商！"}
+                result = {"status": 1, "msg": "SMS provider is not configured."}
         return result
 
     def verify(self, otp, phone=None):
-        """校验验证码"""
+        """Verify OTP code."""
         result = {"status": 0, "msg": "ok"}
         if phone:
             phone = phone
@@ -67,23 +68,23 @@ class SMS(TwoFactorAuthBase):
         data = r.get(f"captcha-{phone}")
         if not data:
             result["status"] = 1
-            result["msg"] = "未获取验证码或验证码已过期！"
+            result["msg"] = "Code was not requested or has expired."
         else:
             captcha = json.loads(data.decode("utf8"))
             if otp != captcha["otp"]:
                 result["status"] = 1
-                result["msg"] = "验证码不正确！"
+                result["msg"] = "Invalid verification code."
         return result
 
     def save(self, phone):
-        """保存2fa配置"""
+        """Save 2FA configuration."""
         result = {"status": 0, "msg": "ok"}
 
         try:
             with transaction.atomic():
-                # 删除旧的2fa配置
+                # Remove old 2FA config
                 self.disable(self.auth_type)
-                # 创建新的2fa配置
+                # Create new 2FA config
                 TwoFactorAuthConfig.objects.create(
                     username=self.user.username,
                     auth_type=self.auth_type,
@@ -99,5 +100,5 @@ class SMS(TwoFactorAuthBase):
 
     @property
     def auth_type(self):
-        """返回认证类型"""
+        """Return auth type code."""
         return "sms"

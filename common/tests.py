@@ -78,7 +78,7 @@ class ConfigOpsTests(TestCase):
 
 
 class SendMessageTest(TestCase):
-    """发送消息测试"""
+    """Message sending tests."""
 
     def setUp(self):
         archer_config = SysConfig()
@@ -109,7 +109,7 @@ class SendMessageTest(TestCase):
     @patch.object(smtplib.SMTP, "sendmail")
     @patch.object(smtplib.SMTP, "quit")
     def testNoPasswordSendMail(self, _quit, sendmail, login, _):
-        """无密码测试"""
+        """No-password email test."""
         some_sub = "test_subject"
         some_body = "mail_body"
         some_to = ["mail_to"]
@@ -126,7 +126,7 @@ class SendMessageTest(TestCase):
     @patch.object(smtplib.SMTP, "sendmail")
     @patch.object(smtplib.SMTP, "quit")
     def testSendMail(self, _quit, sendmail, login, _):
-        """有密码测试"""
+        """Password-protected SMTP test."""
         some_sub = "test_subject"
         some_body = "mail_body"
         some_to = ["mail_to"]
@@ -144,7 +144,7 @@ class SendMessageTest(TestCase):
     @patch.object(smtplib.SMTP, "sendmail")
     @patch.object(smtplib.SMTP, "quit")
     def testSSLSendMail(self, _quit, sendmail, login, _):
-        """SSL 测试"""
+        """SSL SMTP test."""
         some_sub = "test_subject"
         some_body = "mail_body"
         some_to = ["mail_to"]
@@ -179,7 +179,7 @@ class DingTest(TestCase):
                 url=self.url,
                 json={"msgtype": "text", "text": {"content": self.content}},
             )
-            self.assertIn("钉钉Webhook推送成功", lg.output[0])
+            self.assertIn("DingTalk webhook sent successfully", lg.output[0])
         post.return_value.json.return_value = {"errcode": 1, "errmsg": "test_error"}
         with self.assertLogs("default", level="ERROR") as lg:
             sender.send_ding(self.url, self.content)
@@ -191,23 +191,23 @@ class DingTest(TestCase):
 
 class GlobalInfoTest(TestCase):
     def setUp(self):
-        self.u1 = User(username="test_user", display="中文显示", is_active=True)
+        self.u1 = User(username="test_user", display="Chinese display", is_active=True)
         self.u1.save()
 
     @patch("sql.utils.workflow_audit.Audit.todo")
     def testGlobalInfo(self, todo):
-        """测试"""
+        """Test global info context."""
         c = Client()
         r = c.get("/", follow=True)
         todo.assert_not_called()
         self.assertEqual(r.context["todo"], 0)
-        # 已登录用户
+        # Authenticated user
         c.force_login(self.u1)
         todo.return_value = 3
         r = c.get("/", follow=True)
         todo.assert_called_once_with(self.u1)
         self.assertEqual(r.context["todo"], 3)
-        # 报异常
+        # Exception case
         todo.side_effect = NameError("some exception")
         r = c.get("/", follow=True)
         self.assertEqual(r.context["todo"], 0)
@@ -217,12 +217,12 @@ class GlobalInfoTest(TestCase):
 
 
 class CheckTest(TestCase):
-    """检查功能测试"""
+    """Configuration check endpoint tests."""
 
     def setUp(self):
         self.superuser1 = User(
             username="test_user",
-            display="中文显示",
+            display="Chinese display",
             is_active=True,
             is_superuser=True,
             email="XXX@xxx.com",
@@ -245,15 +245,15 @@ class CheckTest(TestCase):
     @patch.object(MsgSender, "__init__", return_value=None)
     @patch.object(MsgSender, "send_email")
     def testEmailCheck(self, send_email, mailsender):
-        """邮箱配置检查"""
+        """Email config check."""
         mail_switch = "true"
         smtp_ssl = "false"
         smtp_server = "some_server"
         smtp_port = "1234"
         smtp_user = "some_user"
         smtp_pass = "some_str"
-        # 略过superuser校验
-        # 未开启mail开关
+        # Skip superuser check
+        # Mail switch disabled
         mail_switch = "false"
         c = Client()
         c.force_login(self.superuser1)
@@ -270,9 +270,9 @@ class CheckTest(TestCase):
         )
         r_json = r.json()
         self.assertEqual(r_json["status"], 1)
-        self.assertEqual(r_json["msg"], "请先开启邮件通知！")
+        self.assertEqual(r_json["msg"], "Please enable email notifications first.")
         mail_switch = "true"
-        # 填写非正整数端口号
+        # Invalid negative port number
         smtp_port = "-3"
         r = c.post(
             "/check/email/",
@@ -287,9 +287,9 @@ class CheckTest(TestCase):
         )
         r_json = r.json()
         self.assertEqual(r_json["status"], 1)
-        self.assertEqual(r_json["msg"], "端口号只能为正整数")
+        self.assertEqual(r_json["msg"], "Port must be a positive integer.")
         smtp_port = "1234"
-        # 未填写用户邮箱
+        # User email not set
         self.superuser1.email = ""
         self.superuser1.save()
         r = c.post(
@@ -305,10 +305,12 @@ class CheckTest(TestCase):
         )
         r_json = r.json()
         self.assertEqual(r_json["status"], 1)
-        self.assertEqual(r_json["msg"], "请先完善当前用户邮箱信息！")
+        self.assertEqual(
+            r_json["msg"], "Please complete the current user's email first."
+        )
         self.superuser1.email = "XXX@xxx.com"
         self.superuser1.save()
-        # 发送失败, 显示traceback
+        # Send failure should return traceback text
         send_email.return_value = "some traceback"
         r = c.post(
             "/check/email/",
@@ -324,9 +326,9 @@ class CheckTest(TestCase):
         r_json = r.json()
         self.assertEqual(r_json["status"], 1)
         self.assertIn("some traceback", r_json["msg"])
-        send_email.reset_mock()  # 重置``Mock``的调用计数
+        send_email.reset_mock()  # Reset mock call counter
         mailsender.reset_mock()
-        # 发送成功
+        # Send success
         send_email.return_value = "success"
         r = c.post(
             "/check/email/",
@@ -348,7 +350,9 @@ class CheckTest(TestCase):
             ssl=False,
         )
         send_email.called_once_with(
-            "Archery 邮件发送测试", "Archery 邮件发送测试...", [self.superuser1.email]
+            "Archery email delivery test",
+            "Archery email delivery test...",
+            [self.superuser1.email],
         )
         self.assertEqual(r_json["status"], 0)
         self.assertEqual(r_json["msg"], "ok")
@@ -386,13 +390,13 @@ class CheckTest(TestCase):
 
 
 class ChartTest(TestCase):
-    """报表测试"""
+    """Dashboard chart tests."""
 
     @classmethod
     def setUpClass(cls):
-        cls.u1 = User(username="some_user", display="用户1")
+        cls.u1 = User(username="some_user", display="user1")
         cls.u1.save()
-        cls.u2 = User(username="some_other_user", display="用户2")
+        cls.u2 = User(username="some_other_user", display="user2")
         cls.u2.save()
         cls.superuser1 = User(username="super1", is_superuser=True)
         cls.superuser1.save()
@@ -407,7 +411,7 @@ class ChartTest(TestCase):
             password="mysql_password",
         )
         cls.slave1.save()
-        # 批量创建数据 ddl ,u1 ,g1, yesterday 组, 2 个数据
+        # Bulk create DDL data: u1, group g1, yesterday, 2 rows
         ddl_workflow = [
             SqlWorkflow(
                 workflow_name="ddl %s" % i,
@@ -425,7 +429,7 @@ class ChartTest(TestCase):
             )
             for i in range(2)
         ]
-        # 批量创建数据 dml ,u1 ,g2, the day before yesterday 组, 3 个数据
+        # Bulk create DML data: u2, group g2, day-before-yesterday, 3 rows
         dml_workflow = [
             SqlWorkflow(
                 workflow_name="Test %s" % i,
@@ -444,7 +448,7 @@ class ChartTest(TestCase):
             for i in range(3)
         ]
         SqlWorkflow.objects.bulk_create(ddl_workflow + dml_workflow)
-        # 保存内容数据
+        # Save workflow content rows
         ddl_workflow_content = [
             SqlWorkflowContent(
                 workflow=SqlWorkflow.objects.get(workflow_name="ddl %s" % i),
@@ -488,7 +492,7 @@ class ChartTest(TestCase):
         self.assertEqual(result[-1], end.strftime("%Y-%m-%d"))
 
     def testSyntaxList(self):
-        """工单以语法类型分组"""
+        """Group workflows by syntax type."""
         dao = ChartDao()
         expected_rows = (("DDL", 2), ("DML", 3))
         today = (datetime.date.today() - relativedelta(days=-1)).strftime("%Y-%m-%d")
@@ -499,7 +503,7 @@ class ChartTest(TestCase):
         self.assertEqual(result["rows"], expected_rows)
 
     def testWorkflowByDate(self):
-        """TODO 按日分组工单数量统计测试"""
+        """TODO: workflow count grouped by date."""
         dao = ChartDao()
         today = (datetime.date.today() - relativedelta(days=-1)).strftime("%Y-%m-%d")
         one_week_before = (datetime.date.today() - relativedelta(days=+6)).strftime(
@@ -509,7 +513,7 @@ class ChartTest(TestCase):
         self.assertEqual(len(result["rows"][0]), 2)
 
     def testWorkflowByGroup(self):
-        """按组统计测试"""
+        """Workflow count grouped by group."""
         dao = ChartDao()
         today = (datetime.date.today() - relativedelta(days=-1)).strftime("%Y-%m-%d")
         one_week_before = (datetime.date.today() - relativedelta(days=+6)).strftime(
@@ -520,7 +524,7 @@ class ChartTest(TestCase):
         self.assertEqual(result["rows"], expected_rows)
 
     def testWorkflowByUser(self):
-        """按用户统计测试"""
+        """Workflow count grouped by user."""
         dao = ChartDao()
         today = (datetime.date.today() - relativedelta(days=-1)).strftime("%Y-%m-%d")
         one_week_before = (datetime.date.today() - relativedelta(days=+6)).strftime(
@@ -535,7 +539,7 @@ class AuthTest(TestCase):
     def setUp(self):
         self.username = "some_user"
         self.password = "some_str"
-        self.u1 = User(username=self.username, password=self.password, display="用户1")
+        self.u1 = User(username=self.username, password=self.password, display="user1")
         self.u1.save()
         self.resource_group1 = ResourceGroup.objects.create(group_name="some_group")
         sys_config = SysConfig()
@@ -547,10 +551,10 @@ class AuthTest(TestCase):
         SysConfig().purge()
 
     def test_init_user(self):
-        """用户初始化测试测试"""
+        """User initialization test."""
         init_user(self.u1)
         self.assertEqual(self.u1, self.resource_group1.users_set.get(pk=self.u1.pk))
-        # init 需要是无状态的, 可以重复执行, 执行一次和执行n次结果一样
+        # init should be idempotent
         init_user(self.u1)
         self.assertEqual(self.u1, self.resource_group1.users_set.get(pk=self.u1.pk))
 
@@ -559,7 +563,7 @@ class PermissionTest(TestCase):
     def setUp(self) -> None:
         self.user = User.objects.create(
             username="test_user",
-            display="中文显示",
+            display="Chinese display",
             is_active=True,
             email="XXX@xxx.com",
         )
@@ -569,27 +573,27 @@ class PermissionTest(TestCase):
         self.user.delete()
 
     def test_superuser_required_false(self):
-        """测试超管权限校验"""
+        """Test superuser permission validation."""
         r = self.client.get("/config/")
-        self.assertContains(r, "您无权操作，请联系管理员")
+        self.assertContains(r, "You are not authorized. Contact admin.")
 
     def test_superuser_required_true(self):
-        """测试超管权限校验"""
+        """Test superuser permission validation."""
         User.objects.filter(username=self.user.username).update(is_superuser=1)
         r = self.client.get("/config/")
-        self.assertNotContains(r, "您无权操作，请联系管理员")
+        self.assertNotContains(r, "You are not authorized. Contact admin.")
 
 
 class ExtendJSONEncoderFTimeTest(TestCase):
     def setUp(self):
-        # 初始化测试数据或状态
+        # Initialize test data/state
         self.datetime1 = datetime.datetime.now()
         self.datetime2 = datetime.datetime.now() - datetime.timedelta(days=1)
         self.tz_range = psycopg2._range.DateTimeTZRange(self.datetime2, self.datetime1)
         self.date_time = self.datetime1
 
     def test_datetime_tz_range(self):
-        # 测试 DateTimeTZRange
+        # Test DateTimeTZRange
         result = ExtendJSONEncoderFTime().default(self.tz_range)
         assert (
             self.datetime1.strftime("%Y-%m-%d") in result
@@ -597,6 +601,6 @@ class ExtendJSONEncoderFTimeTest(TestCase):
         )
 
     def test_datetime(self):
-        # 测试datetime
+        # Test datetime
         result = ExtendJSONEncoderFTime().default(self.date_time)
         assert self.datetime1.strftime("%Y-%m-%d") in result

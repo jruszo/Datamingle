@@ -6,18 +6,18 @@ class TwoFactorAuthBase:
         self.user = user
 
     def get_captcha(self):
-        """获取验证码"""
+        """Get verification code."""
 
     def verify(self, otp):
-        """校验一次性验证码"""
+        """Verify one-time password."""
 
     def enable(self):
-        """启用"""
+        """Enable."""
         result = {"status": 1, "msg": "failed"}
         return result
 
     def disable(self, auth_type):
-        """禁用"""
+        """Disable."""
         result = {"status": 0, "msg": "ok"}
         try:
             TwoFactorAuthConfig.objects.get(
@@ -29,12 +29,12 @@ class TwoFactorAuthBase:
 
     @property
     def auth_type(self):
-        """返回认证类型"""
+        """Return auth type."""
         return "base"
 
 
 def get_authenticator(user=None, auth_type=None):
-    """获取认证器"""
+    """Get authenticator instance."""
     if auth_type == "totp":
         from .totp import TOTP
 

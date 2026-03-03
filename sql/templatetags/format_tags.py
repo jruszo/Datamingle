@@ -6,10 +6,10 @@ from django.utils.safestring import mark_safe
 register = template.Library()
 
 
-# 替换换行符
+# Replace line breaks.
 @register.simple_tag
 def format_str(string):
-    # 换行
+    # Insert HTML line breaks.
     return mark_safe(string.replace(",", "<br/>").replace("\n", "<br/>"))
 
 

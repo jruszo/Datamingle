@@ -19,24 +19,24 @@ logger = logging.getLogger("default")
 
 @superuser_required
 def group(request):
-    """获取资源组列表"""
+    """Get resource group list."""
     limit = int(request.POST.get("limit"))
     offset = int(request.POST.get("offset"))
     limit = offset + limit
     search = request.POST.get("search", "")
 
-    # 过滤搜索条件
+    # Filter search conditions.
     group_obj = ResourceGroup.objects.filter(group_name__icontains=search, is_deleted=0)
     group_count = group_obj.count()
     group_list = group_obj[offset:limit].values(
         "group_id", "group_name", "ding_webhook"
     )
 
-    # QuerySet 序列化
+    # Serialize QuerySet.
     rows = [row for row in group_list]
 
     result = {"total": group_count, "rows": rows}
-    # 返回查询结果
+    # Return query result.
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
@@ -45,8 +45,8 @@ def group(request):
 
 def associated_objects(request):
     """
-    获取资源组已关联对象信息
-    type：(0, '用户'), (1, '实例')
+    Get objects associated with the resource group.
+    type: (0, 'User'), (1, 'Instance')
     """
     group_id = int(request.POST.get("group_id"))
     object_type = request.POST.get("type")
@@ -55,11 +55,11 @@ def associated_objects(request):
     limit = offset + limit
     search = request.POST.get("search")
 
-    # 获取关联数据
+    # Get associated data.
     resource_group = ResourceGroup.objects.get(group_id=group_id)
     rows_users = resource_group.users_set.all()
     rows_instances = resource_group.instance_set.all()
-    # 过滤搜索
+    # Apply search filter.
     if search:
         rows_users = rows_users.filter(display__contains=search)
         rows_instances = rows_instances.filter(instance_name__contains=search)
@@ -77,7 +77,7 @@ def associated_objects(request):
         group_id=F("resource_group__group_id"),
         group_name=F("resource_group__group_name"),
     ).values("object_type", "object_id", "object_name", "group_id", "group_name")
-    # 过滤对象类型
+    # Filter by object type.
     if object_type == "0":
         rows_obj = rows_users
         count = rows_obj.count()
@@ -98,12 +98,12 @@ def associated_objects(request):
 
 def unassociated_objects(request):
     """
-    获取资源组未关联对象信息
-    type：(0, '用户'), (1, '实例')
+    Get objects not associated with the resource group.
+    type: (0, 'User'), (1, 'Instance')
     """
     group_id = int(request.POST.get("group_id"))
     object_type = int(request.POST.get("object_type"))
-    # 获取关联数据
+    # Get associated data.
     resource_group = ResourceGroup.objects.get(group_id=group_id)
     if object_type == 0:
         associated_user_ids = [user.id for user in resource_group.users_set.all()]
@@ -120,7 +120,7 @@ def unassociated_objects(request):
             .values("object_id", "object_name")
         )
     else:
-        raise ValueError("关联对象类型不正确")
+        raise ValueError("Invalid associated object type")
 
     rows = [row for row in rows]
     result = {"status": 0, "msg": "ok", "rows": rows, "total": len(rows)}
@@ -128,16 +128,16 @@ def unassociated_objects(request):
 
 
 def instances(request):
-    """获取资源组关联实例列表"""
+    """Get instances associated with a resource group."""
     group_name = request.POST.get("group_name")
     group_id = ResourceGroup.objects.get(group_name=group_name).group_id
     tag_code = request.POST.get("tag_code")
     db_type = request.POST.get("db_type")
 
-    # 先获取资源组关联所有实例列表
+    # First get all instances associated with the resource group.
     ins = ResourceGroup.objects.get(group_id=group_id).instance_set.all()
 
-    # 过滤项
+    # Filters
     filter_dict = dict()
     # db_type
     if db_type:
@@ -156,7 +156,7 @@ def instances(request):
 
 
 def user_all_instances(request):
-    """获取用户所有实例列表（通过资源组间接关联）"""
+    """Get all instances accessible by the user via resource groups."""
     user = request.user
     type = request.GET.get("type")
     db_type = request.GET.getlist("db_type[]")
@@ -174,8 +174,8 @@ def user_all_instances(request):
 @superuser_required
 def addrelation(request):
     """
-    添加资源组关联对象
-    type：(0, '用户'), (1, '实例')
+    Add objects to a resource group.
+    type: (0, 'User'), (1, 'Instance')
     """
     group_id = int(request.POST.get("group_id"))
     object_type = request.POST.get("object_type")
@@ -183,9 +183,9 @@ def addrelation(request):
     try:
         resource_group = ResourceGroup.objects.get(group_id=group_id)
         obj_ids = [int(obj.split(",")[0]) for obj in object_list]
-        if object_type == "0":  # 用户
+        if object_type == "0":  # User
             resource_group.users_set.add(*Users.objects.filter(pk__in=obj_ids))
-        elif object_type == "1":  # 实例
+        elif object_type == "1":  # Instance
             resource_group.instance_set.add(*Instance.objects.filter(pk__in=obj_ids))
         result = {"status": 0, "msg": "ok"}
     except Exception as e:
@@ -195,7 +195,7 @@ def addrelation(request):
 
 
 def auditors(request):
-    """获取资源组的审批流程"""
+    """Get the approval flow configured for the resource group."""
     group_name = request.POST.get("group_name")
     workflow_type = request.POST["workflow_type"]
     result = {
@@ -210,18 +210,21 @@ def auditors(request):
         )
     else:
         result["status"] = 1
-        result["msg"] = "参数错误"
+        result["msg"] = "Invalid parameters"
         return HttpResponse(json.dumps(result), content_type="application/json")
 
-    # 获取权限组名称
+    # Get permission group names.
     if audit_auth_groups:
-        # 校验配置
+        # Validate configuration.
         for auth_group_id in audit_auth_groups.split(","):
             try:
                 Group.objects.get(id=auth_group_id)
             except Exception:
                 result["status"] = 1
-                result["msg"] = "审批流程权限组不存在，请重新配置！"
+                result["msg"] = (
+                    "Approval flow permission group does not exist. "
+                    "Please reconfigure it."
+                )
                 return HttpResponse(json.dumps(result), content_type="application/json")
         audit_auth_groups_name = "->".join(
             [
@@ -237,13 +240,13 @@ def auditors(request):
 
 @superuser_required
 def changeauditors(request):
-    """设置资源组的审批流程"""
+    """Set the approval flow for the resource group."""
     auth_groups = request.POST.get("audit_auth_groups")
     group_name = request.POST.get("group_name")
     workflow_type = request.POST.get("workflow_type")
     result = {"status": 0, "msg": "ok", "data": []}
 
-    # 调用工作流修改审核配置
+    # Update workflow approval settings.
     group_id = ResourceGroup.objects.get(group_name=group_name).group_id
     audit_auth_groups = [
         str(Group.objects.get(name=auth_group).id)
@@ -256,5 +259,5 @@ def changeauditors(request):
         result["msg"] = str(msg)
         result["status"] = 1
 
-    # 返回结果
+    # Return result.
     return HttpResponse(json.dumps(result), content_type="application/json")

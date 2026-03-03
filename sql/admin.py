@@ -34,7 +34,7 @@ from .models import (
 from sql.form import TunnelForm, InstanceForm
 
 
-# 用户管理
+# User management
 @admin.register(Users)
 class UsersAdmin(UserAdmin):
     list_display = (
@@ -52,11 +52,11 @@ class UsersAdmin(UserAdmin):
         "username",
     )
     ordering = ("id",)
-    # 编辑页显示内容
+    # Fields shown on edit page
     fieldsets = (
-        ("认证信息", {"fields": ("username", "password")}),
+        ("Authentication", {"fields": ("username", "password")}),
         (
-            "个人信息",
+            "Personal Info",
             {
                 "fields": (
                     "display",
@@ -68,7 +68,7 @@ class UsersAdmin(UserAdmin):
             },
         ),
         (
-            "权限信息",
+            "Permissions",
             {
                 "fields": (
                     "is_superuser",
@@ -79,14 +79,14 @@ class UsersAdmin(UserAdmin):
                 )
             },
         ),
-        ("资源组", {"fields": ("resource_group",)}),
-        ("其他信息", {"fields": ("date_joined", "failed_login_count")}),
+        ("Resource Groups", {"fields": ("resource_group",)}),
+        ("Other Info", {"fields": ("date_joined", "failed_login_count")}),
     )
-    # 添加页显示内容
+    # Fields shown on add page
     add_fieldsets = (
-        ("认证信息", {"fields": ("username", "password1", "password2")}),
+        ("Authentication", {"fields": ("username", "password1", "password2")}),
         (
-            "个人信息",
+            "Personal Info",
             {
                 "fields": (
                     "display",
@@ -98,7 +98,7 @@ class UsersAdmin(UserAdmin):
             },
         ),
         (
-            "权限信息",
+            "Permissions",
             {
                 "fields": (
                     "is_superuser",
@@ -109,19 +109,19 @@ class UsersAdmin(UserAdmin):
                 )
             },
         ),
-        ("资源组", {"fields": ("resource_group",)}),
+        ("Resource Groups", {"fields": ("resource_group",)}),
     )
     filter_horizontal = ("groups", "user_permissions", "resource_group")
     list_filter = ("is_staff", "is_superuser", "is_active", "groups", "resource_group")
 
 
-# 用户2fa管理
+# User 2FA management
 @admin.register(TwoFactorAuthConfig)
 class TwoFactorAuthConfigAdmin(admin.ModelAdmin):
     list_display = ("id", "username", "auth_type", "phone", "secret_key", "user_id")
 
 
-# 资源组管理
+# Resource group management
 @admin.register(ResourceGroup)
 class ResourceGroupAdmin(admin.ModelAdmin):
     list_display = (
@@ -139,7 +139,7 @@ class ResourceGroupAdmin(admin.ModelAdmin):
     )
 
 
-# 实例标签配置
+# Instance tag configuration
 @admin.register(InstanceTag)
 class InstanceTagAdmin(admin.ModelAdmin):
     list_display = ("id", "tag_code", "tag_name", "active", "create_time")
@@ -156,12 +156,12 @@ class InstanceTagAdmin(admin.ModelAdmin):
         ),
     )
 
-    # 不支持修改标签代码
+    # Tag code is read-only after creation.
     def get_readonly_fields(self, request, obj=None):
         return ("tag_code",) if obj else ()
 
 
-# 实例管理
+# Instance management
 @admin.register(Instance)
 class InstanceAdmin(admin.ModelAdmin):
     form = InstanceForm
@@ -183,11 +183,11 @@ class InstanceAdmin(admin.ModelAdmin):
             kwargs["widget"] = PasswordInput(render_value=True)
         return super(InstanceAdmin, self).formfield_for_dbfield(db_field, **kwargs)
 
-    # 阿里云实例关系配置
+    # Aliyun instance relation config
     class AliRdsConfigInline(admin.TabularInline):
         model = AliyunRdsConfig
 
-    # 实例资源组关联配置
+    # Instance-resource-group relation config
     filter_horizontal = (
         "resource_group",
         "instance_tag",
@@ -196,7 +196,7 @@ class InstanceAdmin(admin.ModelAdmin):
     inlines = [AliRdsConfigInline]
 
 
-# SSH隧道
+# SSH tunnel
 @admin.register(Tunnel)
 class TunnelAdmin(admin.ModelAdmin):
     list_display = ("id", "tunnel_name", "host", "port", "create_time")
@@ -223,11 +223,11 @@ class TunnelAdmin(admin.ModelAdmin):
         ),
     )
     ordering = ("id",)
-    # 添加页显示内容
+    # Fields shown on add page
     add_fieldsets = (
-        ("隧道信息", {"fields": ("tunnel_name", "host", "port")}),
+        ("Tunnel Info", {"fields": ("tunnel_name", "host", "port")}),
         (
-            "连接信息",
+            "Connection Info",
             {"fields": ("user", "password", "pkey_path", "pkey_password", "pkey")},
         ),
     )
@@ -238,17 +238,17 @@ class TunnelAdmin(admin.ModelAdmin):
             kwargs["widget"] = PasswordInput(render_value=True)
         return super(TunnelAdmin, self).formfield_for_dbfield(db_field, **kwargs)
 
-    # 不支持修改标签代码
+    # ID is read-only after creation.
     def get_readonly_fields(self, request, obj=None):
         return ("id",) if obj else ()
 
 
-# SQL工单内容
+# SQL workflow content
 class SqlWorkflowContentInline(admin.TabularInline):
     model = SqlWorkflowContent
 
 
-# SQL工单
+# SQL workflow
 @admin.register(SqlWorkflow)
 class SqlWorkflowAdmin(admin.ModelAdmin):
     list_display = (
@@ -280,7 +280,7 @@ class SqlWorkflowAdmin(admin.ModelAdmin):
     inlines = [SqlWorkflowContentInline]
 
 
-# SQL查询日志
+# SQL query logs
 @admin.register(QueryLog)
 class QueryLogAdmin(admin.ModelAdmin):
     list_display = (
@@ -303,7 +303,7 @@ class QueryLogAdmin(admin.ModelAdmin):
     )
 
 
-# 查询权限列表
+# Query permission list
 @admin.register(QueryPrivileges)
 class QueryPrivilegesAdmin(admin.ModelAdmin):
     list_display = (
@@ -325,7 +325,7 @@ class QueryPrivilegesAdmin(admin.ModelAdmin):
     )
 
 
-# 查询权限申请记录
+# Query permission request records
 @admin.register(QueryPrivilegesApply)
 class QueryPrivilegesApplyAdmin(admin.ModelAdmin):
     list_display = (
@@ -341,7 +341,7 @@ class QueryPrivilegesApplyAdmin(admin.ModelAdmin):
     list_filter = ("user_display", "group_name", "instance")
 
 
-# 脱敏字段页面定义
+# Data masking columns admin
 @admin.register(DataMaskingColumns)
 class DataMaskingColumnsAdmin(admin.ModelAdmin):
     list_display = (
@@ -359,7 +359,7 @@ class DataMaskingColumnsAdmin(admin.ModelAdmin):
     list_filter = ("rule_type", "active", "instance__instance_name")
 
 
-# 脱敏规则页面定义
+# Data masking rules admin
 @admin.register(DataMaskingRules)
 class DataMaskingRulesAdmin(admin.ModelAdmin):
     list_display = (
@@ -371,7 +371,7 @@ class DataMaskingRulesAdmin(admin.ModelAdmin):
     )
 
 
-# 工作流审批列表
+# Workflow approval list
 @admin.register(WorkflowAudit)
 class WorkflowAuditAdmin(admin.ModelAdmin):
     list_display = (
@@ -391,7 +391,7 @@ class WorkflowAuditAdmin(admin.ModelAdmin):
     )
 
 
-# 工作流日志表
+# Workflow log table
 @admin.register(WorkflowLog)
 class WorkflowLogAdmin(admin.ModelAdmin):
     list_display = (
@@ -403,7 +403,7 @@ class WorkflowLogAdmin(admin.ModelAdmin):
     list_filter = ("operation_type_desc", "operator_display")
 
 
-# 实例数据库列表
+# Instance database list
 @admin.register(InstanceDatabase)
 class InstanceDatabaseAdmin(admin.ModelAdmin):
     list_display = ("db_name", "owner_display", "instance", "remark")
@@ -411,12 +411,12 @@ class InstanceDatabaseAdmin(admin.ModelAdmin):
     list_filter = ("instance", "owner_display")
     list_display_links = ("db_name",)
 
-    # 仅支持修改备注
+    # Only remark can be edited.
     def get_readonly_fields(self, request, obj=None):
         return ("instance", "owner", "owner_display") if obj else ()
 
 
-# 实例用户列表
+# Instance account list
 @admin.register(InstanceAccount)
 class InstanceAccountAdmin(admin.ModelAdmin):
     list_display = ("user", "host", "password", "instance", "remark")
@@ -424,7 +424,7 @@ class InstanceAccountAdmin(admin.ModelAdmin):
     list_filter = ("instance", "host")
     list_display_links = ("user",)
 
-    # 仅支持修改备注
+    # Only remark can be edited.
     def get_readonly_fields(self, request, obj=None):
         return (
             (
@@ -437,7 +437,7 @@ class InstanceAccountAdmin(admin.ModelAdmin):
         )
 
 
-# 实例参数配置表
+# Instance parameter template
 @admin.register(ParamTemplate)
 class ParamTemplateAdmin(admin.ModelAdmin):
     list_display = (
@@ -452,7 +452,7 @@ class ParamTemplateAdmin(admin.ModelAdmin):
     list_display_links = ("variable_name",)
 
 
-# 实例参数修改历史
+# Instance parameter change history
 @admin.register(ParamHistory)
 class ParamHistoryAdmin(admin.ModelAdmin):
     list_display = (
@@ -467,7 +467,7 @@ class ParamHistoryAdmin(admin.ModelAdmin):
     list_filter = ("instance", "user_display")
 
 
-# 归档配置
+# Archive configuration
 @admin.register(ArchiveConfig)
 class ArchiveConfigAdmin(admin.ModelAdmin):
     list_display = (
@@ -490,7 +490,7 @@ class ArchiveConfigAdmin(admin.ModelAdmin):
     search_fields = ("title", "src_table_name")
     list_display_links = ("id", "title")
     list_filter = ("src_instance", "src_db_name", "mode", "no_delete", "state")
-    # 编辑页显示内容
+    # Fields shown on edit page
     fields = (
         "title",
         "resource_group",
@@ -510,13 +510,13 @@ class ArchiveConfigAdmin(admin.ModelAdmin):
     )
 
 
-# 云服务认证信息配置
+# Cloud access key configuration
 @admin.register(CloudAccessKey)
 class CloudAccessKeyAdmin(admin.ModelAdmin):
     list_display = ("type", "key_id", "key_secret", "remark")
 
 
-# 登录审计日志
+# Login audit log
 @admin.register(AuditEntry)
 class AuditEntryAdmin(admin.ModelAdmin):
     list_display = (

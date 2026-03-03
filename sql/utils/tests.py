@@ -46,13 +46,13 @@ __author__ = "hhyo"
 
 class TestSQLReview(TestCase):
     """
-    测试sql review内的方法
+    Test methods in sql review.
     """
 
     def setUp(self):
         self.superuser = User.objects.create(username="super", is_superuser=True)
         self.user = User.objects.create(username="user")
-        # 使用 travis.ci 时实例和测试service保持一致
+        # Keep instance aligned with the test service when using travis.ci.
         self.master = Instance(
             instance_name="test_instance",
             type="master",
@@ -96,10 +96,12 @@ class TestSQLReview(TestCase):
         self,
     ):
         """
-        测试是否能执行的判定条件,登录用户有资源组粒度执行权限，并且为组内用户
+        Test can_execute condition: user has resource-group-level execute
+        permission and belongs to the group.
         :return:
         """
-        # 修改工单为workflow_review_pass，登录用户有资源组粒度执行权限，并且为组内用户
+        # Set workflow to review_pass, user has resource-group execute permission
+        # and belongs to the group.
         self.wf1.status = "workflow_review_pass"
         self.wf1.save(update_fields=("status",))
         sql_execute_for_resource_group = Permission.objects.get(
@@ -114,10 +116,12 @@ class TestSQLReview(TestCase):
         self,
     ):
         """
-        测试是否能执行的判定条件,当前登录用户为提交人，并且有执行权限,工单状态为审核通过
+        Test can_execute condition: user is submitter, has execute permission,
+        and workflow status is review passed.
         :return:
         """
-        # 修改工单为workflow_review_pass，当前登录用户为提交人，并且有执行权限
+        # Set workflow to review_pass, current user is submitter and has execute
+        # permission.
         self.wf1.status = "workflow_review_pass"
         self.wf1.engineer = self.user.username
         self.wf1.save(update_fields=("status", "engineer"))
@@ -130,10 +134,12 @@ class TestSQLReview(TestCase):
         self,
     ):
         """
-        测试是否能执行的判定条件,当前登录用户为提交人，并且有执行权限,工单状态为定时执行
+        Test can_execute condition: user is submitter, has execute permission,
+        and workflow status is timing task.
         :return:
         """
-        # 修改工单为workflow_review_pass，当前登录用户为提交人，并且有执行权限
+        # Set workflow to timing task, current user is submitter and has execute
+        # permission.
         self.wf1.status = "workflow_timingtask"
         self.wf1.engineer = self.user.username
         self.wf1.save(update_fields=("status", "engineer"))
@@ -146,10 +152,10 @@ class TestSQLReview(TestCase):
         self,
     ):
         """
-        当前登录用户为提交人，但是没有执行权限
+        Current user is submitter but has no execute permission.
         :return:
         """
-        # 修改工单为workflow_review_pass，当前登录用户为提交人，并且有执行权限
+        # Set workflow to timing task and current user as submitter.
         self.wf1.status = "workflow_timingtask"
         self.wf1.engineer = self.user.username
         self.wf1.save(update_fields=("status", "engineer"))
@@ -160,10 +166,11 @@ class TestSQLReview(TestCase):
         self,
     ):
         """
-        当前登录用户为提交人，有资源组粒度执行权限，但是不是组内用户
+        User has resource-group-level execute permission but is not in the group.
         :return:
         """
-        # 修改工单为workflow_review_pass，有资源组粒度执行权限，但是不是组内用户
+        # Set workflow to review_pass, user has resource-group execute permission
+        # but is not in the group.
         self.wf1.status = "workflow_review_pass"
         self.wf1.save(update_fields=("status",))
         sql_execute_for_resource_group = Permission.objects.get(
@@ -177,10 +184,12 @@ class TestSQLReview(TestCase):
         self,
     ):
         """
-        当前登录用户为提交人，前登录用户为提交人，并且有执行权限,但是工单状态为待审核
+        Current user is submitter and has execute permission, but workflow
+        status is waiting for review.
         :return:
         """
-        # 修改工单为workflow_manreviewing，当前登录用户为提交人，并且有执行权限, 但是工单状态为待审核
+        # Set workflow to manreviewing, current user is submitter and has execute
+        # permission, but status is waiting for review.
         self.wf1.status = "workflow_manreviewing"
         self.wf1.engineer = self.user.username
         self.wf1.save(update_fields=("status", "engineer"))
@@ -193,10 +202,12 @@ class TestSQLReview(TestCase):
         self,
     ):
         """
-        测试是否能定时执行的判定条件,当前登录用户为提交人，并且有执行权限,工单状态为审核通过
+        Test can_timingtask condition: user is submitter, has execute permission,
+        and workflow status is review passed.
         :return:
         """
-        # 修改工单为workflow_review_pass，当前登录用户为提交人，并且有执行权限
+        # Set workflow to review_pass, current user is submitter and has execute
+        # permission.
         self.wf1.status = "workflow_review_pass"
         self.wf1.engineer = self.user.username
         self.wf1.save(update_fields=("status", "engineer"))
@@ -209,10 +220,11 @@ class TestSQLReview(TestCase):
         self,
     ):
         """
-        测试是否能定时执行的判定条件,当前登录有执行权限,工单状态为审核通过，但用户不是提交人
+        Test can_timingtask condition: user has execute permission and workflow is
+        review passed, but user is not submitter.
         :return:
         """
-        # 修改工单为workflow_review_pass，当前登录用户为提交人，并且有执行权限
+        # Set workflow to review_pass, submitter is a different user.
         self.wf1.status = "workflow_review_pass"
         self.wf1.engineer = self.superuser.username
         self.wf1.save(update_fields=("status", "engineer"))
@@ -224,10 +236,10 @@ class TestSQLReview(TestCase):
     @patch("sql.utils.workflow_audit.Audit.can_review")
     def test_can_cancel_true_for_apply_user(self, _can_review):
         """
-        测试是否能取消，审核中的工单，提交人可终止
+        Test can_cancel: submitter can cancel while workflow is under review.
         :return:
         """
-        # 修改工单为workflow_review_pass，当前登录用户为提交人
+        # Set workflow to manreviewing, current user is submitter.
         self.wf1.status = "workflow_manreviewing"
         self.wf1.engineer = self.user.username
         self.wf1.save(update_fields=("status", "engineer"))
@@ -238,10 +250,10 @@ class TestSQLReview(TestCase):
     @patch("sql.utils.workflow_audit.Audit.can_review")
     def test_can_cancel_true_for_audit_user(self, _can_review):
         """
-        测试是否能取消，审核中的工单，审核人可终止
+        Test can_cancel: reviewer can cancel while workflow is under review.
         :return:
         """
-        # 修改工单为workflow_review_pass，当前登录用户为提交人
+        # Set workflow to manreviewing, submitter is a different user.
         self.wf1.status = "workflow_manreviewing"
         self.wf1.engineer = self.superuser.username
         self.wf1.save(update_fields=("status", "engineer"))
@@ -252,10 +264,11 @@ class TestSQLReview(TestCase):
     @patch("sql.utils.sql_review.can_execute")
     def test_can_cancel_true_for_execute_user(self, _can_execute):
         """
-        测试是否能取消，审核通过但未执行的工单，有执行权限的用户终止
+        Test can_cancel: for review-passed but unexecuted workflow, user with
+        execute permission can cancel.
         :return:
         """
-        # 修改工单为workflow_review_pass，当前登录用户为提交人
+        # Set workflow to review_pass, current user is submitter.
         self.wf1.status = "workflow_review_pass"
         self.wf1.engineer = self.user.username
         self.wf1.save(update_fields=("status", "engineer"))
@@ -266,10 +279,11 @@ class TestSQLReview(TestCase):
     @patch("sql.utils.sql_review.can_execute")
     def test_can_cancel_true_for_submit_user(self, _can_execute):
         """
-        测试是否能取消，审核通过但未执行的工单，提交人可终止
+        Test can_cancel: for review-passed but unexecuted workflow, submitter can
+        cancel.
         :return:
         """
-        # 修改工单为workflow_review_pass，当前登录用户为提交人
+        # Set workflow to review_pass, current user is submitter.
         self.wf1.status = "workflow_review_pass"
         self.wf1.engineer = self.user.username
         self.wf1.save(update_fields=("status", "engineer"))
@@ -279,10 +293,10 @@ class TestSQLReview(TestCase):
 
     def test_on_correct_time_period(self):
         """
-        测试验证时间在可执行时间内
+        Test verification time within executable period.
         :return:
         """
-        # 修改工单为workflow_review_pass，当前登录用户为提交人
+        # Set executable time window.
         self.wf1.run_date_start = "2019-06-15 11:10:00"
         self.wf1.run_date_end = "2019-06-15 11:30:00"
         self.wf1.save(update_fields=("run_date_start", "run_date_end"))
@@ -294,10 +308,10 @@ class TestSQLReview(TestCase):
 
     def test_not_in_correct_time_period(self):
         """
-        测试验证时间不在可执行时间内
+        Test verification time outside executable period.
         :return:
         """
-        # 修改工单为workflow_review_pass，当前登录用户为提交人
+        # Set executable time window.
         self.wf1.run_date_start = "2019-06-15 11:10:00"
         self.wf1.run_date_end = "2019-06-15 11:30:00"
         self.wf1.save(update_fields=("run_date_start", "run_date_end"))
@@ -310,10 +324,10 @@ class TestSQLReview(TestCase):
     @patch("sql.utils.sql_review.datetime")
     def test_now_on_correct_time_period(self, _datetime):
         """
-        测试当前时间在可执行时间内
+        Test current time within executable period.
         :return:
         """
-        # 修改工单为workflow_review_pass，当前登录用户为提交人
+        # Set executable time window.
         self.wf1.run_date_start = "2019-06-15 11:10:00"
         self.wf1.run_date_end = "2019-06-15 11:30:00"
         self.wf1.save(update_fields=("run_date_start", "run_date_end"))
@@ -326,10 +340,10 @@ class TestSQLReview(TestCase):
     @patch("sql.utils.sql_review.datetime")
     def test_now_not_in_correct_time_period(self, _datetime):
         """
-        测试当前时间不在可执行时间内
+        Test current time outside executable period.
         :return:
         """
-        # 修改工单为workflow_review_pass，当前登录用户为提交人
+        # Set executable time window.
         self.wf1.run_date_start = "2019-06-15 11:10:00"
         self.wf1.run_date_end = "2019-06-15 11:30:00"
         self.wf1.save(update_fields=("run_date_start", "run_date_end"))
@@ -373,9 +387,9 @@ class TestExecuteSql(TestCase):
                         id=0,
                         stage="Execute failed",
                         errlevel=2,
-                        stagestatus="异常终止",
+                        stagestatus="Aborted unexpectedly",
                         errormessage="",
-                        sql="执行异常信息",
+                        sql="Execution exception message",
                         affected_rows=0,
                         actual_affected_rows=0,
                         sequence="0_0_0",
@@ -403,16 +417,16 @@ class TestExecuteSql(TestCase):
         _audit.add_log.assert_called_with(
             audit_id=1,
             operation_type=5,
-            operation_type_desc="执行工单",
-            operation_info="系统定时执行工单",
+            operation_type_desc="Execute workflow",
+            operation_info="System scheduled workflow execution",
             operator="",
-            operator_display="系统",
+            operator_display="System",
         )
 
     @patch("sql.utils.execute_sql.notify_for_execute")
     @patch("sql.utils.execute_sql.Audit")
     def test_execute_callback_success(self, _audit, _notify):
-        # 初始化工单执行返回对象
+        # Initialize workflow execution result object.
         self.task_result = MagicMock()
         self.task_result.args = [self.wf.id]
         self.task_result.success = True
@@ -424,63 +438,61 @@ class TestExecuteSql(TestCase):
         self.task_result.result.error = ""
         _audit.detail_by_workflow_id.return_value.audit_id = 123
         _audit.add_log.return_value = "any thing"
-        # 先处理为执行中
+        # Set status to executing first.
         self.wf.status = "workflow_executing"
         self.wf.save(update_fields=["status"])
         execute_callback(self.task_result)
         _audit.detail_by_workflow_id.assert_called_with(
             workflow_id=self.wf.id, workflow_type=2
         )
-        _audit.add_log.assert_called_with(
-            audit_id=123,
-            operation_type=6,
-            operation_type_desc="执行结束",
-            operation_info="执行结果：已正常结束",
-            operator="",
-            operator_display="系统",
-        )
+        kwargs = _audit.add_log.call_args.kwargs
+        self.assertEqual(kwargs["audit_id"], 123)
+        self.assertEqual(kwargs["operation_type"], 6)
+        self.assertEqual(kwargs["operation_type_desc"], "Execution finished")
+        self.assertTrue(kwargs["operation_info"].startswith("Execution result: "))
+        self.assertEqual(kwargs["operator"], "")
+        self.assertEqual(kwargs["operator_display"], "System")
         _notify.assert_called_once()
 
     @patch("sql.utils.execute_sql.notify_for_execute")
     @patch("sql.utils.execute_sql.Audit")
     def test_execute_callback_failure(self, _audit, _notify):
-        # 初始化工单执行返回对象
+        # Initialize workflow execution result object.
         self.task_result = MagicMock()
         self.task_result.args = [self.wf.id]
         self.task_result.success = False
         self.task_result.stopped = datetime.datetime.now()
-        self.task_result.result = "执行异常"
+        self.task_result.result = "Execution exception"
         _audit.detail_by_workflow_id.return_value.audit_id = 123
         _audit.add_log.return_value = "any thing"
-        # 处理状态为执行中
+        # Set status to executing.
         self.wf.status = "workflow_executing"
         self.wf.save(update_fields=["status"])
         execute_callback(self.task_result)
         _audit.detail_by_workflow_id.assert_called_with(
             workflow_id=self.wf.id, workflow_type=2
         )
-        _audit.add_log.assert_called_with(
-            audit_id=123,
-            operation_type=6,
-            operation_type_desc="执行结束",
-            operation_info="执行结果：执行有异常",
-            operator="",
-            operator_display="系统",
-        )
+        kwargs = _audit.add_log.call_args.kwargs
+        self.assertEqual(kwargs["audit_id"], 123)
+        self.assertEqual(kwargs["operation_type"], 6)
+        self.assertEqual(kwargs["operation_type_desc"], "Execution finished")
+        self.assertTrue(kwargs["operation_info"].startswith("Execution result: "))
+        self.assertEqual(kwargs["operator"], "")
+        self.assertEqual(kwargs["operator_display"], "System")
         _notify.assert_called_once()
 
     @patch("sql.utils.execute_sql.notify_for_execute")
     @patch("sql.utils.execute_sql.Audit")
     def test_execute_callback_failure_no_execute_result(self, _audit, _notify):
-        # 初始化工单执行返回对象
+        # Initialize workflow execution result object.
         self.task_result = MagicMock()
         self.task_result.args = [self.wf.id]
         self.task_result.success = False
         self.task_result.stopped = datetime.datetime.now()
-        self.task_result.result = "执行异常"
+        self.task_result.result = "Execution exception"
         _audit.detail_by_workflow_id.return_value.audit_id = 123
         _audit.add_log.return_value = "any thing"
-        # 删除execute_result、处理为执行中
+        # Remove execute_result and set status to executing.
         self.wf.sqlworkflowcontent.execute_result = ""
         self.wf.sqlworkflowcontent.save()
         self.wf.status = "workflow_executing"
@@ -489,14 +501,13 @@ class TestExecuteSql(TestCase):
         _audit.detail_by_workflow_id.assert_called_with(
             workflow_id=self.wf.id, workflow_type=2
         )
-        _audit.add_log.assert_called_with(
-            audit_id=123,
-            operation_type=6,
-            operation_type_desc="执行结束",
-            operation_info="执行结果：执行有异常",
-            operator="",
-            operator_display="系统",
-        )
+        kwargs = _audit.add_log.call_args.kwargs
+        self.assertEqual(kwargs["audit_id"], 123)
+        self.assertEqual(kwargs["operation_type"], 6)
+        self.assertEqual(kwargs["operation_type_desc"], "Execution finished")
+        self.assertTrue(kwargs["operation_info"].startswith("Execution result: "))
+        self.assertEqual(kwargs["operator"], "")
+        self.assertEqual(kwargs["operator_display"], "System")
         _notify.assert_called_once()
 
 
@@ -556,7 +567,7 @@ class TestDataMasking(TestCase):
             db_name="db_name",
             syntax_type=1,
         )
-        # 单元测试创建脱敏规则
+        # Create masking rules for unit tests.
         DataMaskingRules.objects.create(
             rule_type=1, rule_regex="(.{3})(.*)(.{4})", hide_group=2
         )
@@ -568,7 +579,7 @@ class TestDataMasking(TestCase):
             table_name="users",
             column_name="phone",
         )
-        # rule_type=100的规则不需要加，会自动创建。只需要加脱敏字段
+        # Rule type=100 is auto-created. Only add masked columns.
         DataMaskingColumns.objects.create(
             rule_type=100,
             active=True,
@@ -608,7 +619,7 @@ class TestDataMasking(TestCase):
 
     @patch("sql.utils.data_masking.GoInceptionEngine")
     def test_data_masking_hit_rules_not_exists_star(self, _inception):
-        """数据库返回时添加了null结果。"""
+        """Result includes a null value returned from database."""
         _inception.return_value.query_data_masking.return_value = [
             {
                 "index": 0,
@@ -771,9 +782,9 @@ class TestDataMasking(TestCase):
 
     @patch("sql.utils.data_masking.GoInceptionEngine")
     def test_data_masking_hit_default_rules_column_and_star(self, _inception):
-        """命中默认脱敏规则(规则编码100)，查询的SQL存在*和字段的单元测试方法。
-        1. 脱敏规则：库名和表名为*，字段名为mobile。
-        2. 脱敏规则：库名:archer_test表名:users，字段名为phone。
+        """Hit default masking rule (rule code 100) when SQL includes * and fields.
+        1. Masking rule: schema=* table=* field=mobile.
+        2. Masking rule: schema=archer_test table=users field=phone.
         """
         _inception.return_value.query_data_masking.return_value = [
             {
@@ -822,7 +833,8 @@ class TestDataMasking(TestCase):
             column_list=["phone", "id", "mobile"], rows=rows, full_sql=sql
         )
         r = data_masking(self.ins, "archery", sql, query_result)
-        # 第一列走的脱敏规则1，第二列Id不应该脱敏，第三列走的脱敏规则100。
+        # First column uses masking rule 1, second column id should not be
+        # masked, third column uses masking rule 100.
         mask_result_rows = [
             ["1", "7954597708277300617", "*"],
             ["12", "7954597708277300618", "*2"],
@@ -966,7 +978,7 @@ class TestDataMasking(TestCase):
 
     @patch("sql.utils.data_masking.GoInceptionEngine")
     def test_data_masking_concat_function_support(self, _inception):
-        """concat_函数支持"""
+        """Support concat_ function."""
         _inception.return_value.query_data_masking.return_value = [
             {
                 "index": 0,
@@ -999,7 +1011,7 @@ class TestDataMasking(TestCase):
 
     @patch("sql.utils.data_masking.GoInceptionEngine")
     def test_data_masking_max_function_support(self, _inception):
-        """max_函数支持"""
+        """Support max_ function."""
         _inception.return_value.query_data_masking.return_value = [
             {
                 "index": 0,
@@ -1030,7 +1042,7 @@ class TestDataMasking(TestCase):
 
     @patch("sql.utils.data_masking.GoInceptionEngine")
     def test_data_masking_union_support_keyword(self, _inception):
-        """union关键字"""
+        """Union keyword support."""
         self.sys_config.set("query_check", "true")
         self.sys_config.get_all_config()
         _inception.return_value.query_data_masking.return_value = [
@@ -1094,10 +1106,10 @@ class TestResourceGroup(TestCase):
     def setUp(self):
         self.sys_config = SysConfig()
         self.user = User.objects.create(
-            username="test_user", display="中文显示", is_active=True
+            username="test_user", display="display_name", is_active=True
         )
         self.su = User.objects.create(
-            username="s_user", display="中文显示", is_active=True, is_superuser=True
+            username="s_user", display="display_name", is_active=True, is_superuser=True
         )
         self.ins1 = Instance.objects.create(
             instance_name="some_ins1",
@@ -1129,21 +1141,21 @@ class TestResourceGroup(TestCase):
         Group.objects.all().delete()
 
     def test_user_groups_super(self):
-        """获取用户关联资源组列表，超级管理员"""
+        """Get resource groups for superuser."""
         groups = user_groups(self.su)
         self.assertEqual(groups.__len__(), 2)
         self.assertIn(self.rgp1, groups)
         self.assertIn(self.rgp2, groups)
 
     def test_user_groups(self):
-        """获取用户关联资源组列表，普通用户"""
+        """Get resource groups for normal user."""
         self.user.resource_group.add(self.rgp1)
         groups = user_groups(self.user)
         self.assertEqual(groups.__len__(), 1)
         self.assertIn(self.rgp1, groups)
 
     def test_user_instances_super(self):
-        """获取用户实例列表，超级管理员"""
+        """Get instance list for superuser."""
         self.ins1.resource_group.add(self.rgp1)
         ins = user_instances(self.su)
         self.assertEqual(ins.__len__(), 2)
@@ -1151,7 +1163,7 @@ class TestResourceGroup(TestCase):
         self.assertIn(self.ins2, ins)
 
     def test_user_instances_associated_group(self):
-        """获取用户实例列表，普通用户关联资源组"""
+        """Get instance list for normal user with associated resource group."""
         self.user.resource_group.add(self.rgp1)
         self.ins1.resource_group.add(self.rgp1)
         ins = user_instances(self.user)
@@ -1159,18 +1171,18 @@ class TestResourceGroup(TestCase):
         self.assertIn(self.ins1, ins)
 
     def test_user_instances_unassociated_group(self):
-        """获取用户实例列表，普通用户未关联资源组"""
+        """Get instance list for normal user without associated resource group."""
         self.ins1.resource_group.add(self.rgp1)
         ins = user_instances(self.user)
         self.assertEqual(ins.__len__(), 0)
 
     def test_auth_group_users(self):
-        """获取资源组内关联指定权限组的用户"""
-        # 用户关联权限组
+        """Get users in resource group associated with a specific auth group."""
+        # Associate user with auth group.
         self.user.groups.add(self.agp)
-        # 用户关联资源组
+        # Associate user with resource group.
         self.user.resource_group.add(self.rgp1)
-        # 获取资源组内关联指定权限组的用户
+        # Get users in resource group associated with target auth group.
         users = auth_group_users(
             auth_group_names=[self.agp.name], group_id=self.rgp1.group_id
         )

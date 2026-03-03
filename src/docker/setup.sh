@@ -41,7 +41,7 @@ percona-release setup -y ps-57
 apt-get install -yq --no-install-recommends percona-toolkit
 percona-release disable  ps-57
 apt-get install -yq --no-install-recommends gcc libmariadb-dev libldap2-dev libsasl2-dev ldap-utils
-# mysql 软链, 供 sqladvisor 使用
+# MySQL symlink for sqladvisor
 ln -s /usr/lib/x86_64-linux-gnu/libmariadb.so.3 /usr/lib/x86_64-linux-gnu/libmysqlclient.so.18
 apt-get clean
 ln -snf /usr/share/zoneinfo/$TZ /etc/localtime

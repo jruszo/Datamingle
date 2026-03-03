@@ -23,14 +23,14 @@ class MssqlEngine(EngineBase):
         if self.conn:
             return self.conn
 
-        # 尝试检测可用的 ODBC 驱动
+        # Try to detect available ODBC drivers.
         available_drivers = []
         try:
             available_drivers = [driver for driver in pyodbc.drivers()]
         except Exception as e:
-            logger.warning(f"无法获取 ODBC 驱动列表: {e}")
+            logger.warning(f"Unable to fetch ODBC driver list: {e}")
 
-        # 按优先级尝试的驱动列表
+        # Driver priority list.
         driver_priority = [
             "ODBC Driver 17 for SQL Server",
             "ODBC Driver 18 for SQL Server",
@@ -40,7 +40,7 @@ class MssqlEngine(EngineBase):
             "SQL Server",
         ]
 
-        # 找到第一个可用的驱动
+        # Pick first available driver by priority.
         selected_driver = None
         if available_drivers:
             for driver in driver_priority:
@@ -48,21 +48,24 @@ class MssqlEngine(EngineBase):
                     selected_driver = driver
                     break
 
-        # 如果没有找到任何驱动，使用默认驱动（可能会失败，但至少会给出明确的错误）
+        # Fallback to default driver when nothing matched.
         if not selected_driver:
             selected_driver = "ODBC Driver 17 for SQL Server"
             if available_drivers:
                 logger.warning(
-                    f"未找到推荐的 SQL Server ODBC 驱动，可用驱动: {', '.join(available_drivers)}"
+                    "Recommended SQL Server ODBC driver not found, available drivers: "
+                    f"{', '.join(available_drivers)}"
                 )
-                logger.warning(f"将尝试使用默认驱动: {selected_driver}")
+                logger.warning(f"Falling back to default driver: {selected_driver}")
             else:
-                logger.error("未找到任何可用的 ODBC 驱动，请安装 SQL Server ODBC 驱动")
+                logger.error(
+                    "No available ODBC driver found, please install SQL Server ODBC driver"
+                )
 
-        # 构建连接字符串（驱动名称需要用花括号括起来）
-        # 使用数据库默认编码，不强制设置 UTF-8
+        # Build connection string (driver name must be wrapped with braces).
+        # Use database default encoding; do not force UTF-8.
         if "ODBC Driver 17" in selected_driver or "ODBC Driver 18" in selected_driver:
-            # ODBC Driver 17/18
+            # ODBC Driver 17/18.
             connstr = """DRIVER={{{0}}};SERVER={1},{2};UID={3};PWD={4};
 TrustServerCertificate=yes;connect timeout=10;""".format(
                 selected_driver,
@@ -72,7 +75,7 @@ TrustServerCertificate=yes;connect timeout=10;""".format(
                 self.password,
             )
         else:
-            # 其他驱动
+            # Other drivers.
             connstr = """DRIVER={{{0}}};SERVER={1},{2};UID={3};PWD={4};
 connect timeout=10;""".format(
                 selected_driver,
@@ -82,42 +85,42 @@ connect timeout=10;""".format(
                 self.password,
             )
 
-        # 如果指定了数据库名，添加到连接字符串
+        # Add database name if provided.
         if db_name:
             connstr = f"{connstr};DATABASE={db_name}"
 
         try:
             self.conn = pyodbc.connect(connstr)
-            # 不强制设置编码，让 pyodbc 使用数据库的默认编码
-            # 这样插入的中文字符会使用数据库的默认编码（如 GBK、GB2312 等）
-            logger.info(f"成功使用驱动 '{selected_driver}' 连接到 SQL Server")
+            # Let pyodbc use database default encoding.
+            logger.info(f"Connected to SQL Server with driver '{selected_driver}'")
             return self.conn
         except pyodbc.Error as e:
             error_msg = str(e)
             if "Can't open lib" in error_msg or "file not found" in error_msg:
-                # 提供更友好的错误信息
+                # Provide more user-friendly error details.
                 if available_drivers:
                     raise RuntimeError(
-                        f"ODBC 驱动 '{selected_driver}' 不可用。\n"
-                        f"可用驱动: {', '.join(available_drivers)}\n"
-                        f"请安装 Microsoft ODBC Driver for SQL Server 或配置正确的驱动。\n"
-                        f"原始错误: {error_msg}"
+                        f"ODBC driver '{selected_driver}' is unavailable.\n"
+                        f"Available drivers: {', '.join(available_drivers)}\n"
+                        "Please install Microsoft ODBC Driver for SQL Server "
+                        "or configure the correct driver.\n"
+                        f"Original error: {error_msg}"
                     )
                 else:
                     raise RuntimeError(
-                        f"未找到可用的 ODBC 驱动。\n"
-                        f"请安装 Microsoft ODBC Driver for SQL Server。\n"
-                        f"安装方法:\n"
+                        "No available ODBC driver found.\n"
+                        "Please install Microsoft ODBC Driver for SQL Server.\n"
+                        "Installation:\n"
                         f"  macOS: brew tap microsoft/mssql-release https://github.com/Microsoft/homebrew-mssql-release && brew install msodbcsql17\n"
-                        f"  Linux: 参考 https://docs.microsoft.com/en-us/sql/connect/odbc/linux-mac/install-odbc-driver-sql-server\n"
-                        f"原始错误: {error_msg}"
+                        "  Linux: https://docs.microsoft.com/en-us/sql/connect/odbc/linux-mac/install-odbc-driver-sql-server\n"
+                        f"Original error: {error_msg}"
                     )
             else:
-                # 其他连接错误，直接抛出
+                # Raise other connection errors as-is.
                 raise
 
     def get_all_databases(self):
-        """获取数据库列表, 返回一个ResultSet"""
+        """Get database list, return a ResultSet."""
         sql = "SELECT name FROM master.sys.databases order by name"
         result = self.query(sql=sql)
         db_list = [
@@ -129,7 +132,7 @@ connect timeout=10;""".format(
         return result
 
     def get_all_tables(self, db_name, **kwargs):
-        """获取table 列表, 返回一个ResultSet"""
+        """Get table list, return a ResultSet."""
         sql = """SELECT TABLE_NAME
         FROM INFORMATION_SCHEMA.TABLES
         WHERE TABLE_TYPE = 'BASE TABLE' order by TABLE_NAME;"""
@@ -140,9 +143,8 @@ connect timeout=10;""".format(
 
     def get_group_tables_by_db(self, db_name):
         """
-        根据传入的数据库名，获取该库下的表和注释，并按首字符分组，比如 'a': ['account1','apply']
-        :param db_name:
-        :return:
+        Get tables and comments for a DB, grouped by first character.
+        Example: {'a': ['account1', 'apply']}.
         """
         data = {}
         sql = f"""
@@ -163,7 +165,9 @@ connect timeout=10;""".format(
         return data
 
     def get_table_meta_data(self, db_name, tb_name, **kwargs):
-        """数据字典页面使用：获取表格的元信息，返回一个dict{column_list: [], rows: []}"""
+        """Get table metadata for dictionary page.
+        Returns dict: {"column_list": [], "rows": []}.
+        """
         sql = """
             SELECT space.*,table_comment,index_length,IDENT_CURRENT(?) as auto_increment
             FROM (
@@ -226,13 +230,13 @@ connect timeout=10;""".format(
         return {"column_list": _meta_data.column_list, "rows": _meta_data.rows[0]}
 
     def get_table_desc_data(self, db_name, tb_name, **kwargs):
-        """获取表格字段信息"""
+        """Get table column metadata."""
         sql = """
-            select COLUMN_NAME 列名, case when ISNUMERIC(CHARACTER_MAXIMUM_LENGTH)=1 
-then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' else DATA_TYPE end 列类型,
-                COLLATION_NAME 列字符集,
-                IS_NULLABLE 是否为空,
-                COLUMN_DEFAULT 默认值
+            select COLUMN_NAME AS ColumnName, case when ISNUMERIC(CHARACTER_MAXIMUM_LENGTH)=1 
+then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' else DATA_TYPE end AS ColumnType,
+                COLLATION_NAME AS CollationName,
+                IS_NULLABLE AS IsNullable,
+                COLUMN_DEFAULT AS DefaultValue
             from INFORMATION_SCHEMA.columns where TABLE_CATALOG=? and TABLE_NAME = ?;"""
         _desc_data = self.query(
             db_name,
@@ -245,12 +249,12 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         return {"column_list": _desc_data.column_list, "rows": _desc_data.rows}
 
     def get_table_index_data(self, db_name, tb_name, **kwargs):
-        """获取表格索引信息"""
+        """Get table index metadata."""
         sql = """SELECT 
 stuff((select ',' + COL_NAME(t.object_id,t.column_id) from sys.index_columns as t where i.object_id = t.object_id and 
-i.index_id = t.index_id and t.is_included_column = 0 order by key_ordinal for xml path('')),1,1,'') as 列名,
-                i.name AS 索引名,
-                is_unique as 唯一性,is_primary_key as 是否主建
+i.index_id = t.index_id and t.is_included_column = 0 order by key_ordinal for xml path('')),1,1,'') as ColumnNames,
+                i.name AS IndexName,
+                is_unique as IsUnique,is_primary_key as IsPrimaryKey
             FROM sys.indexes AS i  
             WHERE i.object_id = OBJECT_ID(?)
             group by i.name,i.object_id,i.index_id,is_unique,is_primary_key;"""
@@ -258,7 +262,7 @@ i.index_id = t.index_id and t.is_included_column = 0 order by key_ordinal for xm
         return {"column_list": _index_data.column_list, "rows": _index_data.rows}
 
     def get_tables_metas_data(self, db_name, **kwargs):
-        """获取数据库所有表格信息，用作数据字典导出接口"""
+        """Get all table metadata in DB for dictionary export."""
         sql = """SELECT t.name AS TABLE_NAME, 
             case when td.value is not null then convert(varchar(max),td.value) else '' end AS TABLE_COMMENT
         FROM    sysobjects t
@@ -276,11 +280,11 @@ i.index_id = t.index_id and t.is_included_column = 0 order by key_ordinal for xm
         for tb in tbs:
             _meta = dict()
             engine_keys = [
-                {"key": "COLUMN_NAME", "value": "字段名"},
-                {"key": "COLUMN_TYPE", "value": "数据类型"},
-                {"key": "COLLATION_NAME", "value": "列字符集"},
-                {"key": "IS_NULLABLE", "value": "允许非空"},
-                {"key": "COLUMN_DEFAULT", "value": "默认值"},
+                {"key": "COLUMN_NAME", "value": "Column Name"},
+                {"key": "COLUMN_TYPE", "value": "Data Type"},
+                {"key": "COLLATION_NAME", "value": "Collation"},
+                {"key": "IS_NULLABLE", "value": "Nullable"},
+                {"key": "COLUMN_DEFAULT", "value": "Default Value"},
             ]
             _meta["ENGINE_KEYS"] = engine_keys
             _meta["TABLE_INFO"] = tb
@@ -298,7 +302,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
             )
 
             columns = []
-            # 转换查询结果为dict
+            # Convert query rows to dict.
             for row in query_result.rows:
                 columns.append(dict(zip(query_result.column_list, row)))
             _meta["COLUMNS"] = tuple(columns)
@@ -306,7 +310,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         return table_metas
 
     def get_all_columns_by_tb(self, db_name, tb_name, **kwargs):
-        """获取所有字段, 返回一个ResultSet"""
+        """Get all fields, return a ResultSet."""
         result = self.describe_table(db_name, tb_name)
         column_list = [row[0] for row in result.rows]
         result.rows = column_list
@@ -335,7 +339,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         return result
 
     def query_check(self, db_name=None, sql=""):
-        # 查询语句的检查、注释去除、切分
+        # Query checks: strip comments and split statements.
         result = {"msg": "", "bad_query": False, "filtered_sql": sql, "has_star": False}
         banned_keywords = [
             "ascii",
@@ -367,20 +371,20 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         keyword_warning = ""
         star_patter = r"(^|,|\s)\*(\s|\(|$)"
         sql_whitelist = ["select", "sp_helptext"]
-        # 根据白名单list拼接pattern语句
+        # Build whitelist regex from whitelist list.
         whitelist_pattern = "^" + "|^".join(sql_whitelist)
 
-        # 检查是否是执行计划查询（SET SHOWPLAN_ALL ON）
+        # Check whether this is SHOWPLAN query.
         sql_lower = sql.lower().strip()
         is_showplan = sql_lower.startswith("set showplan_all on")
 
-        # 删除注释语句，进行语法判断，执行第一条有效sql
+        # Remove comments, validate syntax, and take first valid SQL.
         try:
             sql_cleaned = sqlparse.format(sql, strip_comments=True)
             sql_parts = sqlparse.split(sql_cleaned)
 
             if is_showplan:
-                # 执行计划查询：提取实际的 SQL 语句进行检查
+                # SHOWPLAN query: extract actual SQL and validate it.
                 actual_sql = None
                 for part in sql_parts:
                     part_lower = part.strip().lower()
@@ -389,42 +393,46 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                         break
 
                 if actual_sql:
-                    # 检查实际的 SQL 是否符合白名单
+                    # Check actual SQL against whitelist.
                     actual_sql_lower = actual_sql.lower()
                     if re.match(whitelist_pattern, actual_sql_lower) is None:
                         result["bad_query"] = True
-                        result["msg"] = "仅支持{}语法!".format(",".join(sql_whitelist))
+                        result["msg"] = "Only {} syntax is supported!".format(
+                            ",".join(sql_whitelist)
+                        )
                         return result
-                    # 返回完整的执行计划 SQL（包含 SET SHOWPLAN_ALL ON）
+                    # Return full SHOWPLAN SQL (including SET SHOWPLAN_ALL ON).
                     result["filtered_sql"] = sql.strip()
-                    sql_lower = actual_sql_lower  # 用于后续检查
+                    sql_lower = actual_sql_lower  # Used for subsequent checks.
                 else:
-                    # 如果没有找到实际 SQL，返回错误
+                    # No actual SQL found in SHOWPLAN query.
                     result["bad_query"] = True
-                    result["msg"] = "执行计划查询中未找到有效的SQL语句"
+                    result["msg"] = "No valid SQL statement found in SHOWPLAN query"
                     return result
             else:
-                # 普通查询：使用第一个 SQL 语句
+                # Normal query: use first SQL statement.
                 sql = sql_parts[0] if sql_parts else sql
                 result["filtered_sql"] = sql.strip()
                 sql_lower = sql.lower()
         except IndexError:
             result["bad_query"] = True
-            result["msg"] = "没有有效的SQL语句"
+            result["msg"] = "No valid SQL statement"
             return result
 
-        # 对于普通查询，检查白名单
+        # For normal queries, validate whitelist.
         if not is_showplan and re.match(whitelist_pattern, sql_lower) is None:
             result["bad_query"] = True
-            result["msg"] = "仅支持{}语法!".format(",".join(sql_whitelist))
+            result["msg"] = "Only {} syntax is supported!".format(
+                ",".join(sql_whitelist)
+            )
             return result
         if re.search(star_patter, sql_lower) is not None:
-            keyword_warning += "禁止使用 * 关键词\n"
+            keyword_warning += "Using * keyword is forbidden\n"
             result["has_star"] = True
         for keyword in banned_keywords:
             pattern = r"(^|,| |=){}( |\(|$)".format(keyword)
             if re.search(pattern, sql_lower) is not None:
-                keyword_warning += "禁止使用 {} 关键词\n".format(keyword)
+                keyword_warning += "Using {} keyword is forbidden\n".format(keyword)
                 result["bad_query"] = True
         if result.get("bad_query") or result.get("has_star"):
             result["msg"] = keyword_warning
@@ -432,15 +440,14 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
 
     def filter_sql(self, sql="", limit_num=0):
         sql_lower = sql.lower()
-        # 对查询sql增加limit限制
+        # Add row limit to query SQL.
         if re.match(r"^select", sql_lower):
-            # 如果已经使用了 OFFSET ... FETCH NEXT，则不添加 TOP（两者不能同时使用）
+            # If OFFSET ... FETCH NEXT already exists, do not add TOP.
             if re.search(r"\boffset\s+\d+\s+rows?\s+fetch\s+next", sql_lower, re.I):
                 return sql.strip()
-            # 如果已经使用了 TOP，则不重复添加
+            # Do not add duplicate TOP.
             if sql_lower.find(" top ") == -1 and limit_num > 0:
-                # 处理 SELECT DISTINCT 的情况，需要将 TOP 放在 DISTINCT 之后
-                # 匹配 "select distinct" 后面跟空格和任意内容
+                # For SELECT DISTINCT, place TOP after DISTINCT.
                 distinct_match = re.match(r"^(select\s+distinct)(\s+.*)$", sql, re.I)
                 if distinct_match:
                     return (
@@ -448,7 +455,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                         + " top {}".format(limit_num)
                         + distinct_match.group(2)
                     )
-                # 保留原始大小写，只替换第一个 select
+                # Keep original case, replace first select only.
                 return re.sub(
                     r"^select\s+",
                     "select top {} ".format(limit_num),
@@ -467,19 +474,19 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         parameters: tuple = None,
         **kwargs,
     ):
-        """返回 ResultSet"""
+        """Return ResultSet."""
         result_set = ResultSet(full_sql=sql)
         try:
             conn = self.get_connection(db_name)
             cursor = conn.cursor()
 
-            # 处理执行计划查询（SET SHOWPLAN_ALL ON）
+            # Handle SHOWPLAN query (SET SHOWPLAN_ALL ON).
             sql_lower = sql.lower().strip()
             is_showplan = sql_lower.startswith("set showplan_all on")
 
             if is_showplan:
-                # 解析执行计划查询：SET SHOWPLAN_ALL ON; <SQL>; SET SHOWPLAN_ALL OFF;
-                # 提取中间的 SQL 语句
+                # Parse SHOWPLAN query and extract actual SQL:
+                # SET SHOWPLAN_ALL ON; <SQL>; SET SHOWPLAN_ALL OFF;
                 sql_parts = sqlparse.split(sql)
                 actual_sql = None
                 for part in sql_parts:
@@ -490,26 +497,26 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
 
                 if actual_sql:
                     try:
-                        # 开启执行计划
+                        # Enable SHOWPLAN.
                         cursor.execute("SET SHOWPLAN_ALL ON")
-                        # 执行实际 SQL
+                        # Execute actual SQL.
                         cursor.execute(actual_sql)
-                        # 获取执行计划结果
+                        # Fetch SHOWPLAN result.
                         rows = cursor.fetchall()
                         fields = cursor.description
                     finally:
-                        # 确保关闭执行计划，即使出错也要关闭
+                        # Ensure SHOWPLAN is disabled even on failure.
                         try:
                             cursor.execute("SET SHOWPLAN_ALL OFF")
                         except:
                             pass
                 else:
-                    # 如果没有找到实际 SQL，直接执行整个语句
+                    # Fallback: execute full SQL if actual SQL not found.
                     cursor.execute(sql)
                     rows = cursor.fetchall()
                     fields = cursor.description
             else:
-                # 普通查询
+                # Normal query.
                 # https://github.com/mkleehammer/pyodbc/wiki/Cursor#executesql-parameters
                 if parameters:
                     cursor.execute(sql, *parameters)
@@ -526,7 +533,8 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
             result_set.affected_rows = len(result_set.rows)
         except Exception as e:
             logger.warning(
-                f"MsSQL语句执行报错，语句：{sql}，错误信息{traceback.format_exc()}"
+                f"MsSQL statement execution failed, SQL: {sql}, "
+                f"error: {traceback.format_exc()}"
             )
             result_set.error = str(e)
         finally:
@@ -535,9 +543,8 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         return result_set
 
     def query_masking(self, db_name=None, sql="", resultset=None):
-        """传入 sql语句, db名, 结果集,
-        返回一个脱敏后的结果集"""
-        # 仅对select语句脱敏
+        """Given SQL, DB name and result set, return masked result set."""
+        # Only mask SELECT statements.
         if re.match(r"^select", sql, re.I):
             filtered_result = brute_mask(self.instance, resultset)
             filtered_result.is_masked = True
@@ -546,41 +553,40 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         return filtered_result
 
     def execute_check(self, db_name=None, sql=""):
-        """上线单执行前的检查, 返回Review set"""
+        """Pre-check before workflow execution, return ReviewSet."""
         from common.config import SysConfig
         from sql.utils.sql_utils import get_syntax_type
 
         config = SysConfig()
         check_result = ReviewSet(full_sql=sql)
-        # 禁用/高危语句检查
+        # Unsupported/high-risk statement checks.
         line = 1
         critical_ddl_regex = config.get("critical_ddl_regex", "")
         p = re.compile(critical_ddl_regex) if critical_ddl_regex else None
-        check_result.syntax_type = 2  # 默认DML
+        check_result.syntax_type = 2  # Default DML.
 
-        # 先按GO分割（MSSQL批处理分隔符），保留原始格式
+        # Split by GO first (MSSQL batch separator), keep original formatting.
         split_reg = re.compile(r"^\s*GO\s*$", re.I | re.M)
         sql_batches = re.split(split_reg, sql)
 
-        # 获取所有SQL语句（按GO分割后，每个批次内的SQL再用sqlparse分割）
-        # 保留原始格式（包括换行符）以匹配测试期望
+        # Get all SQL statements (split by GO, then split each batch by sqlparse).
+        # Keep original formatting including line breaks for test expectations.
         all_statements = []
         for batch in sql_batches:
             if not batch.strip():
                 continue
-            # 对每个批次内的SQL使用sqlparse分割，但保留原始格式
-            # 注意：sqlparse.split 可能会改变格式，所以我们需要保留原始 batch 用于显示
+            # Split SQL inside each batch, while preserving original text display.
             batch_statements = sqlparse.split(batch)
             for stmt in batch_statements:
-                # 保留原始格式，不 strip，以便测试能够匹配原始格式（包括换行符）
+                # Keep original formatting without strip.
                 if stmt.strip():
-                    # 如果 batch 只包含一条语句，使用原始 batch 以保留格式
-                    # 否则使用分割后的语句
+                    # If one statement only, keep original batch to preserve format.
+                    # Otherwise use split statement.
                     if len(batch_statements) == 1:
                         all_statements.append(batch)
                     else:
                         all_statements.append(stmt)
-        # 获取数据库连接用于语法检测
+        # Get DB connection for syntax check.
         conn = None
         cursor = None
         try:
@@ -589,55 +595,61 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
             if db_name:
                 cursor.execute(f"USE [{db_name}]")
         except Exception as e:
-            logger.warning(f"MSSQL连接失败，错误信息：{traceback.format_exc()}")
-            # 连接失败时，仍然进行基本的规则检查
+            logger.warning(f"MSSQL connection failed, error: {traceback.format_exc()}")
+            # On connection failure, still perform basic rule checks.
             conn = None
             cursor = None
 
-        # 逐条检测SQL语句
+        # Check each SQL statement.
         for statement in all_statements:
-            # 去除注释
+            # Strip comments.
             statement_clean = sqlparse.format(statement, strip_comments=True).strip()
             if not statement_clean:
                 continue
 
-            # 禁用语句检查（SELECT查询语句）
+            # Unsupported statement check (SELECT query).
             if re.match(r"^select", statement_clean, re.I):
                 result = ReviewResult(
                     id=line,
                     errlevel=2,
-                    stagestatus="驳回不支持语句",
-                    errormessage="仅支持DML和DDL语句，查询语句请使用SQL查询功能！",
+                    stagestatus="Rejected unsupported statement",
+                    errormessage=(
+                        "Only DML and DDL statements are supported. "
+                        "Use SQL query feature for SELECT statements!"
+                    ),
                     sql=statement,
                     affected_rows=0,
                     execute_time=0,
                 )
-            # 高危语句检查
+            # High-risk statement check.
             elif critical_ddl_regex and p and p.match(statement_clean.lower()):
                 result = ReviewResult(
                     id=line,
                     errlevel=2,
-                    stagestatus="驳回高危SQL",
-                    errormessage=f"禁止提交匹配{critical_ddl_regex}条件的语句！",
+                    stagestatus="Rejected high-risk SQL",
+                    errormessage=(
+                        f"Submitting statements matching {critical_ddl_regex} "
+                        f"is prohibited!"
+                    ),
                     sql=statement,
                     affected_rows=0,
                     execute_time=0,
                 )
-            # 正常语句，进行语法检测
+            # Normal statement, perform syntax check.
             else:
-                # 判断工单类型
+                # Determine workflow syntax type.
                 syntax_type = get_syntax_type(statement_clean, parser=True)
                 if syntax_type == "DDL":
                     check_result.syntax_type = 1
 
-                # 如果有连接，进行语法检测
+                # Run syntax check when connection is available.
                 if conn and cursor:
                     try:
-                        # 使用 SET PARSEONLY ON 进行语法检测（只解析不执行）
+                        # Use SET PARSEONLY ON for syntax check (parse only).
                         cursor.execute("SET PARSEONLY ON")
                         cursor.execute(statement_clean)
                         cursor.execute("SET PARSEONLY OFF")
-                        # 语法检测通过
+                        # Syntax check passed.
                         result = ReviewResult(
                             id=line,
                             errlevel=0,
@@ -648,24 +660,24 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                             execute_time=0,
                         )
                     except Exception as e:
-                        # 语法检测失败
+                        # Syntax check failed.
                         error_msg = str(e)
                         result = ReviewResult(
                             id=line,
                             errlevel=2,
-                            stagestatus="语法错误",
-                            errormessage=f"语法检测失败: {error_msg}",
+                            stagestatus="Syntax error",
+                            errormessage=f"Syntax check failed: {error_msg}",
                             sql=statement,
                             affected_rows=0,
                             execute_time=0,
                         )
-                        # 确保恢复 PARSEONLY 设置
+                        # Ensure PARSEONLY is reset.
                         try:
                             cursor.execute("SET PARSEONLY OFF")
                         except:
                             pass
                 else:
-                    # 无连接时，默认通过（仅做规则检查）
+                    # Without connection, pass by default (rule checks only).
                     result = ReviewResult(
                         id=line,
                         errlevel=0,
@@ -679,7 +691,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
             check_result.rows.append(result)
             line += 1
 
-        # 关闭连接
+        # Close connection.
         if cursor:
             try:
                 cursor.execute("SET PARSEONLY OFF")
@@ -695,7 +707,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
             except:
                 pass
 
-        # 统计警告和错误数量
+        # Count warnings and errors.
         for r in check_result.rows:
             if r.errlevel == 1:
                 check_result.warning_count += 1
@@ -706,40 +718,40 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
 
     def execute_workflow(self, workflow):
         if workflow.is_backup:
-            # TODO mssql 备份未实现
+            # TODO mssql backup is not implemented.
             pass
         return self.execute(
             db_name=workflow.db_name, sql=workflow.sqlworkflowcontent.sql_content
         )
 
     def execute(self, db_name=None, sql="", close_conn=True):
-        """执行sql语句 返回 Review set"""
+        """Execute SQL statements and return ReviewSet."""
         execute_result = ReviewSet(full_sql=sql)
         conn = self.get_connection(db_name=db_name)
         cursor = conn.cursor()
 
-        # 先按GO分割（MSSQL批处理分隔符）
+        # Split by GO first (MSSQL batch separator).
         split_reg = re.compile(r"^\s*GO\s*$", re.I | re.M)
         sql_batches = re.split(split_reg, sql)
 
-        # 获取所有SQL语句（按GO分割后，每个批次内的SQL再用sqlparse分割）
+        # Get all SQL statements (split by GO, then sqlparse each batch).
         all_statements = []
         for batch in sql_batches:
             batch = batch.strip()
             if not batch:
                 continue
-            # 对每个批次内的SQL使用sqlparse分割
+            # Use sqlparse split inside each batch.
             batch_statements = sqlparse.split(batch)
             for stmt in batch_statements:
                 stmt = stmt.strip()
                 if stmt:
                     all_statements.append(stmt)
 
-        # 开启事务（MSSQL默认自动提交，需要显式开启事务以便回滚）
+        # Open transaction (MSSQL autocommit default; explicit transaction for rollback).
         conn.autocommit = False
 
         rowid = 1
-        # 设置数据库上下文，并记录 USE 语句（如果提供了 db_name）
+        # Set DB context and record USE statement when db_name is provided.
         if db_name:
             use_sql = f"USE [{db_name}]"
             try:
@@ -757,14 +769,14 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                 )
                 rowid += 1
             except Exception as e:
-                logger.warning(f"MSSQL USE语句执行失败：{traceback.format_exc()}")
+                logger.warning(f"MSSQL USE statement failed: {traceback.format_exc()}")
                 execute_result.error = str(e)
                 execute_result.rows.append(
                     ReviewResult(
                         id=rowid,
                         errlevel=2,
                         stagestatus="Execute Failed",
-                        errormessage=f"异常信息：{e}",
+                        errormessage=f"Exception info: {e}",
                         sql=use_sql,
                         affected_rows=0,
                         execute_time=0,
@@ -774,10 +786,10 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
 
         for idx, statement in enumerate(all_statements):
             try:
-                # 使用 FuncTimer 统计执行时间
+                # Use FuncTimer to track execution time.
                 with FuncTimer() as t:
                     cursor.execute(statement)
-                    # 每条语句执行成功后立即提交（MSSQL特性）
+                    # Commit immediately after each successful statement (MSSQL behavior).
                     conn.commit()
                 execute_result.rows.append(
                     ReviewResult(
@@ -792,27 +804,28 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                 )
             except Exception as e:
                 logger.warning(
-                    f"Mssql命令执行报错，语句：{statement}， 错误信息：{traceback.format_exc()}"
+                    f"Mssql command execution failed, SQL: {statement}, "
+                    f"error: {traceback.format_exc()}"
                 )
                 execute_result.error = str(e)
-                # 追加当前报错语句信息到执行结果中
+                # Append failed statement to execution results.
                 execute_result.rows.append(
                     ReviewResult(
                         id=rowid,
                         errlevel=2,
                         stagestatus="Execute Failed",
-                        errormessage=f"异常信息：{e}",
+                        errormessage=f"Exception info: {e}",
                         sql=statement,
                         affected_rows=0,
                         execute_time=0,
                     )
                 )
-                # 执行失败，回滚当前事务（如果有未提交的）
+                # On failure, roll back current transaction if needed.
                 try:
                     conn.rollback()
                 except:
                     pass
-                # 报错语句后面的语句标记为审核通过、未执行，追加到执行结果中
+                # Mark following statements as audit passed but not executed.
                 rowid += 1
                 for remaining_statement in all_statements[idx + 1 :]:
                     remaining_statement = remaining_statement.strip()
@@ -823,14 +836,14 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                             id=rowid,
                             errlevel=0,
                             stagestatus="Audit completed",
-                            errormessage="前序语句失败, 未执行",
+                            errormessage="Previous statement failed, not executed",
                             sql=remaining_statement,
                             affected_rows=0,
                             execute_time=0,
                         )
                     )
                     rowid += 1
-                # 终止执行，不再执行后续语句
+                # Stop execution and do not process remaining statements.
                 break
             rowid += 1
         if close_conn:

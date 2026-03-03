@@ -49,7 +49,7 @@ class QueryParamsSearch:
 
 
 class ElasticsearchDocument:
-    """ES doc对象"""
+    """ES document object."""
 
     def __init__(
         self,
@@ -68,20 +68,21 @@ class ElasticsearchDocument:
         self.doc_data_body = doc_data_body
 
     def describe(self) -> str:
-        """返回格式化的描述信息"""
-        return f"[index_name：{self.index_name}, method：{self.method}, api_endpoint：{self.api_endpoint}, doc_id：{self.doc_id}]"
+        """Return a formatted description."""
+        return f"[index_name: {self.index_name}, method: {self.method}, api_endpoint: {self.api_endpoint}, doc_id: {self.doc_id}]"
 
 
 class ElasticsearchEngineBase(EngineBase):
     """
-    Elasticsearch、OpenSearch等Search父类实现
-    如果2者方法差异不大，可以在父类用if else实现。如果差异大，建议在子类实现。
+    Base implementation for search engines like Elasticsearch and OpenSearch.
+    If behavior differences are small, use if/else in this base class.
+    If differences are large, implement in subclasses.
     """
 
     def __init__(self, instance=None):
-        self.conn = None  # type: Elasticsearch  # 使用类型注释来显式提示类型
-        self.db_separator = "__"  # 设置分隔符
-        # 限制只能2种支持的子类
+        self.conn = None  # type: Elasticsearch  # Explicit type hint.
+        self.db_separator = "__"  # Name separator.
+        # Restrict supported subclasses.
         self.search_name = ["Elasticsearch", "OpenSearch"]
         if self.name not in self.search_name:
             raise ValueError(
@@ -90,37 +91,38 @@ class ElasticsearchEngineBase(EngineBase):
         super().__init__(instance=instance)
 
     def get_connection(self, db_name=None):
-        """返回一个conn实例"""
+        """Return a connection instance."""
 
     def test_connection(self):
-        """测试实例链接是否正常"""
+        """Test whether instance connection is valid."""
         return self.get_all_databases()
 
     name: str = "SearchBase"
-    info: str = "SearchBase 引擎"
+    info: str = "SearchBase Engine"
 
     def get_all_databases(self):
-        """获取所有“数据库”名（从索引名提取）,默认提取 __ 前的部分作为数据库名"""
+        """Get all "database" names extracted from index names."""
         try:
             self.get_connection()
-            # 获取所有的别名，没有别名就是本身。
+            # Get all aliases; if none exist, index name itself is used.
             indices = self.conn.indices.get_alias(index=self.db_name)
             database_names = set()
-            database_names.add("system")  # 系统表名使用的库名
+            database_names.add("system")  # Database name used for system tables.
             for index_name in indices.keys():
                 if self.db_separator in index_name:
                     db_name = index_name.split(self.db_separator)[0]
                     database_names.add(db_name)
-            database_names.add("other")  # 表名没有__时，使用的库名
+            database_names.add("other")  # Database name used when no separator exists.
             database_names_sorted = sorted(database_names)
             return ResultSet(rows=database_names_sorted)
         except Exception as e:
-            logger.error(f"获取数据库时出错:{e}{traceback.format_exc()}")
-            raise Exception(f"获取数据库时出错: {str(e)}")
+            logger.error(f"Error getting databases: {e}{traceback.format_exc()}")
+            raise Exception(f"Error getting databases: {str(e)}")
 
     def get_all_tables(self, db_name, **kwargs):
-        """根据给定的数据库名获取所有相关的表名
-        以点开头的表名，不返回。此为系统表，官方不让查询了。
+        """Get all tables related to the given database name.
+
+        Table names that start with a dot are hidden system tables.
         """
         try:
             self.get_connection()
@@ -131,16 +133,16 @@ class ElasticsearchEngineBase(EngineBase):
                 "system": "",
                 "other": "",
             }
-            # 根据分隔符分隔的库名
+            # Handle database names split by separator.
             if db_name not in db_mapping:
                 index_prefix = db_name.rstrip(self.db_separator) + self.db_separator
                 tables = [
                     index for index in indices.keys() if index.startswith(index_prefix)
                 ]
             else:
-                # 处理系统表，和other
+                # Handle system and other.
                 if db_name == "system":
-                    # 将系统的API作为表名
+                    # Add system APIs as pseudo table names.
                     tables.add("/_cat/indices/" + self.db_name)
                     tables.add("/_cat/nodes")
                     tables.add("/_security/role")
@@ -166,10 +168,10 @@ class ElasticsearchEngineBase(EngineBase):
             tables_sorted = sorted(tables)
             return ResultSet(rows=tables_sorted)
         except Exception as e:
-            raise Exception(f"获取表列表时出错: {str(e)}")
+            raise Exception(f"Error getting table list: {str(e)}")
 
     def get_all_columns_by_tb(self, db_name, tb_name, **kwargs):
-        """获取所有字段"""
+        """Get all columns."""
         result_set = ResultSet(full_sql=f"{tb_name}/_mapping")
         if tb_name.startswith(("/", "_")):
             return result_set
@@ -180,18 +182,18 @@ class ElasticsearchEngineBase(EngineBase):
                 properties = (
                     mapping.get(tb_name, {}).get("mappings", {}).get("properties", None)
                 )
-                # 返回字段名
+                # Return field names.
                 result_set.column_list = ["column_name"]
                 if properties is None:
-                    result_set.rows = ["无"]
+                    result_set.rows = ["None"]
                 else:
                     result_set.rows = list(properties.keys())
                 return result_set
             except Exception as e:
-                raise Exception(f"获取字段时出错: {str(e)}")
+                raise Exception(f"Error getting fields: {str(e)}")
 
     def describe_table(self, db_name, tb_name, **kwargs):
-        """表结构"""
+        """Table structure."""
         result_set = ResultSet(full_sql=f"{tb_name}/_mapping")
         if tb_name.startswith(("/", "_")):
             return result_set
@@ -202,10 +204,10 @@ class ElasticsearchEngineBase(EngineBase):
                 properties = (
                     mapping.get(tb_name, {}).get("mappings", {}).get("properties", None)
                 )
-                # 创建包含字段名、类型和其他信息的列表结构
+                # Build list structure with column name, type, and other info.
                 result_set.column_list = ["column_name", "type", "fields"]
                 if properties is None:
-                    result_set.rows = [("无", "无", "无")]
+                    result_set.rows = [("None", "None", "None")]
                 else:
                     result_set.rows = [
                         (
@@ -217,19 +219,19 @@ class ElasticsearchEngineBase(EngineBase):
                     ]
                 return result_set
             except Exception as e:
-                raise Exception(f"获取字段时出错: {str(e)}")
+                raise Exception(f"Error getting fields: {str(e)}")
 
     def query_check(self, db_name=None, sql=""):
-        """语句检查"""
+        """Statement validation."""
         result = {
-            "msg": "语句检查通过。",
+            "msg": "Statement check passed.",
             "bad_query": False,
             "filtered_sql": sql,
             "has_star": False,
         }
         sql = sql.rstrip(";").strip()
         result["filtered_sql"] = sql
-        # 检查是否以 'get' 或 'select' 开头
+        # Validate statement starts with 'get' or 'select'.
         if re.match(r"^get", sql, re.I):
             pass
         elif re.match(r"^select", sql, re.I):
@@ -239,18 +241,21 @@ class ElasticsearchEngineBase(EngineBase):
                 result["filtered_sql"] = sql.strip()
             except IndexError:
                 result["bad_query"] = True
-                result["msg"] = "没有有效的SQL语句。"
+                result["msg"] = "No valid SQL statement found."
         else:
             result["msg"] = (
-                "语句检查失败：语句必须以 'get' 或 'select' 开头。示例查询：GET /dmp__iv/_search、select * from dmp__iv limit 10;"
+                "Statement check failed: statement must start with 'get' or "
+                "'select'. Example: GET /dmp__iv/_search or "
+                "select * from dmp__iv limit 10;"
             )
             result["bad_query"] = True
         return result
 
     def filter_sql(self, sql="", limit_num=0):
-        """过滤 SQL 语句。
-        对查询sql增加limit限制,limit n 或 limit n,n 或 limit n offset n统一改写成limit n
-        此方法SQL部分的逻辑copy的mysql实现。
+        """Filter SQL statement.
+
+        Add or rewrite query LIMIT to enforce row limits.
+        SQL-limit logic is based on MySQL implementation.
         """
         #
         sql = sql.rstrip(";").strip()
@@ -292,16 +297,16 @@ class ElasticsearchEngineBase(EngineBase):
         parameters=None,
         **kwargs,
     ):
-        """执行查询"""
+        """Execute query."""
         try:
             result_set = ResultSet(full_sql=sql)
 
-            # 解析查询字符串
+            # Parse query string.
             query_params = self.parse_es_select_query_to_query_params(sql, limit_num)
             self.get_connection()
-            # 管理查询处理
+            # Admin/query-management endpoints.
             if query_params.path.startswith("/_cat/indices"):
-                # v这个参数用显示标题，需要加上。 opensearch 需要字符串的true
+                # Add "v" to show column headers. OpenSearch expects string true.
                 if "v" not in query_params.params:
                     query_params.params["v"] = "true"
                 response = self.conn.cat.indices(
@@ -313,7 +318,7 @@ class ElasticsearchEngineBase(EngineBase):
                 else:
                     response_body = response.body
                 response_data = self.parse_cat_indices_response(response_body)
-                # 如果有数据，设置列名
+                # Set column names when data exists.
                 if response_data:
                     result_set.column_list = list(response_data[0].keys())
                     result_set.rows = [tuple(row.values()) for row in response_data]
@@ -328,25 +333,24 @@ class ElasticsearchEngineBase(EngineBase):
             elif query_params.sql and self.name == "Elasticsearch":
                 query_body = {"query": query_params.sql}
                 response = self.conn.sql.query(body=query_body)
-                # 提取列名和行数据
+                # Extract columns and rows.
                 columns = response.get("columns", [])
                 rows = response.get("rows", [])
-                # 获取字段名作为列名
+                # Use field names as column headers.
                 column_list = [col["name"] for col in columns]
 
-                # 处理查询结果，将列表和字典转换为 JSON 字符串。列名可能是重复的。
+                # Convert list/dict values to JSON strings.
                 formatted_rows = []
                 for row in rows:
-                    # 创建字典，将列名和对应的行值关联
                     formatted_row = []
                     for col_name, value in zip(column_list, row):
-                        # 如果字段是列表或字典，将其转换为 JSON 字符串
+                        # Convert list/dict fields to JSON strings.
                         if isinstance(value, (list, dict)):
                             formatted_row.append(json.dumps(value))
                         else:
                             formatted_row.append(value)
                     formatted_rows.append(formatted_row)
-                # 构建结果集
+                # Build result set.
                 result_set.rows = formatted_rows
                 result_set.column_list = column_list
             elif query_params.sql and self.name == "OpenSearch":
@@ -354,85 +358,84 @@ class ElasticsearchEngineBase(EngineBase):
                 response = self.conn.transport.perform_request(
                     method="POST", url="/_opendistro/_sql", body=query_body
                 )
-                # 提取列名和行数据
+                # Extract columns and rows.
                 columns = response.get("schema", [])
                 rows = response.get("datarows", [])
-                # 获取字段名作为列名
+                # Use field names as column headers.
                 column_list = [col["name"] for col in columns]
 
-                # 处理查询结果，将列表和字典转换为 JSON 字符串。列名可能是重复的。
+                # Convert list/dict values to JSON strings.
                 formatted_rows = []
                 for row in rows:
-                    # 创建字典，将列名和对应的行值关联
                     formatted_row = []
                     for col_name, value in zip(column_list, row):
-                        # 如果字段是列表或字典，将其转换为 JSON 字符串
+                        # Convert list/dict fields to JSON strings.
                         if isinstance(value, (list, dict)):
                             formatted_row.append(json.dumps(value))
                         else:
                             formatted_row.append(value)
                     formatted_rows.append(formatted_row)
-                # 构建结果集
+                # Build result set.
                 result_set.rows = formatted_rows
                 result_set.column_list = column_list
             else:
-                # 执行搜索查询
+                # Execute search query.
                 response = self.conn.search(
                     index=query_params.index,
                     body=query_params.query_body,
                     params=query_params.params,
                 )
 
-                # 提取查询结果
+                # Extract search hits.
                 hits = response.get("hits", {}).get("hits", [])
-                # 处理查询结果，将列表和字典转换为 JSON 字符串
+                # Convert list/dict values to JSON strings.
                 rows = []
-                all_search_keys = {}  # 用于收集所有字段的集合
+                all_search_keys = {}  # Collect all field names.
                 all_search_keys["_id"] = None
                 for hit in hits:
-                    # 获取文档 ID 和 _source 数据
+                    # Get document ID and source payload.
                     doc_id = hit.get("_id")
                     source_data = hit.get("_source", {})
 
-                    # 转换需要转换为 JSON 字符串的字段
+                    # Convert list/dict fields to JSON strings.
                     for key, value in source_data.items():
-                        all_search_keys[key] = None  # 收集所有字段名
-                        if isinstance(value, (list, dict)):  # 如果字段是列表或字典
-                            source_data[key] = json.dumps(value)  # 转换为 JSON 字符串
+                        all_search_keys[key] = None
+                        if isinstance(value, (list, dict)):
+                            source_data[key] = json.dumps(value)
 
-                    # 构建结果行
+                    # Build result row.
                     row = {"_id": doc_id, **source_data}
                     rows.append(row)
 
                 column_list = list(all_search_keys.keys())
-                # 构建结果集
+                # Build result set.
                 result_set.rows = []
                 for row in rows:
-                    # 按照 column_list 的顺序填充每一行
+                    # Fill each row in column_list order.
                     result_row = tuple(row.get(key, None) for key in column_list)
                     result_set.rows.append(result_row)
                 result_set.column_list = column_list
             result_set.affected_rows = len(result_set.rows)
             return result_set
         except Exception as e:
-            raise Exception(f"执行查询时出错: {str(e)}")
+            raise Exception(f"Error executing query: {str(e)}")
 
     def _security_role(self, sql, query_params: QueryParamsSearch):
-        """角色查询方法。请子类实现。"""
+        """Role query method. Implement in subclass."""
 
     def _security_user(self, sql, query_params: QueryParamsSearch):
-        """用户查询方法。请子类实现。"""
+        """User query method. Implement in subclass."""
 
     def parse_cat_indices_response(self, response_text):
-        """解析cat indices结果"""
-        # 将响应文本按行分割
+        """Parse cat indices response."""
+        # Split response text into lines.
         lines = response_text.strip().splitlines()
-        # 获取列标题
+        # Read header columns.
         headers = lines[0].strip().split()
-        # 解析每一行数据
+        # Parse each row.
         indices_info = []
         for line in lines[1:]:
-            # 按空格分割，并与标题进行配对
+            # Split by spaces and map to headers.
             values = line.strip().split(maxsplit=len(headers) - 1)
             index_info = dict(zip(headers, values))
             indices_info.append(index_info)
@@ -441,35 +444,35 @@ class ElasticsearchEngineBase(EngineBase):
     def parse_es_select_query_to_query_params(
         self, search_query_str: str, limit_num: int
     ) -> QueryParamsSearch:
-        """解析 search query 字符串为 QueryParamsSearch 对象"""
+        """Parse search query string into QueryParamsSearch."""
 
         query_params = QueryParamsSearch()
         sql = search_query_str.rstrip(";").strip()
         if re.match(r"^get", sql, re.I):
-            # 解析查询字符串
+            # Parse query string.
             lines = sql.splitlines()
             method_line = lines[0].strip()
 
             query_body = "\n".join(lines[1:]).strip()
-            # 如果 query_body 为空，使用默认查询体
+            # Use default query body when empty.
             if not query_body:
                 query_body = json.dumps({"query": {"match_all": {}}})
 
-            # 确保 query_body 是有效的 JSON
+            # Ensure query_body is valid JSON.
             try:
                 json_body = json.loads(query_body)
             except json.JSONDecodeError as json_err:
                 raise ValueError(
-                    f"无法转为Json格式。{json_err}。query_body：{query_body}。"
+                    f"Cannot parse JSON format. {json_err}. query_body: {query_body}."
                 )
 
-            # 提取方法和路径
+            # Extract method and path.
             method, path_with_params = method_line.split(maxsplit=1)
-            # 确保路径以 '/' 开头
+            # Ensure path starts with '/'.
             if not path_with_params.startswith("/"):
                 path_with_params = "/" + path_with_params
 
-            # 分离路径和查询参数
+            # Split path and query params.
             path, params_str = (
                 path_with_params.split("?", 1)
                 if "?" in path_with_params
@@ -485,9 +488,9 @@ class ElasticsearchEngineBase(EngineBase):
                         value = ""
                     params[key] = value
             index_pattern = ""
-            # 判断路径类型并提取索引模式
+            # Determine path type and extract index pattern.
             if path.startswith("/_cat/indices"):
-                # _cat API 路径
+                # _cat API path.
                 path_parts = path.split("/")
                 if len(path_parts) > 3:
                     index_pattern = path_parts[3]
@@ -500,20 +503,19 @@ class ElasticsearchEngineBase(EngineBase):
                 path_parts = path.split("/")
                 index_pattern = "*"
             elif "/_search" in path:
-                # 默认情况，处理常规索引路径
-                # 提取索引名称
+                # Default case: normal index path.
                 path_parts = path.split("/")
                 if len(path_parts) > 1:
                     index_pattern = path_parts[1]
 
             if not index_pattern:
-                raise Exception("未找到索引名称。")
+                raise Exception("Index name not found.")
 
             size = limit_num if limit_num > 0 else 100
-            # 检查 JSON 中是否已经有 size，如果没有就设置
+            # Set size when not present in query JSON.
             if "size" not in json_body:
                 json_body["size"] = size
-            # 构建 QueryParams 对象
+            # Build QueryParams object.
             query_params = QueryParamsSearch(
                 index=index_pattern,
                 path=path_with_params,
@@ -527,20 +529,17 @@ class ElasticsearchEngineBase(EngineBase):
         return query_params
 
     def execute_check(self, db_name=None, sql=""):
-        """上线单执行前的检查
-        #PUT只有索引名，没有api-endpoint时, 解释为创建索引，需要包含mappings或settings。
-        #PUT有索引名，有_doc，没有Id，错误写法，必须要写Id。
+        """Pre-execution validation for workflow statements.
 
-        #post 有索引名, 没有_doc，错误写法。报错。
-        #post 有索引，有_doc,  有或没有id 均可。
-        #post 有索引，api-endpoint=_search时，这是查询，报错。
-
-        #delete 有索引，没有_doc，解释为删除表。 archery禁止此操作,需要报错。
-        #delete 有索引，有_doc，没有id，删除必须包含id，需要报错。
-
-        # api-endpoint为_update时，只能post，不能put，错误写法，报错。
-        # api-endpoint为_update_by_query时，只能post，不能put，错误写法，报错。
-        # api-endpoint为_delete_by_query时，只能post，不能put，错误写法，报错。
+        Rules:
+        - PUT with index and no API endpoint means index creation.
+        - PUT with _doc must include document ID.
+        - POST with index and no endpoint is invalid.
+        - POST with _doc supports with or without ID.
+        - _search is query-only and not allowed in execution workflow.
+        - DELETE without _doc is equivalent to dropping index, which is disallowed.
+        - DELETE with _doc must include document ID.
+        - _update, _update_by_query, _delete_by_query must use POST.
         """
         check_result = ReviewSet(full_sql=sql)
         rowid = 1
@@ -552,8 +551,11 @@ class ElasticsearchEngineBase(EngineBase):
                 result = ReviewResult(
                     id=rowid,
                     errlevel=2,
-                    stagestatus="驳回不支持语句",
-                    errormessage="仅支持PUT,POST,DELETE等API方法，GET,SELECT查询语句请使用SQL查询功能！",
+                    stagestatus="Rejected: unsupported statement",
+                    errormessage=(
+                        "Only API methods like PUT/POST/DELETE are supported. "
+                        "For GET/SELECT queries, use SQL query feature."
+                    ),
                     sql=doc.sql,
                 )
             elif re.match(r"^#", doc.sql, re.I):
@@ -561,7 +563,7 @@ class ElasticsearchEngineBase(EngineBase):
                     id=rowid,
                     errlevel=0,
                     stagestatus="Audit completed",
-                    errormessage="此为注释信息。",
+                    errormessage="This is a comment line.",
                     sql=doc.sql,
                     affected_rows=0,
                     execute_time=0,
@@ -570,8 +572,10 @@ class ElasticsearchEngineBase(EngineBase):
                 result = ReviewResult(
                     id=rowid,
                     errlevel=2,
-                    stagestatus="驳回不支持语句",
-                    errormessage=f"请求必须包含索引名称或无法解析。解析结果：{doc_desc}",
+                    stagestatus="Rejected: unsupported statement",
+                    errormessage=(
+                        f"Request must include index name or be parseable. Parsed: {doc_desc}"
+                    ),
                     sql=doc.sql,
                 )
             elif doc.method == "DELETE":
@@ -579,8 +583,8 @@ class ElasticsearchEngineBase(EngineBase):
                     result = ReviewResult(
                         id=rowid,
                         errlevel=2,
-                        stagestatus="驳回不支持语句",
-                        errormessage="删除操作必须包含id条件。",
+                        stagestatus="Rejected: unsupported statement",
+                        errormessage="DELETE operation must include document ID.",
                         sql=doc.sql,
                     )
                 else:
@@ -596,31 +600,36 @@ class ElasticsearchEngineBase(EngineBase):
                             id=rowid,
                             errlevel=0,
                             stagestatus="Audit completed",
-                            errormessage=f"审核通过。解析结果：创建表：[index_name：{doc.index_name}]",
+                            errormessage=f"Audit passed. Parsed result: create index [index_name: {doc.index_name}]",
                             sql=doc.sql,
                         )
                     else:
                         result = ReviewResult(
                             id=rowid,
                             errlevel=2,
-                            stagestatus="驳回不支持语句",
-                            errormessage="PUT请求创建索引时请求体可以为空或需要包含mappings或settings。",
+                            stagestatus="Rejected: unsupported statement",
+                            errormessage=(
+                                "For PUT index creation, request body can be empty "
+                                "or include mappings/settings."
+                            ),
                             sql=doc.sql,
                         )
                 elif doc.method == "POST":
                     result = ReviewResult(
                         id=rowid,
                         errlevel=2,
-                        stagestatus="驳回不支持语句",
-                        errormessage=f"POST请求必须指定API端点，例如_doc。解析结果：{doc_desc}",
+                        stagestatus="Rejected: unsupported statement",
+                        errormessage=(
+                            f"POST request must specify API endpoint, e.g. _doc. Parsed: {doc_desc}"
+                        ),
                         sql=doc.sql,
                     )
                 else:
                     result = ReviewResult(
                         id=rowid,
                         errlevel=2,
-                        stagestatus="驳回不支持语句",
-                        errormessage=f"不支持此操作。解析结果：{doc_desc}",
+                        stagestatus="Rejected: unsupported statement",
+                        errormessage=f"Unsupported operation. Parsed: {doc_desc}",
                         sql=doc.sql,
                         affected_rows=0,
                         execute_time=0,
@@ -631,8 +640,8 @@ class ElasticsearchEngineBase(EngineBase):
                         result = ReviewResult(
                             id=rowid,
                             errlevel=2,
-                            stagestatus="驳回不支持语句",
-                            errormessage="PUT请求必须包含文档Id。",
+                            stagestatus="Rejected: unsupported statement",
+                            errormessage="PUT request must include document ID.",
                             sql=doc.sql,
                         )
                     else:
@@ -645,8 +654,8 @@ class ElasticsearchEngineBase(EngineBase):
                     result = ReviewResult(
                         id=rowid,
                         errlevel=2,
-                        stagestatus="驳回不支持语句",
-                        errormessage=f"不支持此操作。解析结果：{doc_desc}",
+                        stagestatus="Rejected: unsupported statement",
+                        errormessage=f"Unsupported operation. Parsed: {doc_desc}",
                         sql=doc.sql,
                         affected_rows=0,
                         execute_time=0,
@@ -655,8 +664,8 @@ class ElasticsearchEngineBase(EngineBase):
                 result = ReviewResult(
                     id=rowid,
                     errlevel=2,
-                    stagestatus="驳回不支持语句",
-                    errormessage="_search属于查询方法。",
+                    stagestatus="Rejected: unsupported statement",
+                    errormessage="_search is a query-only method.",
                     sql=doc.sql,
                 )
             elif doc.api_endpoint == "_update":
@@ -665,8 +674,8 @@ class ElasticsearchEngineBase(EngineBase):
                         result = ReviewResult(
                             id=rowid,
                             errlevel=2,
-                            stagestatus="驳回不支持语句",
-                            errormessage=f"POST请求{doc.api_endpoint}时必须包含文档Id。",
+                            stagestatus="Rejected: unsupported statement",
+                            errormessage=f"POST {doc.api_endpoint} must include document ID.",
                             sql=doc.sql,
                         )
                     else:
@@ -676,8 +685,10 @@ class ElasticsearchEngineBase(EngineBase):
                     result = ReviewResult(
                         id=rowid,
                         errlevel=2,
-                        stagestatus="驳回不支持语句",
-                        errormessage=f"不支持此操作，{doc.api_endpoint}需要使用POST方法。解析结果：{doc_desc}",
+                        stagestatus="Rejected: unsupported statement",
+                        errormessage=(
+                            f"Unsupported operation: {doc.api_endpoint} must use POST. Parsed: {doc_desc}"
+                        ),
                         sql=doc.sql,
                         affected_rows=0,
                         execute_time=0,
@@ -690,8 +701,10 @@ class ElasticsearchEngineBase(EngineBase):
                     result = ReviewResult(
                         id=rowid,
                         errlevel=2,
-                        stagestatus="驳回不支持语句",
-                        errormessage=f"不支持此操作，{doc.api_endpoint}需要使用POST方法。解析结果：{doc_desc}",
+                        stagestatus="Rejected: unsupported statement",
+                        errormessage=(
+                            f"Unsupported operation: {doc.api_endpoint} must use POST. Parsed: {doc_desc}"
+                        ),
                         sql=doc.sql,
                         affected_rows=0,
                         execute_time=0,
@@ -704,8 +717,10 @@ class ElasticsearchEngineBase(EngineBase):
                     result = ReviewResult(
                         id=rowid,
                         errlevel=2,
-                        stagestatus="驳回不支持语句",
-                        errormessage=f"不支持此操作，{doc.api_endpoint}需要使用POST方法。解析结果：{doc_desc}",
+                        stagestatus="Rejected: unsupported statement",
+                        errormessage=(
+                            f"Unsupported operation: {doc.api_endpoint} must use POST. Parsed: {doc_desc}"
+                        ),
                         sql=doc.sql,
                         affected_rows=0,
                         execute_time=0,
@@ -720,27 +735,30 @@ class ElasticsearchEngineBase(EngineBase):
                 result = ReviewResult(
                     id=rowid,
                     errlevel=2,
-                    stagestatus="驳回不支持语句",
-                    errormessage="API操作端点(API Endpoint)仅支持: 空, _doc、_update、_update_by_query、_delete_by_query。",
+                    stagestatus="Rejected: unsupported statement",
+                    errormessage=(
+                        "Supported API endpoints are: empty, _doc, _update, "
+                        "_update_by_query, _delete_by_query."
+                    ),
                     sql=doc.sql,
                 )
             else:
                 result = ReviewResult(
                     id=rowid,
                     errlevel=2,
-                    stagestatus="驳回不支持语句",
-                    errormessage=f"不支持此操作。解析结果：{doc_desc}",
+                    stagestatus="Rejected: unsupported statement",
+                    errormessage=f"Unsupported operation. Parsed: {doc_desc}",
                     sql=doc.sql,
                     affected_rows=0,
                     execute_time=0,
                 )
-            # 通用的，通过审核
+            # Generic success case.
             if is_pass:
                 result = ReviewResult(
                     id=rowid,
                     errlevel=0,
                     stagestatus="Audit completed",
-                    errormessage=f"审核通过。解析结果：{doc_desc}",
+                    errormessage=f"Audit passed. Parsed result: {doc_desc}",
                     sql=doc.sql,
                     affected_rows=0,
                     execute_time=0,
@@ -748,7 +766,7 @@ class ElasticsearchEngineBase(EngineBase):
 
             check_result.rows.append(result)
             rowid += 1
-        # 统计警告和错误数量
+        # Count warnings and errors.
         for r in check_result.rows:
             if r.errlevel == 1:
                 check_result.warning_count += 1
@@ -757,7 +775,7 @@ class ElasticsearchEngineBase(EngineBase):
         return check_result
 
     def execute_workflow(self, workflow):
-        """执行上线单，返回Review set"""
+        """Execute workflow and return ReviewSet."""
         sql = workflow.sqlworkflowcontent.sql_content
         docs = self.__split_sql(sql)
         execute_result = ReviewSet(full_sql=sql)
@@ -772,7 +790,7 @@ class ElasticsearchEngineBase(EngineBase):
                             id=line,
                             errlevel=0,
                             stagestatus="Execute Successfully",
-                            errormessage="注释信息不需要执行。",
+                            errormessage="Comment line does not need execution.",
                             sql=doc.sql,
                             affected_rows=0,
                             execute_time=0,
@@ -783,7 +801,7 @@ class ElasticsearchEngineBase(EngineBase):
                     reviewResult.id = line
                     execute_result.rows.append(reviewResult)
                 elif doc.api_endpoint == "":
-                    # 创建索引
+                    # Create index.
                     reviewResult = self.__create_index(conn, doc)
                     reviewResult.id = line
                     execute_result.rows.append(reviewResult)
@@ -804,26 +822,26 @@ class ElasticsearchEngineBase(EngineBase):
                     reviewResult.id = line
                     execute_result.rows.append(reviewResult)
                 else:
-                    raise Exception(f"不支持的API类型：{doc.api_endpoint}")
+                    raise Exception(f"Unsupported API type: {doc.api_endpoint}")
         except Exception as e:
             logger.warning(
-                f"ES命令执行报错，语句：{doc.sql}， 错误信息：{traceback.format_exc()}"
+                f"ES command execution failed, sql: {doc.sql}, error: {traceback.format_exc()}"
             )
-            # 追加当前报错语句信息到执行结果中
+            # Append current error statement to execution result.
             execute_result.error = str(e)
             execute_result.rows.append(
                 ReviewResult(
                     id=line,
                     errlevel=2,
                     stagestatus="Execute Failed",
-                    errormessage=f"异常信息：{e}",
+                    errormessage=f"Error message: {e}",
                     sql=doc.sql,
                     affected_rows=0,
                     execute_time=0,
                 )
             )
         if execute_result.error:
-            # 如果失败, 将剩下的部分加入结果集
+            # If failed, append remaining statements as skipped.
             for doc in docs[line:]:
                 line += 1
                 execute_result.rows.append(
@@ -831,7 +849,7 @@ class ElasticsearchEngineBase(EngineBase):
                         id=line,
                         errlevel=0,
                         stagestatus="Audit completed",
-                        errormessage=f"前序语句失败, 未执行",
+                        errormessage="Previous statement failed; not executed.",
                         sql=doc.sql,
                         affected_rows=0,
                         execute_time=0,
@@ -840,7 +858,7 @@ class ElasticsearchEngineBase(EngineBase):
         return execute_result
 
     def __update(self, conn, doc):
-        """ES的  update方法"""
+        """ES update method."""
         errlevel = 0
         with FuncTimer() as t:
             try:
@@ -869,7 +887,7 @@ class ElasticsearchEngineBase(EngineBase):
         )
 
     def __add_or_update(self, conn, doc):
-        """ES的 add_or_update方法"""
+        """ES add_or_update method."""
         with FuncTimer() as t:
             if doc.api_endpoint == "_doc":
                 response = conn.index(
@@ -878,7 +896,7 @@ class ElasticsearchEngineBase(EngineBase):
                     body=doc.doc_data_body,
                 )
             else:
-                raise Exception(f"不支持的API类型：{doc.api_endpoint}")
+                raise Exception(f"Unsupported API type: {doc.api_endpoint}")
 
             successful_count = response.get("_shards", {}).get("successful", None)
             response_str = str(response)
@@ -892,7 +910,7 @@ class ElasticsearchEngineBase(EngineBase):
         )
 
     def __update_by_query(self, conn, doc):
-        """ES的 update_by_query方法"""
+        """ES update_by_query method."""
         errlevel = 0
         with FuncTimer() as t:
             try:
@@ -913,7 +931,7 @@ class ElasticsearchEngineBase(EngineBase):
         )
 
     def __delete_by_query(self, conn, doc):
-        """ES的 update_by_query方法"""
+        """ES delete_by_query method."""
         errlevel = 0
         with FuncTimer() as t:
             try:
@@ -936,7 +954,7 @@ class ElasticsearchEngineBase(EngineBase):
         )
 
     def __create_index(self, conn, doc):
-        """ES的 创建索引方法"""
+        """ES index creation method."""
         errlevel = 0
         with FuncTimer() as t:
             try:
@@ -965,11 +983,11 @@ class ElasticsearchEngineBase(EngineBase):
 
     def __delete_data(self, conn, doc):
         """
-        数据删除
+        Delete data.
         """
         errlevel = 0
         if not doc.doc_id:
-            response_str = "删除操作必须包含id条件。"
+            response_str = "DELETE operation must include document ID."
             successful_count = 0
         with FuncTimer() as t:
             try:
@@ -995,26 +1013,27 @@ class ElasticsearchEngineBase(EngineBase):
 
     def __get_document_from_sql(self, sql):
         """
-        解析输入的SQL，提取索引、文档 ID 和文档数据，返回 ElasticsearchDocument 实例。
+        Parse SQL input and extract index, document ID, and body.
+        Return an ElasticsearchDocument instance.
         """
         result = ElasticsearchDocument(sql=sql)
         if re.match(r"^POST |^PUT |^DELETE ", sql, re.I):
 
-            # 提取方法和路径
+            # Extract method and path.
             method, path_with_params = sql.split(maxsplit=1)
             if path_with_params.startswith("{"):
-                # 如果是{ 开头，说明没有路径部分。
+                # Starts with '{' means path part is missing.
                 return result
-            # 确保路径以 '/' 开头
+            # Ensure path starts with '/'.
             if not path_with_params.startswith("/"):
                 path_with_params = "/" + path_with_params
 
             parts = path_with_params.split(maxsplit=1)
-            path = parts[0]  # 获取路径部分
+            path = parts[0]  # Path part.
             doc_data_body = parts[1].strip() if len(parts) > 1 else None
 
             path_parts = path.split("/")
-            # 提取各个部分
+            # Extract path parts.
             index_name = path_parts[1] if len(path_parts) > 1 else None
             api_endpoint = path_parts[2] if len(path_parts) > 2 else None
             doc_id = path_parts[3] if len(path_parts) > 3 else None
@@ -1024,7 +1043,7 @@ class ElasticsearchEngineBase(EngineBase):
                     doc_data_json = json.loads(doc_data_body)
                 except json.JSONDecodeError as json_err:
                     raise ValueError(
-                        f"无法转为Json格式。{json_err}。doc_data_body：{doc_data_body}。"
+                        f"Cannot parse JSON format. {json_err}. doc_data_body: {doc_data_body}."
                     )
             result = ElasticsearchDocument(
                 sql=sql,
@@ -1038,7 +1057,8 @@ class ElasticsearchEngineBase(EngineBase):
 
     def __split_sql(self, sql):
         """
-        解析输入的多行命令字符串，将其分割为独立的命令列表，解析为documents对象返回
+        Parse multi-line command string into independent commands.
+        Convert parsed commands into document objects.
         """
         lines = sql.strip().splitlines()
         commands = []
@@ -1056,7 +1076,7 @@ class ElasticsearchEngineBase(EngineBase):
             brace_level += stripped_line.count("{")
             brace_level -= stripped_line.count("}")
 
-            # 将当前行加入当前命令
+            # Append current line to current command.
             current_command.append(stripped_line)
 
             if brace_level == 0 and current_command:
@@ -1065,15 +1085,13 @@ class ElasticsearchEngineBase(EngineBase):
 
         merged_commands = []
         for command in commands:
-            # 如果当前命令以 { 开头，合并到前一个命令
+            # Merge command to previous one when it starts with '{'.
             if command.startswith("{") and merged_commands:
-                # 合并当前命令到上一个命令
                 merged_commands[-1] += os.linesep + command
             else:
-                # 如果不是以 { 开头，则直接添加到结果中
                 merged_commands.append(command)
 
-        # 创建 ElasticsearchDocument 实例列表
+        # Build ElasticsearchDocument list.
         documents = []
         for command in merged_commands:
             doc = self.__get_document_from_sql(command)
@@ -1083,13 +1101,13 @@ class ElasticsearchEngineBase(EngineBase):
 
 
 class ElasticsearchEngine(ElasticsearchEngineBase):
-    """Elasticsearch 引擎实现"""
+    """Elasticsearch engine implementation."""
 
     def __init__(self, instance=None):
         super().__init__(instance=instance)
 
     name: str = "Elasticsearch"
-    info: str = "Elasticsearch 引擎"
+    info: str = "Elasticsearch Engine"
 
     def get_connection(self, db_name=None):
         if self.conn:
@@ -1109,36 +1127,38 @@ class ElasticsearchEngine(ElasticsearchEngineBase):
             )
             self.db_name = (self.db_name or "") + "*"
             try:
-                # 创建 Elasticsearch 连接,高版本有basic_auth
+                # Create Elasticsearch connection. New versions support basic_auth.
                 self.conn = Elasticsearch(
                     hosts=hosts,
                     http_auth=http_auth,
-                    verify_certs=self.instance.verify_ssl,  # 需要证书验证
+                    verify_certs=self.instance.verify_ssl,  # Enable certificate verification.
                 )
             except Exception as e:
-                raise Exception(f"Elasticsearch 连接建立失败: {str(e)}")
+                raise Exception(
+                    f"Failed to establish Elasticsearch connection: {str(e)}"
+                )
         if not self.conn:
-            raise Exception("Elasticsearch 连接无法建立。")
+            raise Exception("Unable to establish Elasticsearch connection.")
         return self.conn
 
     def _security_role(self, sql, query_params: QueryParamsSearch):
-        """TODO 角色查询方法。"""
-        raise NotImplementedError("此方法暂未实现。")
+        """TODO role query method."""
+        raise NotImplementedError("This method is not implemented yet.")
 
     def _security_user(self, sql, query_params: QueryParamsSearch):
-        """TODO 用户查询方法。"""
-        raise NotImplementedError("此方法暂未实现。")
+        """TODO user query method."""
+        raise NotImplementedError("This method is not implemented yet.")
 
 
 class OpenSearchEngine(ElasticsearchEngineBase):
-    """OpenSearch 引擎实现"""
+    """OpenSearch engine implementation."""
 
     def __init__(self, instance=None):
-        self.conn = None  # type: OpenSearch  # 使用类型注释来显式提示类型
+        self.conn = None  # type: OpenSearch  # Explicit type hint.
         super().__init__(instance=instance)
 
     name: str = "OpenSearch"
-    info: str = "OpenSearch 引擎"
+    info: str = "OpenSearch Engine"
 
     def get_connection(self, db_name=None):
         if self.conn:
@@ -1159,20 +1179,20 @@ class OpenSearchEngine(ElasticsearchEngineBase):
             self.db_name = (self.db_name or "") + "*"
 
             try:
-                # 创建 OpenSearch 连接
+                # Create OpenSearch connection.
                 self.conn = OpenSearch(
                     hosts=hosts,
                     http_auth=http_auth,
-                    verify_certs=self.instance.verify_ssl,  # 开启证书验证
+                    verify_certs=self.instance.verify_ssl,  # Enable certificate verification.
                 )
             except Exception as e:
-                raise Exception(f"OpenSearch 连接建立失败: {str(e)}")
+                raise Exception(f"Failed to establish OpenSearch connection: {str(e)}")
         if not self.conn:
-            raise Exception("OpenSearch 连接无法建立。")
+            raise Exception("Unable to establish OpenSearch connection.")
         return self.conn
 
     def _security_role(self, sql, query_params: QueryParamsSearch):
-        """角色查询方法。"""
+        """Role query method."""
         result_set = ResultSet(full_sql=sql)
         url = "/_opendistro/_security/api/roles"
         try:
@@ -1181,7 +1201,7 @@ class OpenSearchEngine(ElasticsearchEngineBase):
             response = self.conn.transport.perform_request("GET", url, body=body)
             response_body = response
             if response and isinstance(response_body, (dict)):
-                # 获取第一个角色的信息，动态生成 column_list
+                # Use first role object to build dynamic column list.
                 first_role_info = next(iter(response.values()), {})
                 column_list = ["role_name"] + list(first_role_info.keys())
                 formatted_rows = []
@@ -1190,7 +1210,7 @@ class OpenSearchEngine(ElasticsearchEngineBase):
                     row = [role_name]
                     for column in first_role_info.keys():
                         value = role_info.get(column, None)
-                        # 检查值的类型，如果是 list 或 dict，转换为 JSON 字符串
+                        # Convert list/dict values to JSON strings.
                         if isinstance(value, (list, dict)):
                             row.append(json.dumps(value))
                         else:
@@ -1199,11 +1219,11 @@ class OpenSearchEngine(ElasticsearchEngineBase):
                 result_set.rows = formatted_rows
                 result_set.column_list = column_list
         except Exception as e:
-            raise Exception(f"执行查询时出错: {str(e)}")
+            raise Exception(f"Error executing query: {str(e)}")
         return result_set
 
     def _security_user(self, sql, query_params: QueryParamsSearch):
-        """用户查询方法。"""
+        """User query method."""
         result_set = ResultSet(full_sql=sql)
         url = "/_opendistro/_security/api/user"
         try:
@@ -1212,7 +1232,7 @@ class OpenSearchEngine(ElasticsearchEngineBase):
             response = self.conn.transport.perform_request("GET", url, body=body)
             response_body = response
             if response and isinstance(response_body, (dict)):
-                # 获取第一个角色的信息，动态生成 column_list
+                # Use first role object to build dynamic column list.
                 first_role_info = next(iter(response.values()), {})
                 column_list = ["user_name"] + list(first_role_info.keys())
                 formatted_rows = []
@@ -1221,7 +1241,7 @@ class OpenSearchEngine(ElasticsearchEngineBase):
                     row = [role_name]
                     for column in first_role_info.keys():
                         value = role_info.get(column, None)
-                        # 检查值的类型，如果是 list 或 dict，转换为 JSON 字符串
+                        # Convert list/dict values to JSON strings.
                         if isinstance(value, (list, dict)):
                             row.append(json.dumps(value))
                         else:
@@ -1230,5 +1250,5 @@ class OpenSearchEngine(ElasticsearchEngineBase):
                 result_set.rows = formatted_rows
                 result_set.column_list = column_list
         except Exception as e:
-            raise Exception(f"执行查询时出错: {str(e)}")
+            raise Exception(f"Error executing query: {str(e)}")
         return result_set

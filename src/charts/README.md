@@ -1,38 +1,39 @@
-# Archery Kubernetes Helm 部署文档 
+# Archery Kubernetes Helm Deployment Guide
 
 > [!IMPORTANT]  
-> 此 helm chart 已不建议使用, 保留在此仅为历史原因, 请阅读 [wiki](https://github.com/hhyo/Archery/wiki/k8s) 获取最新的部署指引
+> This Helm chart is no longer recommended for active use. It is kept for historical reasons only.
+> Please read the [wiki](https://github.com/hhyo/Archery/wiki/k8s) for the latest deployment guide.
 
-## 1. 获取依赖 
+## 1. Install Dependencies
 
 helm dependency update
 
-## 2. 替换mysql、redis、archery登录密码
+## 2. Replace MySQL, Redis, and Archery Login Passwords
 
 ### 2.1 mysql
-执行以下命令，执行前将${your mysql password}替换为想要设置的mysql密码。
+Run the command below, replacing `${your mysql password}` with your target MySQL password:
 `grep -rn "MYSQL_ROOT_PASSWORD" *|awk -F: '{print $1}'|uniq|xargs sed -i s/MYSQL_ROOT_PASSWORD/${your mysql password}/g`
 
 ### 2.2 redis
-执行以下命令，执行前将${your redis password}替换为想要设置的redis密码。
+Run the command below, replacing `${your redis password}` with your target Redis password:
 `grep -rn "REDIS_PASSWORD" *|awk -F: '{print $1}'|uniq|xargs sed -i s/REDIS_PASSWORD/${your redis password}/g`
 
-### 2.3 archery默认admin登录密码
-执行以下命令，执行前将${your archery password}替换为想要设置的archery密码。
+### 2.3 Default Archery Admin Password
+Run the command below, replacing `${your archery password}` with your target Archery password:
 `grep -rn "ARCHERY_ADMIN_PASSWORD" *|awk -F: '{print $1}'|uniq|xargs sed -i s/ARCHERY_ADMIN_PASSWORD/${your archery password}/g`
 
-## 3. 更改mysql持久化配置
+## 3. Change MySQL Persistence Configuration
 
-mysql的存储持久化，请查看values.yaml的方法进行配置。
+For MySQL storage persistence, configure it using the options in `values.yaml`.
 
-## 4. LDAP设置
+## 4. LDAP Settings
 
-如需启用LDAP，修改value.yaml里comfigmap下settings.py 内相关内容。
+To enable LDAP, modify the related settings in `settings.py` under `configMap` in `values.yaml`.
 
-## 5. 访问方式
+## 5. Access Methods
 
-5.1 本机访问 kubectl port-forward pods/archery-xxxxxx 9123:9123 
-5.2 集群外访问 将svc配置为nodePort或loadBalance，或开启ingress
+5.1 Local access: `kubectl port-forward pods/archery-xxxxxx 9123:9123`  
+5.2 External cluster access: configure `svc` as `NodePort` or `LoadBalancer`, or enable `ingress`.
 
-默认用户名: admin
-密码为2.3中设置的密码
+Default username: `admin`  
+Password: the value configured in section 2.3

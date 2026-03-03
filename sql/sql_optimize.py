@@ -33,10 +33,10 @@ def optimize_sqladvisor(request):
     verbose = request.POST.get("verbose", 1)
     result = {"status": 0, "msg": "ok", "data": []}
 
-    # 服务器端参数验证
+    # Server-side parameter validation.
     if sql_content is None or instance_name is None:
         result["status"] = 1
-        result["msg"] = "页面提交参数可能为空"
+        result["msg"] = "Submitted page parameters may be empty"
         return HttpResponse(json.dumps(result), content_type="application/json")
 
     try:
@@ -45,19 +45,19 @@ def optimize_sqladvisor(request):
         )
     except Instance.DoesNotExist:
         result["status"] = 1
-        result["msg"] = "你所在组未关联该实例！"
+        result["msg"] = "Your group is not associated with this instance!"
         return HttpResponse(json.dumps(result), content_type="application/json")
 
-    # 检查sqladvisor程序路径
+    # Check SQLAdvisor program path.
     sqladvisor_path = SysConfig().get("sqladvisor")
     if sqladvisor_path is None:
         result["status"] = 1
-        result["msg"] = "请配置SQLAdvisor路径！"
+        result["msg"] = "Please configure the SQLAdvisor path!"
         return HttpResponse(json.dumps(result), content_type="application/json")
 
-    # 提交给sqladvisor获取分析报告
+    # Submit to SQLAdvisor for analysis report.
     sqladvisor = SQLAdvisor()
-    # 准备参数
+    # Prepare parameters.
     args = {
         "h": instance_info.host,
         "P": instance_info.port,
@@ -68,15 +68,15 @@ def optimize_sqladvisor(request):
         "q": sql_content.strip(),
     }
 
-    # 参数检查
+    # Validate parameters.
     args_check_result = sqladvisor.check_args(args)
     if args_check_result["status"] == 1:
         return HttpResponse(
             json.dumps(args_check_result), content_type="application/json"
         )
-    # 参数转换
+    # Convert parameters.
     cmd_args = sqladvisor.generate_args2cmd(args)
-    # 执行命令
+    # Execute command.
     try:
         stdout, stderr = sqladvisor.execute_cmd(cmd_args).communicate()
         result["data"] = f"{stdout}{stderr}"
@@ -93,10 +93,10 @@ def optimize_soar(request):
     sql = request.POST.get("sql")
     result = {"status": 0, "msg": "ok", "data": []}
 
-    # 服务器端参数验证
+    # Server-side parameter validation.
     if not (instance_name and db_name and sql):
         result["status"] = 1
-        result["msg"] = "页面提交参数可能为空"
+        result["msg"] = "Submitted page parameters may be empty"
         return HttpResponse(json.dumps(result), content_type="application/json")
     try:
         instance = user_instances(request.user, db_type=["mysql"]).get(
@@ -104,25 +104,25 @@ def optimize_soar(request):
         )
     except Exception:
         result["status"] = 1
-        result["msg"] = "你所在组未关联该实例"
+        result["msg"] = "Your group is not associated with this instance"
         return HttpResponse(json.dumps(result), content_type="application/json")
 
-    # 检查测试实例的连接信息和soar程序路径
+    # Check test DSN and Soar program path.
     soar_test_dsn = SysConfig().get("soar_test_dsn")
     soar_path = SysConfig().get("soar")
     if not (soar_path and soar_test_dsn):
         result["status"] = 1
-        result["msg"] = "请配置soar_path和test_dsn！"
+        result["msg"] = "Please configure soar_path and test_dsn!"
         return HttpResponse(json.dumps(result), content_type="application/json")
 
-    # 目标实例的连接信息
+    # Connection info for target instance.
     online_dsn = (
         f"{instance.user}:{instance.password}@{instance.host}:{instance.port}/{db_name}"
     )
 
-    # 提交给soar获取分析报告
+    # Submit to Soar for analysis report.
     soar = Soar()
-    # 准备参数
+    # Prepare parameters.
     args = {
         "online-dsn": online_dsn,
         "test-dsn": soar_test_dsn,
@@ -130,15 +130,15 @@ def optimize_soar(request):
         "report-type": "markdown",
         "query": sql.strip(),
     }
-    # 参数检查
+    # Validate parameters.
     args_check_result = soar.check_args(args)
     if args_check_result["status"] == 1:
         return HttpResponse(
             json.dumps(args_check_result), content_type="application/json"
         )
-    # 参数转换
+    # Convert parameters.
     cmd_args = soar.generate_args2cmd(args)
-    # 执行命令
+    # Execute command.
     try:
         stdout, stderr = soar.execute_cmd(cmd_args).communicate()
         result["data"] = stdout if stdout else stderr
@@ -157,12 +157,16 @@ def optimize_sqltuning(request):
     sqltext = sqlparse.format(sqltext, strip_comments=True)
     sqltext = sqlparse.split(sqltext)[0]
     if re.match(r"^select|^show|^explain", sqltext, re.I) is None:
-        result = {"status": 1, "msg": "只支持查询SQL！", "data": []}
+        result = {"status": 1, "msg": "Only query SQL is supported!", "data": []}
         return HttpResponse(json.dumps(result), content_type="application/json")
     try:
         user_instances(request.user).get(instance_name=instance_name)
     except Instance.DoesNotExist:
-        result = {"status": 1, "msg": "你所在组未关联该实例！", "data": []}
+        result = {
+            "status": 1,
+            "msg": "Your group is not associated with this instance!",
+            "data": [],
+        }
         return HttpResponse(json.dumps(result), content_type="application/json")
 
     sql_tunning = SqlTuning(
@@ -185,7 +189,7 @@ def optimize_sqltuning(request):
     if "sql_profile" in option:
         session_status = sql_tunning.exec_sql()
         result["data"]["session_status"] = session_status
-    # 关闭连接
+    # Close connection.
     sql_tunning.engine.close()
     result["data"]["sqltext"] = sqltext
     return HttpResponse(
@@ -196,7 +200,7 @@ def optimize_sqltuning(request):
 
 def explain(request):
     """
-    SQL优化界面获取SQL执行计划
+    Get SQL execution plan from SQL optimization page.
     :param request:
     :return:
     """
@@ -205,40 +209,42 @@ def explain(request):
     db_name = request.POST.get("db_name")
     result = {"status": 0, "msg": "ok", "data": []}
 
-    # 服务器端参数验证
+    # Server-side parameter validation.
     if sql_content is None or instance_name is None:
         result["status"] = 1
-        result["msg"] = "页面提交参数可能为空"
+        result["msg"] = "Submitted page parameters may be empty"
         return HttpResponse(json.dumps(result), content_type="application/json")
 
     try:
         instance = user_instances(request.user).get(instance_name=instance_name)
     except Instance.DoesNotExist:
-        result = {"status": 1, "msg": "实例不存在", "data": []}
+        result = {"status": 1, "msg": "Instance does not exist", "data": []}
         return HttpResponse(json.dumps(result), content_type="application/json")
 
-    # 删除注释语句，进行语法判断，执行第一条有效sql
+    # Remove comments, validate syntax, and execute first valid SQL.
     sql_content = sqlparse.format(sql_content.strip(), strip_comments=True)
     try:
         sql_content = sqlparse.split(sql_content)[0]
     except IndexError:
         result["status"] = 1
-        result["msg"] = "没有有效的SQL语句"
+        result["msg"] = "No valid SQL statement found"
         return HttpResponse(json.dumps(result), content_type="application/json")
     else:
-        # 过滤非explain的语句
+        # Filter out statements that do not start with EXPLAIN.
         if not re.match(r"^explain", sql_content, re.I):
             result["status"] = 1
-            result["msg"] = "仅支持explain开头的语句，请检查"
+            result["msg"] = (
+                "Only statements starting with EXPLAIN are supported. Please check."
+            )
             return HttpResponse(json.dumps(result), content_type="application/json")
 
-    # 执行获取执行计划语句
+    # Execute and get execution plan.
     query_engine = get_engine(instance=instance)
     db_name = query_engine.escape_string(db_name)
     sql_result = query_engine.query(str(db_name), sql_content).to_sep_dict()
     result["data"] = sql_result
 
-    # 返回查询结果
+    # Return query result.
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
@@ -247,7 +253,7 @@ def explain(request):
 
 def optimize_sqltuningadvisor(request):
     """
-    sqltuningadvisor工具获取优化报告
+    Get optimization report using SQLTuningAdvisor.
     :param request:
     :return:
     """
@@ -256,42 +262,42 @@ def optimize_sqltuningadvisor(request):
     db_name = request.POST.get("schema_name")
     result = {"status": 0, "msg": "ok", "data": []}
 
-    # 服务器端参数验证
+    # Server-side parameter validation.
     if sql_content is None or instance_name is None:
         result["status"] = 1
-        result["msg"] = "页面提交参数可能为空"
+        result["msg"] = "Submitted page parameters may be empty"
         return HttpResponse(json.dumps(result), content_type="application/json")
 
     try:
         instance = user_instances(request.user).get(instance_name=instance_name)
     except Instance.DoesNotExist:
-        result = {"status": 1, "msg": "实例不存在", "data": []}
+        result = {"status": 1, "msg": "Instance does not exist", "data": []}
         return HttpResponse(json.dumps(result), content_type="application/json")
 
-    # 不删除注释语句，已获取加hints的SQL优化建议，进行语法判断，执行第一条有效sql
+    # Keep comments to preserve hints, then validate and execute first SQL.
     sql_content = sqlparse.format(sql_content.strip(), strip_comments=False)
-    # 对单引号加转义符,支持plsql语法
+    # Escape single quotes for PL/SQL syntax support.
     sql_content = sql_content.replace("'", "''")
     try:
         sql_content = sqlparse.split(sql_content)[0]
     except IndexError:
         result["status"] = 1
-        result["msg"] = "没有有效的SQL语句"
+        result["msg"] = "No valid SQL statement found"
         return HttpResponse(json.dumps(result), content_type="application/json")
     else:
-        # 过滤非Oracle语句
+        # Filter non-Oracle statements.
         if not instance.db_type == "oracle":
             result["status"] = 1
-            result["msg"] = "SQLTuningAdvisor仅支持oracle数据库的检查"
+            result["msg"] = "SQLTuningAdvisor only supports Oracle database checks"
             return HttpResponse(json.dumps(result), content_type="application/json")
 
-    # 执行获取优化报告
+    # Execute and get optimization report.
     query_engine = get_engine(instance=instance)
     db_name = query_engine.escape_string(db_name)
     sql_result = query_engine.sqltuningadvisor(str(db_name), sql_content).to_sep_dict()
     result["data"] = sql_result
 
-    # 返回查询结果
+    # Return query result.
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",

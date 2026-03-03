@@ -1,4 +1,4 @@
--- 表结构变更
+-- Table schema changes
 ALTER TABLE sql_group
   ADD ding_webhook VARCHAR(255) NOT NULL DEFAULT ''
   AFTER group_level;
@@ -18,7 +18,7 @@ ALTER TABLE query_log
   ADD user_display VARCHAR(50) NOT NULL DEFAULT ''
   AFTER username;
 
--- 数据清洗
+-- Data cleanup
 UPDATE sql_workflow, sql_users
 SET engineer_display = display
 WHERE engineer = username;

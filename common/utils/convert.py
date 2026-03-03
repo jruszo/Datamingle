@@ -3,7 +3,7 @@ from django.db.models import Func
 
 class Convert(Func):
     """
-    Description: 支持mysql的convert(field using gbk)语法，从而支持汉字排序
+    Description: Supports MySQL `convert(field using gbk)` syntax for Chinese sorting.
     Usage:       queryset.order_by(Convert('name', 'gbk').asc())
     Reference:   https://stackoverflow.com/questions/38517743/django-how-to-make-a-query-with-order-by-convert-name-using-gbk-asc
     """

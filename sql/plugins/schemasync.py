@@ -20,7 +20,7 @@ class SchemaSync(Plugin):
 
     def generate_args2cmd(self, args):
         """
-        将请求参数转换为命令行参数
+        Convert request parameters to command-line arguments.
         :return:
         """
         cmd_args = [self.path]

@@ -14,7 +14,10 @@ class OpenaiClient:
         self.default_chat_model = all_config.get("default_chat_model", "gpt-3.5-turbo")
         self.default_query_template = all_config.get(
             "default_query_template",
-            "你是一个熟悉 {{db_type}} 的工程师, 我会给你一些基本信息和要求, 你会生成一个查询语句给我使用, 不要返回任何注释和序号, 仅返回查询语句：{{table_schema}} \n {{user_input}}",
+            "You are an engineer familiar with {{db_type}}. "
+            "I will provide context and requirements. Generate a usable query only. "
+            "Do not return comments or numbering. Return only the query statement: "
+            "{{table_schema}} \n {{user_input}}",
         )
         self.client = OpenAI(base_url=self.base_url, api_key=self.api_key)
 
@@ -26,7 +29,7 @@ class OpenaiClient:
         return completion
 
     def generate_sql_by_openai(self, db_type: str, table_schema: str, user_input: str):
-        """根据传入的基本信息生成查询语句"""
+        """Generate a query from the provided context."""
         template = Template(self.default_query_template)
         current_context = Context(
             dict(db_type=db_type, table_schema=table_schema, user_input=user_input)
@@ -37,11 +40,11 @@ class OpenaiClient:
             res = self.request_chat_completion(messages)
             return res.choices[0].message.content
         except Exception as e:
-            raise ValueError(f"请求openai生成查询语句失败: {e}")
+            raise ValueError(f"Failed to generate query with OpenAI: {e}")
 
 
 def check_openai_config():
-    """校验openai必需配置openai_api_key是否存在"""
+    """Validate whether required OpenAI API config exists."""
     all_config = SysConfig()
     api_key = all_config.get("openai_api_key")
     if api_key:

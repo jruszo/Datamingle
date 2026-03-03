@@ -48,7 +48,7 @@ def sql_workflow_list_audit(request):
 
 def _sql_workflow_list(request):
     """
-    获取审核列表
+    Get review list.
     :param request:
     :return:
     """
@@ -65,45 +65,46 @@ def _sql_workflow_list(request):
     user = request.user
     syntax_type = request.POST.getlist("syntax_type[]")
 
-    # 组合筛选项
+    # Build filter options.
     filter_dict = dict()
-    # 工单类型
+    # Workflow type
     if syntax_type:
         filter_dict["syntax_type__in"] = syntax_type
-    # 工单状态
+    # Workflow status
     if nav_status:
         filter_dict["status"] = nav_status
-    # 实例
+    # Instance
     if instance_id:
         filter_dict["instance_id"] = instance_id
-    # 资源组
+    # Resource group
     if resource_group_id:
         filter_dict["group_id"] = resource_group_id
-    # 时间
+    # Time range
     if start_date and end_date:
         end_date = datetime.datetime.strptime(
             end_date, "%Y-%m-%d"
         ) + datetime.timedelta(days=1)
         filter_dict["create_time__range"] = (start_date, end_date)
-    # 管理员，审计员，可查看所有工单
+    # Admin and auditors can view all workflows.
     if user.is_superuser or user.has_perm("sql.audit_user"):
         pass
-    # 非管理员，拥有审核权限、资源组粒度执行权限的，可以查看组内所有工单
+    # Non-admin users with review or group-execution permission
+    # can view workflows in their groups.
     elif user.has_perm("sql.sql_review") or user.has_perm(
         "sql.sql_execute_for_resource_group"
     ):
-        # 先获取用户所在资源组列表
+        # Get user's resource groups first.
         group_list = user_groups(user)
         group_ids = [group.group_id for group in group_list]
         filter_dict["group_id__in"] = group_ids
-    # 其他人只能查看自己提交的工单
+    # Others can only view workflows they submitted.
     else:
         filter_dict["engineer"] = user.username
 
-    # 过滤组合筛选项
+    # Apply combined filters.
     workflow = SqlWorkflow.objects.filter(**filter_dict)
 
-    # 过滤搜索项，模糊检索项包括提交人名称、工单名
+    # Apply search filter (submitter/workflow name fuzzy match).
     if search:
         workflow = workflow.filter(
             Q(engineer_display__icontains=search) | Q(workflow_name__icontains=search)
@@ -124,10 +125,10 @@ def _sql_workflow_list(request):
         "export_format",
     )
 
-    # QuerySet 序列化
+    # Serialize QuerySet.
     rows = [row for row in workflow_list]
     result = {"total": count, "rows": rows}
-    # 返回查询结果
+    # Return query result.
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
@@ -135,7 +136,7 @@ def _sql_workflow_list(request):
 
 
 def detail_content(request):
-    """获取工单内容"""
+    """Get workflow content."""
     workflow_id = request.GET.get("workflow_id")
     workflow_detail = get_object_or_404(SqlWorkflow, pk=workflow_id)
     if not can_view(request.user, workflow_id):
@@ -148,9 +149,9 @@ def detail_content(request):
     review_result = ReviewSet()
     if rows:
         try:
-            # 检验rows能不能正常解析
+            # Check whether rows can be parsed correctly.
             loaded_rows = json.loads(rows)
-            #  兼容旧数据'[[]]'格式，转换为新格式[{}]
+            # Backward-compatible conversion from old '[[]]' to new '[{}]' format.
             if isinstance(loaded_rows[-1], list):
                 for r in loaded_rows:
                     review_result.rows += [ReviewResult(inception_result=r)]
@@ -160,8 +161,10 @@ def detail_content(request):
                 ReviewResult(
                     id=1,
                     sql=workflow_detail.sqlworkflowcontent.sql_content,
-                    errormessage="Json decode failed."
-                    "执行结果Json解析失败, 请联系管理员",
+                    errormessage=(
+                        "Json decode failed. Execution result JSON parsing failed. "
+                        "Please contact admin."
+                    ),
                 )
             ]
             rows = review_result.json()
@@ -170,9 +173,11 @@ def detail_content(request):
                 ReviewResult(
                     id=1,
                     sql=workflow_detail.sqlworkflowcontent.sql_content,
-                    # 迫于无法单元测试这里加上英文报错信息
-                    errormessage="Json decode failed."
-                    "执行结果Json解析失败, 请联系管理员",
+                    # Keep explicit English error text for reliable unit testing.
+                    errormessage=(
+                        "Json decode failed. Execution result JSON parsing failed. "
+                        "Please contact admin."
+                    ),
                 )
             ]
             rows = review_result.json()
@@ -184,7 +189,7 @@ def detail_content(request):
 
 
 def backup_sql(request):
-    """获取回滚语句"""
+    """Get rollback SQL."""
     workflow_id = request.GET.get("workflow_id")
     if not can_rollback(request.user, workflow_id):
         raise PermissionDenied
@@ -204,7 +209,7 @@ def backup_sql(request):
 @permission_required("sql.sql_review", raise_exception=True)
 def alter_run_date(request):
     """
-    审核人修改可执行时间
+    Allow reviewer to modify executable time window.
     :param request:
     :return:
     """
@@ -212,16 +217,16 @@ def alter_run_date(request):
     run_date_start = request.POST.get("run_date_start")
     run_date_end = request.POST.get("run_date_end")
     if workflow_id == 0:
-        context = {"errMsg": "workflow_id参数为空."}
+        context = {"errMsg": "workflow_id parameter is empty."}
         return render(request, "error.html", context)
 
     user = request.user
     if Audit.can_review(user, workflow_id, 2) is False:
-        context = {"errMsg": "你无权操作当前工单！"}
+        context = {"errMsg": "You are not allowed to operate on this workflow!"}
         return render(request, "error.html", context)
 
     try:
-        # 存进数据库里
+        # Save into database.
         SqlWorkflow(
             id=workflow_id,
             run_date_start=run_date_start or None,
@@ -237,23 +242,23 @@ def alter_run_date(request):
 @permission_required("sql.sql_review", raise_exception=True)
 def passed(request):
     """
-    审核通过，不执行
+    Approve workflow without execution.
     :param request:
     :return:
     """
     workflow_id = int(request.POST.get("workflow_id", 0))
     audit_remark = request.POST.get("audit_remark", "")
     if workflow_id == 0:
-        context = {"errMsg": "workflow_id参数为空."}
+        context = {"errMsg": "workflow_id parameter is empty."}
         return render(request, "error.html", context)
     try:
         sql_workflow = SqlWorkflow.objects.get(id=workflow_id)
     except SqlWorkflow.DoesNotExist:
-        return render(request, "error.html", {"errMsg": "工单不存在"})
+        return render(request, "error.html", {"errMsg": "Workflow does not exist"})
 
     sys_config = SysConfig()
     auditor = get_auditor(workflow=sql_workflow, sys_config=sys_config)
-    # 使用事务保持数据一致性
+    # Keep data consistent using a transaction.
     with transaction.atomic():
         try:
             workflow_audit_detail = auditor.operate(
@@ -261,14 +266,16 @@ def passed(request):
             )
         except AuditException as e:
             return render(
-                request, "error.html", {"errMsg": f"审核失败, 错误信息: {str(e)}"}
+                request,
+                "error.html",
+                {"errMsg": f"Audit failed, error details: {str(e)}"},
             )
         if auditor.audit.current_status == WorkflowStatus.PASSED:
-            # 审批流全部走完了, 把工单标记为审核通过
+            # If approval flow finished, mark workflow as review-passed.
             auditor.workflow.status = "workflow_review_pass"
             auditor.workflow.save()
 
-    # 开启了Pass阶段通知参数才发送消息通知
+    # Send notifications only if Pass phase is enabled.
     is_notified = (
         "Pass" in sys_config.get("notify_phase_control").split(",")
         if sys_config.get("notify_phase_control")
@@ -288,11 +295,11 @@ def passed(request):
 
 def execute(request):
     """
-    执行SQL
+    Execute SQL.
     :param request:
     :return:
     """
-    # 校验多个权限
+    # Validate execute permissions.
     if not (
         request.user.has_perm("sql.sql_execute")
         or request.user.has_perm("sql.sql_execute_for_resource_group")
@@ -300,34 +307,34 @@ def execute(request):
         raise PermissionDenied
     workflow_id = int(request.POST.get("workflow_id", 0))
     if workflow_id == 0:
-        context = {"errMsg": "workflow_id参数为空."}
+        context = {"errMsg": "workflow_id parameter is empty."}
         return render(request, "error.html", context)
 
     if can_execute(request.user, workflow_id) is False:
-        context = {"errMsg": "你无权操作当前工单！"}
+        context = {"errMsg": "You are not allowed to operate on this workflow!"}
         return render(request, "error.html", context)
 
     if on_correct_time_period(workflow_id) is False:
         context = {
-            "errMsg": "不在可执行时间范围内，如果需要修改执行时间请重新提交工单!"
+            "errMsg": "Not within executable time range. Resubmit workflow to change execution time!"
         }
         return render(request, "error.html", context)
-    # 获取审核信息
+    # Get audit information.
     audit_id = Audit.detail_by_workflow_id(
         workflow_id=workflow_id, workflow_type=WorkflowType.SQL_REVIEW
     ).audit_id
-    # 根据执行模式进行对应修改
+    # Apply updates according to execution mode.
     mode = request.POST.get("mode")
-    # 交由系统执行
+    # System execution mode.
     if mode == "auto":
-        # 修改工单状态为排队中
+        # Set workflow status to queued.
         SqlWorkflow(id=workflow_id, status="workflow_queuing").save(
             update_fields=["status"]
         )
-        # 删除定时执行任务
+        # Delete scheduled execution task.
         schedule_name = f"sqlreview-timing-{workflow_id}"
         del_schedule(schedule_name)
-        # 加入执行队列
+        # Add to execution queue.
         async_task(
             "sql.utils.execute_sql.execute",
             workflow_id,
@@ -336,34 +343,34 @@ def execute(request):
             timeout=-1,
             task_name=f"sqlreview-execute-{workflow_id}",
         )
-        # 增加工单日志
+        # Add workflow log.
         Audit.add_log(
             audit_id=audit_id,
             operation_type=5,
-            operation_type_desc="执行工单",
-            operation_info="工单执行排队中",
+            operation_type_desc="Execute Workflow",
+            operation_info="Workflow queued for execution",
             operator=request.user.username,
             operator_display=request.user.display,
         )
 
-    # 线下手工执行
+    # Offline manual execution mode.
     elif mode == "manual":
-        # 将流程状态修改为执行结束
+        # Set workflow status to finished.
         SqlWorkflow(
             id=workflow_id,
             status="workflow_finish",
             finish_time=datetime.datetime.now(),
         ).save(update_fields=["status", "finish_time"])
-        # 增加工单日志
+        # Add workflow log.
         Audit.add_log(
             audit_id=audit_id,
             operation_type=6,
-            operation_type_desc="手工工单",
-            operation_info="确认手工执行结束",
+            operation_type_desc="Manual Workflow",
+            operation_info="Manual execution confirmed complete",
             operator=request.user.username,
             operator_display=request.user.display,
         )
-        # 开启了Execute阶段通知参数才发送消息通知
+        # Send notifications only if Execute phase is enabled.
         sys_config = SysConfig()
         is_notified = (
             "Execute" in sys_config.get("notify_phase_control").split(",")
@@ -377,11 +384,11 @@ def execute(request):
 
 def timing_task(request):
     """
-    定时执行SQL
+    Schedule SQL execution.
     :param request:
     :return:
     """
-    # 校验多个权限
+    # Validate execute permissions.
     if not (
         request.user.has_perm("sql.sql_execute")
         or request.user.has_perm("sql.sql_execute_for_resource_group")
@@ -390,15 +397,15 @@ def timing_task(request):
     workflow_id = request.POST.get("workflow_id")
     run_date = request.POST.get("run_date")
     if run_date is None or workflow_id is None:
-        context = {"errMsg": "时间不能为空"}
+        context = {"errMsg": "Time cannot be empty"}
         return render(request, "error.html", context)
     elif run_date < datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"):
-        context = {"errMsg": "时间不能小于当前时间"}
+        context = {"errMsg": "Time cannot be earlier than current time"}
         return render(request, "error.html", context)
     workflow_detail = SqlWorkflow.objects.get(id=workflow_id)
 
     if can_timingtask(request.user, workflow_id) is False:
-        context = {"errMsg": "你无权操作当前工单！"}
+        context = {"errMsg": "You are not allowed to operate on this workflow!"}
         return render(request, "error.html", context)
 
     run_date = datetime.datetime.strptime(run_date, "%Y-%m-%d %H:%M")
@@ -406,19 +413,22 @@ def timing_task(request):
 
     if on_correct_time_period(workflow_id, run_date) is False:
         context = {
-            "errMsg": "不在可执行时间范围内，如果需要修改执    行时间请重新提交工单!"
+            "errMsg": (
+                "Not within executable time range. "
+                "Resubmit workflow to change execution time!"
+            )
         }
         return render(request, "error.html", context)
 
-    # 使用事务保持数据一致性
+    # Keep data consistent using a transaction.
     try:
         with transaction.atomic():
-            # 将流程状态修改为定时执行
+            # Set workflow status to scheduled execution.
             workflow_detail.status = "workflow_timingtask"
             workflow_detail.save()
-            # 调用添加定时任务
+            # Add schedule task.
             add_sql_schedule(schedule_name, run_date, workflow_id)
-            # 增加工单日志
+            # Add workflow log.
             audit_id = Audit.detail_by_workflow_id(
                 workflow_id=workflow_id,
                 workflow_type=WorkflowType.SQL_REVIEW,
@@ -426,13 +436,15 @@ def timing_task(request):
             Audit.add_log(
                 audit_id=audit_id,
                 operation_type=4,
-                operation_type_desc="定时执行",
-                operation_info="定时执行时间：{}".format(run_date),
+                operation_type_desc="Scheduled Execution",
+                operation_info="Scheduled execution time: {}".format(run_date),
                 operator=request.user.username,
                 operator_display=request.user.display,
             )
     except Exception as msg:
-        logger.error(f"定时执行工单报错，错误信息：{traceback.format_exc()}")
+        logger.error(
+            f"Scheduled workflow execution failed, error details: {traceback.format_exc()}"
+        )
         context = {"errMsg": msg}
         return render(request, "error.html", context)
     return HttpResponseRedirect(reverse("sql:detail", args=(workflow_id,)))
@@ -440,26 +452,26 @@ def timing_task(request):
 
 def cancel(request):
     """
-    终止流程
+    Cancel workflow.
     :param request:
     :return:
     """
     workflow_id = int(request.POST.get("workflow_id", 0))
     if workflow_id == 0:
-        context = {"errMsg": "workflow_id参数为空."}
+        context = {"errMsg": "workflow_id parameter is empty."}
         return render(request, "error.html", context)
     sql_workflow = SqlWorkflow.objects.get(id=workflow_id)
     audit_remark = request.POST.get("cancel_remark")
     if audit_remark is None:
-        context = {"errMsg": "终止原因不能为空"}
+        context = {"errMsg": "Cancellation reason cannot be empty"}
         return render(request, "error.html", context)
 
     user = request.user
     if can_cancel(request.user, workflow_id) is False:
-        context = {"errMsg": "你无权操作当前工单！"}
+        context = {"errMsg": "You are not allowed to operate on this workflow!"}
         return render(request, "error.html", context)
 
-    # 使用事务保持数据一致性
+    # Keep data consistent using a transaction.
     if user.username == sql_workflow.engineer:
         action = WorkflowAction.ABORT
     elif user.has_perm("sql.sql_review"):
@@ -471,15 +483,17 @@ def cancel(request):
         try:
             workflow_audit_detail = auditor.operate(action, request.user, audit_remark)
         except AuditException as e:
-            logger.error(f"取消工单报错，错误信息：{traceback.format_exc()}")
+            logger.error(
+                f"Workflow cancellation failed, error details: {traceback.format_exc()}"
+            )
             return render(request, "error.html", {"errMsg": f"{str(e)}"})
-        # 将流程状态修改为人工终止流程
+        # Set workflow status to manually aborted.
         sql_workflow.status = "workflow_abort"
         sql_workflow.save()
-    # 删除定时执行task
+    # Delete scheduled task.
     if sql_workflow.status == "workflow_timingtask":
         del_schedule(f"sqlreview-timing-{workflow_id}")
-    # 发送取消、驳回通知，开启了Cancel阶段通知参数才发送消息通知
+    # Send cancel/reject notification only if Cancel phase is enabled.
     sys_config = SysConfig()
     is_notified = (
         "Cancel" in sys_config.get("notify_phase_control").split(",")
@@ -499,11 +513,11 @@ def cancel(request):
 
 def get_workflow_status(request):
     """
-    获取某个工单的当前状态
+    Get current status for a workflow.
     """
     workflow_id = request.POST["workflow_id"]
     if workflow_id == "" or workflow_id is None:
-        context = {"status": -1, "msg": "workflow_id参数为空.", "data": ""}
+        context = {"status": -1, "msg": "workflow_id parameter is empty.", "data": ""}
         return HttpResponse(json.dumps(context), content_type="application/json")
 
     workflow_id = int(workflow_id)
@@ -513,7 +527,7 @@ def get_workflow_status(request):
 
 
 def osc_control(request):
-    """用于mysql控制osc执行"""
+    """Control OSC execution for MySQL."""
     workflow_id = request.POST.get("workflow_id")
     sqlsha1 = request.POST.get("sqlsha1")
     command = request.POST.get("command")

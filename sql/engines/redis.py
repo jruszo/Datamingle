@@ -59,7 +59,7 @@ class RedisEngine(EngineBase):
 
     def get_all_databases(self, **kwargs):
         """
-        获取数据库列表
+        Get database list.
         :return:
         """
         result = ResultSet(full_sql="CONFIG GET databases")
@@ -68,15 +68,18 @@ class RedisEngine(EngineBase):
             rows = conn.config_get("databases")["databases"]
         except Exception as e:
             """
-            由于尝试获取databases配置失败，下面的代码块将通过解析info命令的输出来确定数据库的数量。
-            失败场景1：AWS-ElastiCache(Redis)服务不支持部分命令行。比如: config get xx, acl 部分命令
-            失败场景2：使用了没有管理员权限（-@admin）的Redis用户。 （异常信息：this user has no permissions to run the 'config' command or its subcommand）
-            步骤：
-            - 通过info("Keyspace")获取所有的数据库键空间信息。
-            - 从键空间信息中提取数据库编号（如db0, db1等）。
-            - 计算数据库数量，至少会返回0到15共16个数据库。
+            If fetching the "databases" config fails, this fallback infers the
+            database count by parsing the output of the info command.
+            Failure case 1: AWS ElastiCache (Redis) does not support some commands,
+            for example: config get xx and some acl commands.
+            Failure case 2: Redis user has no admin permission (-@admin), for example:
+            "this user has no permissions to run the 'config' command or its subcommand".
+            Steps:
+            - Get keyspace info via info("Keyspace").
+            - Extract db indexes (for example db0, db1).
+            - Compute database count; at least 16 databases (0..15) are returned.
             """
-            logger.warning(f"Redis CONFIG GET databases 执行报错，异常信息：{e}")
+            logger.warning(f"Redis CONFIG GET databases failed, exception: {e}")
             dbs = [
                 int(i.split("db")[1])
                 for i in conn.info("Keyspace").keys()
@@ -89,7 +92,7 @@ class RedisEngine(EngineBase):
         return result
 
     def get_all_tables(self, db_name, **kwargs):
-        """获取表列表。Redis的key可以理为表。方法只扫描部分表。起到预览作用。"""
+        """Get key list. Redis keys are treated as tables for preview."""
         result = ResultSet(full_sql="")
         max_results = 100
         table_info_list = []
@@ -101,13 +104,13 @@ class RedisEngine(EngineBase):
                     break
                 table_info_list.append(key)
         except Exception as e:
-            logger.error(f"get_all_tables执行报错，异常信息：{e}")
+            logger.error(f"get_all_tables failed, exception: {e}")
             result.message = f"{e}"
         result.rows = table_info_list
         return result
 
     def query_check(self, db_name=None, sql="", limit_num=0):
-        """提交查询前的检查"""
+        """Run checks before query submission."""
         result = {"msg": "", "bad_query": True, "filtered_sql": sql, "has_star": False}
         safe_cmd = [
             "scan",
@@ -141,22 +144,22 @@ class RedisEngine(EngineBase):
             "zrank",
             "info",
         ]
-        # 命令校验，仅可以执行safe_cmd内的命令
+        # Command validation: only commands in safe_cmd are allowed.
         for cmd in safe_cmd:
             if re.match(rf"^{cmd}", sql.strip(), re.I):
                 result["bad_query"] = False
                 break
         if result["bad_query"]:
-            result["msg"] = "禁止执行该命令！"
+            result["msg"] = "This command is not allowed!"
         return result
 
     def processlist(self, command_type, **kwargs):
-        """获取连接信息"""
+        """Get connection information."""
         sql = "client list"
         result_set = ResultSet(full_sql=sql)
         conn = self.get_connection(db_name=0)
         clients = conn.client_list()
-        # 根据空闲时间排序
+        # Sort by idle time.
         sort_by = "idle"
         reverse = False
         clients = sorted(
@@ -166,7 +169,7 @@ class RedisEngine(EngineBase):
         return result_set
 
     def query(self, db_name=None, sql="", limit_num=0, close_conn=True, **kwargs):
-        """返回 ResultSet"""
+        """Return a ResultSet."""
         result_set = ResultSet(full_sql=sql)
         try:
             conn = self.get_connection(db_name=db_name)
@@ -183,7 +186,7 @@ class RedisEngine(EngineBase):
                     result_set.affected_rows = len(rows)
             elif isinstance(rows, dict):
                 result_set.column_list = ["field", "value"]
-                # 对Redis的返回结果进行类型判断，如果是dict,list转为json字符串。
+                # Convert dict/list values to JSON strings.
                 pairs_list = []
                 for k, v in rows.items():
                     if isinstance(v, dict):
@@ -192,9 +195,9 @@ class RedisEngine(EngineBase):
                         processed_value = json.dumps(v)
                     else:
                         processed_value = v
-                    # 添加处理后的键值对到列表
+                    # Append processed key-value pair.
                     pairs_list.append([k, processed_value])
-                # 将列表转换为元组并赋值给 result_set.rows
+                # Convert list to tuple and set to result_set.rows.
                 result_set.rows = tuple(pairs_list)
                 result_set.affected_rows = len(result_set.rows)
             else:
@@ -204,7 +207,7 @@ class RedisEngine(EngineBase):
                 result_set.rows = result_set.rows[0:limit_num]
         except Exception as e:
             logger.warning(
-                f"Redis命令执行报错，语句：{sql}， 错误信息：{traceback.format_exc()}"
+                f"Redis command execution failed, statement: {sql}, details: {traceback.format_exc()}"
             )
             result_set.error = str(e)
         return result_set
@@ -213,11 +216,11 @@ class RedisEngine(EngineBase):
         return sql.strip()
 
     def query_masking(self, db_name=None, sql="", resultset=None):
-        """不做脱敏"""
+        """Do not apply masking."""
         return resultset
 
     def execute_check(self, db_name=None, sql=""):
-        """上线单执行前的检查, 返回Review set"""
+        """Run checks before workflow execution and return a ReviewSet."""
         check_result = ReviewSet(full_sql=sql)
         split_sql = [cmd.strip() for cmd in sql.split("\n") if cmd.strip()]
         line = 1
@@ -226,7 +229,7 @@ class RedisEngine(EngineBase):
                 id=line,
                 errlevel=0,
                 stagestatus="Audit completed",
-                errormessage="暂不支持显示影响行数",
+                errormessage="Displaying affected rows is not supported yet",
                 sql=cmd,
                 affected_rows=0,
                 execute_time=0,
@@ -236,7 +239,7 @@ class RedisEngine(EngineBase):
         return check_result
 
     def execute_workflow(self, workflow):
-        """执行上线单，返回Review set"""
+        """Execute workflow and return a ReviewSet."""
         sql = workflow.sqlworkflowcontent.sql_content
         split_sql = [cmd.strip() for cmd in sql.split("\n") if cmd.strip()]
         execute_result = ReviewSet(full_sql=sql)
@@ -252,7 +255,7 @@ class RedisEngine(EngineBase):
                         id=line,
                         errlevel=0,
                         stagestatus="Execute Successfully",
-                        errormessage="暂不支持显示影响行数",
+                        errormessage="Displaying affected rows is not supported yet",
                         sql=cmd,
                         affected_rows=0,
                         execute_time=t.cost,
@@ -261,30 +264,30 @@ class RedisEngine(EngineBase):
                 line += 1
         except Exception as e:
             logger.warning(
-                f"Redis命令执行报错，语句：{cmd or sql}， 错误信息：{traceback.format_exc()}"
+                f"Redis command execution failed, statement: {cmd or sql}, details: {traceback.format_exc()}"
             )
-            # 追加当前报错语句信息到执行结果中
+            # Append current failed statement to execution result.
             execute_result.error = str(e)
             execute_result.rows.append(
                 ReviewResult(
                     id=line,
                     errlevel=2,
                     stagestatus="Execute Failed",
-                    errormessage=f"异常信息：{e}",
+                    errormessage=f"Exception: {e}",
                     sql=cmd,
                     affected_rows=0,
                     execute_time=0,
                 )
             )
             line += 1
-            # 报错语句后面的语句标记为审核通过、未执行，追加到执行结果中
+            # Append remaining statements as skipped because previous failed.
             for statement in split_sql[line - 1 :]:
                 execute_result.rows.append(
                     ReviewResult(
                         id=line,
                         errlevel=0,
                         stagestatus="Audit completed",
-                        errormessage=f"前序语句失败, 未执行",
+                        errormessage="Previous statement failed, not executed",
                         sql=statement,
                         affected_rows=0,
                         execute_time=0,

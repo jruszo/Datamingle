@@ -22,7 +22,7 @@ class ODPSEngine(EngineBase):
         db_name = db_name if db_name else self.instance.db_name
 
         if db_name is None:
-            raise ValueError("db_name不能为空")
+            raise ValueError("db_name cannot be empty")
 
         self.conn = ODPS(self.user, self.password, project=db_name, endpoint=self.host)
 
@@ -33,29 +33,30 @@ class ODPSEngine(EngineBase):
     info = "ODPS engine"
 
     def get_all_databases(self):
-        """获取数据库列表, 返回一个ResultSet
-        ODPS只有project概念, 直接返回project名称
-        TODO: 目前ODPS获取所有项目接口比较慢, 暂时支持返回一个project，后续再优化
+        """Get database list and return a ResultSet.
+        ODPS only has the project concept, so this returns project name(s).
+        TODO: listing all projects in ODPS is currently slow, so for now only
+        one project is returned and this can be optimized later.
         """
         result = ResultSet()
 
         try:
             conn = self.get_connection()
 
-            # 判断project是否存在
+            # Check whether the project exists.
             db_exist = conn.exist_project(self.instance.db_name)
 
             if db_exist is False:
-                raise ValueError(f"[{self.instance.db_name}]项目不存在")
+                raise ValueError(f"[{self.instance.db_name}] project does not exist")
 
             result.rows = [conn.project]
         except Exception as e:
-            logger.warning(f"ODPS执行异常, {e}")
+            logger.warning(f"ODPS execution exception: {e}")
             result.error = str(e)
         return result
 
     def get_all_tables(self, db_name, **kwargs):
-        """获取table 列表, 返回一个ResultSet"""
+        """Get table list and return a ResultSet."""
 
         db_name = db_name if db_name else self.instance.db_name
         result_set = ResultSet()
@@ -67,13 +68,13 @@ class ODPSEngine(EngineBase):
             result_set.rows = rows
 
         except Exception as e:
-            logger.warning(f"ODPS语句执行报错, 错误信息{e}")
+            logger.warning(f"ODPS statement execution failed, error: {e}")
             result_set.error = str(e)
 
         return result_set
 
     def get_all_columns_by_tb(self, db_name, tb_name, **kwargs):
-        """获取所有字段, 返回一个ResultSet"""
+        """Get all columns and return a ResultSet."""
 
         column_list = ["COLUMN_NAME", "COLUMN_TYPE", "COLUMN_COMMENT"]
 
@@ -94,22 +95,22 @@ class ODPSEngine(EngineBase):
         return result
 
     def describe_table(self, db_name, tb_name, **kwargs):
-        """return ResultSet 类似查询"""
+        """Return ResultSet, similar to a query operation."""
 
         result = self.get_all_columns_by_tb(db_name, tb_name)
 
         return result
 
     def query(self, db_name=None, sql="", limit_num=0, close_conn=True, **kwargs):
-        """返回 ResultSet"""
+        """Return ResultSet."""
         result_set = ResultSet(full_sql=sql)
 
         if not re.match(r"^select", sql, re.I):
-            result_set.error = str("仅支持ODPS查询语句")
+            result_set.error = str("Only ODPS SELECT queries are supported")
 
-        # 存在limit，替换limit; 不存在，添加limit
+        # If LIMIT exists, replace it; otherwise append LIMIT.
         if re.search("limit", sql):
-            sql = re.sub("limit.+(\d+)", "limit " + str(limit_num), sql)
+            sql = re.sub(r"limit.+(\d+)", "limit " + str(limit_num), sql)
         else:
             if sql.strip()[-1] == ";":
                 sql = sql[:-1]
@@ -127,18 +128,18 @@ class ODPSEngine(EngineBase):
             result_set.affected_rows = len(rows)
 
         except Exception as e:
-            logger.warning(f"ODPS语句执行报错, 语句：{sql}，错误信息{e}")
+            logger.warning(f"ODPS statement execution failed, sql: {sql}, error: {e}")
             result_set.error = str(e)
         return result_set
 
     def query_check(self, db_name=None, sql=""):
-        # 查询语句的检查、注释去除、切分
+        # Check query statement, strip comments, and split.
         result = {"msg": "", "bad_query": False, "filtered_sql": sql, "has_star": False}
         keyword_warning = ""
         sql_whitelist = ["select"]
-        # 根据白名单list拼接pattern语句
+        # Build regex pattern from whitelist.
         whitelist_pattern = re.compile("^" + "|^".join(sql_whitelist), re.IGNORECASE)
-        # 删除注释语句，进行语法判断，执行第一条有效sql
+        # Remove comments, validate syntax, and keep the first valid SQL.
         try:
             sql = sqlparse.format(sql, strip_comments=True)
             sql = sqlparse.split(sql)[0]
@@ -146,11 +147,13 @@ class ODPSEngine(EngineBase):
             # sql_lower = sql.lower()
         except IndexError:
             result["bad_query"] = True
-            result["msg"] = "没有有效的SQL语句"
+            result["msg"] = "No valid SQL statement found"
             return result
         if whitelist_pattern.match(sql) is None:
             result["bad_query"] = True
-            result["msg"] = "仅支持{}语法!".format(",".join(sql_whitelist))
+            result["msg"] = "Only {} syntax is supported!".format(
+                ",".join(sql_whitelist)
+            )
             return result
         if result.get("bad_query"):
             result["msg"] = keyword_warning

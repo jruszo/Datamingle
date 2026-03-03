@@ -8,7 +8,7 @@ from .models import Users
 
 @superuser_required
 def lists(request):
-    """获取用户列表"""
+    """Get user list."""
     users = Users.objects.order_by("username")
     users = users.values(
         "id", "username", "display", "is_superuser", "is_staff", "is_active", "email"

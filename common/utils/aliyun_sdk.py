@@ -22,7 +22,9 @@ class Aliyun(object):
             secret = rds.ak.raw_key_secret
             self.clt = AcsClient(ak=ak, secret=secret)
         except Exception as m:
-            raise Exception(f"阿里云认证失败：{m}{traceback.format_exc()}")
+            raise Exception(
+                f"Alibaba Cloud authentication failed: {m}{traceback.format_exc()}"
+            )
 
     def request_api(self, request, *values):
         if values:
@@ -38,7 +40,7 @@ class Aliyun(object):
             ensure_ascii=False,
         )
 
-    # 阿里云UTC时间转换为本地时区时间
+    # Convert Alibaba Cloud UTC time to local time zone
     @staticmethod
     def utc2local(utc, utc_format):
         utc_time = datetime.datetime.strptime(utc, utc_format)
@@ -48,7 +50,7 @@ class Aliyun(object):
         return localtime
 
     def DescribeSlowLogs(self, StartTime, EndTime, **kwargs):
-        """获取实例慢日志列表DBName,SortKey、PageSize、PageNumber"""
+        """Get slow log list for an instance: DBName, SortKey, PageSize, PageNumber."""
         request = DescribeSlowLogsRequest.DescribeSlowLogsRequest()
         values = {
             "action_name": "DescribeSlowLogs",
@@ -62,7 +64,7 @@ class Aliyun(object):
         return result
 
     def DescribeSlowLogRecords(self, StartTime, EndTime, **kwargs):
-        """查看慢日志明细SQLId,DBName、PageSize、PageNumber"""
+        """Get slow log details: SQLId, DBName, PageSize, PageNumber."""
         request = DescribeSlowLogRecordsRequest.DescribeSlowLogRecordsRequest()
         values = {
             "action_name": "DescribeSlowLogRecords",
@@ -78,12 +80,19 @@ class Aliyun(object):
         self, ServiceRequestType, ServiceRequestParam, **kwargs
     ):
         """
-        获取统计信息：'GetTimedMonData',{"Language":"zh","KeyGroup":"mem_cpu_usage","KeyName":"","StartTime":"2018-01-15T04:03:26Z","EndTime":"2018-01-15T05:03:26Z"}
-            mem_cpu_usage、iops_usage、detailed_disk_space
-        获取process信息：'ShowProcessList',{"Language":"zh","Command":"Query"}  -- Not Sleep , All
-        终止进程：'ConfirmKillSessionRequest',{"Language":"zh","SQLRequestID":75865,"SQLStatement":"kill 34022786;"}
-        获取表空间信息：'GetSpaceStatForTables',{"Language": "zh", "OrderType": "Data"}
-        获取资源利用信息：'GetResourceUsage',{"Language":"zh"}
+        Get monitoring stats:
+          'GetTimedMonData', {"Language":"zh","KeyGroup":"mem_cpu_usage","KeyName":"",
+          "StartTime":"2018-01-15T04:03:26Z","EndTime":"2018-01-15T05:03:26Z"}
+          key groups: mem_cpu_usage, iops_usage, detailed_disk_space
+        Get process info:
+          'ShowProcessList', {"Language":"zh","Command":"Query"}  -- Not Sleep, All
+        Kill process:
+          'ConfirmKillSessionRequest', {"Language":"zh","SQLRequestID":75865,
+          "SQLStatement":"kill 34022786;"}
+        Get table-space info:
+          'GetSpaceStatForTables', {"Language":"zh", "OrderType":"Data"}
+        Get resource usage info:
+          'GetResourceUsage', {"Language":"zh"}
         """
         request = RequestServiceOfCloudDBARequest.RequestServiceOfCloudDBARequest()
         values = {

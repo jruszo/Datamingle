@@ -46,12 +46,12 @@ class ClickHouseEngine(EngineBase):
     info = "ClickHouse engine"
 
     def escape_string(self, value: str) -> str:
-        """字符串参数转义"""
+        """Escape string parameters."""
         return "%s" % "".join(escape_chars_map.get(c, c) for c in value)
 
     @property
     def auto_backup(self):
-        """是否支持备份"""
+        """Whether backup is supported."""
         return False
 
     @property
@@ -62,7 +62,7 @@ class ClickHouseEngine(EngineBase):
         return tuple([int(n) for n in version.split(".")[:3]])
 
     def get_table_engine(self, tb_name):
-        """获取某个table的engine type"""
+        """Get engine type of a table."""
         db, tb = tb_name.split(".")
         sql = f"""select engine from system.tables where database=%(db)s and name=%(tb)s"""
         query_result = self.query(sql=sql, parameters={"db": db, "tb": tb})
@@ -73,7 +73,7 @@ class ClickHouseEngine(EngineBase):
         return result
 
     def get_all_databases(self):
-        """获取数据库列表, 返回一个ResultSet"""
+        """Get database list and return a ResultSet."""
         sql = "show databases"
         result = self.query(sql=sql)
         db_list = [
@@ -86,7 +86,7 @@ class ClickHouseEngine(EngineBase):
         return result
 
     def get_all_tables(self, db_name, **kwargs):
-        """获取table 列表, 返回一个ResultSet"""
+        """Get table list and return a ResultSet."""
         sql = "show tables"
         result = self.query(db_name=db_name, sql=sql)
         tb_list = [row[0] for row in result.rows]
@@ -94,7 +94,7 @@ class ClickHouseEngine(EngineBase):
         return result
 
     def get_all_columns_by_tb(self, db_name, tb_name, **kwargs):
-        """获取所有字段, 返回一个ResultSet"""
+        """Get all columns and return a ResultSet."""
         sql = f"""select
             name,
             type,
@@ -114,7 +114,7 @@ class ClickHouseEngine(EngineBase):
         return result
 
     def describe_table(self, db_name, tb_name, **kwargs):
-        """return ResultSet 类似查询"""
+        """Return ResultSet, similar to a query."""
         tb_name = self.escape_string(tb_name)
         sql = f"show create table `{tb_name}`;"
         result = self.query(db_name=db_name, sql=sql)
@@ -133,7 +133,7 @@ class ClickHouseEngine(EngineBase):
         parameters=None,
         **kwargs,
     ):
-        """返回 ResultSet"""
+        """Return a ResultSet."""
         result_set = ResultSet(full_sql=sql)
         try:
             conn = self.get_connection(db_name=db_name)
@@ -149,7 +149,9 @@ class ClickHouseEngine(EngineBase):
             result_set.rows = rows
             result_set.affected_rows = len(rows)
         except Exception as e:
-            logger.warning(f"ClickHouse语句执行报错，语句：{sql}，错误信息{e}")
+            logger.warning(
+                f"ClickHouse statement execution failed, sql: {sql}, error: {e}"
+            )
             result_set.error = str(e).split("Stack trace")[0]
         finally:
             if close_conn:
@@ -157,27 +159,29 @@ class ClickHouseEngine(EngineBase):
         return result_set
 
     def query_check(self, db_name=None, sql=""):
-        # 查询语句的检查、注释去除、切分
+        # Check query statement, strip comments, and split.
         result = {"msg": "", "bad_query": False, "filtered_sql": sql, "has_star": False}
-        # 删除注释语句，进行语法判断，执行第一条有效sql
+        # Remove comments, validate syntax, and keep the first valid SQL.
         try:
             sql = sqlparse.format(sql, strip_comments=True)
             sql = sqlparse.split(sql)[0]
             result["filtered_sql"] = sql.strip()
         except IndexError:
             result["bad_query"] = True
-            result["msg"] = "没有有效的SQL语句"
+            result["msg"] = "No valid SQL statement found"
         if re.match(r"^select|^show|^explain|^with", sql, re.I) is None:
             result["bad_query"] = True
-            result["msg"] = "不支持的查询语法类型!"
+            result["msg"] = "Unsupported query syntax type!"
         if "*" in sql:
             result["has_star"] = True
-            result["msg"] = "SQL语句中含有 * "
-        # clickhouse 20.6.3版本开始正式支持explain语法
+            result["msg"] = "SQL statement contains * "
+        # ClickHouse starts officially supporting EXPLAIN from 20.6.3.
         if re.match(r"^explain", sql, re.I) and self.server_version < (20, 6, 3):
             result["bad_query"] = True
-            result["msg"] = f"当前ClickHouse实例版本低于20.6.3，不支持explain!"
-        # select语句先使用Explain判断语法是否正确
+            result["msg"] = (
+                "Current ClickHouse instance version is below 20.6.3; EXPLAIN is not supported!"
+            )
+        # Use EXPLAIN first to verify SELECT syntax.
         if re.match(r"^select", sql, re.I) and self.server_version >= (20, 6, 3):
             explain_result = self.query(db_name=db_name, sql=f"explain {sql}")
             if explain_result.error:
@@ -187,7 +191,7 @@ class ClickHouseEngine(EngineBase):
         return result
 
     def filter_sql(self, sql="", limit_num=0):
-        # 对查询sql增加limit限制,limit n 或 limit n,n 或 limit n offset n统一改写成limit n
+        # Add LIMIT for query SQL; normalize all limit forms to limit n.
         sql = sql.rstrip(";").strip()
         if re.match(r"^select", sql, re.I):
             # LIMIT N
@@ -217,7 +221,7 @@ class ClickHouseEngine(EngineBase):
         return sql
 
     def explain_check(self, check_result, db_name=None, line=0, statement=""):
-        """使用explain ast检查sql语法, 返回Review set"""
+        """Check SQL syntax via EXPLAIN AST and return ReviewSet row."""
         result = ReviewResult(
             id=line,
             errlevel=0,
@@ -227,54 +231,61 @@ class ClickHouseEngine(EngineBase):
             affected_rows=0,
             execute_time=0,
         )
-        # clickhouse版本>=21.1.2 explain ast才支持非select语句检查
+        # EXPLAIN AST supports non-SELECT checks from ClickHouse 21.1.2+.
         if self.server_version >= (21, 1, 2):
             explain_result = self.query(db_name=db_name, sql=f"explain ast {statement}")
             if explain_result.error:
                 result = ReviewResult(
                     id=line,
                     errlevel=2,
-                    stagestatus="驳回未通过检查SQL",
-                    errormessage=f"explain语法检查错误：{explain_result.error}",
+                    stagestatus="Rejected SQL failed check",
+                    errormessage=f"EXPLAIN syntax check failed: {explain_result.error}",
                     sql=statement,
                 )
         return result
 
     def execute_check(self, db_name=None, sql=""):
-        """上线单执行前的检查, 返回Review set"""
+        """Run checks before workflow execution and return a ReviewSet."""
         sql = sqlparse.format(sql, strip_comments=True)
         sql_list = sqlparse.split(sql)
 
-        # 禁用/高危语句检查
+        # Check disabled/high-risk statements.
         check_result = ReviewSet(full_sql=sql)
         line = 1
         critical_ddl_regex = self.config.get("critical_ddl_regex", "")
         p = re.compile(critical_ddl_regex)
-        check_result.syntax_type = 2  # TODO 工单类型 0、其他 1、DDL，2、DML
+        check_result.syntax_type = 2  # TODO Workflow type: 0 others, 1 DDL, 2 DML
 
         for statement in sql_list:
             statement = statement.rstrip(";")
-            # 禁用语句
+            # Disabled statements.
             if re.match(r"^select|^show", statement, re.M | re.IGNORECASE):
                 result = ReviewResult(
                     id=line,
                     errlevel=2,
-                    stagestatus="驳回不支持语句",
-                    errormessage="仅支持DML和DDL语句，查询语句请使用SQL查询功能！",
+                    stagestatus="Rejected unsupported statement",
+                    errormessage=(
+                        "Only DML and DDL statements are supported. "
+                        "Use SQL query feature for SELECT statements."
+                    ),
                     sql=statement,
                 )
-            # 高危语句
+            # High-risk statements.
             elif critical_ddl_regex and p.match(statement.strip().lower()):
                 result = ReviewResult(
                     id=line,
                     errlevel=2,
-                    stagestatus="驳回高危SQL",
-                    errormessage="禁止提交匹配" + critical_ddl_regex + "条件的语句！",
+                    stagestatus="Rejected high-risk SQL",
+                    errormessage=(
+                        "Submitting statements that match "
+                        + critical_ddl_regex
+                        + " is prohibited!"
+                    ),
                     sql=statement,
                 )
-            # alter语句
+            # ALTER statements.
             elif re.match(r"^alter", statement, re.M | re.IGNORECASE):
-                # alter table语句
+                # ALTER TABLE statements.
                 if re.match(
                     r"^alter\s+table\s+(.+?)\s+", statement, re.M | re.IGNORECASE
                 ):
@@ -292,12 +303,15 @@ class ClickHouseEngine(EngineBase):
                             result = ReviewResult(
                                 id=line,
                                 errlevel=2,
-                                stagestatus="驳回不支持SQL",
-                                errormessage="ALTER TABLE仅支持*MergeTree，Merge以及Distributed等引擎表！",
+                                stagestatus="Rejected unsupported SQL",
+                                errormessage=(
+                                    "ALTER TABLE only supports *MergeTree, Merge and "
+                                    "Distributed table engines!"
+                                ),
                                 sql=statement,
                             )
                         else:
-                            # delete与update语句，实际是alter语句的变种
+                            # DELETE/UPDATE are variants of ALTER.
                             if re.match(
                                 r"^alter\s+table\s+(.+?)\s+(delete|update)\s+",
                                 statement,
@@ -307,8 +321,11 @@ class ClickHouseEngine(EngineBase):
                                     result = ReviewResult(
                                         id=line,
                                         errlevel=2,
-                                        stagestatus="驳回不支持SQL",
-                                        errormessage="DELETE与UPDATE仅支持*MergeTree引擎表！",
+                                        stagestatus="Rejected unsupported SQL",
+                                        errormessage=(
+                                            "DELETE and UPDATE only support "
+                                            "*MergeTree table engines!"
+                                        ),
                                         sql=statement,
                                     )
                                 else:
@@ -323,14 +340,14 @@ class ClickHouseEngine(EngineBase):
                         result = ReviewResult(
                             id=line,
                             errlevel=2,
-                            stagestatus="表不存在",
-                            errormessage=f"表 {table_name} 不存在！",
+                            stagestatus="Table not found",
+                            errormessage=f"Table {table_name} does not exist!",
                             sql=statement,
                         )
-                # 其他alter语句
+                # Other ALTER statements.
                 else:
                     result = self.explain_check(check_result, db_name, line, statement)
-            # truncate语句
+            # TRUNCATE statements.
             elif re.match(
                 r"^truncate\s+table\s+(.+?)(\s|$)", statement, re.M | re.IGNORECASE
             ):
@@ -346,8 +363,11 @@ class ClickHouseEngine(EngineBase):
                         result = ReviewResult(
                             id=line,
                             errlevel=2,
-                            stagestatus="驳回不支持SQL",
-                            errormessage="TRUNCATE不支持View,File,URL,Buffer和Null表引擎！",
+                            stagestatus="Rejected unsupported SQL",
+                            errormessage=(
+                                "TRUNCATE does not support View, File, URL, Buffer, "
+                                "or Null table engines!"
+                            ),
                             sql=statement,
                         )
                     else:
@@ -358,11 +378,11 @@ class ClickHouseEngine(EngineBase):
                     result = ReviewResult(
                         id=line,
                         errlevel=2,
-                        stagestatus="表不存在",
-                        errormessage=f"表 {table_name} 不存在！",
+                        stagestatus="Table not found",
+                        errormessage=f"Table {table_name} does not exist!",
                         sql=statement,
                     )
-            # insert语句，explain无法正确判断，暂时只做表存在性检查与简单关键字匹配
+            # INSERT statements: EXPLAIN cannot fully validate them.
             elif re.match(r"^insert", statement, re.M | re.IGNORECASE):
                 if re.match(
                     r"^insert\s+into\s+([a-zA-Z_][0-9a-zA-Z_.]+)([\w\W]*?)(values|format|select)(\s+|\()",
@@ -391,29 +411,29 @@ class ClickHouseEngine(EngineBase):
                         result = ReviewResult(
                             id=line,
                             errlevel=2,
-                            stagestatus="表不存在",
-                            errormessage=f"表 {table_name} 不存在！",
+                            stagestatus="Table not found",
+                            errormessage=f"Table {table_name} does not exist!",
                             sql=statement,
                         )
                 else:
                     result = ReviewResult(
                         id=line,
                         errlevel=2,
-                        stagestatus="驳回不支持SQL",
-                        errormessage="INSERT语法不正确！",
+                        stagestatus="Rejected unsupported SQL",
+                        errormessage="Invalid INSERT syntax!",
                         sql=statement,
                     )
-            # 其他语句使用explain ast简单检查
+            # Other statements use simple EXPLAIN AST check.
             else:
                 result = self.explain_check(check_result, db_name, line, statement)
 
-            # 没有找出DDL语句的才继续执行此判断
+            # Keep checking syntax type if DDL not identified yet.
             if check_result.syntax_type == 2:
                 if get_syntax_type(statement, parser=False, db_type="mysql") == "DDL":
                     check_result.syntax_type = 1
             check_result.rows += [result]
             line += 1
-        # 统计警告和错误数量
+        # Count warnings and errors.
         for r in check_result.rows:
             if r.errlevel == 1:
                 check_result.warning_count += 1
@@ -422,7 +442,7 @@ class ClickHouseEngine(EngineBase):
         return check_result
 
     def execute_workflow(self, workflow):
-        """执行上线单，返回Review set"""
+        """Execute workflow and return a ReviewSet."""
         sql = workflow.sqlworkflowcontent.sql_content
         execute_result = ReviewSet(full_sql=sql)
         sqls = sqlparse.format(sql, strip_comments=True)
@@ -448,28 +468,28 @@ class ClickHouseEngine(EngineBase):
                 )
                 line += 1
             else:
-                # 追加当前报错语句信息到执行结果中
+                # Append current failed statement to execution result.
                 execute_result.error = result.error
                 execute_result.rows.append(
                     ReviewResult(
                         id=line,
                         errlevel=2,
                         stagestatus="Execute Failed",
-                        errormessage=f"异常信息：{result.error}",
+                        errormessage=f"Exception: {result.error}",
                         sql=statement,
                         affected_rows=0,
                         execute_time=0,
                     )
                 )
                 line += 1
-                # 报错语句后面的语句标记为审核通过、未执行，追加到执行结果中
+                # Append remaining statements as skipped due to previous failure.
                 for statement in sql_list[line - 1 :]:
                     execute_result.rows.append(
                         ReviewResult(
                             id=line,
                             errlevel=0,
                             stagestatus="Audit completed",
-                            errormessage=f"前序语句失败, 未执行",
+                            errormessage="Previous statement failed, not executed",
                             sql=statement,
                             affected_rows=0,
                             execute_time=0,
@@ -480,7 +500,7 @@ class ClickHouseEngine(EngineBase):
         return execute_result
 
     def execute(self, db_name=None, sql="", close_conn=True, parameters=None):
-        """原生执行语句"""
+        """Execute raw statement."""
         result = ResultSet(full_sql=sql)
         conn = self.get_connection(db_name=db_name)
         try:
@@ -489,7 +509,9 @@ class ClickHouseEngine(EngineBase):
                 cursor.execute(statement, parameters)
             cursor.close()
         except Exception as e:
-            logger.warning(f"ClickHouse语句执行报错，语句：{sql}，错误信息{e}")
+            logger.warning(
+                f"ClickHouse statement execution failed, sql: {sql}, error: {e}"
+            )
             result.error = str(e).split("Stack trace")[0]
         if close_conn:
             self.close()

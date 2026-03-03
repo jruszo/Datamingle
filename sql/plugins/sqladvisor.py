@@ -28,7 +28,7 @@ class SQLAdvisor(Plugin):
         db_name = args.get("d")
         if not db_name:
             return result
-        # 防止 db_name 注入
+        # Prevent db_name injection.
         db_pattern = r"[a-zA-Z0-9-_]+"
         if not re.match(db_pattern, db_name):
             return {

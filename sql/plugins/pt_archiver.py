@@ -14,7 +14,7 @@ __author__ = "hhyo"
 
 class PtArchiver(Plugin):
     """
-    pt-archiver归档数据
+    Archive data using pt-archiver.
     """
 
     def __init__(self):
@@ -25,7 +25,7 @@ class PtArchiver(Plugin):
 
     def generate_args2cmd(self, args):
         """
-        将请求参数转换为命令行参数
+        Convert request parameters to command-line arguments.
         :return:
         """
         cmd_args = [self.path]

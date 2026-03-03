@@ -19,7 +19,7 @@ logger = logging.getLogger("default")
 
 
 def split_sql(db_name=None, sql=""):
-    """切分语句，追加到检测结果中，默认全部检测通过"""
+    """Split statements and append them to check results as passed by default."""
     sql = sqlparse.format(sql, strip_comments=True)
     sql_result = []
     if db_name:
@@ -87,7 +87,7 @@ class CassandraEngine(EngineBase):
 
     def get_all_databases(self, **kwargs):
         """
-        获取所有的 keyspace/database
+        Get all keyspaces/databases.
         :return:
         """
         result = self.query(sql="SELECT keyspace_name FROM system_schema.keyspaces;")
@@ -95,7 +95,7 @@ class CassandraEngine(EngineBase):
         return result
 
     def get_all_columns_by_tb(self, db_name, tb_name, **kwargs):
-        """获取所有列, 返回一个ResultSet"""
+        """Get all columns and return a ResultSet."""
         sql = "select column_name from columns where keyspace_name=%s and table_name=%s"
         result = self.query(
             db_name="system_schema", sql=sql, parameters=(db_name, tb_name)
@@ -114,27 +114,27 @@ class CassandraEngine(EngineBase):
         return result
 
     def query_check(self, db_name=None, sql="", limit_num: int = 100):
-        """提交查询前的检查"""
-        # 查询语句的检查、注释去除、切分
+        """Run checks before query submission."""
+        # Check query statement, strip comments, and split.
         result = {"msg": "", "bad_query": False, "filtered_sql": sql, "has_star": False}
-        # 删除注释语句，进行语法判断，执行第一条有效sql
+        # Remove comments, validate syntax, and keep the first valid SQL.
         try:
             sql = sqlparse.format(sql, strip_comments=True)
             sql = sqlparse.split(sql)[0]
             result["filtered_sql"] = sql.strip()
         except IndexError:
             result["bad_query"] = True
-            result["msg"] = "没有有效的SQL语句"
+            result["msg"] = "No valid SQL statement found"
         if re.match(r"^select|^describe", sql, re.I) is None:
             result["bad_query"] = True
-            result["msg"] = "不支持的查询语法类型!"
+            result["msg"] = "Unsupported query syntax type!"
         if "*" in sql:
             result["has_star"] = True
-            result["msg"] = "SQL语句中含有 * "
+            result["msg"] = "SQL statement contains * "
         return result
 
     def filter_sql(self, sql="", limit_num=0) -> str:
-        # 对查询sql增加limit限制,limit n 或 limit n,n 或 limit n offset n统一改写成limit n
+        # Enforce query limit; normalize all limit forms to "limit n".
         sql = sql.rstrip(";").strip()
         if re.match(r"^select", sql, re.I):
             # LIMIT N
@@ -158,7 +158,7 @@ class CassandraEngine(EngineBase):
         parameters=None,
         **kwargs,
     ):
-        """返回 ResultSet"""
+        """Return a ResultSet."""
         result_set = ResultSet(full_sql=sql)
         try:
             conn = self.get_connection(db_name=db_name)
@@ -171,7 +171,7 @@ class CassandraEngine(EngineBase):
                 result_set.affected_rows = min(limit_num, result_set.affected_rows)
         except Exception as e:
             logger.warning(
-                f"{self.name} query 错误，语句：{sql}， 错误信息：{traceback.format_exc()}"
+                f"{self.name} query error, statement: {sql}, details: {traceback.format_exc()}"
             )
             result_set.error = str(e)
         if close_conn:
@@ -187,16 +187,16 @@ class CassandraEngine(EngineBase):
         return result
 
     def query_masking(self, db_name=None, sql="", resultset=None):
-        """不做脱敏"""
+        """Do not apply masking."""
         return resultset
 
     def execute_check(self, db_name=None, sql=""):
-        """上线单执行前的检查, 返回Review set"""
+        """Run checks before workflow execution and return a ReviewSet."""
         sql_result = split_sql(db_name, sql)
         return dummy_audit(sql, sql_result)
 
     def execute(self, db_name=None, sql="", close_conn=True, parameters=None):
-        """执行sql语句 返回 Review set"""
+        """Execute SQL statement and return a ReviewSet."""
         execute_result = ReviewSet(full_sql=sql)
         conn = self.get_connection(db_name=db_name)
         sql_result = split_sql(db_name, sql)
@@ -217,7 +217,7 @@ class CassandraEngine(EngineBase):
                 )
             except Exception as e:
                 logger.warning(
-                    f"{self.name} 命令执行报错，语句：{sql}， 错误信息：{traceback.format_exc()}"
+                    f"{self.name} command execution error, statement: {sql}, details: {traceback.format_exc()}"
                 )
                 execute_result.error = str(e)
                 execute_result.rows.append(
@@ -225,7 +225,7 @@ class CassandraEngine(EngineBase):
                         id=rowid,
                         errlevel=2,
                         stagestatus="Execute Failed",
-                        errormessage=f"异常信息：{e}",
+                        errormessage=f"Exception: {e}",
                         sql=statement,
                         affected_rows=0,
                         execute_time=0,
@@ -240,7 +240,7 @@ class CassandraEngine(EngineBase):
                         id=rowid,
                         errlevel=2,
                         stagestatus="Execute Failed",
-                        errormessage="前序语句失败, 未执行",
+                        errormessage="Previous statement failed, not executed",
                         sql=statement,
                         affected_rows=0,
                         execute_time=0,
@@ -252,7 +252,7 @@ class CassandraEngine(EngineBase):
         return execute_result
 
     def execute_workflow(self, workflow: SqlWorkflow):
-        """执行上线单，返回Review set"""
+        """Execute workflow and return a ReviewSet."""
         return self.execute(
             db_name=workflow.db_name, sql=workflow.sqlworkflowcontent.sql_content
         )

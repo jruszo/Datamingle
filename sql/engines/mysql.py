@@ -54,7 +54,7 @@ column_types_map = {
 
 
 class MysqlForkType(Enum):
-    """定义几个支持的版本类型"""
+    """Define supported server fork types."""
 
     MYSQL = "mysql"
     MARIADB = "mariadb"
@@ -106,18 +106,18 @@ class MysqlEngine(EngineBase):
         return self.conn
 
     def escape_string(self, value: str) -> str:
-        """字符串参数转义"""
+        """Escape string parameters."""
         return pymysql.escape_string(value)
 
     @property
     def auto_backup(self):
-        """是否支持备份"""
+        """Whether backup is supported."""
         return True
 
     @property
     def seconds_behind_master(self):
         server_version = self.server_version
-        ##非maria分支且版本号大于8.4，就使用show replica status获取主从延迟
+        # For non-MariaDB and version >= 8.4, use `show replica status`.
         if self.server_fork_type != MysqlForkType.MARIADB and server_version >= (8, 4):
             status_sql = "show replica status"
         else:
@@ -161,7 +161,7 @@ class MysqlEngine(EngineBase):
 
     @property
     def server_fork_type(self):
-        """确认 server 具体是哪种 mysql, mysql, mariadb, 还是 percona"""
+        """Determine server fork type: mysql, mariadb, or percona."""
         server_info = self.server_info
         for i in list(MysqlForkType):
             if i.value in server_info.lower():
@@ -170,7 +170,7 @@ class MysqlEngine(EngineBase):
 
     @property
     def schema_object(self):
-        """获取实例对象信息"""
+        """Get schema object for current instance."""
         url = build_database_url(
             host=self.host, username=self.user, password=self.password, port=self.port
         )
@@ -179,10 +179,10 @@ class MysqlEngine(EngineBase):
         )
 
     def kill_connection(self, thread_id):
-        """终止数据库连接"""
+        """Terminate database connection."""
         self.query(sql=f"kill {thread_id}")
 
-    # 禁止查询的数据库
+    # Databases forbidden for querying.
     forbidden_databases = [
         "information_schema",
         "performance_schema",
@@ -192,7 +192,7 @@ class MysqlEngine(EngineBase):
     ]
 
     def get_all_databases(self):
-        """获取数据库列表, 返回一个ResultSet"""
+        """Get database list, return a ResultSet."""
         sql = "show databases"
         result = self.query(sql=sql)
         db_list = [
@@ -204,7 +204,7 @@ class MysqlEngine(EngineBase):
     forbidden_tables = ["test"]
 
     def get_all_tables(self, db_name, **kwargs):
-        """获取table 列表, 返回一个ResultSet"""
+        """Get table list, return a ResultSet."""
         sql = "show tables"
         result = self.query(db_name=db_name, sql=sql)
         tb_list = [row[0] for row in result.rows if row[0] not in self.forbidden_tables]
@@ -228,7 +228,9 @@ class MysqlEngine(EngineBase):
         return data
 
     def get_table_meta_data(self, db_name, tb_name, **kwargs):
-        """数据字典页面使用：获取表格的元信息，返回一个dict{column_list: [], rows: []}"""
+        """Get table meta for data dictionary page.
+        Returns dict: {"column_list": [], "rows": []}.
+        """
         sql = f"""SELECT
                         TABLE_NAME as table_name,
                         ENGINE as engine,
@@ -257,16 +259,16 @@ class MysqlEngine(EngineBase):
         return {"column_list": _meta_data.column_list, "rows": _meta_data.rows[0]}
 
     def get_table_desc_data(self, db_name, tb_name, **kwargs):
-        """获取表格字段信息"""
+        """Get table column metadata."""
         sql = f"""SELECT 
-                        COLUMN_NAME as '列名',
-                        COLUMN_TYPE as '列类型',
-                        CHARACTER_SET_NAME as '列字符集',
-                        IS_NULLABLE as '是否为空',
-                        COLUMN_KEY as '索引列',
-                        COLUMN_DEFAULT as '默认值',
-                        EXTRA as '拓展信息',
-                        COLUMN_COMMENT as '列说明'
+                        COLUMN_NAME as 'Column Name',
+                        COLUMN_TYPE as 'Column Type',
+                        CHARACTER_SET_NAME as 'Character Set',
+                        IS_NULLABLE as 'Nullable',
+                        COLUMN_KEY as 'Index Column',
+                        COLUMN_DEFAULT as 'Default Value',
+                        EXTRA as 'Extra',
+                        COLUMN_COMMENT as 'Comment'
                     FROM
                         information_schema.COLUMNS
                     WHERE
@@ -279,16 +281,16 @@ class MysqlEngine(EngineBase):
         return {"column_list": _desc_data.column_list, "rows": _desc_data.rows}
 
     def get_table_index_data(self, db_name, tb_name, **kwargs):
-        """获取表格索引信息"""
+        """Get table index metadata."""
         sql = f"""SELECT
-                        COLUMN_NAME as '列名',
-                        INDEX_NAME as '索引名',
-                        NON_UNIQUE as '唯一性',
-                        SEQ_IN_INDEX as '列序列',
-                        CARDINALITY as '基数',
-                        NULLABLE as '是否为空',
-                        INDEX_TYPE as '索引类型',
-                        COMMENT as '备注'
+                        COLUMN_NAME as 'Column Name',
+                        INDEX_NAME as 'Index Name',
+                        NON_UNIQUE as 'Non Unique',
+                        SEQ_IN_INDEX as 'Sequence In Index',
+                        CARDINALITY as 'Cardinality',
+                        NULLABLE as 'Nullable',
+                        INDEX_TYPE as 'Index Type',
+                        COMMENT as 'Comment'
                     FROM
                         information_schema.STATISTICS
                     WHERE
@@ -300,7 +302,7 @@ class MysqlEngine(EngineBase):
         return {"column_list": _index_data.column_list, "rows": _index_data.rows}
 
     def get_tables_metas_data(self, db_name, **kwargs):
-        """获取数据库所有表格信息，用作数据字典导出接口"""
+        """Get all table metadata in a DB for dictionary export."""
         sql_tbs = f"SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=%(db_name)s ORDER BY TABLE_SCHEMA,TABLE_NAME;"
         tbs = self.query(
             sql=sql_tbs,
@@ -312,13 +314,13 @@ class MysqlEngine(EngineBase):
         for tb in tbs:
             _meta = dict()
             engine_keys = [
-                {"key": "COLUMN_NAME", "value": "字段名"},
-                {"key": "COLUMN_TYPE", "value": "数据类型"},
-                {"key": "COLUMN_DEFAULT", "value": "默认值"},
-                {"key": "IS_NULLABLE", "value": "允许非空"},
-                {"key": "EXTRA", "value": "自动递增"},
-                {"key": "COLUMN_KEY", "value": "是否主键"},
-                {"key": "COLUMN_COMMENT", "value": "备注"},
+                {"key": "COLUMN_NAME", "value": "Column Name"},
+                {"key": "COLUMN_TYPE", "value": "Data Type"},
+                {"key": "COLUMN_DEFAULT", "value": "Default Value"},
+                {"key": "IS_NULLABLE", "value": "Nullable"},
+                {"key": "EXTRA", "value": "Auto Increment"},
+                {"key": "COLUMN_KEY", "value": "Primary Key"},
+                {"key": "COLUMN_COMMENT", "value": "Comment"},
             ]
             _meta["ENGINE_KEYS"] = engine_keys
             _meta["TABLE_INFO"] = tb
@@ -344,15 +346,15 @@ class MysqlEngine(EngineBase):
         ).rows
 
     def get_all_databases_summary(self):
-        """实例数据库管理功能，获取实例所有的数据库描述信息"""
-        # 获取所有数据库
+        """Instance DB management: get summary for all databases."""
+        # Get all databases.
         sql_get_db = """SELECT SCHEMA_NAME,DEFAULT_CHARACTER_SET_NAME,DEFAULT_COLLATION_NAME 
         FROM information_schema.SCHEMATA
         WHERE SCHEMA_NAME NOT IN ('information_schema', 'performance_schema', 'mysql', 'test', 'sys');"""
         query_result = self.query("information_schema", sql_get_db, close_conn=False)
         if not query_result.error:
             dbs = query_result.rows
-            # 获取数据库关联用户信息
+            # Get users bound to each database.
             rows = []
             for db in dbs:
                 bind_users = self.get_bind_users(db_name=db[0])
@@ -368,11 +370,11 @@ class MysqlEngine(EngineBase):
         return query_result
 
     def get_instance_users_summary(self):
-        """实例账号管理功能，获取实例所有账号信息"""
+        """Instance account management: get summary for all users."""
         server_version = self.server_version
         sql_get_user_with_account_locked = "select concat('`', user, '`', '@', '`', host,'`') as query,user,host,account_locked from mysql.user;"
         sql_get_user_without_account_locked = "select concat('`', user, '`', '@', '`', host,'`') as query,user,host from mysql.user;"
-        # MySQL 5.7.6版本, mariadb 10.4.2  起支持ACCOUNT LOCK
+        # MySQL >= 5.7.6 and MariaDB >= 10.4.2 support ACCOUNT LOCK.
         if (
             self.server_fork_type == MysqlForkType.MYSQL and server_version >= (5, 7, 6)
         ) or (
@@ -386,11 +388,11 @@ class MysqlEngine(EngineBase):
             sql_get_user = sql_get_user_without_account_locked
         query_result = self.query("mysql", sql_get_user)
         if query_result.error and sql_get_user == sql_get_user_with_account_locked:
-            # 查询出错了, fallback 到不带 lock 信息的 sql
+            # Query failed, fallback to SQL without lock info.
             query_result = self.query("mysql", sql_get_user_without_account_locked)
         if not query_result.error:
             db_users = query_result.rows
-            # 获取用户权限信息
+            # Get user privilege info.
             rows = []
             for db_user in db_users:
                 user_host = db_user[0]
@@ -414,13 +416,13 @@ class MysqlEngine(EngineBase):
         return query_result
 
     def create_instance_user(self, **kwargs):
-        """实例账号管理功能，创建实例账号"""
+        """Instance account management: create account."""
         # escape
         user = self.escape_string(kwargs.get("user", ""))
         host = self.escape_string(kwargs.get("host", ""))
         password1 = self.escape_string(kwargs.get("password1", ""))
         remark = kwargs.get("remark", "")
-        # 在一个事务内执行
+        # Execute within one transaction.
         hosts = host.split("|")
         create_user_cmd = ""
         accounts = []
@@ -442,13 +444,13 @@ class MysqlEngine(EngineBase):
         return exec_result
 
     def drop_instance_user(self, user_host: str, **kwarg):
-        """实例账号管理功能，删除实例账号"""
+        """Instance account management: drop account."""
         # escape
         user_host = self.escape_string(user_host)
         return self.execute(db_name="mysql", sql=f"DROP USER {user_host};")
 
     def reset_instance_user_pwd(self, user_host: str, reset_pwd: str, **kwargs):
-        """实例账号管理功能，重置实例账号密码"""
+        """Instance account management: reset account password."""
         # escape
         user_host = self.escape_string(user_host)
         reset_pwd = self.escape_string(reset_pwd)
@@ -457,7 +459,7 @@ class MysqlEngine(EngineBase):
         )
 
     def get_all_columns_by_tb(self, db_name, tb_name, **kwargs):
-        """获取所有字段, 返回一个ResultSet"""
+        """Get all columns, return a ResultSet."""
         db_name = self.escape_string(db_name)
         tb_name = self.escape_string(tb_name)
         sql = f"""SELECT
@@ -484,7 +486,7 @@ class MysqlEngine(EngineBase):
         return result
 
     def describe_table(self, db_name, tb_name, **kwargs):
-        """return ResultSet 类似查询"""
+        """Return ResultSet for `show create table`."""
         tb_name = self.escape_string(tb_name)
         sql = f"show create table `{tb_name}`;"
         result = self.query(db_name=db_name, sql=sql)
@@ -492,7 +494,7 @@ class MysqlEngine(EngineBase):
 
     @staticmethod
     def result_set_binary_as_hex(result_set):
-        """处理ResultSet，将binary处理成hex"""
+        """Convert binary columns in ResultSet rows to hex strings."""
         new_rows, hex_column_index = [], []
         for idx, _type in enumerate(result_set.column_type):
             if _type in ["TINY_BLOB", "MEDIUM_BLOB", "LONG_BLOB", "BLOB"]:
@@ -515,7 +517,7 @@ class MysqlEngine(EngineBase):
         parameters=None,
         **kwargs,
     ):
-        """返回 ResultSet"""
+        """Return a ResultSet."""
         result_set = ResultSet(full_sql=sql)
         max_execution_time = kwargs.get("max_execution_time", 0)
         cursorclass = kwargs.get("cursorclass") or MySQLdb.cursors.Cursor
@@ -544,7 +546,8 @@ class MysqlEngine(EngineBase):
                 result_set = self.result_set_binary_as_hex(result_set)
         except Exception as e:
             logger.warning(
-                f"{self.name}语句执行报错，语句：{sql}，错误信息{traceback.format_exc()}"
+                f"{self.name} statement execution failed, SQL: {sql}, "
+                f"error: {traceback.format_exc()}"
             )
             result_set.error = str(e)
         finally:
@@ -553,29 +556,29 @@ class MysqlEngine(EngineBase):
         return result_set
 
     def query_check(self, db_name=None, sql=""):
-        # 查询语句的检查、注释去除、切分
+        # Query checks: strip comments and split statements.
         result = {"msg": "", "bad_query": False, "filtered_sql": sql, "has_star": False}
-        # 删除注释语句，进行语法判断，执行第一条有效sql
+        # Remove comments, validate syntax, and keep the first valid SQL.
         try:
             sql = sqlparse.format(sql, strip_comments=True)
             sql = sqlparse.split(sql)[0]
             result["filtered_sql"] = sql.strip()
         except IndexError:
             result["bad_query"] = True
-            result["msg"] = "没有有效的SQL语句"
+            result["msg"] = "No valid SQL statement"
         if re.match(r"^select|^show|^explain", sql, re.I) is None:
             result["bad_query"] = True
-            result["msg"] = "不支持的查询语法类型!"
+            result["msg"] = "Unsupported query syntax type!"
         if "*" in sql:
             result["has_star"] = True
-            result["msg"] = "SQL语句中含有 * "
-        # select语句先使用Explain判断语法是否正确
+            result["msg"] = "SQL contains * "
+        # For SELECT, run EXPLAIN first to validate syntax.
         if re.match(r"^select", sql, re.I):
             explain_result = self.query(db_name=db_name, sql=f"explain {sql}")
             if explain_result.error:
                 result["bad_query"] = True
                 result["msg"] = explain_result.error
-        # 不应该查看mysql.user表
+        # Access to mysql.user should not be allowed.
         if re.match(
             ".*(\\s)+(mysql|`mysql`)(\\s)*\\.(\\s)*(user|`user`)((\\s)*|;).*",
             sql.lower().replace("\n", ""),
@@ -586,12 +589,12 @@ class MysqlEngine(EngineBase):
             )
         ):
             result["bad_query"] = True
-            result["msg"] = "您无权查看该表"
+            result["msg"] = "You do not have permission to view this table"
 
         return result
 
     def filter_sql(self, sql="", limit_num=0):
-        # 对查询sql增加limit限制,limit n 或 limit n,n 或 limit n offset n统一改写成limit n
+        # Enforce limit for query SQL; normalize limit styles.
         sql = sql.rstrip(";").strip()
         if re.match(r"^select", sql, re.I):
             # LIMIT N
@@ -621,9 +624,8 @@ class MysqlEngine(EngineBase):
         return sql
 
     def query_masking(self, db_name=None, sql="", resultset=None):
-        """传入 sql语句, db名, 结果集,
-        返回一个脱敏后的结果集"""
-        # 仅对select语句脱敏
+        """Given SQL, DB name, and result set, return masked result set."""
+        # Only mask SELECT statements.
         if re.match(r"^select", sql, re.I):
             mask_result = data_masking(self.instance, db_name, sql, resultset)
         else:
@@ -631,66 +633,78 @@ class MysqlEngine(EngineBase):
         return mask_result
 
     def execute_check(self, db_name=None, sql=""):
-        """上线单执行前的检查, 返回Review set"""
-        # 进行Inception检查，获取检测结果
+        """Pre-check before workflow execution, return ReviewSet."""
+        # Run Inception check and get result.
         try:
             check_result = self.inc_engine.execute_check(
                 instance=self.instance, db_name=db_name, sql=sql
             )
         except Exception as e:
             logger.debug(
-                f"{self.inc_engine.name}检测语句报错：错误信息{traceback.format_exc()}"
+                f"{self.inc_engine.name} check failed, "
+                f"error: {traceback.format_exc()}"
             )
             raise RuntimeError(
-                f"{self.inc_engine.name}检测语句报错，请注意检查系统配置中{self.inc_engine.name}配置，错误信息：\n{e}"
+                f"{self.inc_engine.name} check failed, please verify "
+                f"{self.inc_engine.name} settings in system config, "
+                f"error:\n{e}"
             )
 
-        # 判断Inception检测结果
+        # Check Inception result.
         if check_result.error:
             logger.debug(
-                f"{self.inc_engine.name}检测语句报错：错误信息{check_result.error}"
+                f"{self.inc_engine.name} check failed, error: {check_result.error}"
             )
             raise RuntimeError(
-                f"{self.inc_engine.name}检测语句报错，错误信息：\n{check_result.error}"
+                f"{self.inc_engine.name} check failed, error:\n{check_result.error}"
             )
 
-        # 禁用/高危语句检查
+        # Unsupported/high-risk statement checks.
         critical_ddl_regex = self.config.get("critical_ddl_regex", "")
         ddl_dml_separation = self.config.get("ddl_dml_separation", False)
         p = re.compile(critical_ddl_regex)
-        # 获取语句类型：DDL或者DML
+        # Get statement type: DDL or DML.
         ddl_dml_flag = ""
         for row in check_result.rows:
             statement = row.sql
-            # 去除注释
+            # Remove comments.
             statement = remove_comments(statement, db_type="mysql")
-            # 获取提交类型
+            # Get syntax type.
             syntax_type = get_syntax_type(statement, parser=False, db_type="mysql")
-            # 禁用语句
+            # Unsupported statements.
             if re.match(r"^select", statement.lower()):
                 check_result.error_count += 1
-                row.stagestatus = "驳回不支持语句"
+                row.stagestatus = "Rejected unsupported statement"
                 row.errlevel = 2
-                row.errormessage = "仅支持DML和DDL语句，查询语句请使用SQL查询功能！"
-            # 高危语句
+                row.errormessage = (
+                    "Only DML and DDL statements are supported. "
+                    "Use SQL query feature for SELECT statements!"
+                )
+            # High-risk statements.
             elif critical_ddl_regex and p.match(statement.strip().lower()):
                 check_result.error_count += 1
-                row.stagestatus = "驳回高危SQL"
+                row.stagestatus = "Rejected high-risk SQL"
                 row.errlevel = 2
-                row.errormessage = "禁止提交匹配" + critical_ddl_regex + "条件的语句！"
+                row.errormessage = (
+                    "Submitting statements matching "
+                    + critical_ddl_regex
+                    + " is prohibited!"
+                )
             elif ddl_dml_separation and syntax_type in ("DDL", "DML"):
                 if ddl_dml_flag == "":
                     ddl_dml_flag = syntax_type
                 elif ddl_dml_flag != syntax_type:
                     check_result.error_count += 1
-                    row.stagestatus = "驳回不支持语句"
+                    row.stagestatus = "Rejected unsupported statement"
                     row.errlevel = 2
-                    row.errormessage = "DDL语句和DML语句不能同时执行！"
+                    row.errormessage = (
+                        "DDL and DML statements cannot be executed together!"
+                    )
         return check_result
 
     def execute_workflow(self, workflow):
-        """执行上线单，返回Review set"""
-        # 判断实例是否只读
+        """Execute workflow, return ReviewSet."""
+        # Check whether instance is read-only.
         read_only = self.query(sql="SELECT @@global.read_only;").rows[0][0]
         if read_only in (1, "ON"):
             result = ReviewSet(
@@ -700,21 +714,26 @@ class MysqlEngine(EngineBase):
                         id=1,
                         errlevel=2,
                         stagestatus="Execute Failed",
-                        errormessage="实例read_only=1，禁止执行变更语句!",
+                        errormessage=(
+                            "Instance read_only=1, executing change statements "
+                            "is forbidden!"
+                        ),
                         sql=workflow.sqlworkflowcontent.sql_content,
                     )
                 ],
             )
-            result.error = ("实例read_only=1，禁止执行变更语句!",)
+            result.error = (
+                "Instance read_only=1, executing change statements is forbidden!",
+            )
             return result
-        # TODO 原生执行
+        # TODO native execution
         # if workflow.is_manual == 1:
         #     return self.execute(db_name=workflow.db_name, sql=workflow.sqlworkflowcontent.sql_content)
-        # inception执行
+        # inception execution
         return self.inc_engine.execute(workflow)
 
     def execute(self, db_name=None, sql="", close_conn=True, parameters=None):
-        """原生执行语句"""
+        """Execute statements natively."""
         result = ResultSet(full_sql=sql)
         conn = self.get_connection(db_name=db_name)
         try:
@@ -725,7 +744,8 @@ class MysqlEngine(EngineBase):
             cursor.close()
         except Exception as e:
             logger.warning(
-                f"{self.name}语句执行报错，语句：{sql}，错误信息{traceback.format_exc()}"
+                f"{self.name} statement execution failed, SQL: {sql}, "
+                f"error: {traceback.format_exc()}"
             )
             result.error = str(e)
         if close_conn:
@@ -733,12 +753,12 @@ class MysqlEngine(EngineBase):
         return result
 
     def get_rollback(self, workflow):
-        """通过inception获取回滚语句列表"""
+        """Get rollback SQL list via inception."""
         inception_engine = GoInceptionEngine()
         return inception_engine.get_rollback(workflow)
 
     def get_variables(self, variables=None):
-        """获取实例参数"""
+        """Get instance variables."""
         if variables:
             variables = (
                 "','".join(variables)
@@ -756,13 +776,13 @@ class MysqlEngine(EngineBase):
         return self.query(sql=sql)
 
     def set_variable(self, variable_name, variable_value):
-        """修改实例参数值"""
+        """Set instance variable value."""
         sql = f"""set global {variable_name}={variable_value};"""
         return self.query(sql=sql)
 
     def osc_control(self, **kwargs):
-        """控制osc执行，获取进度、终止、暂停、恢复等
-        get、kill、pause、resume
+        """Control OSC execution: get progress, kill, pause, resume.
+        get, kill, pause, resume
         """
         return self.inc_engine.osc_control(**kwargs)
 
@@ -772,7 +792,7 @@ class MysqlEngine(EngineBase):
         base_sql="select id, user, host, db, command, time, state, ifnull(info,'') as info from information_schema.processlist",
         **kwargs,
     ):
-        """获取连接信息"""
+        """Get process/connection info."""
         # escape
         command_type = self.escape_string(command_type)
         if not command_type:
@@ -787,8 +807,8 @@ class MysqlEngine(EngineBase):
         return self.query("information_schema", sql)
 
     def get_kill_command(self, thread_ids, thread_ids_check=True):
-        """由传入的线程列表生成kill命令"""
-        # 校验传参
+        """Generate kill command from thread ID list."""
+        # Validate input.
         if thread_ids_check:
             if [i for i in thread_ids if not isinstance(i, int)]:
                 return None
@@ -803,8 +823,8 @@ class MysqlEngine(EngineBase):
         return kill_sql
 
     def kill(self, thread_ids, thread_ids_check=True):
-        """kill线程"""
-        # 校验传参
+        """Kill threads."""
+        # Validate input.
         if thread_ids_check:
             if [i for i in thread_ids if not isinstance(i, int)]:
                 return ResultSet(full_sql="")
@@ -818,7 +838,7 @@ class MysqlEngine(EngineBase):
         return self.execute("information_schema", kill_sql)
 
     def tablespace(self, offset=0, row_count=14):
-        """获取表空间信息"""
+        """Get tablespace information."""
         sql = """
         SELECT
           table_schema AS table_schema,
@@ -837,7 +857,7 @@ class MysqlEngine(EngineBase):
         return self.query("information_schema", sql)
 
     def tablespace_count(self):
-        """获取表空间数量"""
+        """Get tablespace count."""
         sql = """
         SELECT count(*)
         FROM information_schema.tables 
@@ -845,27 +865,27 @@ class MysqlEngine(EngineBase):
         return self.query("information_schema", sql)
 
     def trxandlocks(self):
-        """获取锁等待信息"""
+        """Get lock wait information."""
         server_version = self.server_version
         if server_version < (8, 0, 1):
             sql = """
                 SELECT
-                rtrx.`trx_state`                                                        AS "等待的状态",
-                rtrx.`trx_started`                                                      AS "等待事务开始时间",
-                rtrx.`trx_wait_started`                                                 AS "等待事务等待开始时间",
-                lw.`requesting_trx_id`                                                  AS "等待事务ID",
-                rtrx.trx_mysql_thread_id                                                AS "等待事务线程ID",
-                rtrx.`trx_query`                                                        AS "等待事务的sql",
-                CONCAT(rl.`lock_mode`, '-', rl.`lock_table`, '(', rl.`lock_index`, ')') AS "等待的表信息",
-                rl.`lock_id`                                                            AS "等待的锁id",
-                lw.`blocking_trx_id`                                                    AS "运行的事务id",
-                trx.trx_mysql_thread_id                                                 AS "运行的事务线程id",
-                CONCAT(l.`lock_mode`, '-', l.`lock_table`, '(', l.`lock_index`, ')')    AS "运行的表信息",
-                l.lock_id                                                               AS "运行的锁id",
-                trx.`trx_state`                                                         AS "运行事务的状态",
-                trx.`trx_started`                                                       AS "运行事务的时间",
-                trx.`trx_wait_started`                                                  AS "运行事务的等待开始时间",
-                trx.`trx_query`                                                         AS "运行事务的sql"
+                rtrx.`trx_state`                                                        AS "Waiting State",
+                rtrx.`trx_started`                                                      AS "Waiting Transaction Start Time",
+                rtrx.`trx_wait_started`                                                 AS "Waiting Transaction Wait Start Time",
+                lw.`requesting_trx_id`                                                  AS "Waiting Transaction ID",
+                rtrx.trx_mysql_thread_id                                                AS "Waiting Thread ID",
+                rtrx.`trx_query`                                                        AS "Waiting Transaction SQL",
+                CONCAT(rl.`lock_mode`, '-', rl.`lock_table`, '(', rl.`lock_index`, ')') AS "Waiting Table Info",
+                rl.`lock_id`                                                            AS "Waiting Lock ID",
+                lw.`blocking_trx_id`                                                    AS "Blocking Transaction ID",
+                trx.trx_mysql_thread_id                                                 AS "Blocking Thread ID",
+                CONCAT(l.`lock_mode`, '-', l.`lock_table`, '(', l.`lock_index`, ')')    AS "Blocking Table Info",
+                l.lock_id                                                               AS "Blocking Lock ID",
+                trx.`trx_state`                                                         AS "Blocking Transaction State",
+                trx.`trx_started`                                                       AS "Blocking Transaction Start Time",
+                trx.`trx_wait_started`                                                  AS "Blocking Transaction Wait Start Time",
+                trx.`trx_query`                                                         AS "Blocking Transaction SQL"
                 FROM information_schema.`INNODB_LOCKS` rl
                 , information_schema.`INNODB_LOCKS` l
                 , information_schema.`INNODB_LOCK_WAITS` lw
@@ -879,22 +899,22 @@ class MysqlEngine(EngineBase):
         else:
             sql = """
                 SELECT
-                rtrx.`trx_state`                                                           AS "等待的状态",
-                rtrx.`trx_started`                                                         AS "等待事务开始时间",
-                rtrx.`trx_wait_started`                                                    AS "等待事务等待开始时间",
-                lw.`REQUESTING_ENGINE_TRANSACTION_ID`                                      AS "等待事务ID",
-                rtrx.trx_mysql_thread_id                                                   AS "等待事务线程ID",
-                rtrx.`trx_query`                                                           AS "等待事务的sql",
-                CONCAT(rl.`lock_mode`, '-', rl.`OBJECT_SCHEMA`, '(', rl.`INDEX_NAME`, ')') AS "等待的表信息",
-                rl.`ENGINE_LOCK_ID`                                                        AS "等待的锁id",
-                lw.`BLOCKING_ENGINE_TRANSACTION_ID`                                        AS "运行的事务id",
-                trx.trx_mysql_thread_id                                                    AS "运行的事务线程id",
-                CONCAT(l.`lock_mode`, '-', l.`OBJECT_SCHEMA`, '(', l.`INDEX_NAME`, ')')    AS "运行的表信息",
-                l.ENGINE_LOCK_ID                                                           AS "运行的锁id",
-                trx.`trx_state`                                                            AS "运行事务的状态",
-                trx.`trx_started`                                                          AS "运行事务的时间",
-                trx.`trx_wait_started`                                                     AS "运行事务的等待开始时间",
-                trx.`trx_query`                                                            AS "运行事务的sql"
+                rtrx.`trx_state`                                                           AS "Waiting State",
+                rtrx.`trx_started`                                                         AS "Waiting Transaction Start Time",
+                rtrx.`trx_wait_started`                                                    AS "Waiting Transaction Wait Start Time",
+                lw.`REQUESTING_ENGINE_TRANSACTION_ID`                                      AS "Waiting Transaction ID",
+                rtrx.trx_mysql_thread_id                                                   AS "Waiting Thread ID",
+                rtrx.`trx_query`                                                           AS "Waiting Transaction SQL",
+                CONCAT(rl.`lock_mode`, '-', rl.`OBJECT_SCHEMA`, '(', rl.`INDEX_NAME`, ')') AS "Waiting Table Info",
+                rl.`ENGINE_LOCK_ID`                                                        AS "Waiting Lock ID",
+                lw.`BLOCKING_ENGINE_TRANSACTION_ID`                                        AS "Blocking Transaction ID",
+                trx.trx_mysql_thread_id                                                    AS "Blocking Thread ID",
+                CONCAT(l.`lock_mode`, '-', l.`OBJECT_SCHEMA`, '(', l.`INDEX_NAME`, ')')    AS "Blocking Table Info",
+                l.ENGINE_LOCK_ID                                                           AS "Blocking Lock ID",
+                trx.`trx_state`                                                            AS "Blocking Transaction State",
+                trx.`trx_started`                                                          AS "Blocking Transaction Start Time",
+                trx.`trx_wait_started`                                                     AS "Blocking Transaction Wait Start Time",
+                trx.`trx_query`                                                            AS "Blocking Transaction SQL"
                 FROM performance_schema.`data_locks` rl
                 , performance_schema.`data_locks` l
                 , performance_schema.`data_lock_waits` lw
@@ -908,7 +928,7 @@ class MysqlEngine(EngineBase):
         return self.query("information_schema", sql)
 
     def get_long_transaction(self, thread_time=3):
-        """获取长事务"""
+        """Get long-running transactions."""
         sql = """select trx.trx_started,
         trx.trx_state,
         trx.trx_operation_state,

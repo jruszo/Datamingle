@@ -1,6 +1,6 @@
 -- sql_instance_tag
 INSERT INTO sql_instance_tag (id, tag_code, tag_name, active, create_time)
-VALUES (1, 'can_write', '支持上线', 1, now()),(2, 'can_read', '支持查询', 1, now());
+VALUES (1, 'can_write', 'Supports release', 1, now()),(2, 'can_read', 'Supports query', 1, now());
 
 -- auth_group
 INSERT INTO auth_group (id, name)

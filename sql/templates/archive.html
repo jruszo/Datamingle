@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
 {% block content %}
-    <!-- 自定义操作按钮-->
+    <!-- Custom action buttons -->
     <div style="position: relative">
         <div id="toolbar" class="form-inline pull-left" style="position: absolute;top: 10px">
             <div class="form-group">
                 <select id="filter_instance_id" class="form-control selectpicker"
                         data-live-search="true">
-                    <option value="" selected="selected">全部实例</option>
+                    <option value="" selected="selected">All Instances</option>
                     {% for ins in ins_list %}
                         <option value="{{ ins.id }}">{{ ins.instance_name }}</option>
                     {% endfor %}
@@ -15,16 +15,16 @@
             </div>
             <div class="form-group">
                 <select id="state" class="form-control selectpicker">
-                    <option value="" selected="selected">启用状态</option>
-                    <option value="true">启用</option>
-                    <option value="false">未启用</option>
+                    <option value="" selected="selected">Enabled Status</option>
+                    <option value="true">Enabled</option>
+                    <option value="false">Disabled</option>
                 </select>
             </div>
             <div class="form-group">
                 <button id="btn_add" type="button" class="btn btn-default"
                         data-toggle="modal" data-target="#apply">
                     <span class="glyphicon glyphicon-plus" aria-hidden="true"></span>
-                    <span aria-hidden="true"></span>申请归档
+                    <span aria-hidden="true"></span>Apply for Archive
                 </button>
             </div>
             {% if perms.sql.archive_mgt %}
@@ -32,36 +32,36 @@
                     <button id="btn_add_config" type="button" class="btn btn-info"
                             onclick="window.open('/admin/sql/archiveconfig/add/')">
                         <span class="glyphicon glyphicon-arrow-up" aria-hidden="true"></span>
-                        <span aria-hidden="true"></span>添加配置
+                        <span aria-hidden="true"></span>Add Config
                     </button>
                 </div>
             {% endif %}
         </div>
     </div>
-    <!-- 申请列表的表格-->
+    <!-- Application list table -->
     <div class="table-responsive">
         <table id="archive-list" data-toggle="table" class="table table-striped table-hover"
                style="table-layout:inherit;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
         </table>
     </div>
-    <!-- 申请权限的模态框-->
+    <!-- Archive request modal -->
     <div class="modal fade" id="apply" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
         <div class="modal-dialog" role="document">
             <div class="modal-content">
                 <div class="modal-header">
                     <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span
                             aria-hidden="true">&times;</span></button>
-                    <h4 class="modal-title" id="myModalLabel">申请数据归档</h4>
+                    <h4 class="modal-title" id="myModalLabel">Apply for Data Archive</h4>
                 </div>
                 <div class="modal-body">
                     <div class="form-group">
                         <input type="text" autocomplete="off" class="form-control" id="title"
-                               placeholder="对归档进行简单描述">
+                               placeholder="Brief description for this archive task">
                     </div>
                     <div class="form-group">
                         <select id="group_name" name="group_name"
                                 class="selectpicker show-tick form-control bs-select-hidden"
-                                title="请选择组:"
+                                title="Please select group:"
                                 data-live-search="true" required>
                             {% for group in group_list %}
                                 <option value="{{ group.group_name }}">{{ group.group_name }}</option>
@@ -71,46 +71,46 @@
                     <div class="form-group">
                         <select id="src_instance_name" name="src_instance_name"
                                 class="selectpicker show-tick form-control bs-select-hidden" data-live-search="true"
-                                title="请选择源实例:"
-                                data-placeholder="请选择实例:" required>
+                                title="Please select source instance:"
+                                data-placeholder="Please select instance:" required>
                         </select>
                     </div>
                     <div class="form-group">
                         <select id="src_db_name" name="src_db_name"
                                 class="form-control selectpicker show-tick bs-select-hidden"
-                                title="请选择源数据库:"
-                                data-live-search="true" data-placeholder="请选择数据库:" required>
+                                title="Please select source database:"
+                                data-live-search="true" data-placeholder="Please select database:" required>
                         </select>
                     </div>
                     <div class="form-group">
                         <select id="src_table_name" name="src_table_name"
                                 class="form-control selectpicker show-tick bs-select-hidden"
                                 data-live-search="true"
-                                data-name="请选择需要归档的表:"
-                                title="请选择需要归档的表:"
-                                data-placeholder="请选择需要归档的表:" required>
+                                data-name="Please select source table to archive:"
+                                title="Please select source table to archive:"
+                                data-placeholder="Please select source table to archive:" required>
                         </select>
                     </div>
                     <div class="form-group">
                         <select id="mode" name="mode"
                                 class="form-control selectpicker show-tick bs-select-hidden"
-                                data-name="请选择归档模式:"
-                                title="请选择归档模式:"
-                                data-placeholder="请选择归档模式:" required>
-                            <option value='file'>归档到文件</option>
-                            <option value='dest'>归档到其他实例</option>
-                            <option value='purge'>直接删除</option>
+                                data-name="Please select archive mode:"
+                                title="Please select archive mode:"
+                                data-placeholder="Please select archive mode:" required>
+                            <option value='file'>Archive to file</option>
+                            <option value='dest'>Archive to another instance</option>
+                            <option value='purge'>Delete directly</option>
                         </select>
                     </div>
                     <div class="form-group" id="no_delete-div" style="display: none">
                         <div class="form-group">
                             <select id="no_delete" name="no_delete"
                                     class="selectpicker show-tick form-control bs-select-hidden"
-                                    title="归档后是否保留源数据:"
-                                    data-placeholder="归档后是否保留源数据:" required>
-                                <option value='' disabled>归档后是否保留源数据</option>
-                                <option value='true' selected>保留</option>
-                                <option value='false'>删除</option>
+                                    title="Keep source data after archiving?"
+                                    data-placeholder="Keep source data after archiving?" required>
+                                <option value='' disabled>Keep source data after archiving?</option>
+                                <option value='true' selected>Keep</option>
+                                <option value='false'>Delete</option>
                             </select>
                         </div>
                     </div>
@@ -118,56 +118,56 @@
                         <div class="form-group">
                             <select id="dest_instance_name" name="dest_instance_name"
                                     class="selectpicker show-tick form-control bs-select-hidden" data-live-search="true"
-                                    title="请选择目标实例:"
-                                    data-placeholder="请选择目标实例:" required>
+                                    title="Please select destination instance:"
+                                    data-placeholder="Please select destination instance:" required>
                             </select>
                         </div>
                         <div class="form-group">
                             <select id="dest_db_name" name="dest_db_name"
                                     class="form-control selectpicker show-tick bs-select-hidden"
-                                    title="请选择目标数据库:"
-                                    data-live-search="true" data-placeholder="请选择对应数据库:" required>
+                                    title="Please select destination database:"
+                                    data-live-search="true" data-placeholder="Please select corresponding database:" required>
                             </select>
                         </div>
                         <div class="form-group">
                             <select id="dest_table_name" name="dest_table_name"
                                     class="form-control selectpicker show-tick bs-select-hidden"
                                     data-live-search="true"
-                                    data-name="请选择目标表:"
-                                    title="请选择目标表:"
-                                    data-placeholder="请选择需目标表:" required>
+                                    data-name="Please select destination table:"
+                                    title="Please select destination table:"
+                                    data-placeholder="Please select destination table:" required>
                             </select>
                         </div>
                     </div>
                     <div class="form-group">
                         <textarea id="condition" name="condition" class="form-control"
-                                  placeholder="请输入归档条件，就是SQL语句的WHERE条件"></textarea>
+                                  placeholder="Enter archive condition (SQL WHERE clause)"></textarea>
                     </div>
                     <div class="form-group">
                         <input type="number" autocomplete="off" name="sleep" class="form-control" id="sleep"
-                               placeholder="归档10000行记录后的休眠秒数">
+                               placeholder="Sleep seconds after archiving each 10,000 rows">
                     </div>
-                    <!--审批流程-->
+                    <!-- Approval workflow -->
                     <div id="div-workflow_auditors" class="form-group" style="display: none">
-                        <p class="bg-primary">&nbsp&nbsp&nbsp审批流程：<b id="workflow_auditors"></b></p>
+                        <p class="bg-primary">&nbsp&nbsp&nbspApproval workflow: <b id="workflow_auditors"></b></p>
                     </div>
-                    <p class="text-info">提示：源表和目标表结构必须保持一致，否则将会归档失败</p>
+                    <p class="text-info">Note: Source and destination table schemas must match, otherwise archiving will fail.</p>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-default" data-dismiss="modal">取消</button>
-                    <button type="button" class="btn btn-success" onclick="archive_apply()">提交申请</button>
+                    <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-success" onclick="archive_apply()">Submit Request</button>
                 </div>
             </div>
         </div>
     </div>
-    <!-- 日志信息-->
+    <!-- Log info -->
     <div class="modal fade" id="logs">
         <div class="modal-dialog">
             <div class="modal-content message_align">
                 <div class="modal-header">
                     <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span
                             aria-hidden="true">×</span></button>
-                    <h4 class="modal-title text-danger">工单日志</h4>
+                    <h4 class="modal-title text-danger">Workflow Log</h4>
                 </div>
                 <div class="modal-body">
                     <div class="table-responsive">
@@ -186,7 +186,7 @@
 {% block js %}
     <!--group -->
     <script>
-        // 获取实例信息和审批流程
+        // Get instance info and approval workflow.
         $("#group_name").change(function () {
             $.ajax({
                 type: "post",
@@ -248,44 +248,44 @@
 
     </script>
     <script>
-        //筛选变动自动刷新
+        // Auto-refresh when filters change.
         $("#filter_instance_id").change(function () {
             archive_apply_list();
         });
-        //筛选变动自动刷新
+        // Auto-refresh when filters change.
         $("#state").change(function () {
             archive_apply_list();
         });
 
-        //获取申请列表
+        // Get application list.
         function archive_apply_list() {
             $('#archive-list').bootstrapTable('destroy').bootstrapTable({
                 escape: true,
                 method: 'get',
                 contentType: "application/x-www-form-urlencoded",
                 url: "/archive/list/",
-                striped: true,                      //是否显示行间隔色
-                cache: false,                       //是否使用缓存，默认为true，所以一般情况下需要设置一下这个属性（*）
-                pagination: true,                   //是否显示分页（*）
-                sortable: true,                     //是否启用排序
-                sortOrder: "asc",                   //排序方式
-                sidePagination: "server",           //分页方式：client客户端分页，server服务端分页（*）
-                pageNumber: 1,                      //初始化加载第一页，默认第一页,并记录
-                pageSize: 20,                     //每页的记录行数（*）
-                pageList: [20, 30, 50, 100],       //可供选择的每页的行数（*）
-                search: true,                      //是否显示表格搜索
-                strictSearch: false,                //是否全匹配搜索
-                showColumns: true,                  //是否显示所有的列（选择显示的列）
-                showRefresh: true,                  //是否显示刷新按钮
-                minimumCountColumns: 2,             //最少允许的列数
-                clickToSelect: true,                //是否启用点击选中行
-                uniqueId: "id",                     //每一行的唯一标识，一般为主键列
-                showToggle: true,                   //是否显示详细视图和列表视图的切换按钮
-                cardView: false,                    //是否显示详细视图
-                detailView: false,                  //是否显示父子表
-                locale: 'zh-CN',                    //本地化
+                striped: true,                      // Show row stripe.
+                cache: false,                       // Disable cache.
+                pagination: true,                   // Enable pagination.
+                sortable: true,                     // Enable sorting.
+                sortOrder: "asc",                   // Sort order.
+                sidePagination: "server",           // Server-side pagination.
+                pageNumber: 1,                      // Initial page number.
+                pageSize: 20,                       // Rows per page.
+                pageList: [20, 30, 50, 100],        // Page size options.
+                search: true,                       // Enable table search.
+                strictSearch: false,                // Use fuzzy search.
+                showColumns: true,                  // Show column selector.
+                showRefresh: true,                  // Show refresh button.
+                minimumCountColumns: 2,             // Minimum visible columns.
+                clickToSelect: true,                // Enable row selection.
+                uniqueId: "id",                     // Unique row identifier.
+                showToggle: true,                   // Show list/card toggle.
+                cardView: false,                    // Disable card view.
+                detailView: false,                  // Disable detail view.
+                locale: 'en-US',                    // Localization.
                 queryParamsType: 'limit',
-                //请求服务数据时所传参数
+                // Request parameters sent to backend.
                 queryParams:
                     function (params) {
                         return {
@@ -300,7 +300,7 @@
                     title: 'ID',
                     field: 'id'
                 }, {
-                    title: '工单名称',
+                    title: 'Workflow Name',
                     field: 'title',
                     formatter: function (value, row, index) {
                         var span = document.createElement('span');
@@ -314,80 +314,80 @@
                         return span.outerHTML;
                     }
                 }, {
-                    title: '实例',
+                    title: 'Instance',
                     field: 'src_instance__instance_name'
                 }, {
-                    title: '数据库',
+                    title: 'Database',
                     field: 'src_db_name'
                 }, {
-                    title: '表',
+                    title: 'Table',
                     field: 'src_table_name'
                 }, {
-                    title: '归档模式',
+                    title: 'Archive Mode',
                     field: 'mode'
                 }, {
-                    title: '源数据',
+                    title: 'Source Data',
                     field: 'no_delete',
                     formatter: function (value, row, index) {
                         if (String(value) === 'true') {
-                            return '保留'
+                            return 'Keep'
                         } else {
-                            return '删除'
+                            return 'Delete'
                         }
                     }
                 }, {
-                    title: '休眠(秒)',
+                    title: 'Sleep (s)',
                     field: 'sleep'
                 }, {
-                    title: '启用状态',
+                    title: 'Enabled Status',
                     field: 'state',
                     formatter: function (value, row, index) {
                         if (String(value) === 'true') {
-                            return "<span class=\"label label-success\">" + '启用' + "</span>"
+                            return "<span class=\"label label-success\">" + 'Enabled' + "</span>"
                         } else {
-                            return "<span class=\"label label-danger\">" + '关闭' + "</span>"
+                            return "<span class=\"label label-danger\">" + 'Disabled' + "</span>"
                         }
                     }
                 }, {
-                    title: '工单状态',
+                    title: 'Workflow Status',
                     field: 'status',
                     formatter: function (value, row, index) {
                         return workflow_status_formatter(value)
                     },
-                    visible: false // 默认不显示
+                    visible: false // Hidden by default.
                 }, {
-                    title: '申请人',
+                    title: 'Requester',
                     field: 'user_display'
                 }, {
-                    title: '申请时间',
+                    title: 'Request Time',
                     field: 'create_time'
                 }, {
-                    title: '组',
+                    title: 'Group',
                     field: 'resource_group__group_name',
-                    visible: false // 默认不显示
+                    visible: false // Hidden by default.
                 }, {
-                    title: '操作',
+                    title: 'Actions',
                     field: 'operation',
                     formatter: function (value, row, index) {
-                        return "<button class=\"btn btn-info btn-xs\" workflow_id=\"" + row.id + "\"\n" + "onclick=\"getLog(this)\" >操作日志\n" + "</button>"
+                        return "<button class=\"btn btn-info btn-xs\" workflow_id=\"" + row.id + "\"\n" + "onclick=\"getLog(this)\" >Operation Log\n" + "</button>"
                     }
                 }],
                 onLoadSuccess: function () {
                 },
                 onLoadError: onLoadErrorCallback,
                 onSearch: function (e) {
-                    //传搜索参数给服务器
+                    // Send search parameters to backend.
                     queryParams(e)
                 },
                 responseHandler: function (res) {
-                    //在ajax获取到数据，渲染表格之前，修改数据源
+                    // Transform data before rendering table.
                     return res;
                 }
             });
 
         }
 
-        //实例变更获取数据库列表
+        // Get database list when instance changes.
         $("#src_instance_name").change(function () {
             $.ajax({
                 type: "get",
@@ -451,7 +451,7 @@
             });
         });
 
-        //数据库变更获取表名称
+        // Get table names when database changes.
         $("#src_db_name").change(function () {
             $.ajax({
                 type: "get",
@@ -515,9 +515,9 @@
             });
         });
 
-        //判断页面显示
+        // Toggle page sections by selected mode.
         $("#mode").change(function () {
-            //库权限
+            // Show/hide destination and source-data options.
             let mode = $("#mode").val();
             if (mode === 'dest') {
                 $("#dest-div").show();
@@ -531,12 +531,12 @@
             }
         });
 
-        //提交权限申请
+        // Submit archive request.
         function archive_apply() {
-            //禁用按钮
+            // Disable buttons.
             $('button[type=button]').addClass('disabled');
             $('button[type=button]').prop('disabled', true);
-            //提交请求
+            // Send request.
             $.ajax({
                 type: "post",
                 url: "/archive/apply/",
@@ -573,7 +573,7 @@
             });
         }
 
-        // 获取操作日志
+        // Get operation log.
         function getLog(obj) {
             var workflow_id = $(obj).attr("workflow_id");
             var workflow_type = 3;
@@ -588,42 +588,42 @@
                 complete: function () {
                 },
                 success: function (data) {
-                    //初始化table
+                    // Initialize table.
                     $('#logs').modal('show');
                     $('#log-list').bootstrapTable('destroy').bootstrapTable({
                         escape: true,
-                        striped: true,                      //是否显示行间隔色
-                        cache: false,                       //是否使用缓存，默认为true，所以一般情况下需要设置一下这个属性（*）
-                        pagination: false,                   //是否显示分页（*）
-                        sortable: false,                     //是否启用排序
-                        sortOrder: "asc",                   //排序方式
-                        sidePagination: "client",           //分页方式：client客户端分页，server服务端分页（*）
-                        pageNumber: 1,                      //初始化加载第一页，默认第一页,并记录
-                        pageSize: 20,                     //每页的记录行数（*）
-                        pageList: [20, 30, 50, 100],       //可供选择的每页的行数（*）
-                        search: false,                      //是否显示表格搜索
-                        strictSearch: false,                //是否全匹配搜索
-                        showColumns: false,                  //是否显示所有的列（选择显示的列）
-                        showRefresh: false,                  //是否显示刷新按钮
-                        minimumCountColumns: 2,             //最少允许的列数
-                        clickToSelect: false,                //是否启用点击选中行
-                        uniqueId: "id",                     //每一行的唯一标识，一般为主键列
-                        showToggle: false,                   //是否显示详细视图和列表视图的切换按钮
-                        cardView: false,                    //是否显示详细视图
-                        detailView: false,                  //是否显示父子表
-                        locale: 'zh-CN',                    //本地化
+                        striped: true,                      // Show row stripe.
+                        cache: false,                       // Disable cache.
+                        pagination: false,                  // Disable pagination.
+                        sortable: false,                    // Disable sorting.
+                        sortOrder: "asc",                   // Sort order.
+                        sidePagination: "client",           // Client-side pagination.
+                        pageNumber: 1,                      // Initial page number.
+                        pageSize: 20,                       // Rows per page.
+                        pageList: [20, 30, 50, 100],        // Page size options.
+                        search: false,                      // Disable table search.
+                        strictSearch: false,                // Use fuzzy search.
+                        showColumns: false,                 // Hide column selector.
+                        showRefresh: false,                 // Hide refresh button.
+                        minimumCountColumns: 2,             // Minimum visible columns.
+                        clickToSelect: false,               // Disable row selection.
+                        uniqueId: "id",                     // Unique row identifier.
+                        showToggle: false,                  // Hide list/card toggle.
+                        cardView: false,                    // Disable card view.
+                        detailView: false,                  // Disable detail view.
+                        locale: 'en-US',                    // Localization.
                         data: data.rows,
                         columns: [{
-                            title: '操作',
+                            title: 'Operation',
                             field: 'operation_type_desc'
                         }, {
-                            title: '操作人',
+                            title: 'Operator',
                             field: 'operator_display'
                         }, {
-                            title: '操作时间',
+                            title: 'Operation Time',
                             field: 'operation_time'
                         }, {
-                            title: '操作信息',
+                            title: 'Operation Info',
                             field: 'operation_info'
                         }],
                         onLoadSuccess: function () {
@@ -637,7 +637,7 @@
             })
         }
 
-        //初始化数据
+        // Initialize data.
         $(document).ready(function () {
             archive_apply_list();
         });

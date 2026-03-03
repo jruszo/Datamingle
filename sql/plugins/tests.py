@@ -28,7 +28,7 @@ __author__ = "hhyo"
 
 class TestPlugin(TestCase):
     """
-    测试Plugin调用
+    Test Plugin calls.
     """
 
     @classmethod
@@ -46,7 +46,7 @@ class TestPlugin(TestCase):
 
     def test_check_args_path(self):
         """
-        测试路径
+        Test executable path validation.
         :return:
         """
         args = {
@@ -62,9 +62,9 @@ class TestPlugin(TestCase):
         args_check_result = soar.check_args(args)
         self.assertDictEqual(
             args_check_result,
-            {"status": 1, "msg": "可执行文件路径不能为空！", "data": {}},
+            {"status": 1, "msg": "Executable path cannot be empty!", "data": {}},
         )
-        # 路径不为空
+        # Path is not empty.
         self.sys_config.set("soar", "/opt/archery/src/plugins/soar")
         self.sys_config.get_all_config()
         soar = Soar()
@@ -73,7 +73,7 @@ class TestPlugin(TestCase):
 
     def test_check_args_disable(self):
         """
-        测试禁用参数
+        Test disabled argument validation.
         :return:
         """
         args = {
@@ -90,12 +90,16 @@ class TestPlugin(TestCase):
         args_check_result = soar.check_args(args)
         self.assertDictEqual(
             args_check_result,
-            {"status": 1, "msg": "allow-online-as-test参数已被禁用", "data": {}},
+            {
+                "status": 1,
+                "msg": "Argument allow-online-as-test is disabled",
+                "data": {},
+            },
         )
 
     def test_check_args_required(self):
         """
-        测试必选参数
+        Test required argument validation.
         :return:
         """
         args = {
@@ -110,17 +114,27 @@ class TestPlugin(TestCase):
         soar.required_args = ["query"]
         args_check_result = soar.check_args(args)
         self.assertDictEqual(
-            args_check_result, {"status": 1, "msg": "必须指定query参数", "data": {}}
+            args_check_result,
+            {
+                "status": 1,
+                "msg": "Required argument query must be specified",
+                "data": {},
+            },
         )
         args["query"] = ""
         args_check_result = soar.check_args(args)
         self.assertDictEqual(
-            args_check_result, {"status": 1, "msg": "query参数值不能为空", "data": {}}
+            args_check_result,
+            {
+                "status": 1,
+                "msg": "Value for argument query cannot be empty",
+                "data": {},
+            },
         )
 
     def test_soar_generate_args2cmd(self):
         """
-        测试SOAR参数转换
+        Test SOAR argument conversion.
         :return:
         """
         args = {
@@ -138,7 +152,7 @@ class TestPlugin(TestCase):
 
     def test_sql_advisor_generate_args2cmd(self):
         """
-        测试sql_advisor参数转换
+        Test sql_advisor argument conversion.
         :return:
         """
         args = {
@@ -158,7 +172,7 @@ class TestPlugin(TestCase):
 
     def test_schema_sync_generate_args2cmd(self):
         """
-        测试schema_sync参数转换
+        Test schema_sync argument conversion.
         :return:
         """
         args = {
@@ -181,7 +195,7 @@ class TestPlugin(TestCase):
 
     def test_my2sql_generate_args2cmd(self):
         """
-        测试my2sql参数转换
+        Test my2sql argument conversion.
         :return:
         """
         args = {
@@ -211,7 +225,7 @@ class TestPlugin(TestCase):
 
     def test_pt_archiver_generate_args2cmd(self):
         """
-        测试pt_archiver参数转换
+        Test pt_archiver argument conversion.
         :return:
         """
         args = {
@@ -252,7 +266,7 @@ class TestPlugin(TestCase):
             cmd_args, shell=False, stdout=ANY, stderr=ANY, universal_newlines=ANY
         )
         self.assertIn("some_stdout", stdout)
-        # 异常
+        # Exception.
 
         mock_subprocess.Popen.side_effect = Exception("Boom! some exception!")
         with self.assertRaises(RuntimeError):
@@ -261,12 +275,12 @@ class TestPlugin(TestCase):
 
 class TestSoar(TestCase):
     """
-    测试Soar的拓展方法
+    Test Soar extension methods.
     """
 
     @classmethod
     def setUpClass(cls):
-        soar_path = "/opt/archery/src/plugins/soar"  # 修改为本机的soar路径
+        soar_path = "/opt/archery/src/plugins/soar"  # Update to local soar path.
         cls.superuser = User(username="super", is_superuser=True)
         cls.superuser.save()
         cls.client = Client()
@@ -284,7 +298,7 @@ class TestSoar(TestCase):
     @patch("sql.plugins.plugin.subprocess")
     def test_fingerprint(self, _subprocess):
         """
-        测试SQL指纹打印，未断言
+        Test SQL fingerprint printing (no assertion).
         :return:
         """
         sql = """select * from sql_users where id>0 and email<>'';"""
@@ -293,7 +307,7 @@ class TestSoar(TestCase):
     @patch("sql.plugins.plugin.subprocess")
     def test_compress(self, _subprocess):
         """
-        测试SQL压缩，未断言
+        Test SQL compression (no assertion).
         :return:
         """
         sql = """
@@ -306,7 +320,7 @@ class TestSoar(TestCase):
     @patch("sql.plugins.plugin.subprocess")
     def test_pretty(self, _subprocess):
         """
-        测试SQL美化，未断言
+        Test SQL formatting (no assertion).
         :return:
         """
         sql = """select * from sql_users where id>0 and email<>'';"""
@@ -315,7 +329,7 @@ class TestSoar(TestCase):
     @patch("sql.plugins.plugin.subprocess")
     def test_remove_comment(self, _subprocess):
         """
-        测试去除注释，未断言
+        Test comment removal (no assertion).
         :return:
         """
         sql = """--
@@ -329,12 +343,12 @@ class TestSoar(TestCase):
     @patch("sql.plugins.plugin.subprocess")
     def test_rewrite(self, _subprocess):
         """
-        测试SQL改写
+        Test SQL rewrite.
         :return:
         """
         sql = """update sql_users set username='',id=1 where id>0 and email<>'';"""
         self.soar.rewrite(sql)
-        # 异常测试
+        # Exception case.
         with self.assertRaises(RuntimeError):
             self.soar.rewrite(sql, "unknown")
 

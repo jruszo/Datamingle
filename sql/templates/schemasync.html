@@ -5,40 +5,40 @@
         <div class="col-md-3">
             <div class="panel panel-default">
                 <div class="panel-heading">
-                    操作选项
+                    Options
                 </div>
                 <div class="panel-body">
                     <div class="form-group">
                         <select id="instance_name" name="instance_name"
                                 class="selectpicker show-tick form-control bs-select-hidden" data-live-search="true"
-                                title="请选择源实例:"
-                                data-placeholder="请选择实例:" required>
+                                title="Please select source instance:"
+                                data-placeholder="Please select instance:" required>
                         </select>
                     </div>
                     <div class="form-group">
                         <select id="db_name" name="db_name" class="form-control selectpicker show-tick bs-select-hidden"
-                                title="请选择源数据库:"
-                                data-live-search="true" data-placeholder="请选择数据库:" required>
-                            <option value="all">全部</option>
+                                title="Please select source database:"
+                                data-live-search="true" data-placeholder="Please select database:" required>
+                            <option value="all">All</option>
                         </select>
                     </div>
                     <div class="form-group">
                         <select id="target_instance_name" name="instance_name"
                                 class="selectpicker show-tick form-control bs-select-hidden" data-live-search="true"
-                                title="请选择目标实例:"
-                                data-placeholder="请选择目标实例:" required>
+                                title="Please select target instance:"
+                                data-placeholder="Please select target instance:" required>
                         </select>
                     </div>
                     <div class="form-group">
                         <select id="target_db_name" name="db_name"
                                 class="form-control selectpicker show-tick bs-select-hidden"
-                                title="请选择目标数据库:"
-                                data-live-search="true" data-placeholder="请选择对应数据库:" required>
-                            <option value="all">全部</option>
+                                title="Please select target database:"
+                                data-live-search="true" data-placeholder="Please select corresponding database:" required>
+                            <option value="all">All</option>
                         </select>
                     </div>
                     <div class="form-group">
-                        <h5 class="control-label text-bold">DIFF选项：</h5>
+                        <h5 class="control-label text-bold">DIFF Options:</h5>
                         <div class="form-group">
                             <div class="checkbox">
                                 <label>
@@ -55,7 +55,7 @@
                         </div>
                     </div>
                     <div class="form-group">
-                        <input id="btn-SchemaSync" type="button" class="btn btn-danger" value="Schema对比"
+                        <input id="btn-SchemaSync" type="button" class="btn btn-danger" value="Schema Diff"
                                onclick="schemasync()"/>
                     </div>
                 </div>
@@ -64,11 +64,11 @@
         <div class="col-md-9 column">
             <div class="panel panel-default">
                 <div class="panel-heading">
-                    SQL语句
+                    SQL Statement
                 </div>
                 <div class="panel-body">
                     <h5 class="control-label text-bold" style="color: red">
-                        <b>页面仅展示单库对比结果，生成的SQL文件会保存到项目downloads目录</b></h5>
+                        <b>This page only shows single-database diff results. Generated SQL files are saved in the project's downloads directory.</b></h5>
                     <br>
                     <div id="schemadiff-result" style="display:none;" class="row clearfix">
                         <div id="schemadiff-result-col" class="col-md-12"></div>
@@ -80,9 +80,9 @@
 {% endblock content %}
 {% block js %}
     {% load static %}
-    <!-- 选择同步数据 -->
+    <!-- Select sync data -->
     <script>
-        //获取用户实例列表
+        // Get user instance list.
         $(function () {
             $.ajax({
                 type: "get",
@@ -117,9 +117,9 @@
             });
         });
 
-        //获取源数据库名称
+        // Get source database names.
         $("#instance_name").change(function () {
-            //将数据通过ajax提交给获取db_name
+            // Request db_name via AJAX.
             $.ajax({
                 type: "get",
                 url: "/instance/instance_resource/",
@@ -138,7 +138,7 @@
                             var name = "<option>" + result[i] + "</option>";
                             $("#db_name").append(name);
                         }
-                        $("#db_name").prepend("<option value=\"all\">全部</option>");
+                        $("#db_name").prepend("<option value=\"all\">All</option>");
                         $('#db_name').selectpicker('render');
                         $('#db_name').selectpicker('refresh');
                     } else {
@@ -151,9 +151,9 @@
             });
         });
 
-        //获取目标数据库名称
+        // Get target database names.
         $("#target_instance_name").change(function () {
-            //将数据通过ajax提交给获取db_name
+            // Request db_name via AJAX.
             $.ajax({
                 type: "get",
                 url: "/instance/instance_resource/",
@@ -172,7 +172,7 @@
                             var name = "<option>" + result[i] + "</option>";
                             $("#target_db_name").append(name);
                         }
-                        $("#target_db_name").prepend("<option value=\"all\">全部</option>");
+                        $("#target_db_name").prepend("<option value=\"all\">All</option>");
                         $('#target_db_name').selectpicker('render');
                         $('#target_db_name').selectpicker('refresh');
                     } else {
@@ -185,7 +185,7 @@
             });
         });
     </script>
-    <!-- 执行对比 -->
+    <!-- Execute diff -->
     <script>
         function schemasync() {
             var instance_name = $('#instance_name').val();
@@ -196,7 +196,7 @@
                 $('#btn-SchemaSync').addClass('disabled');
                 $('#btn-SchemaSync').prop('disabled', true);
                 $("#schemadiff-result").hide();
-                alert('请耐心等待对比结果，可在对应目录获取生成的SQL文件');
+                alert('Please wait for diff results. Generated SQL files can be found in the corresponding directory.');
                 $.ajax({
                     type: "post",
                     url: "/instance/schemasync/",
@@ -245,7 +245,7 @@
                                 "<td>" + revert_stdout + "</td>" +
                                 "</tr> </tbody></table> </div>";
                             $("#schemadiff-result-col").html(finalHtml);
-                            //填充内容后展现出来
+                            // Show section after content is populated.
                             $("#schemadiff-result").show();
                         } else {
                             alert(data.msg);
@@ -256,9 +256,8 @@
                     }
                 });
             } else {
-                alert('请选择完整！')
+                alert('Please complete all selections!')
             }
         }
     </script>
 {% endblock %}
-

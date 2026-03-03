@@ -16,7 +16,7 @@ from .models import Instance
 logger = logging.getLogger("default")
 
 
-# 问题诊断--进程列表
+# Diagnostics -- process list
 @permission_required("sql.process_view", raise_exception=True)
 def process(request):
     instance_name = request.POST.get("instance_name")
@@ -28,12 +28,17 @@ def process(request):
     try:
         instance = user_instances(request.user).get(instance_name=instance_name)
     except Instance.DoesNotExist:
-        result = {"status": 1, "msg": "你所在组未关联该实例", "data": []}
+        result = {
+            "status": 1,
+            "msg": "Your group is not associated with this instance",
+            "data": [],
+        }
         return HttpResponse(json.dumps(result), content_type="application/json")
 
     query_engine = get_engine(instance=instance)
     query_result = None
-    # processlist方法已提升为父类方法，简化此处的逻辑。进程添加新数据库支持时，改前端即可。
+    # processlist is handled in the base engine class to simplify this logic.
+    # When adding a new DB type for process view, update frontend only.
     query_result = query_engine.processlist(command_type=command_type, **request_kwargs)
     if query_result:
         if not query_result.error:
@@ -42,14 +47,16 @@ def process(request):
         else:
             result = {"status": 1, "msg": query_result.error}
 
-    # 返回查询结果
-    # ExtendJSONEncoderBytes 使用json模块，bigint_as_string只支持simplejson
+    # Return query result.
+    # ExtendJSONEncoderBytes uses json module.
+    # bigint_as_string is only supported by simplejson.
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoderBytes), content_type="application/json"
     )
 
 
-# 问题诊断--通过线程id构建请求 这里只是用于确定将要kill的线程id还在运行
+# Diagnostics -- build request by thread ID.
+# This only verifies that the target thread ID is still running.
 @permission_required("sql.process_kill", raise_exception=True)
 def create_kill_session(request):
     instance_name = request.POST.get("instance_name")
@@ -58,7 +65,11 @@ def create_kill_session(request):
     try:
         instance = user_instances(request.user).get(instance_name=instance_name)
     except Instance.DoesNotExist:
-        result = {"status": 1, "msg": "你所在组未关联该实例", "data": []}
+        result = {
+            "status": 1,
+            "msg": "Your group is not associated with this instance",
+            "data": [],
+        }
         return HttpResponse(json.dumps(result), content_type="application/json")
 
     result = {"status": 0, "msg": "ok", "data": []}
@@ -68,18 +79,19 @@ def create_kill_session(request):
     except AttributeError:
         result = {
             "status": 1,
-            "msg": "暂时不支持{}类型数据库通过进程id构建请求".format(instance.db_type),
+            "msg": "{} database type is not currently supported for request "
+            "generation by process ID".format(instance.db_type),
             "data": [],
         }
         return HttpResponse(json.dumps(result), content_type="application/json")
-    # 返回查询结果
+    # Return query result.
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
     )
 
 
-# 问题诊断--终止会话 这里是实际执行kill的操作
+# Diagnostics -- terminate session (actual kill operation)
 @permission_required("sql.process_kill", raise_exception=True)
 def kill_session(request):
     instance_name = request.POST.get("instance_name")
@@ -89,7 +101,11 @@ def kill_session(request):
     try:
         instance = user_instances(request.user).get(instance_name=instance_name)
     except Instance.DoesNotExist:
-        result = {"status": 1, "msg": "你所在组未关联该实例", "data": []}
+        result = {
+            "status": 1,
+            "msg": "Your group is not associated with this instance",
+            "data": [],
+        }
         return HttpResponse(json.dumps(result), content_type="application/json")
 
     engine = get_engine(instance=instance)
@@ -103,21 +119,22 @@ def kill_session(request):
     else:
         result = {
             "status": 1,
-            "msg": "暂时不支持{}类型数据库终止会话".format(instance.db_type),
+            "msg": "{} database type is not currently supported for session "
+            "termination".format(instance.db_type),
             "data": [],
         }
         return HttpResponse(json.dumps(result), content_type="application/json")
 
     if r and r.error:
         result = {"status": 1, "msg": r.error, "data": []}
-    # 返回查询结果
+    # Return query result.
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
     )
 
 
-# 问题诊断--表空间信息
+# Diagnostics -- tablespace information
 @permission_required("sql.tablespace_view", raise_exception=True)
 def tablespace(request):
     instance_name = request.POST.get("instance_name")
@@ -126,7 +143,11 @@ def tablespace(request):
     try:
         instance = user_instances(request.user).get(instance_name=instance_name)
     except Instance.DoesNotExist:
-        result = {"status": 1, "msg": "你所在组未关联该实例", "data": []}
+        result = {
+            "status": 1,
+            "msg": "Your group is not associated with this instance",
+            "data": [],
+        }
         return HttpResponse(json.dumps(result), content_type="application/json")
 
     query_engine = get_engine(instance=instance)
@@ -135,7 +156,8 @@ def tablespace(request):
     except AttributeError:
         result = {
             "status": 1,
-            "msg": "暂时不支持{}类型数据库的表空间信息查询".format(instance.db_type),
+            "msg": "{} database type is not currently supported for tablespace "
+            "queries".format(instance.db_type),
             "data": [],
         }
         return HttpResponse(json.dumps(result), content_type="application/json")
@@ -148,14 +170,14 @@ def tablespace(request):
             result = {"status": 0, "msg": "ok", "rows": table_space, "total": total}
         else:
             result = {"status": 1, "msg": query_result.error}
-    # 返回查询结果
+    # Return query result.
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
     )
 
 
-# 问题诊断--锁等待
+# Diagnostics -- lock waits
 @permission_required("sql.trxandlocks_view", raise_exception=True)
 def trxandlocks(request):
     instance_name = request.POST.get("instance_name")
@@ -163,7 +185,11 @@ def trxandlocks(request):
     try:
         instance = user_instances(request.user).get(instance_name=instance_name)
     except Instance.DoesNotExist:
-        result = {"status": 1, "msg": "你所在组未关联该实例", "data": []}
+        result = {
+            "status": 1,
+            "msg": "Your group is not associated with this instance",
+            "data": [],
+        }
         return HttpResponse(json.dumps(result), content_type="application/json")
 
     query_engine = get_engine(instance=instance)
@@ -174,7 +200,8 @@ def trxandlocks(request):
     else:
         result = {
             "status": 1,
-            "msg": "暂时不支持{}类型数据库的锁等待查询".format(instance.db_type),
+            "msg": "{} database type is not currently supported for lock wait "
+            "queries".format(instance.db_type),
             "data": [],
         }
         return HttpResponse(json.dumps(result), content_type="application/json")
@@ -185,14 +212,14 @@ def trxandlocks(request):
     else:
         result = {"status": 1, "msg": query_result.error}
 
-    # 返回查询结果
+    # Return query result.
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
     )
 
 
-# 问题诊断--长事务
+# Diagnostics -- long transactions
 @permission_required("sql.trx_view", raise_exception=True)
 def innodb_trx(request):
     instance_name = request.POST.get("instance_name")
@@ -200,7 +227,11 @@ def innodb_trx(request):
     try:
         instance = user_instances(request.user).get(instance_name=instance_name)
     except Instance.DoesNotExist:
-        result = {"status": 1, "msg": "你所在组未关联该实例", "data": []}
+        result = {
+            "status": 1,
+            "msg": "Your group is not associated with this instance",
+            "data": [],
+        }
         return HttpResponse(json.dumps(result), content_type="application/json")
 
     query_engine = get_engine(instance=instance)
@@ -209,7 +240,8 @@ def innodb_trx(request):
     except AttributeError:
         result = {
             "status": 1,
-            "msg": "暂时不支持{}类型数据库的长事务查询".format(instance.db_type),
+            "msg": "{} database type is not currently supported for long "
+            "transaction queries".format(instance.db_type),
             "data": [],
         }
         return HttpResponse(json.dumps(result), content_type="application/json")
@@ -220,7 +252,7 @@ def innodb_trx(request):
     else:
         result = {"status": 1, "msg": query_result.error}
 
-    # 返回查询结果
+    # Return query result.
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",

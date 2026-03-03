@@ -11,6 +11,7 @@ archery/settings_dev.py
 sql/migrations/
 venv
 env
+conda311
 sonar-project.properties
 .scannerwork
 .env

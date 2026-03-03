@@ -21,7 +21,7 @@ class Soar(Plugin):
 
     def fingerprint(self, sql):
         """
-        输出SQL的指纹
+        Output SQL fingerprint.
         :param sql:
         :return:
         """
@@ -31,7 +31,7 @@ class Soar(Plugin):
 
     def compress(self, sql):
         """
-        压缩SQL
+        Compress SQL.
         :param sql:
         :return:
         """
@@ -41,13 +41,13 @@ class Soar(Plugin):
 
     def pretty(self, sql):
         """
-        美化SQL
+        Pretty-format SQL.
         :param sql:
         :return:
         """
         args = {
             "query": sql,
-            "max-pretty-sql-length": 100000,  # 超出该长度的SQL会转换成指纹输出 (default 1024)
+            "max-pretty-sql-length": 100000,  # Longer SQL is output as fingerprint (default 1024)
             "report-type": "pretty",
         }
         cmd_args = self.generate_args2cmd(args)
@@ -55,7 +55,7 @@ class Soar(Plugin):
 
     def remove_comment(self, sql):
         """
-        去除SQL语句中的注释，支持单行多行注释的去除
+        Remove comments from SQL, including single-line and multi-line comments.
         :param sql:
         :return:
         """
@@ -65,7 +65,7 @@ class Soar(Plugin):
 
     def rewrite(self, sql, rewrite_rules=None):
         """
-        SQL改写
+        Rewrite SQL.
         :param sql:
         :param rewrite_rules:
         :return:
@@ -93,7 +93,9 @@ class Soar(Plugin):
         ]
         rewrite_rules = rewrite_rules if rewrite_rules else ["dml2select"]
         if set(rewrite_rules).issubset(set(rewrite_type_list)) is False:
-            raise RuntimeError(f"不支持的改写规则，仅支持{rewrite_type_list}")
+            raise RuntimeError(
+                f"Unsupported rewrite rule, only these are supported: {rewrite_type_list}"
+            )
         args = {
             "query": sql,
             "report-type": "rewrite",
@@ -104,7 +106,7 @@ class Soar(Plugin):
 
     def query_tree(self, sql):
         """
-        语法树打印，包括[ast, tiast, ast-json, tiast-json]
+        Print syntax tree, including [ast, tiast, ast-json, tiast-json].
         :param sql:
         :return:
         """

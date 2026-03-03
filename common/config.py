@@ -18,7 +18,7 @@ class SysConfig(object):
 
     def get_all_config(self):
         try:
-            # 获取系统配置信息
+            # Load system configuration from DB
             all_config = Config.objects.all().values("item", "value")
             sys_config = {}
             for items in all_config:
@@ -29,19 +29,21 @@ class SysConfig(object):
                 sys_config[items["item"]] = items["value"]
             self.sys_config = sys_config
         except Exception as m:
-            logger.error(f"获取系统配置信息失败:{m}{traceback.format_exc()}")
+            logger.error(
+                f"Failed to load system configuration: {m}{traceback.format_exc()}"
+            )
             self.sys_config = {}
 
     def get(self, key, default_value=None):
         value = self.sys_config.get(key)
         if value:
             return value
-        # 尝试去数据库里取
+        # Fallback to DB lookup
         config_entry = Config.objects.filter(item=key).last()
         if config_entry:
-            # 清洗成 python 的 bool
+            # Normalize string bool into Python bool
             value = self.filter_bool(config_entry.value)
-        # 是字符串的话, 如果是空, 或者全是空格, 返回默认值
+        # If it's an empty/blank string, return default
         if isinstance(value, str) and value.strip() == "":
             return default_value
         if value is not None:
@@ -71,7 +73,7 @@ class SysConfig(object):
 
     def replace(self, configs):
         result = {"status": 0, "msg": "ok", "data": []}
-        # 清空并替换
+        # Replace all existing configs
         try:
             with transaction.atomic():
                 self.purge()
@@ -92,20 +94,20 @@ class SysConfig(object):
         return result
 
     def purge(self):
-        """清除所有配置, 供测试以及replace方法使用"""
+        """Clear all configs. Used by tests and `replace`."""
         try:
             with transaction.atomic():
                 Config.objects.all().delete()
                 self.sys_config = {}
         except Exception as m:
-            logger.error(f"删除缓存失败:{m}{traceback.format_exc()}")
+            logger.error(f"Failed to clear config cache: {m}{traceback.format_exc()}")
 
 
-# 修改系统配置
+# Update system configuration
 @superuser_required
 def change_config(request):
     configs = request.POST.get("configs")
     archer_config = SysConfig()
     result = archer_config.replace(configs)
-    # 返回结果
+    # Return result
     return HttpResponse(json.dumps(result), content_type="application/json")

@@ -1,7 +1,7 @@
 from unittest.mock import patch, MagicMock
 
 # ========================================================
-# 第一步：準備攔截器但不立即 start，或者將其引用保留以便清理
+# Step 1: Prepare the patcher and keep a reference for cleanup
 # ========================================================
 requests_patcher = patch("requests.get")
 
@@ -15,26 +15,26 @@ mock_response.json.return_value = {
     "end_session_endpoint": "https://example.com/logout",
 }
 
-# 立即啟動以保護接下來的 Django 導入
+# Start patching immediately to protect subsequent Django imports
 mock_get = requests_patcher.start()
 mock_get.return_value = mock_response
 
 # ========================================================
-# 第二步：現在才開始導入 Django 相關組件
+# Step 2: Import Django components after patch setup
 # ========================================================
 from django.test import TestCase, override_settings
 from django.core.exceptions import SuspiciousOperation
 from django.contrib.auth import get_user_model
 from django.conf import settings
 
-# common 內部的導入也放在這之後，因為它們內部通常也會 import settings
+# Keep common imports after this point because they usually import settings internally
 from common.authenticate.oidc_auth import OIDCAuthenticationBackend
 
-# 取得 User 模型
+# Get User model
 User = get_user_model()
 
 # ========================================================
-# 第三步：定義測試內容
+# Step 3: Define test cases
 # ========================================================
 OIDC_MOCK_ENDPOINTS = {
     "OIDC_OP_AUTHORIZATION_ENDPOINT": "https://example.com/auth",
@@ -51,17 +51,17 @@ OIDC_MOCK_ENDPOINTS = {
 class OIDCAuthTest(TestCase):
     @classmethod
     def setUpClass(cls):
-        # 這裡不再調用 patch().start()，因為全域已經啟動了。
-        # 我們直接引用全域啟動的 patcher 和 mock 對象。
+        # Do not call patch().start() again; the global patch is already active.
+        # Reuse global patcher and mock objects directly.
         cls.requests_patcher = requests_patcher
         cls.mock_get = mock_get
 
-        # 呼叫原本的 setUpClass (這會觸發 Django settings 的相關處理)
+        # Call original setUpClass (triggers Django settings handling)
         super().setUpClass()
 
     @classmethod
     def tearDownClass(cls):
-        # 測試結束後，停止全域啟動的 patch，防止污染其他測試檔案
+        # Stop global patch after tests to avoid leaking into other test files
         super().tearDownClass()
         cls.requests_patcher.stop()
 

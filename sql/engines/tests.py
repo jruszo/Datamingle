@@ -38,7 +38,7 @@ class TestReviewSet(TestCase):
 class TestEngineBase(TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.u1 = User(username="some_user", display="用户1")
+        cls.u1 = User(username="some_user", display="user1")
         cls.u1.save()
         cls.ins1 = Instance(
             instance_name="some_ins",
@@ -139,7 +139,7 @@ class TestRedis(TestCase):
 
     @patch("redis.Redis.execute_command")
     def test_query_with_dict_response(self, _execute_command):
-        # 定义 execute_command 的字典响应
+        # Define dict response for execute_command.
         dict_response = {
             "key1": "value1",
             "key2": {"subkey": "subvalue"},
@@ -149,7 +149,7 @@ class TestRedis(TestCase):
         new_engine = RedisEngine(instance=self.ins)
         query_result = new_engine.query(db_name=0, sql="keys *", limit_num=100)
 
-        # 验证结果集
+        # Verify result set.
         expected_rows = [
             ["key1", "value1"],
             ["key2", json.dumps({"subkey": "subvalue"})],
@@ -169,23 +169,23 @@ class TestRedis(TestCase):
     @patch("redis.Redis.info")
     @patch("redis.Redis.config_get")
     def test_get_all_databases_exception_handling(self, mock_config_get, mock_info):
-        # 模拟config_get方法抛出异常
-        mock_config_get.side_effect = Exception("模拟config_get异常")
-        # 模拟info方法返回特定的Keyspace信息
+        # Mock config_get raising an exception.
+        mock_config_get.side_effect = Exception("Mocked config_get exception")
+        # Mock info() returning specific Keyspace info.
         mock_info.return_value = {
             "db0": "some_info",
             "db1": "some_info",
             "db18": "some_info",
         }
-        # 实例化RedisEngine并调用get_all_databases方法
+        # Instantiate RedisEngine and call get_all_databases.
         new_engine = RedisEngine(instance=self.ins)
         result = new_engine.get_all_databases()
-        # 验证返回的数据库列表是否符合预期.
+        # Verify returned DB list.
         expected_dbs = [str(x) for x in range(int(19))]
         self.assertListEqual(result.rows, expected_dbs)
-        # 验证config_get方法被调用
+        # Verify config_get was called.
         mock_config_get.assert_called_once_with("databases")
-        # 验证info方法被调用
+        # Verify info was called.
         mock_info.assert_called_once_with("Keyspace")
 
     @patch("redis.Redis.info")
@@ -194,20 +194,20 @@ class TestRedis(TestCase):
         self, mock_config_get, mock_info
     ):
         """
-        测试当Redis CONFIG GET命令因异常而失败，并且info命令返回空Keyspace信息时，
-        get_all_databases方法应正确处理并返回包含从0到15的数据库索引列表。
+        Test when Redis CONFIG GET fails and info returns empty Keyspace;
+        get_all_databases should return indexes from 0 to 15.
         """
-        # 模拟config_get方法抛出异常
-        mock_config_get.side_effect = Exception("模拟config_get异常")
-        # 模拟info方法返回空的Keyspace信息
+        # Mock config_get raising an exception.
+        mock_config_get.side_effect = Exception("Mocked config_get exception")
+        # Mock info() returning empty Keyspace info.
         mock_info.return_value = {}
-        # 实例化RedisEngine并调用get_all_databases方法
+        # Instantiate RedisEngine and call get_all_databases.
         new_engine = RedisEngine(instance=self.ins)
         result = new_engine.get_all_databases()
-        # 验证返回的数据库列表，应该包括0到15，总共16个数据库
+        # Verify returned DB list should include 0..15 (16 DBs total).
         expected_dbs = [str(x) for x in range(16)]
         self.assertListEqual(result.rows, expected_dbs)
-        # 验证config_get和info方法的调用
+        # Verify config_get and info calls.
         mock_config_get.assert_called_once_with("databases")
         mock_info.assert_called_once_with("Keyspace")
 
@@ -215,25 +215,25 @@ class TestRedis(TestCase):
     @patch("redis.Redis.config_get")
     def test_get_all_databases_with_less_than_15_dbs(self, mock_config_get, mock_info):
         """
-        测试当Redis CONFIG GET命令因异常而失败，并且info命令返回的Keyspace信息
-        db num数据库值小于15时，get_all_databases方法应正确处理并返回包含从0到15的数据库索引列表。
+        Test when Redis CONFIG GET fails and info returns Keyspace with
+        fewer than 15 DB numbers; get_all_databases should still return 0..15.
         """
-        # 模拟config_get方法抛出异常
-        mock_config_get.side_effect = Exception("模拟config_get异常")
-        # 模拟info方法返回小于15个数据库的Keyspace信息
+        # Mock config_get raising an exception.
+        mock_config_get.side_effect = Exception("Mocked config_get exception")
+        # Mock info() returning less-than-15 DB Keyspace info.
         mock_info.return_value = {
             "db0": "some_info",
             "db1": "some_info",
             "db5": "some_info",
-            # 假设只有3个数据库
+            # Assume only 3 DBs exist.
         }
-        # 实例化RedisEngine并调用get_all_databases方法
+        # Instantiate RedisEngine and call get_all_databases.
         new_engine = RedisEngine(instance=self.ins)
         result = new_engine.get_all_databases()
-        # 验证返回的数据库列表，应该包括0到15，总共16个数据库
+        # Verify returned DB list should include 0..15 (16 DBs total).
         expected_dbs = [str(x) for x in range(16)]
         self.assertListEqual(result.rows, expected_dbs)
-        # 验证config_get和info方法的调用
+        # Verify config_get and info calls.
         mock_config_get.assert_called_once_with("databases")
         mock_info.assert_called_once_with("Keyspace")
 
@@ -241,26 +241,26 @@ class TestRedis(TestCase):
         "redis.Redis.scan_iter", return_value=["table1", "table2", "table3", "table4"]
     )
     def test_get_all_tables_success(self, _scan_iter):
-        # 创建 RedisEngine 实例
+        # Create RedisEngine instance.
         new_engine = RedisEngine(instance=self.ins)
 
-        # 调用 get_all_tables 方法
+        # Call get_all_tables.
         db_name = "4"
         result = new_engine.get_all_tables(db_name)
         mask_result_rows = ["table1", "table2", "table3", "table4"]
-        # 验证返回的表格信息
+        # Verify returned table info.
         self.assertEqual(result.rows, mask_result_rows)
 
     @patch("redis.Redis.scan_iter", side_effect=Exception("Test Exception"))
     def test_get_all_tables_exception(self, _scan_iter):
-        # 创建 RedisEngine 实例
+        # Create RedisEngine instance.
         new_engine = RedisEngine(instance=self.ins)
 
-        # 调用 get_all_tables 方法并模拟异常
+        # Call get_all_tables and simulate exception.
         db_name = "4"
         result = new_engine.get_all_tables(db_name)
 
-        # 验证返回的异常信息
+        # Verify exception info.
         self.assertEqual(result.rows, [])
         self.assertIn(result.message, "Test Exception")
 
@@ -271,7 +271,7 @@ class TestRedis(TestCase):
         self.assertDictEqual(
             check_result,
             {
-                "msg": "禁止执行该命令！",
+                "msg": "This command is not allowed!",
                 "bad_query": True,
                 "filtered_sql": safe_cmd,
                 "has_star": False,
@@ -285,7 +285,7 @@ class TestRedis(TestCase):
         self.assertDictEqual(
             check_result,
             {
-                "msg": "禁止执行该命令！",
+                "msg": "This command is not allowed!",
                 "bad_query": True,
                 "filtered_sql": safe_cmd,
                 "has_star": False,
@@ -312,7 +312,7 @@ class TestRedis(TestCase):
             id=1,
             errlevel=0,
             stagestatus="Audit completed",
-            errormessage="暂不支持显示影响行数",
+            errormessage="Displaying affected rows is not supported yet",
             sql=sql,
             affected_rows=0,
             execute_time=0,
@@ -329,7 +329,7 @@ class TestRedis(TestCase):
             id=1,
             errlevel=0,
             stagestatus="Execute Successfully",
-            errormessage="暂不支持显示影响行数",
+            errormessage="Displaying affected rows is not supported yet",
             sql=sql,
             affected_rows=0,
             execute_time=0,
@@ -355,9 +355,9 @@ class TestRedis(TestCase):
 
     @patch("sql.engines.redis.RedisEngine.get_connection")
     def test_processlist(self, mock_get_connection):
-        """测试 processlist 方法，模拟获取连接并返回客户端列表"""
+        """Test processlist by mocking a connection and returning client list."""
 
-        # 模拟 Redis 连接的客户端列表
+        # Mock client list returned by Redis connection.
         mock_conn = Mock()
 
         return_value_mock = [
@@ -367,27 +367,27 @@ class TestRedis(TestCase):
         ]
         mock_conn.client_list.return_value = return_value_mock
 
-        # 设置 get_connection 返回模拟连接
+        # Set mocked connection from get_connection.
         mock_get_connection.return_value = mock_conn
 
-        # 创建 RedisEngine 实例
+        # Create RedisEngine instance.
         new_engine = RedisEngine(instance=self.ins)
 
-        # 调用 processlist 方法并测试其返回值
-        command_types = ["All"]  # 假设支持的命令类型
+        # Call processlist and verify return values.
+        command_types = ["All"]  # Assume supported command types.
         for command_type in command_types:
             result_set = new_engine.processlist(command_type=command_type)
 
-            # 验证返回值是 ResultSet 实例
+            # Verify return type is ResultSet.
             self.assertIsInstance(result_set, ResultSet)
 
-            # 验证返回的客户端列表被正确排序
+            # Verify returned client list is sorted correctly.
             sorted_clients = sorted(
                 return_value_mock, key=lambda client: client.get("idle"), reverse=False
             )
             self.assertEqual(result_set.rows, sorted_clients)
 
-        # 验证 get_connection 是否被调用
+        # Verify get_connection is called.
         mock_get_connection.assert_called()
 
 
@@ -442,18 +442,18 @@ class TestPgSQL(TestCase):
     @patch("psycopg2.connect.cursor")
     @patch("psycopg2.connect")
     def test_query_not_limit(self, _conn, _cursor, _execute):
-        # 模拟数据库连接和游标
+        # Mock DB connection and cursor.
         mock_cursor = MagicMock()
         _conn.return_value.cursor.return_value = mock_cursor
 
-        # 模拟 SQL 查询的返回结果，包含 JSONB 类型、字符串和数字数据
+        # Mock SQL query result with JSONB, string, and numeric columns.
         mock_cursor.fetchall.return_value = [
-            ({"key": "value"}, "test_string", 123)  # 返回一行数据，三列
+            ({"key": "value"}, "test_string", 123)  # One row with three columns.
         ]
         mock_cursor.description = [
-            ("json_column", 3802),  # JSONB 类型
-            ("string_column", 25),  # 25 表示 TEXT 类型的 OID
-            ("number_column", 23),  # 23 表示 INTEGER 类型的 OID
+            ("json_column", 3802),  # JSONB type.
+            ("string_column", 25),  # 25 is TEXT OID.
+            ("number_column", 23),  # 23 is INTEGER OID.
         ]
 
         # _conn.return_value.cursor.return_value.fetchall.return_value = [(1,)]
@@ -465,20 +465,20 @@ class TestPgSQL(TestCase):
             schema_name="some_schema",
         )
 
-        # 断言查询结果的类型和数据
+        # Assert query result type and data.
         self.assertIsInstance(query_result, ResultSet)
-        # 验证返回的 JSONB 列已转换为 JSON 字符串
+        # Verify JSONB column is converted to JSON string.
         expected_row = ('{"key": "value"}', "test_string", 123)
         self.assertListEqual(query_result.rows, [expected_row])
 
         expected_column = ["json_column", "string_column", "number_column"]
-        # 验证列名是否正确
+        # Verify column names.
         self.assertEqual(query_result.column_list, expected_column)
 
-        # 验证受影响的行数
+        # Verify affected rows.
         self.assertEqual(query_result.affected_rows, 1)
 
-        # 验证类型代码是否正确（3802 表示 JSONB，25 表示 TEXT，23 表示 INTEGER）
+        # Verify type codes (3802 JSONB, 25 TEXT, 23 INTEGER).
         expected_column_type_codes = [3802, 25, 23]
         actual_column_type_codes = [desc[1] for desc in mock_cursor.description]
         self.assertListEqual(actual_column_type_codes, expected_column_type_codes)
@@ -545,7 +545,7 @@ class TestPgSQL(TestCase):
         self.assertDictEqual(
             check_result,
             {
-                "msg": "不支持的查询语法类型!",
+                "msg": "Unsupported query syntax type!",
                 "bad_query": True,
                 "filtered_sql": sql.strip(),
                 "has_star": False,
@@ -559,7 +559,7 @@ class TestPgSQL(TestCase):
         self.assertDictEqual(
             check_result,
             {
-                "msg": "SQL语句中含有 * ",
+                "msg": "SQL statement contains * ",
                 "bad_query": False,
                 "filtered_sql": sql.strip(),
                 "has_star": True,
@@ -611,8 +611,11 @@ class TestPgSQL(TestCase):
         row = ReviewResult(
             id=1,
             errlevel=2,
-            stagestatus="驳回不支持语句",
-            errormessage="仅支持DML和DDL语句，查询语句请使用SQL查询功能！",
+            stagestatus="Rejected unsupported statement",
+            errormessage=(
+                "Only DML and DDL statements are supported. "
+                "Use SQL query feature for SELECT statements."
+            ),
             sql=sql,
         )
         new_engine = PgSQLEngine(instance=self.ins)
@@ -627,8 +630,10 @@ class TestPgSQL(TestCase):
         row = ReviewResult(
             id=1,
             errlevel=2,
-            stagestatus="驳回高危SQL",
-            errormessage="禁止提交匹配" + "^|update" + "条件的语句！",
+            stagestatus="Rejected high-risk SQL",
+            errormessage=(
+                "Submitting statements that match " + "^|update" + " is prohibited!"
+            ),
             sql=sql,
         )
         new_engine = PgSQLEngine(instance=self.ins)
@@ -695,7 +700,7 @@ class TestPgSQL(TestCase):
             id=1,
             errlevel=2,
             stagestatus="Execute Failed",
-            errormessage=f'异常信息：{f"Oracle命令执行报错，语句：{sql}"}',
+            errormessage=f"Exception info: Oracle command execution failed, statement: {sql}",
             sql=sql,
             affected_rows=0,
             execute_time=0,
@@ -724,35 +729,35 @@ class TestPgSQL(TestCase):
 
     @patch("psycopg2.connect")
     def test_processlist_not_idle(self, mock_connect):
-        # 模拟数据库连接和游标
+        # Mock DB connection and cursor.
         mock_cursor = MagicMock()
         mock_connect.return_value.cursor.return_value = mock_cursor
 
-        # 假设 query 方法返回的结果
+        # Assume query result returned.
         mock_cursor.fetchall.return_value = [
             (123, "test_db", "user", "app_name", "active")
         ]
 
-        # 创建 PgSQLEngine 实例
+        # Create PgSQLEngine instance.
         new_engine = PgSQLEngine(instance=self.ins)
 
-        # 调用 processlist 方法
+        # Call processlist.
         result = new_engine.processlist(command_type="Not Idle")
         self.assertEqual(result.rows, mock_cursor.fetchall.return_value)
 
     @patch("psycopg2.connect")
     def test_processlist_idle(self, mock_connect):
-        # 模拟数据库连接和游标
+        # Mock DB connection and cursor.
         mock_cursor = MagicMock()
         mock_connect.return_value.cursor.return_value = mock_cursor
 
-        # 假设 query 方法返回的结果
+        # Assume query result returned.
         mock_cursor.fetchall.return_value = [
             (123, "test_db", "user", "app_name", "idle")
         ]
-        # 创建 PgSQLEngine 实例
+        # Create PgSQLEngine instance.
         new_engine = PgSQLEngine(instance=self.ins)
-        # 调用 processlist 方法
+        # Call processlist.
         result = new_engine.processlist(command_type="Idle")
         self.assertEqual(result.rows, mock_cursor.fetchall.return_value)
 
@@ -765,8 +770,8 @@ class TestModel(TestCase):
         pass
 
     def test_result_set_rows_shadow(self):
-        # 测试默认值为空列表的坑
-        # 如果默认值是空列表，又使用的是累加的方法更新，会导致残留上次的列表
+        # Guard against mutable default list pitfall.
+        # If default is a shared list and updated cumulatively, stale data leaks.
         result_set1 = ResultSet()
         for i in range(10):
             result_set1.rows += [i]
@@ -1003,7 +1008,7 @@ class TestGoInception(TestCase):
 
 
 class TestOracle(TestCase):
-    """Oracle 测试"""
+    """Oracle tests."""
 
     def setUp(self):
         self.ins = Instance.objects.create(
@@ -1041,12 +1046,12 @@ class TestOracle(TestCase):
     @patch("cx_Oracle.makedsn")
     @patch("cx_Oracle.connect")
     def test_get_connection(self, _connect, _makedsn):
-        # 填写 sid 测试
+        # Test with SID.
         new_engine = OracleEngine(self.ins)
         new_engine.get_connection()
         _connect.assert_called_once()
         _makedsn.assert_called_once()
-        # 填写 service_name 测试
+        # Test with service_name.
         _connect.reset_mock()
         _makedsn.reset_mock()
         self.ins.service_name = "some_service"
@@ -1056,7 +1061,7 @@ class TestOracle(TestCase):
         new_engine.get_connection()
         _connect.assert_called_once()
         _makedsn.assert_called_once()
-        # 都不填写, 检测 ValueError
+        # Test ValueError when neither sid nor service_name is set.
         _connect.reset_mock()
         _makedsn.reset_mock()
         self.ins.service_name = ""
@@ -1166,7 +1171,7 @@ class TestOracle(TestCase):
         self.assertDictEqual(
             check_result,
             {
-                "msg": "不支持语法!",
+                "msg": "Unsupported syntax!",
                 "bad_query": True,
                 "filtered_sql": sql.strip(";"),
                 "has_star": False,
@@ -1184,7 +1189,7 @@ class TestOracle(TestCase):
         self.assertDictEqual(
             check_result,
             {
-                "msg": "禁止使用 * 关键词\n",
+                "msg": "Using * keyword is forbidden\n",
                 "bad_query": False,
                 "filtered_sql": sql.strip(";"),
                 "has_star": True,
@@ -1198,7 +1203,7 @@ class TestOracle(TestCase):
         self.assertDictEqual(
             check_result,
             {
-                "msg": "没有有效的SQL语句",
+                "msg": "No valid SQL statement",
                 "bad_query": True,
                 "filtered_sql": sql.strip(),
                 "has_star": False,
@@ -1218,8 +1223,11 @@ class TestOracle(TestCase):
         row = ReviewResult(
             id=1,
             errlevel=2,
-            stagestatus="驳回不支持语句",
-            errormessage="仅支持DML和DDL语句，查询语句请使用SQL查询功能！",
+            stagestatus="Rejected unsupported statement",
+            errormessage=(
+                "Only DML and DDL statements are supported. "
+                "Use SQL query feature for SELECT statements!"
+            ),
             sql=sqlparse.format(
                 sql, strip_comments=True, reindent=True, keyword_case="lower"
             ),
@@ -1236,8 +1244,10 @@ class TestOracle(TestCase):
         row = ReviewResult(
             id=1,
             errlevel=2,
-            stagestatus="驳回高危SQL",
-            errormessage="禁止提交匹配" + "^|update" + "条件的语句！",
+            stagestatus="Rejected high-risk SQL",
+            errormessage="Submitting statements matching "
+            + "^|update"
+            + " is prohibited!",
             sql=sqlparse.format(
                 sql, strip_comments=True, reindent=True, keyword_case="lower"
             ),
@@ -1263,8 +1273,8 @@ class TestOracle(TestCase):
         row = ReviewResult(
             id=1,
             errlevel=1,
-            stagestatus="当前平台，此语法不支持审核！",
-            errormessage="当前平台，此语法不支持审核！",
+            stagestatus="Current platform does not support auditing this syntax!",
+            errormessage="Current platform does not support auditing this syntax!",
             sql=sqlparse.format(
                 sql, strip_comments=True, reindent=True, keyword_case="lower"
             ),
@@ -1282,7 +1292,7 @@ class TestOracle(TestCase):
 
     def test_get_sql_first_object_name(self):
         """
-        测试获取sql文本中的object_name
+        Test extracting object_name from SQL text.
         :return:
         """
         new_engine = OracleEngine(instance=self.ins)
@@ -1314,8 +1324,8 @@ end;"""
         row = ReviewResult(
             id=1,
             errlevel=1,
-            stagestatus=""""TRADE".INSERTUSER对象已经存在，请确认是否替换！""",
-            errormessage=""""TRADE".INSERTUSER对象已经存在，请确认是否替换！""",
+            stagestatus='"TRADE".INSERTUSER already exists, please confirm replacement!',
+            errormessage='"TRADE".INSERTUSER already exists, please confirm replacement!',
             sql=sqlparse.format(
                 sql, strip_comments=True, reindent=True, keyword_case="lower"
             ),
@@ -1349,8 +1359,8 @@ end;"""
         row = ReviewResult(
             id=1,
             errlevel=2,
-            stagestatus=""""TRADE".INSERTUSER对象已经存在！""",
-            errormessage=""""TRADE".INSERTUSER对象已经存在！""",
+            stagestatus='"TRADE".INSERTUSER already exists!',
+            errormessage='"TRADE".INSERTUSER already exists!',
             sql=sqlparse.format(
                 sql, strip_comments=True, reindent=True, keyword_case="lower"
             ),
@@ -1421,7 +1431,7 @@ end;"""
             id=1,
             errlevel=2,
             stagestatus="Execute Failed",
-            errormessage=f'异常信息：{f"Oracle命令执行报错，语句：{sql}"}',
+            errormessage=f"Exception info: Oracle command execution failed, statement: {sql}",
             sql=sql,
             affected_rows=0,
             execute_time=0,
@@ -1520,70 +1530,70 @@ end;"""
 
     @patch("sql.engines.oracle.OracleEngine.query")
     def test_get_table_desc_data(self, _query):
-        """测试获取表格字段信息方法"""
+        """Test getting table column metadata."""
         new_engine = OracleEngine(instance=self.ins)
 
-        # 模拟查询返回结果
+        # Mock query result.
         mock_result = ResultSet()
         mock_result.column_list = [
-            "列名",
-            "列注释",
-            "字段类型",
-            "字段默认值",
-            "是否为空",
-            "所属索引",
-            "约束类型",
+            "Column Name",
+            "Column Comment",
+            "Data Type",
+            "Default Value",
+            "Nullable",
+            "Index Name",
+            "Constraint Type",
         ]
         mock_result.rows = [
-            ("ID", "主键ID", "NUMBER(10)", "1", " NOT NULL", "PK_USER", "P")
+            ("ID", "Primary key ID", "NUMBER(10)", "1", " NOT NULL", "PK_USER", "P")
         ]
         _query.return_value = mock_result
 
-        # 调用被测试方法
+        # Call method under test.
         result = new_engine.get_table_desc_data(db_name="TEST_SCHEMA", tb_name="USERS")
 
-        # 验证结果结构
+        # Verify result structure.
         self.assertIsInstance(result, dict)
         self.assertIn("column_list", result)
         self.assertIn("rows", result)
         self.assertIsInstance(result["column_list"], list)
         self.assertIsInstance(result["rows"], list)
 
-        # 验证query方法被正确调用
+        # Verify query method call.
         _query.assert_called_once()
 
     @patch("sql.engines.oracle.OracleEngine.query")
     def test_get_table_index_data(self, _query):
-        """测试获取表格索引信息方法"""
+        """Test getting table index metadata."""
         new_engine = OracleEngine(instance=self.ins)
 
-        # 模拟查询返回结果
+        # Mock query result.
         mock_result = ResultSet()
         mock_result.column_list = [
-            "索引名称",
-            "唯一性",
-            "索引类型",
-            "压缩属性",
-            "表空间",
-            "状态",
-            "分区",
+            "Index Name",
+            "Uniqueness",
+            "Index Type",
+            "Compression",
+            "Tablespace",
+            "Status",
+            "Partitioned",
         ]
         mock_result.rows = [
             ("PK_USERS", "UNIQUE", "NORMAL", "DISABLED", "USERS_TBS", "VALID", "NO")
         ]
         _query.return_value = mock_result
 
-        # 调用被测试方法
+        # Call method under test.
         result = new_engine.get_table_index_data(db_name="TEST_SCHEMA", tb_name="USERS")
 
-        # 验证结果结构
+        # Verify result structure.
         self.assertIsInstance(result, dict)
         self.assertIn("column_list", result)
         self.assertIn("rows", result)
         self.assertIsInstance(result["column_list"], list)
         self.assertIsInstance(result["rows"], list)
 
-        # 验证query方法被正确调用
+        # Verify query method call.
         _query.assert_called_once()
 
 
@@ -1599,7 +1609,7 @@ class MongoTest(TestCase):
         )
         self.engine = MongoEngine(instance=self.ins)
         self.sys_config = SysConfig()
-        # rule_type=100的规则不需要加，会自动创建。只需要加脱敏字段
+        # rule_type=100 is auto-created; only masking columns are needed.
         DataMaskingColumns.objects.create(
             rule_type=100,
             active=True,
@@ -1620,7 +1630,7 @@ class MongoTest(TestCase):
 
     @patch("sql.engines.mongo.MongoEngine.get_connection")
     def test_query(self, mock_get_connection):
-        # TODO 正常查询还没做
+        # TODO: normal query path not covered yet.
         test_sql1 = """db.job.find().count()"""
         test_sql2 = """db.job.find({ goofy :{"$exists":false}})"""
         self.assertIsInstance(self.engine.query("some_db", test_sql1), ResultSet)
@@ -1643,7 +1653,7 @@ class MongoTest(TestCase):
     @patch("sql.engines.mongo.MongoEngine.get_connection")
     def test_get_all_tables(self, mock_get_connection):
         mock_db = Mock()
-        # 下面是查表示例返回结果
+        # Sample table-list query result.
         mock_db.list_collection_names.return_value = ["u", "v", "w"]
         mock_get_connection.return_value = {"some_db": mock_db}
         table_list = self.engine.get_all_tables("some_db")
@@ -1697,7 +1707,7 @@ class MongoTest(TestCase):
             id=1,
             errlevel=0,
             stagestatus="Audit completed",
-            errormessage="检测通过",
+            errormessage="Check passed",
             affected_rows=1000,
             sql=sql,
             execute_time=0,
@@ -1710,7 +1720,7 @@ class MongoTest(TestCase):
     @patch("sql.engines.mongo.MongoEngine.get_all_tables")
     def test_execute_check_include_dot(self, mock_get_all_tables):
         sql = """db.job.insert({
-                                    fileName: "现金明细20230103075728.xls",
+                                    fileName: "cash_detail20230103075728.xls",
                                     contentType: ".xls",
                                     createdTime: ISODate("2023-01-03T12:05:27.402Z"),
                                     reportDate: ISODate("2023-01-03T12:05:27.402Z"),
@@ -1788,7 +1798,7 @@ class MongoTest(TestCase):
         sql = """db.job.insert({"orderCode":1001);"""
         mock_get_all_tables.return_value.rows = "job"
         check_result = self.engine.execute_check("some_db", sql)
-        self.assertEqual(check_result.rows[0].__dict__["stagestatus"], "语法错误")
+        self.assertEqual(check_result.rows[0].__dict__["stagestatus"], "Syntax error")
 
     @patch("sql.engines.mongo.MongoEngine.exec_cmd")
     @patch("sql.engines.mongo.MongoEngine.get_master")
@@ -1831,7 +1841,9 @@ class MongoTest(TestCase):
         )
         check_result = self.engine.execute("some_db", sql)
         mock_get_master.assert_called_once()
-        self.assertEqual(check_result.rows[0].__dict__["stagestatus"], "异常终止")
+        self.assertEqual(
+            check_result.rows[0].__dict__["stagestatus"], "Aborted unexpectedly"
+        )
 
     def test_fill_query_columns(self):
         columns = ["_id", "title", "tags", "likes"]
@@ -1849,7 +1861,7 @@ class MongoTest(TestCase):
 
     @patch("sql.engines.mongo.MongoEngine.get_connection")
     def test_processlist(self, mock_get_connection):
-        # 模拟 MongoDB aggregate 的游标行为
+        # Mock MongoDB aggregate cursor behavior.
         class AggregateCursor:
             def __enter__(self):
                 yield {
@@ -2125,14 +2137,14 @@ class TestClickHouse(TestCase):
 
     def test_query_check_wrong_sql(self):
         new_engine = ClickHouseEngine(instance=self.ins1)
-        wrong_sql = "-- 测试"
+        wrong_sql = "-- test"
         check_result = new_engine.query_check(db_name="some_db", sql=wrong_sql)
         self.assertDictEqual(
             check_result,
             {
-                "msg": "不支持的查询语法类型!",
+                "msg": "Unsupported query syntax type!",
                 "bad_query": True,
-                "filtered_sql": "-- 测试",
+                "filtered_sql": "-- test",
                 "has_star": False,
             },
         )
@@ -2144,7 +2156,7 @@ class TestClickHouse(TestCase):
         self.assertDictEqual(
             check_result,
             {
-                "msg": "不支持的查询语法类型!",
+                "msg": "Unsupported query syntax type!",
                 "bad_query": True,
                 "filtered_sql": "update user set id=0",
                 "has_star": False,
@@ -2171,7 +2183,7 @@ class TestClickHouse(TestCase):
         check_result = new_engine.execute_check(db_name="some_db", sql=select_sql)
         self.assertEqual(
             check_result.rows[0].errormessage,
-            "仅支持DML和DDL语句，查询语句请使用SQL查询功能！",
+            "Only DML and DDL statements are supported. Use SQL query feature for SELECT statements.",
         )
 
     @patch.object(ClickHouseEngine, "query")
@@ -2186,7 +2198,7 @@ class TestClickHouse(TestCase):
         check_result = new_engine.execute_check(db_name="some_db", sql=alter_sql)
         self.assertEqual(
             check_result.rows[0].errormessage,
-            "ALTER TABLE仅支持*MergeTree，Merge以及Distributed等引擎表！",
+            "ALTER TABLE only supports *MergeTree, Merge and Distributed table engines!",
         )
 
     @patch.object(ClickHouseEngine, "query")
@@ -2201,7 +2213,7 @@ class TestClickHouse(TestCase):
         check_result = new_engine.execute_check(db_name="some_db", sql=alter_sql)
         self.assertEqual(
             check_result.rows[0].errormessage,
-            "TRUNCATE不支持View,File,URL,Buffer和Null表引擎！",
+            "TRUNCATE does not support View, File, URL, Buffer, or Null table engines!",
         )
 
     @patch.object(ClickHouseEngine, "query")
@@ -2370,7 +2382,7 @@ class ODPSTest(TestCase):
 
     @patch("sql.engines.odps.ODPSEngine.get_connection")
     def test_get_all_tables(self, mock_get_connection):
-        # 下面是查表示例返回结果
+        # Sample table-list query result.
         class T:
             def __init__(self, name):
                 self.name = name

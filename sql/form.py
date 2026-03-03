@@ -33,7 +33,8 @@ class TunnelForm(ModelForm):
                     )
             except IOError:
                 raise ValidationError(
-                    "秘钥文件不存在， 请勾选秘钥路径的清除选项再进行保存"
+                    "The private key file does not exist. Select the option to clear "
+                    "the private key path, then save again."
                 )
 
 

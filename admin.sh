@@ -8,7 +8,7 @@
 function init() {
     echo "Initing archery"
     echo "----------------"
-    echo "安装/更新可能缺少的依赖: mysql-community-devel gcc gcc-c++ python-devel"
+    echo "Install/update potentially missing dependencies: mysql-community-devel gcc gcc-c++ python-devel"
     sudo yum install -y epel-release
     sudo yum install -y mysql-devel gcc gcc-c++ python-devel MySQL-python
     sudo yum install -y python36 python3-devel python36-pip openldap-devel unixODBC-devel gettext

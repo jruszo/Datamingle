@@ -15,16 +15,16 @@ rs = get_redis_connection("default")
 
 
 def get_access_token():
-    """获取access_token:https://ding-doc.dingtalk.com/doc#/serverapi2/eev437"""
-    # 优先获取缓存
+    """Get DingTalk access token: https://ding-doc.dingtalk.com/doc#/serverapi2/eev437"""
+    # Read from cache first
     try:
         access_token = rs.execute_command(f"get ding_access_token")
     except Exception as e:
-        logger.error(f"获取钉钉access_token缓存出错:{e}")
+        logger.error(f"Failed to read DingTalk access_token from cache: {e}")
         access_token = None
     if access_token:
         return access_token.decode()
-    # 请求钉钉接口获取
+    # Request from DingTalk API
     sys_config = SysConfig()
     app_key = sys_config.get("ding_app_key")
     app_secret = sys_config.get("ding_app_secret")
@@ -36,12 +36,12 @@ def get_access_token():
         rs.execute_command(f"SETEX ding_access_token {expires_in-60} {access_token}")
         return access_token
     else:
-        logger.error(f"获取钉钉access_token出错:{resp}")
+        logger.error(f"Failed to fetch DingTalk access_token: {resp}")
         return None
 
 
 def get_ding_user_id(username):
-    """更新用户ding_user_id"""
+    """Update user's ding_user_id."""
     try:
         ding_user_id = rs.execute_command("GET {}".format(username.lower()))
         if ding_user_id:
@@ -50,11 +50,11 @@ def get_ding_user_id(username):
                 user.ding_user_id = str(ding_user_id, encoding="utf8")
                 user.save(update_fields=["ding_user_id"])
     except Exception as e:
-        logger.error(f"更新用户ding_user_id失败:{e}")
+        logger.error(f"Failed to update user ding_user_id: {e}")
 
 
 def get_dept_list_id_fetch_child(token, parent_dept_id):
-    """获取所有子部门列表"""
+    """Get all child department IDs recursively."""
     ids = [int(parent_dept_id)]
     url = (
         "https://oapi.dingtalk.com/department/list_ids?id={0}&access_token={1}".format(
@@ -70,8 +70,8 @@ def get_dept_list_id_fetch_child(token, parent_dept_id):
 
 def sync_ding_user_id():
     """
-    使用工号（username）登陆archery，并且工号对应钉钉系统中字段 "jobnumber"。
-    所以可根据钉钉中 jobnumber 查到该用户的 ding_user_id。
+    Archery users log in with employee ID (`username`), which maps to DingTalk's
+    `jobnumber` field. Use `jobnumber` to find and cache user `ding_user_id`.
     """
     sys_config = SysConfig()
     ding_dept_ids = sys_config.get("ding_dept_ids", "")
@@ -79,11 +79,11 @@ def sync_ding_user_id():
     token = get_access_token()
     if not token:
         return False
-    # 获取全部部门列表
+    # Fetch all department IDs
     sub_dept_id_list = []
     for dept_id in list(set(ding_dept_ids.split(","))):
         sub_dept_id_list.extend(get_dept_list_id_fetch_child(token, dept_id))
-    # 遍历部门下的用户
+    # Iterate users in each department
     user_ids = []
     for sdi in sub_dept_id_list:
         url = f"https://oapi.dingtalk.com/user/getDeptMember?access_token={token}&deptId={sdi}"
@@ -92,10 +92,10 @@ def sync_ding_user_id():
             if resp.get("errcode") == 0:
                 user_ids.extend(resp.get("userIds"))
             else:
-                raise Exception(f"获取部门用户出错:{resp}")
+                raise Exception(f"Failed to fetch department users: {resp}")
         except Exception as e:
-            raise Exception(f"获取部门用户出错:{e}")
-    # 获取所有用户信息并缓存
+            raise Exception(f"Failed to fetch department users: {e}")
+    # Fetch user details and cache mappings
     for user_id in list(set(user_ids)):
         url = (
             f"https://oapi.dingtalk.com/user/get?access_token={token}&userid={user_id}"
@@ -105,24 +105,25 @@ def sync_ding_user_id():
             if resp.get("errcode") == 0:
                 if not resp.get(username2ding):
                     raise Exception(
-                        f"钉钉用户信息不包含{username2ding}字段，无法获取id信息，请确认ding_archery_username配置{resp}"
+                        f"DingTalk user payload does not include `{username2ding}`. "
+                        f"Please check `ding_archery_username` config: {resp}"
                     )
                 rs.execute_command(
                     f"SETEX {resp.get(username2ding).lower()} 86400 {resp.get('userid')}"
                 )
             else:
-                raise Exception(f"获取用户信息出错:{resp}")
+                raise Exception(f"Failed to fetch user info: {resp}")
         except Exception as e:
-            raise Exception(f"获取用户信息出错:{e}")
+            raise Exception(f"Failed to fetch user info: {e}")
     return True
 
 
 @superuser_required
 def sync_ding_user(request):
-    """主动触发同步接口，同时写入schedule每天进行同步"""
+    """Trigger manual sync and also register daily schedule sync."""
     try:
-        # 添加schedule并触发同步
+        # Add schedule and trigger sync
         add_sync_ding_user_schedule()
-        return JsonResponse({"status": 0, "msg": f"触发同步成功"})
+        return JsonResponse({"status": 0, "msg": "Sync triggered successfully"})
     except Exception as e:
-        return JsonResponse({"status": 1, "msg": f"触发同步异常:{e}"})
+        return JsonResponse({"status": 1, "msg": f"Sync trigger failed: {e}"})

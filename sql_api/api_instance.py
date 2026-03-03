@@ -20,7 +20,7 @@ import MySQLdb
 
 class InstanceList(generics.ListAPIView):
     """
-    列出所有的instance或者创建一个新的instance配置
+    List all instances or create a new instance configuration.
     """
 
     filterset_class = InstanceFilter
@@ -29,10 +29,10 @@ class InstanceList(generics.ListAPIView):
     queryset = Instance.objects.all().order_by("id")
 
     @extend_schema(
-        summary="实例清单",
+        summary="Instance List",
         request=InstanceSerializer,
         responses={200: InstanceSerializer},
-        description="列出所有实例（过滤，分页）",
+        description="List all instances (filtering, pagination).",
     )
     def get(self, request):
         instances = self.filter_queryset(self.queryset)
@@ -42,10 +42,10 @@ class InstanceList(generics.ListAPIView):
         return self.get_paginated_response(data)
 
     @extend_schema(
-        summary="创建实例",
+        summary="Create Instance",
         request=InstanceSerializer,
         responses={201: InstanceSerializer},
-        description="创建一个实例配置",
+        description="Create an instance configuration.",
     )
     def post(self, request):
         serializer = InstanceSerializer(data=request.data)
@@ -57,7 +57,7 @@ class InstanceList(generics.ListAPIView):
 
 class InstanceDetail(views.APIView):
     """
-    实例操作
+    Instance operations.
     """
 
     serializer_class = InstanceDetailSerializer
@@ -69,10 +69,10 @@ class InstanceDetail(views.APIView):
             raise Http404
 
     @extend_schema(
-        summary="更新实例",
+        summary="Update Instance",
         request=InstanceDetailSerializer,
         responses={200: InstanceDetailSerializer},
-        description="更新一个实例配置",
+        description="Update an instance configuration.",
     )
     def put(self, request, pk):
         instance = self.get_object(pk)
@@ -82,7 +82,9 @@ class InstanceDetail(views.APIView):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    @extend_schema(summary="删除实例", description="删除一个实例配置")
+    @extend_schema(
+        summary="Delete Instance", description="Delete an instance configuration."
+    )
     def delete(self, request, pk):
         instance = self.get_object(pk)
         instance.delete()
@@ -91,7 +93,7 @@ class InstanceDetail(views.APIView):
 
 class TunnelList(generics.ListAPIView):
     """
-    列出所有的tunnel或者创建一个新的tunnel配置
+    List all tunnels or create a new tunnel configuration.
     """
 
     pagination_class = CustomizedPagination
@@ -99,10 +101,10 @@ class TunnelList(generics.ListAPIView):
     queryset = Tunnel.objects.all().order_by("id")
 
     @extend_schema(
-        summary="隧道清单",
+        summary="Tunnel List",
         request=TunnelSerializer,
         responses={200: TunnelSerializer},
-        description="列出所有隧道（过滤，分页）",
+        description="List all tunnels (filtering, pagination).",
     )
     def get(self, request):
         tunnels = self.filter_queryset(self.queryset)
@@ -112,10 +114,10 @@ class TunnelList(generics.ListAPIView):
         return self.get_paginated_response(data)
 
     @extend_schema(
-        summary="创建隧道",
+        summary="Create Tunnel",
         request=TunnelSerializer,
         responses={201: TunnelSerializer},
-        description="创建一个隧道配置",
+        description="Create a tunnel configuration.",
     )
     def post(self, request):
         serializer = TunnelSerializer(data=request.data)
@@ -127,7 +129,7 @@ class TunnelList(generics.ListAPIView):
 
 class AliyunRdsList(generics.ListAPIView):
     """
-    列出所有的AliyunRDS或者创建一个新的AliyunRDS配置
+    List all Aliyun RDS configs or create a new one.
     """
 
     pagination_class = CustomizedPagination
@@ -135,10 +137,10 @@ class AliyunRdsList(generics.ListAPIView):
     queryset = AliyunRdsConfig.objects.all().select_related("ak").order_by("id")
 
     @extend_schema(
-        summary="AliyunRDS清单",
+        summary="Aliyun RDS List",
         request=AliyunRdsSerializer,
         responses={200: AliyunRdsSerializer},
-        description="列出所有AliyunRDS（过滤，分页）",
+        description="List all Aliyun RDS configs (filtering, pagination).",
     )
     def get(self, request):
         aliyunrds = self.filter_queryset(self.queryset)
@@ -148,10 +150,10 @@ class AliyunRdsList(generics.ListAPIView):
         return self.get_paginated_response(data)
 
     @extend_schema(
-        summary="创建AliyunRDS",
+        summary="Create Aliyun RDS",
         request=AliyunRdsSerializer,
         responses={201: AliyunRdsSerializer},
-        description="创建一个AliyunRDS配置（包含一个CloudAccessKey）",
+        description="Create an Aliyun RDS configuration (including a CloudAccessKey).",
     )
     def post(self, request):
         serializer = AliyunRdsSerializer(data=request.data)
@@ -163,17 +165,17 @@ class AliyunRdsList(generics.ListAPIView):
 
 class InstanceResource(views.APIView):
     """
-    获取实例内的资源信息，database、schema、table、column
+    Get resource information inside an instance: database, schema, table, column.
     """
 
     @extend_schema(
-        summary="实例资源",
+        summary="Instance Resources",
         request=InstanceResourceSerializer,
         responses={200: InstanceResourceListSerializer},
-        description="获取实例内的资源信息",
+        description="Get resource information inside an instance.",
     )
     def post(self, request):
-        # 参数验证
+        # Parameter validation
         serializer = InstanceResourceSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -216,7 +218,7 @@ class InstanceResource(views.APIView):
                 )
             else:
                 raise serializers.ValidationError(
-                    {"errors": "不支持的资源类型或者参数不完整！"}
+                    {"errors": "Unsupported resource type or incomplete parameters."}
                 )
         except Exception as msg:
             raise serializers.ValidationError({"errors": msg})

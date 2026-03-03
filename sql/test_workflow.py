@@ -18,7 +18,7 @@ def test_get_sql_workflow(
     response = admin_client.get(f"/detail/{sql_workflow.id}/")
     assert response.status_code == 200
     assertTemplateUsed(response, "detail.html")
-    # 展示审批人用户名
+    # Displays approver group names.
     review_info = response.context["review_info"]
     assert len(review_info.nodes) == len(
         fake_generate_audit_setting.return_value.audit_auth_groups

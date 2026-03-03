@@ -1,22 +1,22 @@
-# 是否允许测试环境与线上环境配置相同
+# Whether test and production environments are allowed to share the same config
 allow-online-as-test: false
-# 是否清理测试时产生的临时文件
+# Whether to clean temporary files generated during testing
 drop-test-temporary: true
-# 语法检查小工具
+# Syntax-check helper mode
 only-syntax-check: false
 sampling-data-factor: 100
 sampling: true
 sampling-statistic-target: 100
 profiling: false
 trace: false
-# 日志级别，[0:Emergency, 1:Alert, 2:Critical, 3:Error, 4:Warning, 5:Notice, 6:Informational, 7:Debug]
+# Log level [0:Emergency, 1:Alert, 2:Critical, 3:Error, 4:Warning, 5:Notice, 6:Informational, 7:Debug]
 log-level: 7
 log-output: /opt/archery/logs/soar.log
-# 优化建议输出格式
+# Output format for optimization suggestions
 report-type: markdown
 ignore-rules:
 - ""
-# 启发式算法相关配置
+# Heuristic algorithm settings
 max-join-table-count: 5
 max-group-by-cols-count: 5
 max-distinct-count: 5
@@ -24,7 +24,7 @@ max-index-cols-count: 5
 max-total-rows: 9999999
 spaghetti-query-length: 2048
 allow-drop-index: false
-# EXPLAIN相关配置
+# EXPLAIN settings
 explain-sql-report-type: pretty
 explain-type: extended
 explain-format: traditional

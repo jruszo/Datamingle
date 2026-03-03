@@ -8,9 +8,9 @@ from sql.models import WorkflowAudit, WorkflowLog
 from sql.utils.resource_group import user_groups
 
 
-# 获取审核列表
+# Get pending review list
 def lists(request):
-    # 获取用户信息
+    # Get user info
     user = request.user
 
     limit = int(request.POST.get("limit"))
@@ -19,23 +19,23 @@ def lists(request):
     limit = offset + limit
     search = request.POST.get("search", "")
 
-    # 先获取用户所在资源组列表
+    # First, fetch resource groups for the user
     group_list = user_groups(user)
     group_ids = [group.group_id for group in group_list]
-    # 再获取用户所在权限组列表
+    # Then, fetch auth groups for the user
     if user.is_superuser:
         auth_group_ids = [group.id for group in Group.objects.all()]
     else:
         auth_group_ids = [group.id for group in Group.objects.filter(user=user)]
 
-    # 只返回所在资源组当前待自己审核的数据
+    # Return only records in the user's resource groups waiting for this reviewer
     workflow_audit = WorkflowAudit.objects.filter(
         workflow_title__icontains=search,
         current_status=WorkflowStatus.WAITING,
         group_id__in=group_ids,
         current_audit__in=auth_group_ids,
     )
-    # 过滤工单类型
+    # Filter by workflow type
     if workflow_type != 0:
         workflow_audit = workflow_audit.filter(workflow_type=workflow_type)
 
@@ -52,18 +52,18 @@ def lists(request):
         "group_name",
     )
 
-    # QuerySet 序列化
+    # Serialize QuerySet
     rows = [row for row in audit_list]
 
     result = {"total": audit_list_count, "rows": rows}
-    # 返回查询结果
+    # Return query result
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
     )
 
 
-# 获取工单日志
+# Get workflow logs
 def log(request):
     workflow_id = request.POST.get("workflow_id")
     workflow_type = request.POST.get("workflow_type")
@@ -86,10 +86,10 @@ def log(request):
         workflow_logs = []
         count = 0
 
-    # QuerySet 序列化
+    # Serialize QuerySet
     rows = [row for row in workflow_logs]
     result = {"total": count, "rows": rows}
-    # 返回查询结果
+    # Return query result
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoderFTime, bigint_as_string=True),
         content_type="application/json",
