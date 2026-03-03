@@ -54,7 +54,7 @@ def index(request):
 
 
 def login(request):
-    """登录页面"""
+    """Login page."""
     if request.user and request.user.is_authenticated:
         return HttpResponseRedirect("/")
 
@@ -66,13 +66,13 @@ def login(request):
             "oidc_enabled": settings.ENABLE_OIDC,
             "dingding_enabled": settings.ENABLE_DINGDING,
             "cas_enabled": settings.ENABLE_CAS,
-            "oidc_btn_name": SysConfig().get("oidc_btn_name", "以OIDC登录"),
+            "oidc_btn_name": SysConfig().get("oidc_btn_name", "Log in with OIDC"),
         },
     )
 
 
 def twofa(request):
-    """2fa认证页面"""
+    """2FA page."""
     if request.user.is_authenticated:
         return HttpResponseRedirect("/")
 
@@ -87,9 +87,9 @@ def twofa(request):
             auth_type = {}
             auth_type["code"] = user_auth_type
             if user_auth_type == "totp":
-                auth_type["display"] = "Google身份验证器"
+                auth_type["display"] = "Google Authenticator"
             elif user_auth_type == "sms":
-                auth_type["display"] = "短信验证码"
+                auth_type["display"] = "SMS verification code"
             auth_types.append(auth_type)
         if "sms" in user_auth_types:
             phone = TwoFactorAuthConfig.objects.get(
@@ -114,27 +114,28 @@ def twofa(request):
 
 @permission_required("sql.menu_dashboard", raise_exception=True)
 def dashboard(request):
-    """dashboard页面"""
+    """Dashboard page."""
     return render(request, "dashboard.html")
 
 
 def sqlworkflow(request):
-    """SQL上线工单列表页面"""
+    """SQL review workflow list page."""
     user = request.user
-    # 过滤筛选项的数据
+    # Data for filter options
     filter_dict = dict()
-    # 管理员，可查看所有工单
+    # Admin users can view all workflows
     if user.is_superuser or user.has_perm("sql.audit_user"):
         pass
-    # 非管理员，拥有审核权限、资源组粒度执行权限的，可以查看组内所有工单
+    # Non-admin users with review or resource-group execution permission
+    # can view all workflows in their groups.
     elif user.has_perm("sql.sql_review") or user.has_perm(
         "sql.sql_execute_for_resource_group"
     ):
-        # 先获取用户所在资源组列表
+        # Get the user's resource groups first
         group_list = user_groups(user)
         group_ids = [group.group_id for group in group_list]
         filter_dict["group_id__in"] = group_ids
-    # 其他人只能查看自己提交的工单
+    # Everyone else can only view their own workflows
     else:
         filter_dict["engineer"] = user.username
     instance_id = (
@@ -160,26 +161,27 @@ def sqlworkflow(request):
 
 
 def sqlexportworkflow(request):
-    """SQL数据导出工单列表页面"""
+    """SQL data export workflow list page."""
     user = request.user
-    # 获取所有配置项
+    # Get all config values
     storage_type = SysConfig().get("storage_type")
-    # 离线下载权限判断
+    # Check offline download permission
     can_offline_download = user.is_superuser or user.has_perm("sql.offline_download")
-    # 过滤筛选项的数据
+    # Data for filter options
     filter_dict = dict()
-    # 管理员，可查看所有工单
+    # Admin users can view all workflows
     if user.is_superuser or user.has_perm("sql.audit_user"):
         pass
-    # 非管理员，拥有审核权限、资源组粒度执行权限的，可以查看组内所有工单
+    # Non-admin users with review or resource-group execution permission
+    # can view all workflows in their groups.
     elif user.has_perm("sql.sql_review") or user.has_perm(
         "sql.sql_execute_for_resource_group"
     ):
-        # 先获取用户所在资源组列表
+        # Get the user's resource groups first
         group_list = user_groups(user)
         group_ids = [group.group_id for group in group_list]
         filter_dict["group_id__in"] = group_ids
-    # 其他人只能查看自己提交的工单
+    # Everyone else can only view their own workflows
     else:
         filter_dict["engineer"] = user.username
     instance_id = (
@@ -208,17 +210,17 @@ def sqlexportworkflow(request):
 
 @permission_required("sql.sql_submit", raise_exception=True)
 def submit_sql(request):
-    """提交SQL的页面"""
+    """SQL submission page."""
     user = request.user
-    # 获取组信息
+    # Get group information
     group_list = user_groups(user)
 
-    # 获取系统配置
+    # Get system config
     archer_config = SysConfig()
 
-    # 主动创建标签
+    # Ensure tag exists
     InstanceTag.objects.get_or_create(
-        tag_code="can_write", defaults={"tag_name": "支持上线", "active": True}
+        tag_code="can_write", defaults={"tag_name": "Supports SQL Review", "active": True}
     )
 
     context = {
@@ -230,26 +232,27 @@ def submit_sql(request):
 
 
 def detail(request, workflow_id):
-    """展示SQL工单详细页面"""
+    """SQL workflow detail page."""
     workflow_detail = get_object_or_404(SqlWorkflow, pk=workflow_id)
     audit_handler = AuditV2(workflow=workflow_detail)
     if not can_view(request.user, workflow_id):
         raise PermissionDenied
     review_info = audit_handler.get_review_info()
-    # 自动审批不通过的不需要获取下列信息
+    # For auto-review failures, no need to fetch the fields below.
     if workflow_detail.status != "workflow_autoreviewwrong":
-        # 是否可审核
+        # Can review
         is_can_review = Audit.can_review(request.user, workflow_id, 2)
-        # 是否可执行 TODO 这几个判断方法入参都修改为workflow对象，可减少多次数据库交互
+        # Can execute
+        # TODO: pass workflow object into these checks to reduce repeated DB queries.
         is_can_execute = can_execute(request.user, workflow_id)
-        # 是否可定时执行
+        # Can schedule
         is_can_timingtask = can_timingtask(request.user, workflow_id)
-        # 是否可取消
+        # Can cancel
         is_can_cancel = can_cancel(request.user, workflow_id)
-        # 是否可查看回滚信息
+        # Can view rollback information
         is_can_rollback = can_rollback(request.user, workflow_id)
 
-        # 获取审核日志
+        # Get audit logs
         try:
             audit_detail = Audit.detail_by_workflow_id(
                 workflow_id=workflow_id,
@@ -260,7 +263,7 @@ def detail(request, workflow_id):
                 Audit.logs(audit_id=audit_id).latest("id").operation_info
             )
         except Exception as e:
-            logger.debug(f"无审核日志记录，错误信息{e}")
+            logger.debug(f"No audit log records found, error: {e}")
             last_operation_info = ""
     else:
         is_can_review = False
@@ -270,7 +273,7 @@ def detail(request, workflow_id):
         is_can_rollback = False
         last_operation_info = None
 
-    # 获取定时执行任务信息
+    # Get scheduled task information
     if workflow_detail.status == "workflow_timingtask":
         job_id = Const.workflowJobprefix["sqlreview"] + "-" + str(workflow_id)
         job = task_info(job_id)
@@ -281,18 +284,18 @@ def detail(request, workflow_id):
     else:
         run_date = ""
 
-    # 添加当前审核人信息
+    # Add current reviewer information
     current_reviewers = []
     for node in review_info.nodes:
         if node.is_current_node == False:
             continue
         for user in node.group.user_set.filter(is_active=1):
-            # 确保 group_name 和 group.name 类型一致
+            # Ensure group_name and group.name use the same type.
             group_names = [group.group_name for group in user_groups(user)]
             if workflow_detail.group_name in group_names:
                 current_reviewers.append(user)
 
-    # 获取是否开启手工执行确认
+    # Check whether manual execution confirmation is enabled.
     manual = SysConfig().get("manual")
 
     context = {
@@ -312,17 +315,17 @@ def detail(request, workflow_id):
 
 
 def rollback(request):
-    """展示回滚的SQL页面"""
+    """Rollback SQL page."""
     workflow_id = request.GET.get("workflow_id")
     if not can_rollback(request.user, workflow_id):
         raise PermissionDenied
     download = request.GET.get("download")
     if workflow_id == "" or workflow_id is None:
-        context = {"errMsg": "workflow_id参数为空."}
+        context = {"errMsg": "workflow_id parameter is empty."}
         return render(request, "error.html", context)
     workflow = SqlWorkflow.objects.get(id=int(workflow_id))
 
-    # 直接下载回滚语句
+    # Directly download rollback SQL
     if download:
         try:
             query_engine = get_engine(instance=workflow.instance)
@@ -332,24 +335,24 @@ def rollback(request):
             context = {"errMsg": msg}
             return render(request, "error.html", context)
 
-        # 获取数据，存入目录
+        # Get data and save into directory
         path = os.path.join(settings.BASE_DIR, "downloads/rollback")
         os.makedirs(path, exist_ok=True)
         file_name = f"{path}/rollback_{workflow_id}.sql"
         with open(file_name, "w") as f:
             for sql in list_backup_sql:
                 f.write(f"/*{sql[0]}*/\n{sql[1]}\n")
-        # 返回
+        # Return response
         response = FileResponse(open(file_name, "rb"))
         response["Content-Type"] = "application/octet-stream"
         response["Content-Disposition"] = (
             f'attachment;filename="rollback_{workflow_id}.sql"'
         )
         return response
-    # 异步获取，并在页面展示，如果数据量大加载会缓慢
+    # Fetch asynchronously and render in page; large datasets may load slowly.
     else:
         rollback_workflow_name = (
-            f"【回滚工单】原工单Id:{workflow_id} ,{workflow.workflow_name}"
+            f"[Rollback Workflow] Source workflow ID: {workflow_id}, {workflow.workflow_name}"
         )
         context = {
             "workflow_detail": workflow,
@@ -360,18 +363,18 @@ def rollback(request):
 
 @permission_required("sql.menu_sqlanalyze", raise_exception=True)
 def sqlanalyze(request):
-    """SQL分析页面"""
+    """SQL analysis page."""
     return render(request, "sqlanalyze.html")
 
 
 @permission_required("sql.menu_query", raise_exception=True)
 def sqlquery(request):
-    """SQL在线查询页面"""
-    # 主动创建标签
+    """Online SQL query page."""
+    # Ensure tag exists
     InstanceTag.objects.get_or_create(
-        tag_code="can_read", defaults={"tag_name": "支持查询", "active": True}
+        tag_code="can_read", defaults={"tag_name": "Supports Query", "active": True}
     )
-    # 收藏语句
+    # Favorite statements
     user = request.user
     group_list = user_groups(user)
     storage_type = SysConfig().get("storage_type")
@@ -394,9 +397,9 @@ def sqlquery(request):
 
 @permission_required("sql.menu_queryapplylist", raise_exception=True)
 def queryapplylist(request):
-    """查询权限申请列表页面"""
+    """Query permission request list page."""
     user = request.user
-    # 获取资源组
+    # Get resource groups
     group_list = user_groups(user)
 
     context = {"group_list": group_list, "engines": engine_map}
@@ -404,15 +407,15 @@ def queryapplylist(request):
 
 
 def queryapplydetail(request, apply_id):
-    """查询权限申请详情页面"""
+    """Query permission request detail page."""
     workflow_detail = QueryPrivilegesApply.objects.get(apply_id=apply_id)
-    # 获取当前审批和审批流程
+    # Get current approver and approval flow
     audit_handler = AuditV2(workflow=workflow_detail)
     review_info = audit_handler.get_review_info()
 
-    # 是否可审核
+    # Can review
     is_can_review = Audit.can_review(request.user, apply_id, 1)
-    # 获取审核日志
+    # Get audit logs
     if workflow_detail.status == 2:
         try:
             audit_id = Audit.detail_by_workflow_id(
@@ -422,18 +425,18 @@ def queryapplydetail(request, apply_id):
                 Audit.logs(audit_id=audit_id).latest("id").operation_info
             )
         except Exception as e:
-            logger.debug(f"无审核日志记录，错误信息{e}")
+            logger.debug(f"No audit log records found, error: {e}")
             last_operation_info = ""
     else:
         last_operation_info = ""
 
-    # 添加当前审核人信息
+    # Add current reviewer information
     current_reviewers = []
     for node in review_info.nodes:
         if node.is_current_node == False:
             continue
         for user in node.group.user_set.filter(is_active=1):
-            # 确保 group_name 和 group.name 类型一致
+            # Ensure group_name and group.name use the same type.
             group_names = [group.group_name for group in user_groups(user)]
             if workflow_detail.group_name in group_names:
                 current_reviewers.append(user)
@@ -449,8 +452,8 @@ def queryapplydetail(request, apply_id):
 
 
 def queryuserprivileges(request):
-    """查询权限管理页面"""
-    # 获取所有用户
+    """Query permission management page."""
+    # Get all users
     user_list = (
         QueryPrivileges.objects.filter(is_deleted=0).values("user_display").distinct()
     )
@@ -460,34 +463,34 @@ def queryuserprivileges(request):
 
 @permission_required("sql.menu_sqladvisor", raise_exception=True)
 def sqladvisor(request):
-    """SQL优化工具页面"""
+    """SQL optimization tool page."""
     return render(request, "sqladvisor.html")
 
 
 @permission_required("sql.menu_slowquery", raise_exception=True)
 def slowquery(request):
-    """SQL慢日志页面"""
+    """SQL slow log page."""
     return render(request, "slowquery.html")
 
 
 @permission_required("sql.menu_instance", raise_exception=True)
 def instance(request):
-    """实例管理页面"""
-    # 获取实例标签
+    """Instance management page."""
+    # Get instance tags
     tags = InstanceTag.objects.filter(active=True)
     return render(request, "instance.html", {"tags": tags, "engines": engine_map})
 
 
 @permission_required("sql.menu_instance_account", raise_exception=True)
 def instanceaccount(request):
-    """实例账号管理页面"""
+    """Instance account management page."""
     return render(request, "instanceaccount.html")
 
 
 @permission_required("sql.menu_database", raise_exception=True)
 def database(request):
-    """实例数据库管理页面"""
-    # 获取所有有效用户，通知对象
+    """Instance database management page."""
+    # Get all active users as notification targets
     active_user = Users.objects.filter(is_active=1)
 
     return render(request, "database.html", {"active_user": active_user})
@@ -495,38 +498,38 @@ def database(request):
 
 @permission_required("sql.menu_dbdiagnostic", raise_exception=True)
 def dbdiagnostic(request):
-    """会话管理页面"""
+    """Session management page."""
     return render(request, "dbdiagnostic.html")
 
 
 @permission_required("sql.menu_data_dictionary", raise_exception=True)
 def data_dictionary(request):
-    """数据字典页面"""
+    """Data dictionary page."""
     return render(request, "data_dictionary.html", locals())
 
 
 @permission_required("sql.menu_param", raise_exception=True)
 def instance_param(request):
-    """实例参数管理页面"""
+    """Instance parameter management page."""
     return render(request, "param.html")
 
 
 @permission_required("sql.menu_my2sql", raise_exception=True)
 def my2sql(request):
-    """my2sql页面"""
+    """My2SQL page."""
     return render(request, "my2sql.html")
 
 
 @permission_required("sql.menu_schemasync", raise_exception=True)
 def schemasync(request):
-    """数据库差异对比页面"""
+    """Schema diff page."""
     return render(request, "schemasync.html")
 
 
 @permission_required("sql.menu_archive", raise_exception=True)
 def archive(request):
-    """归档列表页面"""
-    # 获取资源组
+    """Archive list page."""
+    # Get resource groups
     group_list = user_groups(request.user)
     ins_list = user_instances(request.user, db_type=["mysql"]).order_by(
         Convert("instance_name", "gbk").asc()
@@ -537,9 +540,9 @@ def archive(request):
 
 
 def archive_detail(request, id):
-    """归档详情页面"""
+    """Archive detail page."""
     archive_config = ArchiveConfig.objects.get(pk=id)
-    # 获取当前审批和审批流程、是否可审核
+    # Get current approver, approval flow, and whether review is allowed.
     audit_handler = AuditV2(
         workflow=archive_config, resource_group=archive_config.resource_group
     )
@@ -549,7 +552,7 @@ def archive_detail(request, id):
         can_review = True
     except AuditException:
         can_review = False
-    # 获取审核日志
+    # Get audit logs
     if archive_config.status == 2:
         try:
             audit_id = Audit.detail_by_workflow_id(
@@ -559,18 +562,18 @@ def archive_detail(request, id):
                 Audit.logs(audit_id=audit_id).latest("id").operation_info
             )
         except Exception as e:
-            logger.debug(f"归档配置{id}无审核日志记录，错误信息{e}")
+            logger.debug(f"No audit log records for archive config {id}, error: {e}")
             last_operation_info = ""
     else:
         last_operation_info = ""
 
-    # 添加当前审核人信息
+    # Add current reviewer information
     current_reviewers = []
     for node in review_info.nodes:
         if node.is_current_node == False:
             continue
         for user in node.group.user_set.filter(is_active=1):
-            # 确保 group_name 和 group.name 类型一致
+            # Ensure group_name and group.name use the same type.
             group_names = [group.group_name for group in user_groups(user)]
             if archive_config.resource_group.group_name in group_names:
                 current_reviewers.append(user)
@@ -587,27 +590,27 @@ def archive_detail(request, id):
 
 @superuser_required
 def config(request):
-    """配置管理页面"""
-    # 获取所有资源组名称
+    """Configuration management page."""
+    # Get all resource group names
     group_list = ResourceGroup.objects.all()
-    # 获取所有权限组
+    # Get all permission groups
     auth_group_list = Group.objects.all()
-    # 获取所有实例标签
+    # Get all instance tags
     instance_tags = InstanceTag.objects.all()
-    # 支持自动审核的数据库类型
+    # Database types that support auto review
     db_type = ["mysql", "oracle", "mongo", "clickhouse", "redis", "doris"]
-    # 获取所有配置项
+    # Get all config values
     all_config = Config.objects.all().values("item", "value")
     sys_config = {}
     for items in all_config:
         sys_config[items["item"]] = items["value"]
 
-    # 设置OPENAI部分配置不存在时的默认值
+    # Set OpenAI defaults when config values are missing.
     if not sys_config.get("default_chat_model", ""):
         sys_config["default_chat_model"] = "gpt-3.5-turbo"
     if not sys_config.get("default_query_template", ""):
         sys_config["default_query_template"] = (
-            "你是一个熟悉 {{db_type}} 的工程师, 我会给你一些基本信息和要求, 你会生成一个查询语句给我使用, 不要返回任何注释和序号, 仅返回查询语句：{{table_schema}} \n {{user_input}}"
+            "You are an engineer familiar with {{db_type}}. I will give you basic information and requirements. Generate one query for me. Do not return comments or numbering. Return only the query: {{table_schema}} \n {{user_input}}"
         )
 
     context = {
@@ -623,28 +626,28 @@ def config(request):
 
 @superuser_required
 def group(request):
-    """资源组管理页面"""
+    """Resource group management page."""
     return render(request, "group.html")
 
 
 @superuser_required
 def groupmgmt(request, group_id):
-    """资源组组关系管理页面"""
+    """Resource group relation management page."""
     group = ResourceGroup.objects.get(group_id=group_id)
     return render(request, "groupmgmt.html", {"group": group})
 
 
 def workflows(request):
-    """待办列表页面"""
+    """Todo list page."""
     return render(request, "workflow.html")
 
 
 def workflowsdetail(request, audit_id):
-    """待办详情"""
-    # 按照不同的workflow_type返回不同的详情
+    """Todo detail."""
+    # Return different detail pages by workflow_type.
     audit_detail = Audit.detail(audit_id)
     if not audit_detail:
-        raise Http404("不存在对应的工单记录")
+        raise Http404("No corresponding workflow record exists")
     if audit_detail.workflow_type == WorkflowType.QUERY:
         return HttpResponseRedirect(
             reverse("sql:queryapplydetail", args=(audit_detail.workflow_id,))
@@ -661,8 +664,8 @@ def workflowsdetail(request, audit_id):
 
 @permission_required("sql.menu_document", raise_exception=True)
 def dbaprinciples(request):
-    """SQL文档页面"""
-    #  读取MD文件
+    """SQL documentation page."""
+    # Read markdown file
     file = os.path.join(settings.BASE_DIR, "docs/docs.md")
     with open(file, "r", encoding="utf-8") as f:
         md = f.read().replace("\n", "\\n")
@@ -671,7 +674,7 @@ def dbaprinciples(request):
 
 @permission_required("sql.audit_user", raise_exception=True)
 def audit(request):
-    """通用审计日志页面"""
+    """General audit log page."""
     _action_types = AuditEntry.objects.values_list("action").distinct()
     action_types = [i[0] for i in _action_types]
     return render(request, "audit.html", {"action_types": action_types})
@@ -679,7 +682,7 @@ def audit(request):
 
 @permission_required("sql.audit_user", raise_exception=True)
 def audit_sqlquery(request):
-    """SQL在线查询页面审计"""
+    """Online SQL query audit page."""
     user = request.user
     favorites = QueryLog.objects.filter(username=user.username, favorite=True).values(
         "id", "alias"
@@ -688,22 +691,23 @@ def audit_sqlquery(request):
 
 
 def audit_sqlworkflow(request):
-    """SQL上线工单列表页面"""
+    """SQL review workflow list page."""
     user = request.user
-    # 过滤筛选项的数据
+    # Data for filter options
     filter_dict = dict()
-    # 管理员，可查看所有工单
+    # Admin users can view all workflows
     if user.is_superuser or user.has_perm("sql.audit_user"):
         pass
-    # 非管理员，拥有审核权限、资源组粒度执行权限的，可以查看组内所有工单
+    # Non-admin users with review or resource-group execution permission
+    # can view all workflows in their groups.
     elif user.has_perm("sql.sql_review") or user.has_perm(
         "sql.sql_execute_for_resource_group"
     ):
-        # 先获取用户所在资源组列表
+        # Get the user's resource groups first
         group_list = user_groups(user)
         group_ids = [group.group_id for group in group_list]
         filter_dict["group_id__in"] = group_ids
-    # 其他人只能查看自己提交的工单
+    # Everyone else can only view their own workflows
     else:
         filter_dict["engineer"] = user.username
     instance_id = (
@@ -728,15 +732,15 @@ def audit_sqlworkflow(request):
 
 @permission_required("sql.sqlexport_submit", raise_exception=True)
 def sqlexportsubmit(request):
-    """SQL导出工单页面"""
-    # 主动创建标签
+    """SQL export workflow submission page."""
+    # Ensure tag exists
     InstanceTag.objects.get_or_create(
-        tag_code="can_read", defaults={"tag_name": "支持查询", "active": True}
+        tag_code="can_read", defaults={"tag_name": "Supports Query", "active": True}
     )
-    # 收藏语句
+    # Favorite statements
     user = request.user
     group_list = user_groups(user)
-    # 获取所有配置项
+    # Get all config values
     max_export_rows = SysConfig().get("max_export_rows")
     max_export_rows = int(max_export_rows) if max_export_rows else 10000
 

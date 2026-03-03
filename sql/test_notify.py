@@ -44,18 +44,18 @@ User = get_user_model()
 
 class TestNotify(TestCase):
     """
-    测试消息
+    Notification tests.
     """
 
     def setUp(self):
         self.sys_config = SysConfig()
         self.aug = Group.objects.create(id=1, name="auth_group")
         self.user = User.objects.create(
-            username="test_user", display="中文显示", is_active=True
+            username="test_user", display="Display Name", is_active=True
         )
         self.su = User.objects.create(
             username="s_user",
-            display="中文显示",
+            display="Display Name",
             is_active=True,
             is_superuser=True,
         )
@@ -101,16 +101,16 @@ class TestNotify(TestCase):
             status=0,
             audit_auth_groups="some_audit_group",
         )
-        # 必须要有的几个
-        # WorkflowAudit, 审核表, 每一个工作流关联一条记录
-        # WorkflowAuditDetail, 审核详情, 每一个审核步骤一条记录, 并且都关联到一个 WorkflowAudit
+        # Required objects:
+        # WorkflowAudit: one record per workflow.
+        # WorkflowAuditDetail: one record per audit step linked to WorkflowAudit.
         self.audit_wf = WorkflowAudit.objects.create(
             group_id=1,
             group_name="some_group",
             workflow_id=self.wf.id,
             workflow_type=2,
-            workflow_title="申请标题",
-            workflow_remark="申请备注",
+            workflow_title="Request title",
+            workflow_remark="Request note",
             audit_auth_groups="1",
             current_audit="1",
             next_audit="2",
@@ -122,15 +122,15 @@ class TestNotify(TestCase):
             audit_user=self.user.display,
             audit_time=datetime.now(),
             audit_status=1,
-            remark="测试备注",
+            remark="Test note",
         )
         self.audit_query = WorkflowAudit.objects.create(
             group_id=1,
             group_name="some_group",
             workflow_id=self.query_apply_1.apply_id,
             workflow_type=1,
-            workflow_title="申请标题",
-            workflow_remark="申请备注",
+            workflow_title="Request title",
+            workflow_remark="Request note",
             audit_auth_groups=",".join([str(self.aug.id)]),
             current_audit=str(self.aug.id),
             next_audit="-1",
@@ -141,13 +141,13 @@ class TestNotify(TestCase):
             audit_user=self.user.display,
             audit_time=datetime.now(),
             audit_status=1,
-            remark="测试query备注",
+            remark="Test query note",
         )
 
         self.rs = ResourceGroup.objects.create(group_id=1, ding_webhook="url")
 
         self.archive_apply = ArchiveConfig.objects.create(
-            title="测试归档",
+            title="Test archive",
             resource_group=self.rs,
             src_instance=self.ins,
             src_db_name="foo",
@@ -166,7 +166,7 @@ class TestNotify(TestCase):
             workflow_id=self.archive_apply.id,
             workflow_type=3,
             workflow_title=self.archive_apply.title,
-            workflow_remark="申请备注",
+            workflow_remark="Request note",
             audit_auth_groups=",".join([str(self.aug.id)]),
             current_audit=str(self.aug.id),
             next_audit="-1",
@@ -216,7 +216,7 @@ class TestNotify(TestCase):
 
     @patch("sql.notify.auto_notify")
     def test_notify_for_execute(self, mock_auto_notify: Mock):
-        """测试适配器"""
+        """Test adapter."""
         notify_for_execute(self.wf)
         mock_auto_notify.assert_called_once_with(
             workflow=self.wf, sys_config=ANY, event_type=EventType.EXECUTE
@@ -224,7 +224,7 @@ class TestNotify(TestCase):
 
     @patch("sql.notify.auto_notify")
     def test_notify_for_audit(self, mock_auto_notify: Mock):
-        """测试适配器"""
+        """Test adapter."""
         notify_for_audit(
             workflow_audit=self.audit_wf, workflow_audit_detail=self.audit_wf_detail
         )
@@ -238,7 +238,7 @@ class TestNotify(TestCase):
 
     @patch("sql.notify.auto_notify")
     def test_notify_for_m2sql(self, mock_auto_notify: Mock):
-        """测试适配器"""
+        """Test adapter."""
         task = Mock()
         task.success = True
         task.kwargs = {"user": "foo"}
@@ -249,7 +249,7 @@ class TestNotify(TestCase):
             workflow=expect_workflow, sys_config=ANY, event_type=EventType.M2SQL
         )
         mock_auto_notify.reset_mock()
-        # 测试失败的情况
+        # Test failure scenario.
         task.success = False
         task.result = "Traceback blahblah"
         expect_workflow = My2SqlResult(
@@ -260,19 +260,19 @@ class TestNotify(TestCase):
             workflow=expect_workflow, sys_config=ANY, event_type=EventType.M2SQL
         )
 
-    # 下面的测试均为 notifier 的测试, 测试 render 和 send
+    # The tests below focus on notifier render() and send().
     def test_legacy_render_execution(self):
         notifier = LegacyRender(
             workflow=self.wf, event_type=EventType.EXECUTE, sys_config=self.sys_config
         )
         notifier.render()
         self.assertEqual(len(notifier.messages), 1)
-        self.assertIn("工单", notifier.messages[0].msg_title)
+        self.assertIn("Workflow", notifier.messages[0].msg_title)
         with self.assertRaises(NotImplementedError):
             notifier.send()
 
     def test_legacy_render_execution_ddl(self):
-        """DDL 比普通的工单多一个通知 dba"""
+        """DDL has one extra DBA notification compared to normal workflow."""
         self.wf.syntax_type = 1
         self.wf.status = "workflow_finish"
         self.wf.save()
@@ -282,7 +282,7 @@ class TestNotify(TestCase):
         )
         notifier.render()
         self.assertEqual(len(notifier.messages), 2)
-        self.assertIn("有新的DDL语句执行完成", notifier.messages[1].msg_title)
+        self.assertIn("A new DDL statement finished execution", notifier.messages[1].msg_title)
 
     def test_legacy_render_audit(self):
         notifier = LegacyRender(
@@ -294,8 +294,8 @@ class TestNotify(TestCase):
         )
         notifier.render()
         self.assertEqual(len(notifier.messages), 1)
-        self.assertIn("新的工单申请", notifier.messages[0].msg_title)
-        # 测试一下不传 workflow
+        self.assertIn("New Workflow Request", notifier.messages[0].msg_title)
+        # Test without providing workflow.
         notifier = LegacyRender(
             event_type=EventType.AUDIT,
             workflow=None,
@@ -305,10 +305,10 @@ class TestNotify(TestCase):
         )
         notifier.render()
         self.assertEqual(len(notifier.messages), 1)
-        self.assertIn("新的工单申请", notifier.messages[0].msg_title)
+        self.assertIn("New Workflow Request", notifier.messages[0].msg_title)
 
     def test_legacy_render_query_audit(self):
-        # 默认是库权限的
+        # Default is database-level permission.
         notifier = LegacyRender(
             workflow=self.query_apply_1,
             event_type=EventType.AUDIT,
@@ -318,9 +318,9 @@ class TestNotify(TestCase):
         )
         notifier.render()
         self.assertEqual(len(notifier.messages), 1)
-        self.assertIn("数据库清单", notifier.messages[0].msg_content)
+        self.assertIn("Database List", notifier.messages[0].msg_content)
 
-        # 表级别的权限申请
+        # Table-level permission request.
         self.query_apply_1.priv_type = 2
         self.query_apply_1.table_list = "foo,bar"
         self.query_apply_1.save()
@@ -333,7 +333,7 @@ class TestNotify(TestCase):
         )
         notifier.render()
         self.assertEqual(len(notifier.messages), 1)
-        self.assertIn("表清单", notifier.messages[0].msg_content)
+        self.assertIn("Table List", notifier.messages[0].msg_content)
         self.assertIn("foo,bar", notifier.messages[0].msg_content)
 
     def test_legacy_render_archive_audit(self):
@@ -345,11 +345,11 @@ class TestNotify(TestCase):
         )
         notifier.render()
         self.assertEqual(len(notifier.messages), 1)
-        self.assertIn("归档表", notifier.messages[0].msg_content)
+        self.assertIn("Archive Table", notifier.messages[0].msg_content)
 
     def test_legacy_render_audit_success(self):
-        """审核通过消息"""
-        # 只测试上线工单
+        """Approved audit message."""
+        # Only test SQL deployment workflow here.
         self.audit_wf.current_status = 1
         self.audit_wf.save()
         notifier = LegacyRender(
@@ -360,12 +360,12 @@ class TestNotify(TestCase):
         )
         notifier.render()
         self.assertEqual(len(notifier.messages), 1)
-        self.assertIn("工单审核通过", notifier.messages[0].msg_title)
+        self.assertIn("Workflow Approved", notifier.messages[0].msg_title)
 
     def test_legacy_render_audit_reject(self):
         self.audit_wf.current_status = 2
         self.audit_wf.save()
-        self.audit_wf_detail.remark = "驳回foo-bar"
+        self.audit_wf_detail.remark = "Rejected foo-bar"
         self.audit_wf_detail.save()
         notifier = LegacyRender(
             workflow=self.wf,
@@ -376,13 +376,13 @@ class TestNotify(TestCase):
         )
         notifier.render()
         self.assertEqual(len(notifier.messages), 1)
-        self.assertIn("工单被驳回", notifier.messages[0].msg_title)
-        self.assertIn("驳回foo-bar", notifier.messages[0].msg_content)
+        self.assertIn("Workflow Rejected", notifier.messages[0].msg_title)
+        self.assertIn("Rejected foo-bar", notifier.messages[0].msg_content)
 
     def test_legacy_render_audit_abort(self):
         self.audit_wf.current_status = 3
         self.audit_wf.save()
-        self.audit_wf_detail.remark = "撤回foo-bar"
+        self.audit_wf_detail.remark = "Withdrawn foo-bar"
         self.audit_wf_detail.save()
         notifier = LegacyRender(
             workflow=self.wf,
@@ -393,8 +393,8 @@ class TestNotify(TestCase):
         )
         notifier.render()
         self.assertEqual(len(notifier.messages), 1)
-        self.assertIn("提交人主动终止工单", notifier.messages[0].msg_title)
-        self.assertIn("撤回foo-bar", notifier.messages[0].msg_content)
+        self.assertIn("Workflow Cancelled by Submitter", notifier.messages[0].msg_title)
+        self.assertIn("Withdrawn foo-bar", notifier.messages[0].msg_content)
 
     def test_legacy_render_m2sql(self):
         successful_workflow = My2SqlResult(
@@ -407,8 +407,11 @@ class TestNotify(TestCase):
         )
         notifier.render()
         self.assertEqual(len(notifier.messages), 1)
-        self.assertEqual(notifier.messages[0].msg_title, "[Archery 通知]My2SQL执行结束")
-        # 失败
+        self.assertEqual(
+            notifier.messages[0].msg_title,
+            "[Archery Notification] My2SQL execution finished",
+        )
+        # Failure.
         failed_workflow = My2SqlResult(
             submitter=self.user.username, success=False, error="Traceback blahblah"
         )
@@ -419,10 +422,13 @@ class TestNotify(TestCase):
         )
         notifier.render()
         self.assertEqual(len(notifier.messages), 1)
-        self.assertEqual(notifier.messages[0].msg_title, "[Archery 通知]My2SQL执行失败")
+        self.assertEqual(
+            notifier.messages[0].msg_title,
+            "[Archery Notification] My2SQL execution failed",
+        )
 
     def test_general_webhook(self):
-        # SQL 上线工单
+        # SQL deployment workflow
         notifier = GenericWebhookNotifier(
             workflow=self.wf,
             event_type=EventType.AUDIT,
@@ -440,7 +446,7 @@ class TestNotify(TestCase):
                 "group_name": "some_group",
                 "workflow_type": 2,
                 "create_user_display": "",
-                "workflow_title": "申请标题",
+                "workflow_title": "Request title",
                 "audit_auth_groups": self.audit_wf.audit_auth_groups,
                 "current_audit": "1",
                 "current_status": 0,
@@ -459,7 +465,7 @@ class TestNotify(TestCase):
                 "syntax_type": 1,
                 "is_backup": True,
                 "engineer": "test_user",
-                "engineer_display": "中文显示",
+                "engineer_display": "Display Name",
                 "status": "workflow_timingtask",
                 "audit_auth_groups": "some_audit_group",
                 "run_date_start": None,
@@ -479,7 +485,7 @@ class TestNotify(TestCase):
         self.assertEqual(
             notifier.request_data["instance"]["instance_name"], self.ins.instance_name
         )
-        # SQL 查询工单
+        # SQL query privilege workflow
         notifier = GenericWebhookNotifier(
             workflow=self.query_apply_1,
             event_type=EventType.AUDIT,
@@ -512,10 +518,11 @@ def test_notify_send(
     notifier_to_test: Notifier.__class__,
     method_assert_called: str,
 ):
-    """测试通知发送
-    初始化 notifier_to_test, 然后调用 send 方法, 然后断言对应的方法`method_assert_called`被调用了
-    send 方法都是 MsgSender 的方法, 所以这里只需要断言 MsgSender 的方法被调用了, 如果没有用到 MsgSender 的方法, 那么就不需要这个测试
-    需要自己写别的测试
+    """Test notifier send().
+
+    Initialize ``notifier_to_test``, call ``send()``, and assert the corresponding
+    ``MsgSender`` method was called. If a notifier does not use ``MsgSender``,
+    it should be tested separately.
     """
     mock_send_method = Mock()
     mock_msg_sender = mocker.patch("sql.notify.MsgSender")
@@ -532,7 +539,7 @@ def test_notify_send(
 
 
 def test_override_sys_key():
-    """dataclass 的继承有时候让人有点困惑, 在这里补一个测试确认可以正常覆盖一些值"""
+    """Ensure dataclass inheritance can override class-level defaults."""
 
     class OverrideNotifier(Notifier):
         sys_config_key = "test"

@@ -22,7 +22,7 @@ from sql.tests import User
 
 class TestArchiver(TestCase):
     """
-    测试Archive
+    Test Archive.
     """
 
     def setUp(self):
@@ -34,7 +34,7 @@ class TestArchiver(TestCase):
         self.u1.user_permissions.add(menu_archive)
         self.u2.user_permissions.add(menu_archive)
         self.u2.user_permissions.add(archive_review)
-        # 使用 travis.ci 时实例和测试service保持一致
+        # Keep test instance consistent with CI service.
         self.ins = Instance.objects.create(
             instance_name="test_instance",
             type="master",
@@ -92,7 +92,7 @@ class TestArchiver(TestCase):
 
     def test_archive_list_super(self):
         """
-        测试管理员获取归档申请列表
+        Superuser gets archive request list.
         :return:
         """
         data = {"filter_instance_id": self.ins.id, "state": "false", "search": "text"}
@@ -102,7 +102,7 @@ class TestArchiver(TestCase):
 
     def test_archive_list_own(self):
         """
-        测试非管理员和审核人获取归档申请列表
+        Non-admin non-reviewer gets own archive list.
         :return:
         """
         data = {"filter_instance_id": self.ins.id, "state": "false", "search": "text"}
@@ -112,7 +112,7 @@ class TestArchiver(TestCase):
 
     def test_archive_list_review(self):
         """
-        测试审核人获取归档申请列表
+        Reviewer gets archive request list.
         :return:
         """
         data = {"filter_instance_id": self.ins.id, "state": "false", "search": "text"}
@@ -122,7 +122,7 @@ class TestArchiver(TestCase):
 
     def test_archive_apply_not_param(self):
         """
-        测试申请归档实例数据，参数不完整
+        Archive apply fails when parameters are incomplete.
         :return:
         """
         data = {
@@ -141,12 +141,13 @@ class TestArchiver(TestCase):
         self.client.force_login(self.superuser)
         r = self.client.post(path="/archive/apply/", data=data)
         self.assertDictEqual(
-            json.loads(r.content), {"status": 1, "msg": "请填写完整！", "data": {}}
+            json.loads(r.content),
+            {"status": 1, "msg": "Please complete all required fields!", "data": {}},
         )
 
     def test_archive_apply_not_dest_param(self):
         """
-        测试申请归档实例数据，目标实例不完整
+        Archive apply fails when destination instance params are incomplete.
         :return:
         """
         data = {
@@ -164,12 +165,16 @@ class TestArchiver(TestCase):
         r = self.client.post(path="/archive/apply/", data=data)
         self.assertDictEqual(
             json.loads(r.content),
-            {"status": 1, "msg": "归档到实例时目标实例信息必选！", "data": {}},
+            {
+                "status": 1,
+                "msg": "Destination instance info is required for destination mode!",
+                "data": {},
+            },
         )
 
     def test_archive_apply_not_exist_review(self):
         """
-        测试申请归档实例数据，未配置审批流程
+        Archive apply fails when approval flow is not configured.
         :return:
         """
         data = {
@@ -190,13 +195,17 @@ class TestArchiver(TestCase):
         r = self.client.post(path="/archive/apply/", data=data)
         self.assertDictEqual(
             json.loads(r.content),
-            {"data": {}, "msg": "新建审批流失败, 请联系管理员", "status": 1},
+            {
+                "data": {},
+                "msg": "Failed to create approval flow. Contact admin.",
+                "status": 1,
+            },
         )
 
     @patch("sql.archiver.async_task")
     def test_archive_apply(self, _async_task):
         """
-        测试申请归档实例数据
+        Test archive apply.
         :return:
         """
         WorkflowAuditSetting.objects.create(
@@ -251,7 +260,7 @@ class TestArchiver(TestCase):
     @patch("sql.archiver.async_task")
     def test_archive_audit(self, _async_task, mock_operate):
         """
-        测试审核归档实例数据
+        Test archive review.
         :return:
         """
         mock_operate.return_value = None
@@ -260,7 +269,7 @@ class TestArchiver(TestCase):
             "audit_status": WorkflowStatus.PASSED,
             "audit_remark": "xxxx",
         }
-        # operate 被 patch 了, 这里强制设置一下, 走一下流程
+        # operate is patched, force a passed state to run through flow.
         self.audit_flow.current_status = WorkflowStatus.PASSED
         self.audit_flow.save()
         self.client.force_login(self.superuser)
@@ -275,7 +284,7 @@ class TestArchiver(TestCase):
     @patch("sql.archiver.async_task")
     def test_add_archive_task(self, _async_task):
         """
-        测试添加异步归档任务
+        Test adding async archive tasks.
         :return:
         """
         add_archive_task()
@@ -283,7 +292,7 @@ class TestArchiver(TestCase):
     @patch("sql.archiver.async_task")
     def test_add_archive(self, _async_task):
         """
-        测试执行归档任务
+        Test executing archive task.
         :return:
         """
         with self.assertRaises(Exception):
@@ -292,7 +301,7 @@ class TestArchiver(TestCase):
     @patch("sql.archiver.async_task")
     def test_archive_log(self, _async_task):
         """
-        测试获取归档日志
+        Test fetching archive logs.
         :return:
         """
         data = {

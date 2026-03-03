@@ -25,7 +25,7 @@ logger = logging.getLogger("default")
 @permission_required("sql.menu_my2sql", raise_exception=True)
 def binlog_list(request):
     """
-    获取binlog列表
+    Get binlog list.
     :param request:
     :return:
     """
@@ -33,7 +33,7 @@ def binlog_list(request):
     try:
         instance = Instance.objects.get(instance_name=instance_name)
     except Instance.DoesNotExist:
-        result = {"status": 1, "msg": "实例不存在", "data": []}
+        result = {"status": 1, "msg": "Instance does not exist", "data": []}
         return HttpResponse(json.dumps(result), content_type="application/json")
     query_engine = get_engine(instance=instance)
     query_result = query_engine.query("information_schema", "show binary logs;")
@@ -49,7 +49,7 @@ def binlog_list(request):
     else:
         result = {"status": 1, "msg": query_result.error}
 
-    # 返回查询结果
+    # Return query result.
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
@@ -63,7 +63,7 @@ def del_binlog(request):
     try:
         instance = Instance.objects.get(id=instance_id)
     except Instance.DoesNotExist:
-        result = {"status": 1, "msg": "实例不存在", "data": []}
+        result = {"status": 1, "msg": "Instance does not exist", "data": []}
         return HttpResponse(json.dumps(result), content_type="application/json")
 
     if binlog:
@@ -71,15 +71,15 @@ def del_binlog(request):
         binlog = query_engine.escape_string(binlog)
         query_result = query_engine.query(sql=rf"purge master logs to '{binlog}';")
         if query_result.error is None:
-            result = {"status": 0, "msg": "清理成功", "data": ""}
+            result = {"status": 0, "msg": "Cleanup succeeded", "data": ""}
         else:
             result = {
                 "status": 2,
-                "msg": f"清理失败,Error:{query_result.error}",
+                "msg": f"Cleanup failed, Error: {query_result.error}",
                 "data": "",
             }
     else:
-        result = {"status": 1, "msg": "Error:未选择binlog！", "data": ""}
+        result = {"status": 1, "msg": "Error: no binlog selected!", "data": ""}
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
@@ -89,7 +89,7 @@ def del_binlog(request):
 @permission_required("sql.menu_my2sql", raise_exception=True)
 def my2sql(request):
     """
-    通过解析binlog获取SQL--使用my2sql
+    Parse binlog and get SQL using my2sql.
     :param request:
     :return:
     """
@@ -132,10 +132,10 @@ def my2sql(request):
 
     result = {"status": 0, "msg": "ok", "data": []}
 
-    # 提交给my2sql进行解析
+    # Submit to my2sql for parsing.
     my2sql = My2SQL()
     username, password = instance.get_username_password()
-    # 准备参数
+    # Prepare parameters.
     args = {
         "host": instance.host,
         "user": username,
@@ -160,19 +160,19 @@ def my2sql(request):
         "output-toScreen": True,
     }
 
-    # 参数检查
+    # Validate parameters.
     args_check_result = my2sql.check_args(args)
     if args_check_result["status"] == 1:
         return HttpResponse(
             json.dumps(args_check_result), content_type="application/json"
         )
-    # 参数转换
+    # Convert parameters.
     cmd_args = my2sql.generate_args2cmd(args)
 
-    # 执行命令
+    # Execute command.
     try:
         p = my2sql.execute_cmd(cmd_args)
-        # 读取前num行后结束
+        # Read first `num` lines then stop.
         rows = []
         n = 1
         for line in iter(p.stdout.readline, ""):
@@ -189,13 +189,13 @@ def my2sql(request):
                 break
 
         if rows.__len__() == 0:
-            # 判断是否有异常
+            # Check whether an error occurred.
             stderr = p.stderr.read()
             if stderr and isinstance(stderr, str):
                 result["status"] = 1
                 result["msg"] = stderr
                 return HttpResponse(json.dumps(result), content_type="application/json")
-        # 终止子进程
+        # Terminate child process.
         p.kill()
         result["data"] = rows
     except Exception as e:
@@ -203,7 +203,7 @@ def my2sql(request):
         result["status"] = 1
         result["msg"] = str(e)
 
-    # 异步保存到文件
+    # Save to file asynchronously.
     if save_sql:
         args.update({"instance": instance})
         args.pop("password")
@@ -217,7 +217,7 @@ def my2sql(request):
             task_name=f"my2sql-{time.time()}",
         )
 
-    # 返回查询结果
+    # Return query result.
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
@@ -226,9 +226,9 @@ def my2sql(request):
 
 def my2sql_file(args, user):
     """
-    用于异步保存binlog解析的文件
-    :param args: 参数
-    :param user: 操作用户对象，用户消息推送
+    Save parsed binlog SQL files asynchronously.
+    :param args: Parameters
+    :param user: User object used for message notifications
     :return:
     """
     my2sql = My2SQL()
@@ -244,9 +244,9 @@ def my2sql_file(args, user):
     path = os.path.join(settings.BASE_DIR, "downloads/my2sql/")
     os.makedirs(path, exist_ok=True)
 
-    # 参数转换
+    # Convert parameters.
     args["output-dir"] = path
     cmd_args = my2sql.generate_args2cmd(args)
-    # 使用output-dir参数执行命令保存sql
+    # Execute command with output-dir to save SQL.
     my2sql.execute_cmd(cmd_args)
     return user, path

@@ -23,7 +23,7 @@ log = logging.getLogger("default")
 
 @login_required
 def audit_input(request):
-    """用户提交的操作信息"""
+    """Operation information submitted by users."""
     result = {}
     action = request.POST.get("action")
     extra_info = request.POST.get("extra_info", "")
@@ -45,7 +45,7 @@ def audit_input(request):
 
 @permission_required("sql.audit_user", raise_exception=True)
 def audit_log(request):
-    """获取审计日志列表"""
+    """Get the audit log list."""
     limit = int(request.POST.get("limit", 0))
     offset = int(request.POST.get("offset", 0))
     limit = offset + limit
@@ -77,11 +77,11 @@ def audit_log(request):
         "user_id", "user_name", "user_display", "action", "extra_info", "action_time"
     )
 
-    # QuerySet 序列化
+    # Serialize QuerySet.
     rows = [row for row in audit_log_list]
 
     result = {"total": audit_log_count, "rows": rows}
-    # 返回查询结果
+    # Return query result.
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
@@ -102,7 +102,7 @@ def user_logged_in_callback(sender, request, user, **kwargs):
     ip = get_client_ip(request)
     now = timezone.now()
     AuditEntry.objects.create(
-        action="登入",
+        action="Login",
         extra_info=ip,
         user_id=user.id,
         user_name=user.username,
@@ -116,7 +116,7 @@ def user_logged_out_callback(sender, request, user, **kwargs):
     ip = get_client_ip(request)
     now = timezone.now()
     AuditEntry.objects.create(
-        action="登出",
+        action="Logout",
         extra_info=ip,
         user_id=user.id,
         user_name=user.username,
@@ -137,7 +137,7 @@ def user_login_failed_callback(sender, credentials, **kwargs):
         user_id = user_obj[0].id
         user_display = user_obj[0].display
     AuditEntry.objects.create(
-        action="登入失败",
+        action="Login Failed",
         user_id=user_id,
         user_name=user_name,
         user_display=user_display,

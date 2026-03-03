@@ -57,14 +57,14 @@ class SqlTuning(object):
     """
 
     def __extract_tables(self):
-        """获取sql语句中的表名"""
+        """Get table names from SQL text."""
         return [i["name"].strip("`") for i in extract_tables(self.sqltext)]
 
     def basic_information(self):
         return self.engine.query(sql="select @@version", close_conn=False).to_sep_dict()
 
     def sys_parameter(self):
-        # 获取mysql版本信息
+        # Get MySQL version information.
         server_version = self.engine.server_version
         if server_version < (5, 7, 0):
             sql = self.sql_variable.replace("performance_schema", "information_schema")
@@ -73,7 +73,7 @@ class SqlTuning(object):
         return self.engine.query(sql=sql, close_conn=False).to_sep_dict()
 
     def optimizer_switch(self):
-        # 获取mysql版本信息
+        # Get MySQL version information.
         server_version = self.engine.server_version
         if server_version < (5, 7, 0):
             sql = self.sql_optimizer_switch.replace(
@@ -92,7 +92,7 @@ class SqlTuning(object):
         ).to_sep_dict()
         return plan, optimizer_rewrite_sql
 
-    # 获取关联表信息存在缺陷，只能获取到一张表
+    # Related table extraction is limited and currently returns only one table.
     def object_statistics(self):
         object_statistics = []
         for index, table_name in enumerate(self.__extract_tables()):
@@ -134,7 +134,7 @@ class SqlTuning(object):
                             variable_value var_value 
                         from performance_schema.session_status order by 1"""
 
-        # 获取mysql版本信息
+        # Get MySQL version information.
         server_version = self.engine.server_version
         if server_version < (5, 7, 0):
             sql = sql_profiling.replace("performance_schema", "information_schema")
@@ -146,24 +146,24 @@ class SqlTuning(object):
             close_conn=False,
         ).to_sep_dict()
         query_id = records["rows"][0][0] + 3  # skip next sql
-        # 获取执行前信息
+        # Get status before execution.
         result["BEFORE_STATUS"] = self.engine.query(
             sql=sql, close_conn=False
         ).to_sep_dict()
 
-        # 执行查询语句,统计执行时间
+        # Execute query and measure execution time.
         t_start = time.time()
         self.engine.query(sql=self.sqltext, close_conn=False).to_sep_dict()
         t_end = time.time()
         cost_time = "%5s" % "{:.4f}".format(t_end - t_start)
         result["EXECUTE_TIME"] = cost_time
 
-        # 获取执行后信息
+        # Get status after execution.
         result["AFTER_STATUS"] = self.engine.query(
             sql=sql, close_conn=False
         ).to_sep_dict()
 
-        # 获取PROFILING_DETAIL信息
+        # Get profiling detail information.
         result["PROFILING_DETAIL"] = self.engine.query(
             sql="select STATE,DURATION,CPU_USER,CPU_SYSTEM,BLOCK_OPS_IN,BLOCK_OPS_OUT ,MESSAGES_SENT ,MESSAGES_RECEIVED ,PAGE_FAULTS_MAJOR ,PAGE_FAULTS_MINOR ,SWAPS from INFORMATION_SCHEMA.PROFILING where query_id="
             + str(query_id)
@@ -179,7 +179,7 @@ class SqlTuning(object):
             close_conn=False,
         ).to_sep_dict()
 
-        # 处理执行前后对比信息
+        # Compare status before and after execution.
         before_status_rows = [list(item) for item in result["BEFORE_STATUS"]["rows"]]
         after_status_rows = [list(item) for item in result["AFTER_STATUS"]["rows"]]
         for index, item in enumerate(before_status_rows):

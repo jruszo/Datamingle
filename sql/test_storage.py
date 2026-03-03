@@ -7,10 +7,10 @@ import json
 
 class TestDynamicStorage(unittest.TestCase):
     """
-    测试 DynamicStorage 类的行为
+    Tests behavior of the DynamicStorage class.
     """
 
-    # 存储类型到类的映射
+    # Mapping from storage type to backend class.
     storage_classes = {
         "local": "FileSystemStorage",
         "sftp": "SFTPStorage",
@@ -19,7 +19,7 @@ class TestDynamicStorage(unittest.TestCase):
     }
 
     def setUp(self):
-        """通用配置数据"""
+        """Shared configuration data."""
         self.local_config = {
             "storage_type": "local",
             "local_path": "/tmp/files/",
@@ -101,16 +101,16 @@ class TestDynamicStorage(unittest.TestCase):
         ]
     )
     def test_storage_initialization(self, storage_type, storage_class, expected_kwargs):
-        """参数化测试存储后端初始化"""
+        """Parameterized test for storage backend initialization."""
         config_dict = getattr(self, f"{storage_type}_config")
 
         with patch(f"sql.storage.{storage_class}") as mock_storage:
             DynamicStorage(config_dict=config_dict)
 
-            # 验证正确的存储类被调用
+            # Verify the correct storage class was called.
             mock_storage.assert_called_once()
 
-            # 验证调用参数
+            # Verify call arguments.
             actual_kwargs = mock_storage.call_args[1]
             self.assertDictEqual(actual_kwargs, expected_kwargs)
 
@@ -124,19 +124,19 @@ class TestDynamicStorage(unittest.TestCase):
         ]
     )
     def test_method_proxying(self, method, filename, content):
-        """测试方法代理到底层存储"""
+        """Test method proxying to the underlying storage."""
         mock_storage = MagicMock()
         with patch.object(DynamicStorage, "_init_storage", return_value=mock_storage):
             storage = DynamicStorage(config_dict=self.local_config)
 
-            # 调用代理方法
+            # Call proxied method.
             method_call = getattr(storage, method)
             if content:
                 method_call(filename, content)
             else:
                 method_call(filename)
 
-            # 验证底层存储方法被调用
+            # Verify the underlying method was called.
             underlying_call = getattr(mock_storage, method)
             if content:
                 underlying_call.assert_called_once_with(filename, content)
@@ -144,8 +144,8 @@ class TestDynamicStorage(unittest.TestCase):
                 underlying_call.assert_called_once_with(filename)
 
     def test_close_behavior(self):
-        """测试 close 方法的两种场景"""
-        # 场景1：底层存储有 close 方法
+        """Test two close() scenarios."""
+        # Scenario 1: underlying storage has close().
         mock_storage_with_close = MagicMock()
         mock_storage_with_close.close = MagicMock()
 
@@ -156,7 +156,7 @@ class TestDynamicStorage(unittest.TestCase):
             storage.close()
             mock_storage_with_close.close.assert_called_once()
 
-        # 场景2：底层存储无 close 方法
+        # Scenario 2: underlying storage has no close().
         mock_storage_without_close = MagicMock()
         delattr(mock_storage_without_close, "close")
 
@@ -165,20 +165,20 @@ class TestDynamicStorage(unittest.TestCase):
         ):
             storage = DynamicStorage(config_dict=self.local_config)
             try:
-                storage.close()  # 不应报错
+                storage.close()  # Should not raise.
             except Exception as e:
                 self.fail(f"close() raised {e}")
 
     def test_storage_operation_exceptions(self):
-        """测试存储操作异常处理"""
+        """Test exception handling for storage operations."""
         for method in ["open", "save", "delete", "exists", "size"]:
             with self.subTest(method=method):
                 with patch.object(DynamicStorage, "_init_storage") as mock_init:
                     mock_storage = MagicMock()
                     mock_init.return_value = mock_storage
 
-                    # 模拟底层存储抛出异常
-                    getattr(mock_storage, method).side_effect = Exception("存储错误")
+                    # Simulate an exception from the underlying storage.
+                    getattr(mock_storage, method).side_effect = Exception("storage error")
 
                     storage = DynamicStorage(config_dict=self.local_config)
 
@@ -188,26 +188,26 @@ class TestDynamicStorage(unittest.TestCase):
                         else:
                             getattr(storage, method)("test.txt")
 
-                    self.assertIn("存储错误", str(context.exception))
+                    self.assertIn("storage error", str(context.exception))
 
     def test_init_unsupported_storage_type(self):
-        """测试不支持的存储类型抛出 ValueError"""
+        """Test ValueError for unsupported storage type."""
         config = {"storage_type": "unsupported"}
         with self.assertRaises(ValueError) as context:
             DynamicStorage(config_dict=config)
-        self.assertIn("不支持的存储类型", str(context.exception))
+        self.assertIn("Unsupported storage type", str(context.exception))
 
     def test_check_connection_local(self):
-        """测试本地存储连接检查"""
+        """Test local storage connection check."""
         storage = DynamicStorage(config_dict=self.local_config)
         success, msg = storage.check_connection()
         self.assertTrue(success)
-        self.assertEqual(msg, "本地存储连接成功")
+        self.assertEqual(msg, "Local storage connection succeeded")
 
     def test_check_connection_sftp(self):
-        """测试 SFTP 连接检查"""
+        """Test SFTP connection check."""
         with patch("sql.storage.SFTPStorage") as mock_sftp_class:
-            # 完整的上下文管理器模拟
+            # Full context manager mock.
             mock_context = MagicMock()
             mock_context.listdir.return_value = ([], [])
 
@@ -216,29 +216,29 @@ class TestDynamicStorage(unittest.TestCase):
             mock_sftp_instance.__exit__.return_value = None
             mock_sftp_class.return_value = mock_sftp_instance
 
-            # 成功场景
+            # Success path.
             storage = DynamicStorage(config_dict=self.sftp_config)
             success, msg = storage.check_connection()
             mock_context.listdir.assert_called_once_with(".")
             self.assertTrue(success)
-            self.assertEqual(msg, "SFTP 连接成功")
+            self.assertEqual(msg, "SFTP connection succeeded")
 
-            # 失败场景
-            mock_context.listdir.side_effect = Exception("SFTP连接失败")
+            # Failure path.
+            mock_context.listdir.side_effect = Exception("SFTP connection failure")
             success, msg = storage.check_connection()
             self.assertFalse(success)
-            self.assertIn("SFTP连接失败", msg)
+            self.assertIn("SFTP connection failure", msg)
 
     def test_check_connection_s3c(self):
-        """测试 S3 兼容存储连接检查"""
+        """Test S3-compatible storage connection check."""
         with patch("sql.storage.S3Boto3Storage") as mock_s3_class:
             mock_s3_instance = MagicMock()
             mock_s3_class.return_value = mock_s3_instance
 
-            # 设置 bucket_name 属性
+            # Set bucket_name attribute.
             mock_s3_instance.bucket_name = "my-bucket"
 
-            # 成功场景
+            # Success path.
             mock_client = MagicMock()
             mock_s3_instance.connection.meta.client = mock_client
 
@@ -246,21 +246,21 @@ class TestDynamicStorage(unittest.TestCase):
             success, msg = storage.check_connection()
             mock_client.head_bucket.assert_called_once_with(Bucket="my-bucket")
             self.assertTrue(success)
-            self.assertEqual(msg, "S3 存储连接成功")
+            self.assertEqual(msg, "S3 storage connection succeeded")
 
-            # 失败场景
-            mock_client.head_bucket.side_effect = Exception("Bucket 不存在")
+            # Failure path.
+            mock_client.head_bucket.side_effect = Exception("Bucket does not exist")
             success, msg = storage.check_connection()
             self.assertFalse(success)
-            self.assertIn("Bucket 不存在", msg)
+            self.assertIn("Bucket does not exist", msg)
 
     def test_check_connection_azure(self):
-        """测试 Azure Blob 存储连接检查"""
+        """Test Azure Blob storage connection check."""
         with patch("sql.storage.AzureStorage") as mock_azure_class:
             mock_azure_instance = MagicMock()
             mock_azure_class.return_value = mock_azure_instance
 
-            # 成功场景
+            # Success path.
             mock_client = MagicMock()
             mock_azure_instance.client = mock_client
 
@@ -268,13 +268,15 @@ class TestDynamicStorage(unittest.TestCase):
             success, msg = storage.check_connection()
             mock_client.get_container_properties.assert_called_once()
             self.assertTrue(success)
-            self.assertEqual(msg, "Azure Blob 存储连接成功")
+            self.assertEqual(msg, "Azure Blob storage connection succeeded")
 
-            # 失败场景
-            mock_client.get_container_properties.side_effect = Exception("容器不存在")
+            # Failure path.
+            mock_client.get_container_properties.side_effect = Exception(
+                "Container does not exist"
+            )
             success, msg = storage.check_connection()
             self.assertFalse(success)
-            self.assertIn("容器不存在", msg)
+            self.assertIn("Container does not exist", msg)
 
     @parameterized.expand(
         [
@@ -284,7 +286,7 @@ class TestDynamicStorage(unittest.TestCase):
         ]
     )
     def test_custom_json_params(self, storage_type, param_name, json_value):
-        """自定义JSON参数处理测试"""
+        """Test handling of custom JSON parameters."""
         config_dict = getattr(self, f"{storage_type}_config").copy()
         config_dict[param_name] = json_value
 
@@ -303,14 +305,14 @@ class TestDynamicStorage(unittest.TestCase):
         ]
     )
     def test_invalid_json_params(self, storage_type, param_name):
-        """测试无效JSON参数处理"""
+        """Test handling of invalid JSON parameters."""
         config_dict = getattr(self, f"{storage_type}_config").copy()
         config_dict[param_name] = "invalid{json"
 
         with patch(f"sql.storage.{self.storage_classes[storage_type]}") as mock_storage:
             try:
                 storage = DynamicStorage(config_dict=config_dict)
-                # 验证基础参数仍然正确设置
+                # Verify base parameters remain correctly set.
                 if storage_type == "sftp":
                     self.assertEqual(storage.sftp_path, self.sftp_config["sftp_path"])
                 elif storage_type == "s3c":
@@ -332,7 +334,7 @@ class TestDynamicStorage(unittest.TestCase):
         ]
     )
     def test_empty_config_values(self, storage_type, param_name, empty_value):
-        """测试空配置参数处理"""
+        """Test handling of empty configuration values."""
         config_dict = getattr(self, f"{storage_type}_config").copy()
         config_dict[param_name] = empty_value
 

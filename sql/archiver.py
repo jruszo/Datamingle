@@ -40,7 +40,7 @@ __author__ = "hhyo"
 @permission_required("sql.menu_archive", raise_exception=True)
 def archive_list(request):
     """
-    获取归档申请列表
+    Get archive request list.
     :param request:
     :return:
     """
@@ -52,7 +52,7 @@ def archive_list(request):
     limit = offset + limit
     search = request.GET.get("search", "")
 
-    # 组合筛选项
+    # Build filter options.
     filter_dict = dict()
     if filter_instance_id:
         filter_dict["src_instance"] = filter_instance_id
@@ -61,23 +61,23 @@ def archive_list(request):
     elif state == "false":
         filter_dict["state"] = False
 
-    # 管理员可以看到全部数据
+    # Admin users can view all records.
     if user.is_superuser:
         pass
-    # 拥有审核权限、可以查看组内所有工单
+    # Users with review permission can view all workflows in their groups.
     elif user.has_perm("sql.archive_review"):
-        # 先获取用户所在资源组列表
+        # Get the user's resource groups first.
         group_list = user_groups(user)
         group_ids = [group.group_id for group in group_list]
         filter_dict["resource_group__in"] = group_ids
-    # 其他人只能看到自己提交的工单
+    # Others can only view workflows they submitted.
     else:
         filter_dict["user_name"] = user.username
 
-    # 过滤组合筛选项
+    # Apply combined filters.
     archive_config = ArchiveConfig.objects.filter(**filter_dict)
 
-    # 过滤搜索项，支持模糊搜索标题、用户
+    # Apply search filter (title/user fuzzy match).
     if search:
         archive_config = archive_config.filter(
             Q(title__icontains=search) | Q(user_display__icontains=search)
@@ -103,11 +103,11 @@ def archive_list(request):
         "resource_group__group_name",
     )
 
-    # QuerySet 序列化
+    # Serialize QuerySet.
     rows = [row for row in lists]
 
     result = {"total": count, "rows": rows}
-    # 返回查询结果
+    # Return query result.
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
@@ -116,7 +116,7 @@ def archive_list(request):
 
 @permission_required("sql.archive_apply", raise_exception=True)
 def archive_apply(request):
-    """申请归档实例数据"""
+    """Submit archive request for instance data."""
     user = request.user
     title = request.POST.get("title")
     group_name = request.POST.get("group_name")
@@ -132,7 +132,7 @@ def archive_apply(request):
     sleep = request.POST.get("sleep") or 0
     result = {"status": 0, "msg": "ok", "data": {}}
 
-    # 参数校验
+    # Validate parameters.
     if (
         not all(
             [
@@ -147,21 +147,27 @@ def archive_apply(request):
         )
         or no_delete is None
     ):
-        return JsonResponse({"status": 1, "msg": "请填写完整！", "data": {}})
+        return JsonResponse({"status": 1, "msg": "Please complete all required fields!", "data": {}})
     if mode == "dest" and not all([dest_instance_name, dest_db_name, dest_table_name]):
         return JsonResponse(
-            {"status": 1, "msg": "归档到实例时目标实例信息必选！", "data": {}}
+            {"status": 1, "msg": "Destination instance info is required for destination mode!", "data": {}}
         )
 
-    # 获取源实例信息
+    # Get source instance info.
     try:
         s_ins = user_instances(request.user, db_type=["mysql"]).get(
             instance_name=src_instance_name
         )
     except Instance.DoesNotExist:
-        return JsonResponse({"status": 1, "msg": "你所在组未关联该实例！", "data": {}})
+        return JsonResponse(
+            {
+                "status": 1,
+                "msg": "Your group is not associated with this instance!",
+                "data": {},
+            }
+        )
 
-    # 获取目标实例信息
+    # Get destination instance info.
     if mode == "dest":
         try:
             d_ins = user_instances(request.user, db_type=["mysql"]).get(
@@ -169,16 +175,20 @@ def archive_apply(request):
             )
         except Instance.DoesNotExist:
             return JsonResponse(
-                {"status": 1, "msg": "你所在组未关联该实例！", "data": {}}
+                {
+                    "status": 1,
+                    "msg": "Your group is not associated with this instance!",
+                    "data": {},
+                }
             )
     else:
         d_ins = None
 
-    # 获取资源组和审批信息
+    # Get resource group and audit settings.
     res_group = ResourceGroup.objects.get(group_name=group_name)
-    # 使用事务保持数据一致性
+    # Keep data consistent using a transaction.
     with transaction.atomic():
-        # 保存申请信息到数据库
+        # Save request into database.
         archive_info = ArchiveConfig(
             title=title,
             resource_group=res_group,
@@ -207,9 +217,9 @@ def archive_apply(request):
         try:
             audit_handler.create_audit()
         except AuditException as e:
-            logger.error(f"新建审批流失败: {str(e)}")
+            logger.error(f"Failed to create approval flow: {str(e)}")
             return JsonResponse(
-                {"status": 1, "msg": "新建审批流失败, 请联系管理员", "data": {}}
+                {"status": 1, "msg": "Failed to create approval flow. Contact admin.", "data": {}}
             )
         audit_handler.workflow.status = audit_handler.audit.current_status
         if audit_handler.audit.current_status == WorkflowStatus.PASSED:
@@ -237,11 +247,11 @@ def archive_apply(request):
 @permission_required("sql.archive_review", raise_exception=True)
 def archive_audit(request):
     """
-    审核数据归档申请
+    Review archive request.
     :param request:
     :return:
     """
-    # 获取用户信息
+    # Get user input.
     archive_id = int(request.POST["archive_id"])
     try:
         audit_status = WorkflowAction(int(request.POST["audit_status"]))
@@ -249,7 +259,12 @@ def archive_audit(request):
         return render(
             request,
             "error.html",
-            {"errMsg": f"数据错误, 不允许的操作, 请检查 audit_status, error: {str(e)}"},
+            {
+                "errMsg": (
+                    f"Data error, operation not allowed. "
+                    f"Please check audit_status. Error: {str(e)}"
+                )
+            },
         )
     audit_remark = request.POST.get("audit_remark")
 
@@ -258,19 +273,19 @@ def archive_audit(request):
     try:
         archive_workflow = ArchiveConfig.objects.get(id=archive_id)
     except ArchiveConfig.DoesNotExist:
-        return render(request, "error.html", {"errMsg": "工单不存在"})
+        return render(request, "error.html", {"errMsg": "Workflow does not exist"})
 
     resource_group = archive_workflow.resource_group
     auditor = get_auditor(workflow=archive_workflow, resource_group=resource_group)
 
-    # 使用事务保持数据一致性
+    # Keep data consistent using a transaction.
     with transaction.atomic():
         try:
             workflow_audit_detail = auditor.operate(
                 audit_status, request.user, audit_remark
             )
         except AuditException as e:
-            return render(request, "error.html", {"errMsg": f"审核失败: {str(e)}"})
+            return render(request, "error.html", {"errMsg": f"Review failed: {str(e)}"})
         auditor.workflow.status = auditor.audit.current_status
         if auditor.audit.current_status == WorkflowStatus.PASSED:
             auditor.workflow.state = True
@@ -288,14 +303,14 @@ def archive_audit(request):
 
 def add_archive_task(archive_ids=None):
     """
-    添加数据归档异步任务，仅处理有效归档任务
-    :param archive_ids: 归档任务id列表
+    Add async archive tasks and only process valid archive records.
+    :param archive_ids: archive task id list
     :return:
     """
     archive_ids = archive_ids or []
     if not isinstance(archive_ids, list):
         archive_ids = list(archive_ids)
-    # 没有传archive_id代表全部归档任务统一调度
+    # If no archive_id is passed, schedule all enabled archive tasks.
     if archive_ids:
         archive_cnf_list = ArchiveConfig.objects.filter(
             id__in=archive_ids,
@@ -307,7 +322,7 @@ def add_archive_task(archive_ids=None):
             state=True, status=WorkflowStatus.PASSED
         )
 
-    # 添加task任务
+    # Add async tasks.
     for archive_info in archive_cnf_list:
         archive_id = archive_info.id
         async_task(
@@ -321,7 +336,7 @@ def add_archive_task(archive_ids=None):
 
 def archive(archive_id):
     """
-    执行数据库归档
+    Execute database archive.
     :return:
     """
     archive_info = ArchiveConfig.objects.get(id=archive_id)
@@ -333,7 +348,7 @@ def archive(archive_id):
     sleep = archive_info.sleep
     mode = archive_info.mode
 
-    # 获取归档表的字符集信息
+    # Get source table charset info.
     s_engine = get_engine(s_ins)
     s_db = s_engine.schema_object.databases[src_db_name]
     s_tb = s_db.tables[src_table_name]
@@ -342,7 +357,7 @@ def archive(archive_id):
         s_charset = s_db.options["charset"].value
 
     pt_archiver = PtArchiver()
-    # 准备参数
+    # Prepare parameters.
     source = (
         rf"h={s_ins.host},u={s_ins.user},p={s_ins.password},"
         rf"P={s_ins.port},D={src_db_name},t={src_table_name},A={s_charset}"
@@ -359,12 +374,12 @@ def archive(archive_id):
         "sleep": sleep,
     }
 
-    # 归档到目标实例
+    # Archive into destination instance.
     if mode == "dest":
         d_ins = archive_info.dest_instance
         dest_db_name = archive_info.dest_db_name
         dest_table_name = archive_info.dest_table_name
-        # 目标表的字符集信息
+        # Destination table charset info.
         schema_object = get_engine(d_ins).schema_object
         d_db = schema_object.databases[dest_db_name]
         d_tb = d_db.tables[dest_table_name]
@@ -391,13 +406,13 @@ def archive(archive_id):
     elif mode == "purge":
         args["purge"] = True
 
-    # 参数检查
+    # Validate parameters.
     args_check_result = pt_archiver.check_args(args)
     if args_check_result["status"] == 1:
         return JsonResponse(args_check_result)
-    # 参数转换
+    # Convert parameters.
     cmd_args = pt_archiver.generate_args2cmd(args)
-    # 执行命令，获取结果
+    # Execute command and collect results.
     select_cnt = 0
     insert_cnt = 0
     delete_cnt = 0
@@ -413,44 +428,44 @@ def archive(archive_id):
                 delete_cnt = re.findall(r"^DELETE\s(\d+)$", line)
             stdout += f"{line}\n"
     statistics = stdout
-    # 获取异常信息
+    # Get error output.
     stderr = p.stderr.read()
     if stderr:
         statistics = stdout + stderr
 
-    # 判断归档结果
+    # Evaluate archive result.
     select_cnt = int(select_cnt[0]) if select_cnt else 0
     insert_cnt = int(insert_cnt[0]) if insert_cnt else 0
     delete_cnt = int(delete_cnt[0]) if delete_cnt else 0
     error_info = ""
     success = True
     if stderr:
-        error_info = f"命令执行报错:{stderr}"
+        error_info = f"Command execution error: {stderr}"
         success = False
     if mode == "dest":
-        # 删除源数据，判断删除数量和写入数量
+        # If deleting source data, check delete/write counts.
         if not no_delete and (insert_cnt != delete_cnt):
-            error_info = f"删除和写入数量不一致:{insert_cnt}!={delete_cnt}"
+            error_info = f"Delete and insert counts do not match: {insert_cnt}!={delete_cnt}"
             success = False
     elif mode == "file":
-        # 删除源数据，判断查询数量和删除数量
+        # If deleting source data, check select/delete counts.
         if not no_delete and (select_cnt != delete_cnt):
-            error_info = f"查询和删除数量不一致:{select_cnt}!={delete_cnt}"
+            error_info = f"Select and delete counts do not match: {select_cnt}!={delete_cnt}"
             success = False
     elif mode == "purge":
-        # 直接删除。判断查询数量和删除数量
+        # Purge mode: check select/delete counts.
         if select_cnt != delete_cnt:
-            error_info = f"查询和删除数量不一致:{select_cnt}!={delete_cnt}"
+            error_info = f"Select and delete counts do not match: {select_cnt}!={delete_cnt}"
             success = False
 
-    # 执行信息保存到数据库
+    # Save execution details to database.
     if connection.connection and not connection.is_usable():
         close_old_connections()
-    # 更新最后归档时间
+    # Update last archive timestamp.
     ArchiveConfig(id=archive_id, last_archive_time=t.end).save(
         update_fields=["last_archive_time"]
     )
-    # 替换密码信息后保存
+    # Mask passwords before storing command.
     shell_cmd = " ".join(cmd_args)
     ArchiveLog.objects.create(
         archive=archive_info,
@@ -478,7 +493,7 @@ def archive(archive_id):
 
 @permission_required("sql.menu_archive", raise_exception=True)
 def archive_log(request):
-    """获取归档日志列表"""
+    """Get archive log list."""
     limit = int(request.GET.get("limit", 0))
     offset = int(request.GET.get("offset", 0))
     limit = offset + limit
@@ -502,10 +517,10 @@ def archive_log(request):
         "start_time",
         "end_time",
     )
-    # QuerySet 序列化
+    # Serialize QuerySet.
     rows = [row for row in lists]
     result = {"total": count, "rows": rows}
-    # 返回查询结果
+    # Return query result.
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
@@ -514,10 +529,10 @@ def archive_log(request):
 
 @permission_required("sql.archive_mgt", raise_exception=True)
 def archive_switch(request):
-    """开启关闭归档任务"""
+    """Enable or disable archive task."""
     archive_id = request.POST.get("archive_id")
     state = True if request.POST.get("state") == "true" else False
-    # 更新启用状态
+    # Update enabled state.
     try:
         ArchiveConfig(id=archive_id, state=state).save(update_fields=["state"])
         return JsonResponse({"status": 0, "msg": "ok", "data": {}})
@@ -527,7 +542,7 @@ def archive_switch(request):
 
 @permission_required("sql.archive_mgt", raise_exception=True)
 def archive_once(request):
-    """单次立即调用归档任务"""
+    """Trigger archive task once immediately."""
     archive_id = request.GET.get("archive_id")
     async_task(
         "sql.archiver.archive",

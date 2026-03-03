@@ -35,10 +35,10 @@ logger = logging.getLogger("default")
 __author__ = "hhyo"
 
 
-# TODO 权限校验内的语法解析和判断独立到每个engine内
+# TODO: move syntax parsing/validation in permission checks into each engine.
 def query_priv_check(user, instance, db_name, sql_content, limit_num):
     """
-    查询权限校验
+    Query permission validation.
     :param user:
     :param instance:
     :param db_name:
@@ -47,15 +47,15 @@ def query_priv_check(user, instance, db_name, sql_content, limit_num):
     :return:
     """
     result = {"status": 0, "msg": "ok", "data": {"priv_check": True, "limit_num": 0}}
-    # 如果有can_query_all_instance, 视为管理员, 仅获取limit值信息
-    # superuser 拥有全部权限, 不需做特别修改
+    # If user has query_all_instances, treat as admin and only apply limit.
+    # superuser already has all privileges.
     if user.has_perm("sql.query_all_instances"):
         priv_limit = int(SysConfig().get("admin_query_limit", 5000))
         result["data"]["limit_num"] = (
             min(priv_limit, limit_num) if limit_num else priv_limit
         )
         return result
-    # 如果有can_query_resource_group_instance, 视为资源组管理员, 可查询资源组内所有实例数据
+    # If user has query_resource_group_instance, treat as group admin.
     if user.has_perm("sql.query_resource_group_instance"):
         if user_instances(user, tag_codes=["can_read"]).filter(pk=instance.pk).exists():
             priv_limit = int(SysConfig().get("admin_query_limit", 5000))
@@ -64,27 +64,29 @@ def query_priv_check(user, instance, db_name, sql_content, limit_num):
             )
             return result
 
-    # 仅MySQL做表权限校验
+    # Only MySQL performs table-level permission checks.
     if instance.db_type == "mysql":
         try:
-            # explain和show create跳过权限校验
+            # Skip permission check for EXPLAIN and SHOW CREATE.
             if re.match(r"^explain|^show\s+create", sql_content, re.I):
                 return result
-            # 其他权限校验
+            # Validate permissions for other statements.
             table_ref = _table_ref(sql_content, instance, db_name)
-            # 循环验证权限，可能存在性能问题，但一次查询涉及的库表数量有限
+            # Loop-based checks may be slower, but query table count is usually small.
             for table in table_ref:
-                # 既无库权限也无表权限则鉴权失败
+                # Fail if user has neither db-level nor table-level permission.
                 if not _db_priv(user, instance, table["schema"]) and not _tb_priv(
                     user, instance, table["schema"], table["name"]
                 ):
-                    # 没有库表查询权限时的staus为2
+                    # Status 2 indicates permission denial.
                     result["status"] = 2
                     result["msg"] = (
-                        f"你无{table['schema']}.{table['name']}表的查询权限！请先到查询权限管理进行申请"
+                        f"You do not have query permission on "
+                        f"{table['schema']}.{table['name']}. "
+                        "Please apply in Query Permission Management first."
                     )
                     return result
-            # 获取查询涉及库/表权限的最小limit限制，和前端传参作对比，取最小值
+            # Use the smallest limit among involved db/table privileges.
             for table in table_ref:
                 priv_limit = _priv_limit(
                     user, instance, db_name=table["schema"], tb_name=table["name"]
@@ -93,13 +95,18 @@ def query_priv_check(user, instance, db_name, sql_content, limit_num):
             result["data"]["limit_num"] = limit_num
         except Exception as msg:
             logger.error(
-                f"无法校验查询语句权限，{instance.instance_name}，{sql_content}，{traceback.format_exc()}"
+                "Unable to validate query permission, "
+                f"{instance.instance_name}, {sql_content}, {traceback.format_exc()}"
             )
             result["status"] = 1
-            result["msg"] = f"无法校验查询语句权限，请联系管理员，错误信息：{msg}"
-    # 其他类型实例仅校验库权限
+            result["msg"] = (
+                f"Unable to validate query permission. "
+                f"Contact admin. Error details: {msg}"
+            )
+    # For other instance types, only database-level permissions are checked.
     else:
-        # 先获取查询语句涉及的库，redis、mssql、pgsql特殊处理，仅校验当前选择的库
+        # Get databases referenced by SQL.
+        # redis/mssql/pgsql only check the currently selected database.
         if instance.db_type in ["redis", "mssql", "pgsql"]:
             dbs = [db_name]
         else:
@@ -109,20 +116,21 @@ def query_priv_check(user, instance, db_name, sql_content, limit_num):
                 if i["schema"] is not None
             ]
             dbs.append(db_name)
-        # 库去重
+        # Deduplicate database list.
         dbs = list(set(dbs))
-        # 排序
+        # Sort database names.
         dbs.sort()
-        # 校验库权限，无库权限直接返回
+        # Validate db permission and fail fast.
         for db_name in dbs:
             if not _db_priv(user, instance, db_name):
-                # 没有库表查询权限时的staus为2
+                # Status 2 indicates permission denial.
                 result["status"] = 2
                 result["msg"] = (
-                    f"你无{db_name}数据库的查询权限！请先到查询权限管理进行申请"
+                    f"You do not have query permission on database {db_name}. "
+                    "Please apply in Query Permission Management first."
                 )
                 return result
-        # 有所有库权限则获取最小limit值
+        # With all db permissions, choose the minimum limit.
         for db_name in dbs:
             priv_limit = _priv_limit(user, instance, db_name=db_name)
             limit_num = min(priv_limit, limit_num) if limit_num else priv_limit
@@ -133,7 +141,7 @@ def query_priv_check(user, instance, db_name, sql_content, limit_num):
 @permission_required("sql.menu_queryapplylist", raise_exception=True)
 def query_priv_apply_list(request):
     """
-    获取查询权限申请列表
+    Get query permission request list.
     :param request:
     :return:
     """
@@ -144,21 +152,21 @@ def query_priv_apply_list(request):
     search = request.POST.get("search", "")
 
     query_privs = QueryPrivilegesApply.objects.all()
-    # 过滤搜索项，支持模糊搜索标题、用户
+    # Apply search filter (title/user fuzzy match).
     if search:
         query_privs = query_privs.filter(
             Q(title__icontains=search) | Q(user_display__icontains=search)
         )
-    # 管理员可以看到全部数据
+    # Admin users can view all records.
     if user.is_superuser:
         query_privs = query_privs
-    # 拥有审核权限、可以查看组内所有工单
+    # Users with review permission can view all workflows in their groups.
     elif user.has_perm("sql.query_review"):
-        # 先获取用户所在资源组列表
+        # Get user's resource groups first.
         group_list = user_groups(user)
         group_ids = [group.group_id for group in group_list]
         query_privs = query_privs.filter(group_id__in=group_ids)
-    # 其他人只能看到自己提交的工单
+    # Others can only view workflows they submitted.
     else:
         query_privs = query_privs.filter(user_name=user.username)
 
@@ -178,11 +186,11 @@ def query_priv_apply_list(request):
         "group_name",
     )
 
-    # QuerySet 序列化
+    # Serialize QuerySet.
     rows = [row for row in lists]
 
     result = {"total": count, "rows": rows}
-    # 返回查询结果
+    # Return query result.
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
@@ -192,7 +200,7 @@ def query_priv_apply_list(request):
 @permission_required("sql.query_applypriv", raise_exception=True)
 def query_priv_apply(request):
     """
-    申请查询权限
+    Apply for query permission.
     :param request:
     :return:
     """
@@ -207,15 +215,15 @@ def query_priv_apply(request):
     valid_date = request.POST.get("valid_date")
     limit_num = request.POST.get("limit_num")
 
-    # 获取用户信息
+    # Get user info.
     user = request.user
 
-    # 服务端参数校验
+    # Server-side parameter validation.
     result = {"status": 0, "msg": "ok", "data": []}
     if int(priv_type) == 1:
         if not (title and instance_name and db_list and valid_date and limit_num):
             result["status"] = 1
-            result["msg"] = "请填写完整"
+            result["msg"] = "Please fill in all required fields"
             return HttpResponse(json.dumps(result), content_type="application/json")
     elif int(priv_type) == 2:
         if not (
@@ -227,7 +235,7 @@ def query_priv_apply(request):
             and limit_num
         ):
             result["status"] = 1
-            result["msg"] = "请填写完整"
+            result["msg"] = "Please fill in all required fields"
             return HttpResponse(json.dumps(result), content_type="application/json")
     try:
         user_instances(request.user, tag_codes=["can_read"]).get(
@@ -235,36 +243,39 @@ def query_priv_apply(request):
         )
     except Instance.DoesNotExist:
         result["status"] = 1
-        result["msg"] = "你所在组未关联该实例！"
+        result["msg"] = "Your group is not associated with this instance!"
         return HttpResponse(json.dumps(result), content_type="application/json")
 
-    # 库权限
+    # Database-level permission.
     ins = Instance.objects.get(instance_name=instance_name)
     if int(priv_type) == 1:
-        # 检查申请账号是否已拥库查询权限
+        # Check whether user already has database query permission.
         for db_name in db_list:
             if _db_priv(user, ins, db_name):
                 result["status"] = 1
                 result["msg"] = (
-                    f"你已拥有{instance_name}实例{db_name}库权限，不能重复申请"
+                    f"You already have database permission for {db_name} "
+                    f"on instance {instance_name}; duplicate request is not allowed."
                 )
                 return HttpResponse(json.dumps(result), content_type="application/json")
 
-    # 表权限
+    # Table-level permission.
     elif int(priv_type) == 2:
-        # 先检查是否拥有库权限
+        # First check whether user already has database permission.
         if _db_priv(user, ins, db_name):
             result["status"] = 1
             result["msg"] = (
-                f"你已拥有{instance_name}实例{db_name}库的全部权限，不能重复申请"
+                f"You already have full database permission for {db_name} "
+                f"on instance {instance_name}; duplicate request is not allowed."
             )
             return HttpResponse(json.dumps(result), content_type="application/json")
-        # 检查申请账号是否已拥有该表的查询权限
+        # Check whether user already has query permission on the table.
         for tb_name in table_list:
             if _tb_priv(user, ins, db_name, tb_name):
                 result["status"] = 1
                 result["msg"] = (
-                    f"你已拥有{instance_name}实例{db_name}.{tb_name}表的查询权限，不能重复申请"
+                    f"You already have query permission on {db_name}.{tb_name} "
+                    f"for instance {instance_name}; duplicate request is not allowed."
                 )
                 return HttpResponse(json.dumps(result), content_type="application/json")
 
@@ -272,7 +283,7 @@ def query_priv_apply(request):
         title=title,
         group_id=group_id,
         group_name=group_name,
-        # audit_auth_groups 暂时设置为空
+        # audit_auth_groups is temporarily empty here.
         audit_auth_groups="",
         user_name=user.username,
         user_display=user.display,
@@ -289,19 +300,19 @@ def query_priv_apply(request):
         apply_info.db_list = db_name
         apply_info.table_list = ",".join(table_list)
     audit_handler = get_auditor(workflow=apply_info)
-    # 使用事务保持数据一致性
+    # Keep data consistent using a transaction.
     try:
         with transaction.atomic():
             audit_handler.create_audit()
     except AuditException as e:
-        logger.error(f"新建审批流失败, {str(e)}")
+        logger.error(f"Failed to create approval flow, {str(e)}")
         result["status"] = 1
-        result["msg"] = "新建审批流失败, 请联系管理员"
+        result["msg"] = "Failed to create approval flow, please contact admin"
         return HttpResponse(json.dumps(result), content_type="application/json")
     _query_apply_audit_call_back(
         audit_handler.workflow.apply_id, audit_handler.audit.current_status
     )
-    # 消息通知
+    # Send notification.
     async_task(
         notify_for_audit,
         workflow_audit=audit_handler.audit,
@@ -314,7 +325,7 @@ def query_priv_apply(request):
 @permission_required("sql.menu_queryapplylist", raise_exception=True)
 def user_query_priv(request):
     """
-    用户的查询权限管理
+    User query permission management.
     :param request:
     :return:
     """
@@ -328,28 +339,28 @@ def user_query_priv(request):
     user_query_privs = QueryPrivileges.objects.filter(
         is_deleted=0, valid_date__gte=datetime.datetime.now()
     )
-    # 过滤搜索项，支持模糊搜索用户、数据库、表
+    # Apply search filter (user/db/table fuzzy match).
     if search:
         user_query_privs = user_query_privs.filter(
             Q(user_display__icontains=search)
             | Q(db_name__icontains=search)
             | Q(table_name__icontains=search)
         )
-    # 过滤用户
+    # Filter user.
     if user_display != "all":
         user_query_privs = user_query_privs.filter(user_display=user_display)
-    # 管理员可以看到全部数据
+    # Admin users can view all records.
     if user.is_superuser:
         user_query_privs = user_query_privs
-    # 拥有管理权限、可以查看组内所有工单
+    # Users with management permission can view workflows in their groups.
     elif user.has_perm("sql.query_mgtpriv"):
-        # 先获取用户所在资源组列表
+        # Get user's resource groups first.
         group_list = user_groups(user)
         group_ids = [group.group_id for group in group_list]
         user_query_privs = user_query_privs.filter(
             instance__queryprivilegesapply__group_id__in=group_ids
         )
-    # 其他人只能看到自己提交的工单
+    # Others can only view workflows they submitted.
     else:
         user_query_privs = user_query_privs.filter(user_name=user.username)
 
@@ -369,11 +380,11 @@ def user_query_priv(request):
         )
     )
 
-    # QuerySet 序列化
+    # Serialize QuerySet.
     rows = [row for row in privileges_list]
 
     result = {"total": privileges_count, "rows": rows}
-    # 返回查询结果
+    # Return query result.
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
@@ -383,7 +394,7 @@ def user_query_priv(request):
 @permission_required("sql.query_mgtpriv", raise_exception=True)
 def query_priv_modify(request):
     """
-    变更权限信息
+    Modify privilege information.
     :param request:
     :return:
     """
@@ -391,21 +402,21 @@ def query_priv_modify(request):
     type = request.POST.get("type")
     result = {"status": 0, "msg": "ok", "data": []}
 
-    # type=1删除权限,type=2变更权限
+    # type=1 delete privilege, type=2 modify privilege
     try:
         privilege = QueryPrivileges.objects.get(privilege_id=int(privilege_id))
     except QueryPrivileges.DoesNotExist:
-        result["msg"] = "待操作权限不存在"
+        result["msg"] = "Target privilege does not exist"
         result["status"] = 1
         return HttpResponse(json.dumps(result), content_type="application/json")
 
     if int(type) == 1:
-        # 删除权限
+        # Delete privilege.
         privilege.is_deleted = 1
         privilege.save(update_fields=["is_deleted"])
         return HttpResponse(json.dumps(result), content_type="application/json")
     elif int(type) == 2:
-        # 变更权限
+        # Modify privilege.
         valid_date = request.POST.get("valid_date")
         limit_num = request.POST.get("limit_num")
         privilege.valid_date = valid_date
@@ -417,17 +428,17 @@ def query_priv_modify(request):
 @permission_required("sql.query_review", raise_exception=True)
 def query_priv_audit(request):
     """
-    查询权限审核
+    Query permission audit.
     :param request:
     :return:
     """
-    # 获取用户信息
+    # Get user input.
     apply_id = int(request.POST["apply_id"])
     try:
         audit_status = WorkflowAction(int(request.POST["audit_status"]))
     except ValueError as e:
         return render(
-            request, "error.html", {"errMsg": f"audit_status 参数错误, {str(e)}"}
+            request, "error.html", {"errMsg": f"Invalid audit_status parameter, {str(e)}"}
         )
     audit_remark = request.POST.get("audit_remark")
 
@@ -437,22 +448,22 @@ def query_priv_audit(request):
     try:
         sql_query_apply = QueryPrivilegesApply.objects.get(apply_id=apply_id)
     except QueryPrivilegesApply.DoesNotExist:
-        return render(request, "error.html", {"errMsg": "工单不存在"})
+        return render(request, "error.html", {"errMsg": "Workflow does not exist"})
     auditor = get_auditor(workflow=sql_query_apply)
-    # 使用事务保持数据一致性
+    # Keep data consistent using a transaction.
     with transaction.atomic():
         try:
             workflow_audit_detail = auditor.operate(
                 audit_status, request.user, audit_remark
             )
         except AuditException as e:
-            return render(request, "error.html", {"errMsg": f"审核失败: {str(e)}"})
-        # 统一 call back, 内部做授权和更新数据库内容
+            return render(request, "error.html", {"errMsg": f"Audit failed: {str(e)}"})
+        # Unified callback that handles grants and data updates.
         _query_apply_audit_call_back(
             auditor.audit.workflow_id, auditor.audit.current_status
         )
 
-    # 消息通知
+    # Send notification.
     async_task(
         notify_for_audit,
         workflow_audit=auditor.audit,
@@ -466,7 +477,7 @@ def query_priv_audit(request):
 
 def _table_ref(sql_content, instance, db_name):
     """
-    解析语法树，获取语句涉及的表，用于查询权限限制
+    Parse syntax tree and get referenced tables for permission checks.
     :param sql_content:
     :param instance:
     :param db_name:
@@ -481,16 +492,16 @@ def _table_ref(sql_content, instance, db_name):
 
 def _db_priv(user, instance, db_name):
     """
-    检测用户是否拥有指定库权限
-    :param user: 用户对象
-    :param instance: 实例对象
-    :param db_name: 库名
-    :return: 权限存在则返回对应权限的limit_num，否则返回False
-    TODO 返回统一为 int 类型, 不存在返回0 (虽然其实在python中 0==False)
+    Check whether user has permission on specified database.
+    :param user: user object
+    :param instance: instance object
+    :param db_name: database name
+    :return: limit_num if permission exists, otherwise False
+    TODO: return int consistently, and 0 for not found.
     """
     if user.is_superuser:
         return int(SysConfig().get("admin_query_limit", 5000))
-    # 获取用户库权限
+    # Get user's database privileges.
     user_privileges = QueryPrivileges.objects.filter(
         user_name=user.username,
         instance=instance,
@@ -506,14 +517,14 @@ def _db_priv(user, instance, db_name):
 
 def _tb_priv(user, instance, db_name, tb_name):
     """
-    检测用户是否拥有指定表权限
-    :param user: 用户对象
-    :param instance: 实例对象
-    :param db_name: 库名
-    :param tb_name: 表名
-    :return: 权限存在则返回对应权限的limit_num，否则返回False
+    Check whether user has permission on specified table.
+    :param user: user object
+    :param instance: instance object
+    :param db_name: database name
+    :param tb_name: table name
+    :return: limit_num if permission exists, otherwise False
     """
-    # 获取用户表权限
+    # Get user's table privileges.
     user_privileges = QueryPrivileges.objects.filter(
         user_name=user.username,
         instance=instance,
@@ -533,18 +544,18 @@ def _tb_priv(user, instance, db_name, tb_name):
 
 def _priv_limit(user, instance, db_name, tb_name=None):
     """
-    获取用户拥有的查询权限的最小limit限制，用于返回结果集限制
+    Get the minimum limit of user's query privileges for result restriction.
     :param db_name:
-    :param tb_name: 可为空，为空时返回库权限
+    :param tb_name: optional, if empty returns db-level privilege
     :return:
     """
-    # 获取库表权限limit值
+    # Get db/table limit values.
     db_limit_num = _db_priv(user, instance, db_name)
     if tb_name:
         tb_limit_num = _tb_priv(user, instance, db_name, tb_name)
     else:
         tb_limit_num = None
-    # 返回最小值
+    # Return minimum value.
     if db_limit_num and tb_limit_num:
         return min(db_limit_num, tb_limit_num)
     elif db_limit_num:
@@ -552,24 +563,24 @@ def _priv_limit(user, instance, db_name, tb_name=None):
     elif tb_limit_num:
         return tb_limit_num
     else:
-        raise RuntimeError("用户无任何有效权限！")
+        raise RuntimeError("User has no valid privileges!")
 
 
 def _query_apply_audit_call_back(apply_id, workflow_status):
     """
-    查询权限申请用于工作流审核回调
-    :param apply_id: 申请id
-    :param workflow_status: 审核结果
+    Workflow audit callback for query permission applications.
+    :param apply_id: application id
+    :param workflow_status: audit result
     :return:
     """
-    # 更新业务表状态
+    # Update business table status.
     apply_info = QueryPrivilegesApply.objects.get(apply_id=apply_id)
     apply_info.status = workflow_status
     apply_info.save()
-    # 审核通过插入权限信息，批量插入，减少性能消耗
+    # Insert privileges on approval using bulk insert for better performance.
     if workflow_status == WorkflowStatus.PASSED:
         apply_queryset = QueryPrivilegesApply.objects.get(apply_id=apply_id)
-        # 库权限
+        # Database-level privileges.
 
         if apply_queryset.priv_type == 1:
             insert_list = [
@@ -585,7 +596,7 @@ def _query_apply_audit_call_back(apply_id, workflow_status):
                 )
                 for db_name in apply_queryset.db_list.split(",")
             ]
-        # 表权限
+        # Table-level privileges.
         elif apply_queryset.priv_type == 2:
             insert_list = [
                 QueryPrivileges(

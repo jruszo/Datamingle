@@ -28,24 +28,24 @@ logger = logging.getLogger("default")
 
 class OffLineDownLoad(EngineBase):
     """
-    离线下载类，用于执行离线下载操作。
+    Offline download class for executing offline export operations.
     """
 
     def execute_offline_download(self, workflow):
         """
-        执行离线下载操作
-        :param workflow: 工单实例
-        :return: 下载结果
+        Execute offline download operation.
+        :param workflow: Workflow instance
+        :return: Download result
         """
         with tempfile.TemporaryDirectory() as temp_dir:
-            # 获取系统配置
+            # Get system configuration.
             config = SysConfig()
-            # 先进行 max_execution_time 变量的判断是否存在以及是否为空,默认值60
+            # Validate max_execution_time configuration and fallback to default 60.
             max_execution_time_str = config.get("max_export_rows", "60")
             max_execution_time = (
                 int(max_execution_time_str) if max_execution_time_str else 60
             )
-            # 获取前端提交的 SQL 和其他工单信息
+            # Get submitted SQL and related workflow information.
             full_sql = workflow.sqlworkflowcontent.sql_content
             full_sql = sqlparse.format(full_sql, strip_comments=True)
             full_sql = sqlparse.split(full_sql)[0]
@@ -57,7 +57,7 @@ class OffLineDownLoad(EngineBase):
             start_time = time.time()
 
             try:
-                # 执行 SQL 查询
+                # Execute SQL query.
                 storage = DynamicStorage()
                 results = check_engine.query(
                     db_name=workflow.db_name,
@@ -71,25 +71,25 @@ class OffLineDownLoad(EngineBase):
                     result = results.rows
                     actual_rows = results.affected_rows
 
-                # 保存查询结果为 CSV or JSON or XML or XLSX or SQL 文件
+                # Save query result into CSV/JSON/XML/XLSX/SQL file.
                 get_format_type = workflow.export_format
                 file_name = save_to_format_file(
                     get_format_type, result, workflow, columns, temp_dir
                 )
 
-                # 将导出的文件保存到存储
+                # Save exported file to storage backend.
                 tmp_file = os.path.join(temp_dir, file_name)
                 with open(tmp_file, "rb") as f:
                     storage.save(file_name, f)
 
-                end_time = time.time()  # 记录结束时间
+                end_time = time.time()  # Record end time.
                 elapsed_time = round(end_time - start_time, 3)
                 execute_result.rows = [
                     ReviewResult(
                         stage="Executed",
                         errlevel=0,
-                        stagestatus="执行正常",
-                        errormessage=f"保存文件: {file_name}",
+                        stagestatus="Execution succeeded",
+                        errormessage=f"Saved file: {file_name}",
                         sql=full_sql,
                         execute_time=elapsed_time,
                         affected_rows=actual_rows,
@@ -102,13 +102,13 @@ class OffLineDownLoad(EngineBase):
 
                 return execute_result
             except Exception as e:
-                # 返回工单执行失败的状态和错误信息
+                # Return failed execution state and error details.
                 execute_result.rows = [
                     ReviewResult(
                         stage="Execute failed",
                         error=1,
                         errlevel=2,
-                        stagestatus="异常终止",
+                        stagestatus="Aborted",
                         errormessage=f"{e}",
                         sql=full_sql,
                     )
@@ -116,20 +116,21 @@ class OffLineDownLoad(EngineBase):
                 execute_result.error = e
                 return execute_result
             finally:
-                # 关闭存储连接（主要是sftp情况save后需要关闭连接）
+                # Close storage connection (mainly required for SFTP after save).
                 storage.close()
-                # 清理本地文件和临时目录
+                # Clean local files and temporary directory.
                 shutil.rmtree(temp_dir)
 
     def pre_count_check(self, workflow):
         """
-        提交工单时进行后端检查，检查行数是否符合阈值 以及 是否允许的查询语句
-        :param workflow: 工单实例
-        :return: 检查结果字典
+        Backend checks before workflow submission:
+        validate row count threshold and allowed query statements.
+        :param workflow: Workflow instance
+        :return: Validation result
         """
-        # 获取系统配置
+        # Get system configuration.
         config = SysConfig()
-        # 获取前端提交的 SQL 和其他工单信息
+        # Get submitted SQL and related workflow information.
         full_sql = workflow.sql_content
         full_sql = sqlparse.format(full_sql, strip_comments=True)
         full_sql = sqlparse.split(full_sql)[0]
@@ -145,21 +146,21 @@ class OffLineDownLoad(EngineBase):
         max_export_rows_str = config.get("max_export_rows", "10000")
         max_export_rows = int(max_export_rows_str) if max_export_rows_str else 10000
 
-        allowed_prefixes = ("select", "with")  # 允许 SELECT 和 WITH 开头
+        allowed_prefixes = ("select", "with")  # Only allow SELECT/WITH statements.
         if not clean_sql.startswith(allowed_prefixes):
             result = ReviewResult(
-                stage="自动审核失败",
+                stage="Auto review failed",
                 errlevel=2,
-                stagestatus="检查未通过！",
-                errormessage=f"违规语句！",
+                stagestatus="Check failed!",
+                errormessage="Disallowed statement!",
                 affected_rows=actual_rows_check,
                 sql=full_sql,
             )
         elif result_set.error:
             result = ReviewResult(
-                stage="自动审核失败",
+                stage="Auto review failed",
                 errlevel=2,
-                stagestatus="检查未通过！",
+                stagestatus="Check failed!",
                 errormessage=result_set.error,
                 affected_rows=actual_rows_check,
                 sql=full_sql,
@@ -167,22 +168,25 @@ class OffLineDownLoad(EngineBase):
         elif actual_rows_check > max_export_rows:
             result = ReviewResult(
                 errlevel=2,
-                stagestatus="检查未通过！",
-                errormessage=f"导出数据行数({actual_rows_check})超过阈值({max_export_rows})。",
+                stagestatus="Check failed!",
+                errormessage=(
+                    f"Export row count ({actual_rows_check}) exceeds threshold "
+                    f"({max_export_rows})."
+                ),
                 affected_rows=actual_rows_check,
                 sql=full_sql,
             )
         else:
             result = ReviewResult(
                 errlevel=0,
-                stagestatus="行数统计完成",
+                stagestatus="Row count completed",
                 errormessage="None",
                 sql=full_sql,
                 affected_rows=actual_rows_check,
                 execute_time=0,
             )
         check_result.rows = [result]
-        # 统计警告和错误数量
+        # Count warnings and errors.
         for r in check_result.rows:
             if r.errlevel == 1:
                 check_result.warning_count += 1
@@ -195,21 +199,21 @@ def save_to_format_file(
     format_type=None, result=None, workflow=None, columns=None, temp_dir=None
 ):
     """
-    保存查询结果为指定格式的文件。
-    :param format_type: 文件格式类型（csv、json、xml、xlsx、sql）
-    :param result: 查询结果
-    :param workflow: 工单实例
-    :param columns: 列名
-    :param temp_dir: 临时目录路径
-    :return: 压缩后的文件名
+    Save query result into a file with specified format.
+    :param format_type: File format type (csv/json/xml/xlsx/sql)
+    :param result: Query result
+    :param workflow: Workflow instance
+    :param columns: Column names
+    :param temp_dir: Temporary directory path
+    :return: Compressed filename
     """
-    # 生成唯一的文件名（包含工单ID、日期和随机哈希值）
+    # Generate unique filename (workflow DB + timestamp + random hash).
     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    hash_value = hashlib.sha256(os.urandom(32)).hexdigest()[:8]  # 使用前8位作为哈希值
+    hash_value = hashlib.sha256(os.urandom(32)).hexdigest()[:8]  # Use first 8 chars.
     base_name = f"{workflow.db_name}_{timestamp}_{hash_value}"
     file_name = f"{base_name}.{format_type}"
     file_path = os.path.join(temp_dir, file_name)
-    # 将查询结果写入 CSV 文件
+    # Write query result into target format file.
     if format_type == "csv":
         save_csv(file_path, result, columns)
     elif format_type == "json":
@@ -232,10 +236,10 @@ def save_to_format_file(
 
 def save_csv(file_path, result, columns):
     """
-    保存CSV文件，将查询结果写入CSV文件。
-    :param file_path: CSV文件路径
-    :param result: 查询结果
-    :param columns: 列名
+    Save CSV file from query result.
+    :param file_path: CSV file path
+    :param result: Query result
+    :param columns: Column names
     """
     with open(file_path, "w", newline="", encoding="utf-8") as csv_file:
         csv_writer = csv.writer(csv_file, quoting=csv.QUOTE_ALL)
@@ -250,10 +254,10 @@ def save_csv(file_path, result, columns):
 
 def save_json(file_path, result, columns):
     """
-    保存JSON文件，将查询结果写入JSON文件。
-    :param file_path: JSON文件路径
-    :param result: 查询结果
-    :param columns: 列名
+    Save JSON file from query result.
+    :param file_path: JSON file path
+    :param result: Query result
+    :param columns: Column names
     """
     with open(file_path, "w", encoding="utf-8") as json_file:
         json.dump(
@@ -266,10 +270,10 @@ def save_json(file_path, result, columns):
 
 def save_xml(file_path, result, columns):
     """
-    保存XML文件，将查询结果写入XML文件。
-    :param file_path: XML文件路径
-    :param result: 查询结果
-    :param columns: 列名
+    Save XML file from query result.
+    :param file_path: XML file path
+    :param result: Query result
+    :param columns: Column names
     """
     root = ET.Element("tabledata")
 
@@ -298,10 +302,10 @@ def save_xml(file_path, result, columns):
 
 def save_xlsx(file_path, result, columns):
     """
-    保存Excel文件，将查询结果写入Excel文件。
-    :param file_path: Excel文件路径
-    :param result: 查询结果
-    :param columns: 列名
+    Save Excel file from query result.
+    :param file_path: Excel file path
+    :param result: Query result
+    :param columns: Column names
     """
     try:
         df = pd.DataFrame(
@@ -316,15 +320,15 @@ def save_xlsx(file_path, result, columns):
         )
         df.to_excel(file_path, index=False, header=True)
     except ValueError as e:
-        raise ValueError(f"Excel最大支持行数为1048576,已超出!")
+        raise ValueError("Excel supports at most 1048576 rows, limit exceeded!")
 
 
 def save_sql(file_path, result, columns):
     """
-    保存SQL文件，将查询结果写入SQL文件。
-    :param file_path: SQL文件路径
-    :param result: 查询结果
-    :param columns: 列名
+    Save SQL file from query result.
+    :param file_path: SQL file path
+    :param result: Query result
+    :param columns: Column names
     """
     with open(file_path, "w") as sql_file:
         for row in result:
@@ -351,7 +355,8 @@ def save_sql(file_path, result, columns):
 
 class StorageFileResponse(FileResponse):
     """
-    自定义文件响应类，用于处理文件下载，主要用于处理storages.backends.sftpstorage下载后无法关闭后台连接的问题。
+    Custom file response class for downloads.
+    Mainly used to close backend connections for SFTP storage downloads.
     """
 
     def __init__(self, *args, storage=None, **kwargs):
@@ -366,25 +371,26 @@ class StorageFileResponse(FileResponse):
 
 def offline_file_download(request):
     """
-    下载文件，本地文件和sftp文件使用文件流，云对象存储服务的文件重定向到url。
+    Download file:
+    local/SFTP returns file stream, cloud object storage returns redirect URL.
     :param request:
     :return:
     """
     file_name = request.GET.get("file_name", " ")
     workflow_id = request.GET.get("workflow_id", " ")
-    action = "离线下载"
-    extra_info = f"工单id：{workflow_id}，文件：{file_name}"
+    action = "Offline download"
+    extra_info = f"Workflow ID: {workflow_id}, file: {file_name}"
     config = SysConfig()
     storage_type = config.get("storage_type")
     storage = DynamicStorage()
 
     try:
         if not storage.exists(file_name):
-            extra_info = extra_info + f"，error:文件不存在。"
-            return JsonResponse({"error": "文件不存在"}, status=404)
+            extra_info = extra_info + ", error: file does not exist."
+            return JsonResponse({"error": "File does not exist"}, status=404)
         elif storage.exists(file_name):
             if storage_type in ["sftp", "local"]:
-                # SFTP/LOCAL处理 - 直接提供文件流
+                # SFTP/local handling: return file stream directly.
                 try:
                     file = storage.open(file_name, "rb")
                     file_size = storage.size(file_name)
@@ -396,28 +402,30 @@ def offline_file_download(request):
                     response["Content-Encoding"] = "identity"
                     return response
                 except Exception as e:
-                    extra_info = extra_info + f"，error:{str(e)}"
+                    extra_info = extra_info + f", error: {str(e)}"
                     logger.error(extra_info)
                     return JsonResponse(
-                        {"error": f"文件下载失败：请联系管理员。"}, status=500
+                        {"error": "File download failed. Please contact admin."},
+                        status=500,
                     )
 
             elif storage_type in ["s3c", "azure"]:
                 try:
-                    # 云对象存储生成带有效期的临时下载URL
+                    # Generate presigned URL for cloud object storage.
                     presigned_url = storage.url(file_name)
                     return JsonResponse({"type": "redirect", "url": presigned_url})
                 except Exception as e:
-                    extra_info = extra_info + f"，error:{str(e)}"
+                    extra_info = extra_info + f", error: {str(e)}"
                     logger.error(extra_info)
                     return JsonResponse(
-                        {"error": f"文件下载失败：请联系管理员。"}, status=500
+                        {"error": "File download failed. Please contact admin."},
+                        status=500,
                     )
 
     except Exception as e:
-        extra_info = extra_info + f"，error:{str(e)}"
+        extra_info = extra_info + f", error: {str(e)}"
         logger.error(extra_info)
-        return JsonResponse({"error": "内部错误，请联系管理员。"}, status=500)
+        return JsonResponse({"error": "Internal error, please contact admin."}, status=500)
 
     finally:
         if request.method != "HEAD":

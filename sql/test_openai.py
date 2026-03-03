@@ -4,7 +4,7 @@ from common.utils.openai import OpenaiClient
 
 
 def test_check_openai(admin_client, setup_sys_config):
-    """校验openai配置"""
+    """Validate OpenAI config."""
     setup_sys_config.set("openai_base_url", "https://api.openai.com")
     response = admin_client.get("/check/openai/")
     assert response.status_code == 200
@@ -18,7 +18,7 @@ def test_check_openai(admin_client, setup_sys_config):
 
 @pytest.fixture
 def openai_client(setup_sys_config):
-    # 使用mock来模拟SysConfig
+    # Use mock config values.
     setup_sys_config.set("openai_base_url", "https://api.openai.com")
     setup_sys_config.set("openai_api_key", "sk-xxxx")
     setup_sys_config.set("default_chat_model", "gpt-3.5-turbo")
@@ -83,33 +83,33 @@ def test_generate_sql_by_openai(openai_client, mocker):
         openai_client.generate_sql_by_openai(
             "MySQL", "table_schema_description", "query_description"
         )
-    assert str(excinfo.value) == "请求openai生成查询语句失败: API Error"
+    assert str(excinfo.value) == "Failed to generate query with OpenAI: API Error"
 
 
 @pytest.mark.parametrize(
     "data, expected_msg",
     [
-        ({}, "query_desc or db_type不存在"),
+        ({}, "query_desc or db_type does not exist"),
         (
             {
                 "db_type": "",
-                "query_desc": "获取所有用户名为test的记录",
+                "query_desc": "Get all records where username is test",
                 "instance_name": "some_ins",
             },
-            "query_desc or db_type不存在",
+            "query_desc or db_type does not exist",
         ),
         (
             {
                 "db_type": "MySQL",
-                "query_desc": "获取所有用户名为test的记录",
+                "query_desc": "Get all records where username is test",
                 "instance_name": "test_instance",
             },
-            "实例不存在",
+            "Instance does not exist",
         ),
     ],
 )
 def test_generate_sql(admin_client, db_instance, data, expected_msg):
-    """测试openai生成sql"""
+    """Test SQL generation with OpenAI."""
     response = admin_client.post("/query/generate_sql/", data=data)
     assert response.status_code == 200
     assert response.json()["msg"] == expected_msg

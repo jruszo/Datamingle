@@ -23,7 +23,7 @@ import logging
 logger = logging.getLogger("default")
 
 
-# 获取SQL慢日志统计
+# Get slow SQL summary.
 @permission_required("sql.menu_slowquery", raise_exception=True)
 def slowquery_review(request):
     instance_name = request.POST.get("instance_name")
@@ -32,17 +32,21 @@ def slowquery_review(request):
     db_name = request.POST.get("db_name")
     limit = int(request.POST.get("limit"))
     offset = int(request.POST.get("offset"))
-    # 服务端权限校验
+    # Server-side permission validation.
     try:
         user_instances(request.user, db_type=["mysql"]).get(instance_name=instance_name)
     except Exception:
-        result = {"status": 1, "msg": "你所在组未关联该实例", "data": []}
+        result = {
+            "status": 1,
+            "msg": "Your group is not associated with this instance",
+            "data": [],
+        }
         return HttpResponse(json.dumps(result), content_type="application/json")
 
-    # 判断是RDS还是其他实例
+    # Determine whether this is RDS or another instance type.
     instance_info = Instance.objects.get(instance_name=instance_name)
     if AliyunRdsConfig.objects.filter(instance=instance_info, is_enable=True).exists():
-        # 调用阿里云慢日志接口
+        # Call Aliyun slow-query API.
         query_engine = get_engine(instance=instance_info)
         result = query_engine.slowquery_review(
             start_time, end_time, db_name, limit, offset
@@ -53,12 +57,12 @@ def slowquery_review(request):
         sortName = str(request.POST.get("sortName"))
         sortOrder = str(request.POST.get("sortOrder")).lower()
 
-        # 时间处理
+        # Time handling.
         end_time = datetime.datetime.strptime(
             end_time, "%Y-%m-%d"
         ) + datetime.timedelta(days=1)
         filter_kwargs = {"slowqueryhistory__db_max": db_name} if db_name else {}
-        # 获取慢查数据
+        # Get slow-query summary data.
         slowsql_obj = (
             SlowQuery.objects.filter(
                 slowqueryhistory__hostname_max=(
@@ -72,32 +76,32 @@ def slowquery_review(request):
             .values("SQLText", "SQLId")
             .annotate(
                 CreateTime=Max("slowqueryhistory__ts_max"),
-                DBName=Max("slowqueryhistory__db_max"),  # 数据库
+                DBName=Max("slowqueryhistory__db_max"),  # Database
                 QueryTimeAvg=Sum("slowqueryhistory__query_time_sum")
-                / Sum("slowqueryhistory__ts_cnt"),  # 平均执行时长
-                MySQLTotalExecutionCounts=Sum("slowqueryhistory__ts_cnt"),  # 执行总次数
+                / Sum("slowqueryhistory__ts_cnt"),  # Average execution time
+                MySQLTotalExecutionCounts=Sum("slowqueryhistory__ts_cnt"),  # Total execution count
                 MySQLTotalExecutionTimes=Sum(
                     "slowqueryhistory__query_time_sum"
-                ),  # 执行总时长
+                ),  # Total execution time
                 ParseTotalRowCounts=Sum(
                     "slowqueryhistory__rows_examined_sum"
-                ),  # 扫描总行数
+                ),  # Total scanned rows
                 ReturnTotalRowCounts=Sum(
                     "slowqueryhistory__rows_sent_sum"
-                ),  # 返回总行数
+                ),  # Total returned rows
                 ParseRowAvg=Sum("slowqueryhistory__rows_examined_sum")
-                / Sum("slowqueryhistory__ts_cnt"),  # 平均扫描行数
+                / Sum("slowqueryhistory__ts_cnt"),  # Average scanned rows
                 ReturnRowAvg=Sum("slowqueryhistory__rows_sent_sum")
-                / Sum("slowqueryhistory__ts_cnt"),  # 平均返回行数
+                / Sum("slowqueryhistory__ts_cnt"),  # Average returned rows
             )
         )
         slow_sql_count = slowsql_obj.count()
-        # 默认“执行总次数”倒序排列
+        # Default sort: total execution count descending.
         slow_sql_list = slowsql_obj.order_by(
             "-" + sortName if "desc".__eq__(sortOrder) else sortName
         )[offset:limit]
 
-        # QuerySet 序列化
+        # Serialize QuerySet.
         sql_slow_log = []
         for SlowLog in slow_sql_list:
             SlowLog["QueryTimeAvg"] = round(SlowLog["QueryTimeAvg"], 6)
@@ -109,14 +113,14 @@ def slowquery_review(request):
             sql_slow_log.append(SlowLog)
         result = {"total": slow_sql_count, "rows": sql_slow_log}
 
-    # 返回查询结果
+    # Return query result.
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
     )
 
 
-# 获取SQL慢日志明细
+# Get slow SQL details.
 @permission_required("sql.menu_slowquery", raise_exception=True)
 def slowquery_review_history(request):
     instance_name = request.POST.get("instance_name")
@@ -126,17 +130,21 @@ def slowquery_review_history(request):
     sql_id = request.POST.get("SQLId")
     limit = int(request.POST.get("limit"))
     offset = int(request.POST.get("offset"))
-    # 服务端权限校验
+    # Server-side permission validation.
     try:
         user_instances(request.user, db_type=["mysql"]).get(instance_name=instance_name)
     except Exception:
-        result = {"status": 1, "msg": "你所在组未关联该实例", "data": []}
+        result = {
+            "status": 1,
+            "msg": "Your group is not associated with this instance",
+            "data": [],
+        }
         return HttpResponse(json.dumps(result), content_type="application/json")
 
-    # 判断是RDS还是其他实例
+    # Determine whether this is RDS or another instance type.
     instance_info = Instance.objects.get(instance_name=instance_name)
     if AliyunRdsConfig.objects.filter(instance=instance_info, is_enable=True).exists():
-        # 调用阿里云慢日志接口
+        # Call Aliyun slow-query API.
         query_engine = get_engine(instance=instance_info)
         result = query_engine.slowquery_review_history(
             start_time, end_time, db_name, sql_id, limit, offset
@@ -146,7 +154,7 @@ def slowquery_review_history(request):
         sortName = str(request.POST.get("sortName"))
         sortOrder = str(request.POST.get("sortOrder")).lower()
 
-        # 时间处理
+        # Time handling.
         end_time = datetime.datetime.strptime(
             end_time, "%Y-%m-%d"
         ) + datetime.timedelta(days=1)
@@ -154,8 +162,8 @@ def slowquery_review_history(request):
         filter_kwargs = {}
         filter_kwargs.update({"checksum": sql_id}) if sql_id else None
         filter_kwargs.update({"db_max": db_name}) if db_name else None
-        # SQLId、DBName非必传
-        # 获取慢查明细数据
+        # SQLId and DBName are optional.
+        # Get slow-query detail data.
         slow_sql_record_obj = SlowQueryHistory.objects.filter(
             hostname_max=(instance_info.host + ":" + str(instance_info.port)),
             ts_min__range=(start_time, end_time),
@@ -164,18 +172,18 @@ def slowquery_review_history(request):
         ).annotate(
             ExecutionStartTime=F(
                 "ts_min"
-            ),  # 本次统计(每5分钟一次)该类型sql语句出现的最小时间
-            DBName=F("db_max"),  # 数据库名
+            ),  # Earliest time in this 5-minute aggregation window
+            DBName=F("db_max"),  # Database name
             HostAddress=Concat(
                 V("'"), "user_max", V("'"), V("@"), V("'"), "client_max", V("'")
-            ),  # 用户名
-            SQLText=F("sample"),  # SQL语句
-            TotalExecutionCounts=F("ts_cnt"),  # 本次统计该sql语句出现的次数
-            QueryTimePct95=F("query_time_pct_95"),  # 本次统计该sql语句95%耗时
-            QueryTimes=F("query_time_sum"),  # 本次统计该sql语句花费的总时间(秒)
-            LockTimes=F("lock_time_sum"),  # 本次统计该sql语句锁定总时长(秒)
-            ParseRowCounts=F("rows_examined_sum"),  # 本次统计该sql语句解析总行数
-            ReturnRowCounts=F("rows_sent_sum"),  # 本次统计该sql语句返回总行数
+            ),  # User name
+            SQLText=F("sample"),  # SQL text
+            TotalExecutionCounts=F("ts_cnt"),  # Count in this aggregation window
+            QueryTimePct95=F("query_time_pct_95"),  # 95th percentile query time
+            QueryTimes=F("query_time_sum"),  # Total query time (seconds)
+            LockTimes=F("lock_time_sum"),  # Total lock time (seconds)
+            ParseRowCounts=F("rows_examined_sum"),  # Total rows examined
+            ReturnRowCounts=F("rows_sent_sum"),  # Total rows returned
         )
 
         slow_sql_record_count = slow_sql_record_obj.count()
@@ -194,7 +202,7 @@ def slowquery_review_history(request):
             "ReturnRowCounts",
         )
 
-        # QuerySet 序列化
+        # Serialize QuerySet.
         sql_slow_record = []
         for SlowRecord in slow_sql_record_list:
             SlowRecord["QueryTimePct95"] = round(SlowRecord["QueryTimePct95"], 6)
@@ -203,7 +211,7 @@ def slowquery_review_history(request):
             sql_slow_record.append(SlowRecord)
         result = {"total": slow_sql_record_count, "rows": sql_slow_record}
 
-        # 返回查询结果
+        # Return query result.
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
@@ -212,7 +220,7 @@ def slowquery_review_history(request):
 
 @cache_page(60 * 10)
 def report(request):
-    """返回慢SQL历史趋势"""
+    """Return slow SQL trend history."""
     checksum = request.GET.get("checksum")
     checksum = pymysql.escape_string(checksum)
     cnt_data = ChartDao().slow_query_review_history_by_cnt(checksum)
@@ -223,24 +231,29 @@ def report(request):
     line = Line(init_opts=opts.InitOpts(width="800", height="380px"))
     line.add_xaxis(cnt_x_data)
     line.add_yaxis(
-        "慢查次数",
+        "Slow Query Count",
         cnt_y_data,
         is_smooth=True,
         markline_opts=opts.MarkLineOpts(
             data=[
-                opts.MarkLineItem(type_="max", name="最大值"),
-                opts.MarkLineItem(type_="average", name="平均值"),
+                opts.MarkLineItem(type_="max", name="Max"),
+                opts.MarkLineItem(type_="average", name="Average"),
             ]
         ),
     )
-    line.add_yaxis("慢查时长(95%)", pct_y_data, is_smooth=True, is_symbol_show=False)
+    line.add_yaxis(
+        "Slow Query Duration (95%)",
+        pct_y_data,
+        is_smooth=True,
+        is_symbol_show=False,
+    )
     line.set_series_opts(
         areastyle_opts=opts.AreaStyleOpts(
             opacity=0.5,
         )
     )
     line.set_global_opts(
-        title_opts=opts.TitleOpts(title="SQL历史趋势"),
+        title_opts=opts.TitleOpts(title="SQL Trend History"),
         legend_opts=opts.LegendOpts(selected_mode="single"),
         xaxis_opts=opts.AxisOpts(
             axistick_opts=opts.AxisTickOpts(is_align_with_label=True),

@@ -18,7 +18,7 @@ from .models import Instance
 
 @permission_required("sql.menu_data_dictionary", raise_exception=True)
 def table_list(request):
-    """数据字典获取表列表"""
+    """Get table list from the data dictionary."""
     instance_name = request.GET.get("instance_name", "")
     db_name = request.GET.get("db_name", "")
     db_type = request.GET.get("db_type", "")
@@ -37,7 +37,7 @@ def table_list(request):
         except Exception as e:
             res = {"status": 1, "msg": str(e)}
     else:
-        res = {"status": 1, "msg": "非法调用！"}
+        res = {"status": 1, "msg": "Invalid request!"}
     return HttpResponse(
         json.dumps(res, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
@@ -46,7 +46,7 @@ def table_list(request):
 
 @permission_required("sql.menu_data_dictionary", raise_exception=True)
 def table_info(request):
-    """数据字典获取表信息"""
+    """Get table details from the data dictionary."""
     instance_name = request.GET.get("instance_name", "")
     db_name = request.GET.get("db_name", "")
     tb_name = request.GET.get("tb_name", "")
@@ -71,7 +71,7 @@ def table_info(request):
                 db_name=db_name, tb_name=tb_name
             )
 
-            # mysql数据库可以获取创建表格的SQL语句，mssql暂无找到生成创建表格的SQL语句
+            # MySQL can provide CREATE TABLE SQL; this is unavailable for MSSQL here.
             if instance.db_type == "mysql":
                 _create_sql = query_engine.query(
                     db_name, "show create table `%s`;" % tb_name
@@ -83,7 +83,7 @@ def table_info(request):
         except Exception as e:
             res = {"status": 1, "msg": str(e)}
     else:
-        res = {"status": 1, "msg": "非法调用！"}
+        res = {"status": 1, "msg": "Invalid request!"}
     return HttpResponse(
         json.dumps(res, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
@@ -102,7 +102,7 @@ def get_export_full_path(base_dir: str, instance_name: str, db_name: str) -> str
 
 @permission_required("sql.data_dictionary_export", raise_exception=True)
 def export(request):
-    """导出数据字典"""
+    """Export data dictionary."""
     instance_name = request.GET.get("instance_name", "")
     db_name = request.GET.get("db_name", "")
 
@@ -112,20 +112,30 @@ def export(request):
         ).get(instance_name=instance_name)
         query_engine = get_engine(instance=instance)
     except Instance.DoesNotExist:
-        return JsonResponse({"status": 1, "msg": "你所在组未关联该实例！", "data": []})
+        return JsonResponse(
+            {
+                "status": 1,
+                "msg": "Your group is not associated with this instance.",
+                "data": [],
+            }
+        )
 
-    # 普通用户仅可以获取指定数据库的字典信息
+    # Regular users can only export dictionary data for a specific database.
     if db_name:
         dbs = [query_engine.escape_string(db_name)]
-    # 管理员可以导出整个实例的字典信息
+    # Admins can export dictionary data for the entire instance.
     elif request.user.is_superuser:
         dbs = query_engine.get_all_databases().rows
     else:
         return JsonResponse(
-            {"status": 1, "msg": "仅管理员可以导出整个实例的字典信息！", "data": []}
+            {
+                "status": 1,
+                "msg": "Only admins can export dictionary data for the full instance!",
+                "data": [],
+            }
         )
 
-    # 获取数据，存入目录
+    # Get data and write to output directory.
     path = os.path.join(settings.BASE_DIR, "downloads", "dictionary")
     os.makedirs(path, exist_ok=True)
     for db in dbs:
@@ -140,15 +150,19 @@ def export(request):
         )
         fullpath = get_export_full_path(path, instance_name, db)
         if not fullpath:
-            return JsonResponse({"status": 1, "msg": "实例名或db名不合法", "data": []})
+            return JsonResponse(
+                {"status": 1, "msg": "Invalid instance name or db name", "data": []}
+            )
         with open(fullpath, "w", encoding="utf-8") as fp:
             fp.write(data)
-    # 关闭连接
+    # Close connection.
     query_engine.close()
     if db_name:
         fullpath = get_export_full_path(path, instance_name, db)
         if not fullpath:
-            return JsonResponse({"status": 1, "msg": "实例名或db名不合法", "data": []})
+            return JsonResponse(
+                {"status": 1, "msg": "Invalid instance name or db name", "data": []}
+            )
         response = FileResponse(open(fullpath, "rb"))
         response["Content-Type"] = "application/octet-stream"
         response["Content-Disposition"] = (
@@ -160,7 +174,10 @@ def export(request):
         return JsonResponse(
             {
                 "status": 0,
-                "msg": f"实例{instance_name}数据字典导出成功，请到downloads目录下载！",
+                "msg": (
+                    f"Data dictionary export for instance {instance_name} succeeded. "
+                    "Please download it from the downloads directory."
+                ),
                 "data": [],
             }
         )

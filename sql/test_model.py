@@ -1,4 +1,4 @@
-"""models.py 的补充测试"""
+"""Supplementary tests for models.py."""
 
 from django.conf import settings
 from sql.models import InstanceTag

@@ -16,12 +16,12 @@ from sql.utils.workflow_audit import AuditV2
 
 
 class TestQueryPrivilegesApply(TestCase):
-    """测试权限列表、权限管理"""
+    """Test privilege list and privilege management."""
 
     def setUp(self):
         self.superuser = User.objects.create(username="super", is_superuser=True)
         self.user = User.objects.create(username="user")
-        # 使用 travis.ci 时实例和测试service保持一致
+        # Keep test instance consistent with CI service.
         self.slave = Instance.objects.create(
             instance_name="test_instance",
             type="slave",
@@ -74,8 +74,8 @@ class TestQueryPrivilegesApply(TestCase):
         self.sys_config.replace(json.dumps({}))
 
     def test_query_audit_call_back(self):
-        """测试权限申请工单回调"""
-        # 工单状态改为审核失败, 验证工单状态
+        """Test callback for privilege request workflow."""
+        # Set workflow to rejected and verify status.
         sql.query_privileges._query_apply_audit_call_back(
             self.query_apply_1.apply_id, 2
         )
@@ -92,7 +92,7 @@ class TestQueryPrivilegesApply(TestCase):
                 ),
                 0,
             )
-        # 工单改为审核成功, 验证工单状态和权限状态
+        # Set workflow to approved and verify workflow/privilege status.
         sql.query_privileges._query_apply_audit_call_back(
             self.query_apply_1.apply_id, 1
         )
@@ -109,7 +109,7 @@ class TestQueryPrivilegesApply(TestCase):
                 ),
                 1,
             )
-        # 表权限申请测试, 只测试审核成功
+        # Table privilege request: test approved path only.
         sql.query_privileges._query_apply_audit_call_back(
             self.query_apply_2.apply_id, 1
         )
@@ -130,7 +130,7 @@ class TestQueryPrivilegesApply(TestCase):
 
     def test_query_priv_apply_list_super_with_search(self):
         """
-        测试权限申请列表，管理员查看所有用户，并且搜索
+        Test privilege request list: superuser with search.
         """
         data = {"limit": 14, "offset": 0, "search": "some_title1"}
         self.client.force_login(self.superuser)
@@ -157,7 +157,8 @@ class TestQueryPrivilegesApply(TestCase):
 
     def test_query_priv_apply_list_with_query_review_perm(self):
         """
-        测试权限申请列表，普通用户，拥有sql.query_review权限，在组内
+        Test privilege request list:
+        normal user with sql.query_review permission in group.
         """
         data = {"limit": 14, "offset": 0, "search": ""}
 
@@ -190,7 +191,8 @@ class TestQueryPrivilegesApply(TestCase):
 
     def test_query_priv_apply_list_no_query_review_perm(self):
         """
-        测试权限申请列表，普通用户，无sql.query_review权限，在组内
+        Test privilege request list:
+        normal user without sql.query_review permission in group.
         """
         data = {"limit": 14, "offset": 0, "search": ""}
 
@@ -203,7 +205,7 @@ class TestQueryPrivilegesApply(TestCase):
 
     def test_user_query_priv_with_search(self):
         """
-        测试权限申请列表，管理员查看所有用户，并且搜索
+        Test user query privileges: superuser with search.
         """
         data = {"limit": 14, "offset": 0, "search": "user"}
         QueryPrivileges.objects.create(
@@ -236,7 +238,8 @@ class TestQueryPrivilegesApply(TestCase):
 
     def test_user_query_priv_with_query_mgtpriv(self):
         """
-        测试权限申请列表，普通用户，拥有sql.query_mgtpriv权限，在组内
+        Test user query privileges:
+        normal user with sql.query_mgtpriv permission in group.
         """
         data = {"limit": 14, "offset": 0, "search": "user"}
         QueryPrivileges.objects.create(
@@ -274,7 +277,8 @@ class TestQueryPrivilegesApply(TestCase):
 
     def test_user_query_priv_no_query_mgtpriv(self):
         """
-        测试权限申请列表，普通用户，没有sql.query_mgtpriv权限，在组内
+        Test user query privileges:
+        normal user without sql.query_mgtpriv permission in group.
         """
         data = {"limit": 14, "offset": 0, "search": "user"}
         QueryPrivileges.objects.create(
@@ -296,7 +300,7 @@ class TestQueryPrivilegesApply(TestCase):
 
 
 class TestQueryPrivilegesCheck(TestCase):
-    """测试权限校验"""
+    """Test privilege validation."""
 
     def setUp(self):
         self.superuser = User.objects.create(username="super", is_superuser=True)
@@ -304,7 +308,7 @@ class TestQueryPrivilegesCheck(TestCase):
         query_all_instance_perm = Permission.objects.get(codename="query_all_instances")
         self.user_can_query_all.user_permissions.add(query_all_instance_perm)
         self.user = User.objects.create(username="user")
-        # 使用 travis.ci 时实例和测试service保持一致
+        # Keep test instance consistent with CI service.
         self.slave = Instance.objects.create(
             instance_name="test_instance",
             type="slave",
@@ -327,7 +331,7 @@ class TestQueryPrivilegesCheck(TestCase):
 
     def test_db_priv_super(self):
         """
-        测试超级管理员验证数据库权限
+        Test database privilege validation for superuser.
         :return:
         """
         self.sys_config.set("admin_query_limit", "50")
@@ -339,7 +343,7 @@ class TestQueryPrivilegesCheck(TestCase):
 
     def test_db_priv_user_priv_not_exist(self):
         """
-        测试普通用户验证数据库权限，用户无权限
+        Test database privilege validation for normal user without privilege.
         :return:
         """
         r = sql.query_privileges._db_priv(
@@ -349,7 +353,7 @@ class TestQueryPrivilegesCheck(TestCase):
 
     def test_db_priv_user_priv_exist(self):
         """
-        测试普通用户验证数据库权限，用户有权限
+        Test database privilege validation for normal user with privilege.
         :return:
         """
         QueryPrivileges.objects.create(
@@ -367,7 +371,7 @@ class TestQueryPrivilegesCheck(TestCase):
 
     def test_tb_priv_super(self):
         """
-        测试超级管理员验证表权限
+        Test table privilege validation for superuser.
         :return:
         """
         self.sys_config.set("admin_query_limit", "50")
@@ -382,7 +386,7 @@ class TestQueryPrivilegesCheck(TestCase):
 
     def test_tb_priv_user_priv_not_exist(self):
         """
-        测试普通用户验证表权限，用户无权限
+        Test table privilege validation for normal user without privilege.
         :return:
         """
         r = sql.query_privileges._tb_priv(
@@ -395,7 +399,7 @@ class TestQueryPrivilegesCheck(TestCase):
 
     def test_tb_priv_user_priv_exist(self):
         """
-        测试普通用户验证表权限，用户有权限
+        Test table privilege validation for normal user with privilege.
         :return:
         """
         QueryPrivileges.objects.create(
@@ -418,7 +422,7 @@ class TestQueryPrivilegesCheck(TestCase):
     @patch("sql.query_privileges._db_priv")
     def test_priv_limit_from_db(self, __db_priv):
         """
-        测试用户获取查询数量限制，通过库名获取
+        Test query row limit from database privilege.
         :return:
         """
         __db_priv.return_value = 10
@@ -431,7 +435,7 @@ class TestQueryPrivilegesCheck(TestCase):
     @patch("sql.query_privileges._db_priv")
     def test_priv_limit_from_tb(self, __db_priv, __tb_priv):
         """
-        测试用户获取查询数量限制，通过表名获取
+        Test query row limit from table privilege.
         :return:
         """
         __db_priv.return_value = 10
@@ -444,7 +448,7 @@ class TestQueryPrivilegesCheck(TestCase):
     @patch("sql.engines.goinception.GoInceptionEngine.query_print")
     def test_table_ref(self, _query_print):
         """
-        测试通过goInception获取查询语句的table_ref
+        Test table_ref extraction via goInception.
         :return:
         """
         _query_print.return_value = {
@@ -462,10 +466,10 @@ class TestQueryPrivilegesCheck(TestCase):
     @patch("sql.engines.goinception.GoInceptionEngine.query_print")
     def test_table_ref_wrong(self, _query_print):
         """
-        测试通过goInception获取查询语句的table_ref
+        Test table_ref extraction failure via goInception.
         :return:
         """
-        _query_print.side_effect = RuntimeError("语法错误")
+        _query_print.side_effect = RuntimeError("Syntax error")
         with self.assertRaises(RuntimeError):
             sql.query_privileges._table_ref(
                 "select * from archery.sql_users;", self.slave, self.db_name
@@ -473,7 +477,8 @@ class TestQueryPrivilegesCheck(TestCase):
 
     def test_query_priv_check_super(self):
         """
-        测试用户权限校验，超级管理员不做校验，直接返回系统配置的limit
+        Test privilege check for superuser:
+        no detailed checks, returns configured limit.
         :return:
         """
         r = sql.query_privileges.query_priv_check(
@@ -500,7 +505,7 @@ class TestQueryPrivilegesCheck(TestCase):
         )
 
     def test_query_priv_check_explain_or_show_create(self):
-        """测试用户权限校验，explain和show create不做校验"""
+        """Test privilege check bypass for EXPLAIN and SHOW CREATE."""
         r = sql.query_privileges.query_priv_check(
             user=self.user,
             instance=self.slave,
@@ -518,7 +523,8 @@ class TestQueryPrivilegesCheck(TestCase):
     @patch("sql.query_privileges._db_priv", return_value=False)
     def test_query_priv_check_no_priv(self, __db_priv, __tb_priv, __table_ref):
         """
-        测试用户权限校验，mysql实例、普通用户 无库表权限，inception语法树正常打印
+        Test privilege check:
+        MySQL instance, normal user, no db/table privilege.
         :return:
         """
         r = sql.query_privileges.query_priv_check(
@@ -532,7 +538,10 @@ class TestQueryPrivilegesCheck(TestCase):
             r,
             {
                 "status": 2,
-                "msg": "你无archery.sql_users表的查询权限！请先到查询权限管理进行申请",
+                "msg": (
+                    "You do not have query permission on archery.sql_users. "
+                    "Please apply in Query Permission Management first."
+                ),
                 "data": {"priv_check": True, "limit_num": 0},
             },
         )
@@ -545,7 +554,8 @@ class TestQueryPrivilegesCheck(TestCase):
     @patch("sql.query_privileges._db_priv", return_value=1000)
     def test_query_priv_check_db_priv_exist(self, __db_priv, __tb_priv, __table_ref):
         """
-        测试用户权限校验，mysql实例、普通用户 有库权限，inception语法树正常打印
+        Test privilege check:
+        MySQL instance, normal user, db privilege exists.
         :return:
         """
         r = sql.query_privileges.query_priv_check(
@@ -568,7 +578,8 @@ class TestQueryPrivilegesCheck(TestCase):
     @patch("sql.query_privileges._db_priv", return_value=False)
     def test_query_priv_check_tb_priv_exist(self, __db_priv, __tb_priv, __table_ref):
         """
-        测试用户权限校验，mysql实例、普通用户 ，有表权限，inception语法树正常打印
+        Test privilege check:
+        MySQL instance, normal user, table privilege exists.
         :return:
         """
         r = sql.query_privileges.query_priv_check(
@@ -589,10 +600,11 @@ class TestQueryPrivilegesCheck(TestCase):
         self, __db_priv, __tb_priv, __table_ref
     ):
         """
-        测试用户权限校验，mysql实例、普通用户 ，inception语法树抛出异常
+        Test privilege check:
+        MySQL instance, normal user, table_ref parsing raises exception.
         :return:
         """
-        __table_ref.side_effect = RuntimeError("语法错误")
+        __table_ref.side_effect = RuntimeError("Syntax error")
         self.sys_config.get_all_config()
         r = sql.query_privileges.query_priv_check(
             user=self.user,
@@ -605,7 +617,10 @@ class TestQueryPrivilegesCheck(TestCase):
             r,
             {
                 "status": 1,
-                "msg": "无法校验查询语句权限，请联系管理员，错误信息：语法错误",
+                "msg": (
+                    "Unable to validate query permission. "
+                    "Contact admin. Error details: Syntax error"
+                ),
                 "data": {"priv_check": True, "limit_num": 0},
             },
         )
@@ -613,7 +628,7 @@ class TestQueryPrivilegesCheck(TestCase):
     @patch("sql.query_privileges._db_priv", return_value=False)
     def test_query_priv_check_with_pgsql_db_priv(self, __db_priv):
         """
-        测试用户权限校验,pgsql实例、普通用户
+        Test privilege check for pgsql instance and normal user.
         """
         pgsql_instance = Instance(
             instance_name="pgsql",
@@ -636,7 +651,8 @@ class TestQueryPrivilegesCheck(TestCase):
     @patch("sql.query_privileges._db_priv", return_value=1000)
     def test_query_priv_check_not_mysql_db_priv_exist(self, __db_priv):
         """
-        测试用户权限校验，非mysql实例、普通用户 有库权限
+        Test privilege check:
+        non-MySQL instance, normal user, db privilege exists.
         :return:
         """
         mssql_instance = Instance(
@@ -663,7 +679,8 @@ class TestQueryPrivilegesCheck(TestCase):
     @patch("sql.query_privileges._db_priv", return_value=False)
     def test_query_priv_check_not_mysql_db_priv_not_exist(self, __db_priv):
         """
-        测试用户权限校验，非mysql实例、普通用户 无库权限
+        Test privilege check:
+        non-MySQL instance, normal user, no db privilege.
         :return:
         """
         mssql_instance = Instance(
@@ -686,7 +703,10 @@ class TestQueryPrivilegesCheck(TestCase):
             r,
             {
                 "data": {"limit_num": 0, "priv_check": True},
-                "msg": "你无archery数据库的查询权限！请先到查询权限管理进行申请",
+                "msg": (
+                    "You do not have query permission on database archery. "
+                    "Please apply in Query Permission Management first."
+                ),
                 "status": 2,
             },
         )

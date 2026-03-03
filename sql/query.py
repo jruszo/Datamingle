@@ -26,7 +26,7 @@ logger = logging.getLogger("default")
 @permission_required("sql.query_submit", raise_exception=True)
 def query(request):
     """
-    获取SQL查询结果
+    Get SQL query result.
     :param request:
     :return:
     """
@@ -43,33 +43,33 @@ def query(request):
         instance = user_instances(request.user).get(instance_name=instance_name)
     except Instance.DoesNotExist:
         result["status"] = 1
-        result["msg"] = "你所在组未关联该实例"
+        result["msg"] = "Your group is not associated with this instance"
         return HttpResponse(json.dumps(result), content_type="application/json")
 
-    # 服务器端参数验证
+    # Server-side parameter validation.
     if None in [sql_content, db_name, instance_name, limit_num]:
         result["status"] = 1
-        result["msg"] = "页面提交参数可能为空"
+        result["msg"] = "Submitted parameters may be empty"
         return HttpResponse(json.dumps(result), content_type="application/json")
 
     try:
         config = SysConfig()
-        # 查询前的检查，禁用语句检查，语句切分
+        # Pre-query checks: forbidden SQL check and SQL splitting.
         query_engine = get_engine(instance=instance)
         query_check_info = query_engine.query_check(db_name=db_name, sql=sql_content)
         if query_check_info.get("bad_query"):
-            # 引擎内部判断为 bad_query
+            # Marked as bad_query by engine.
             result["status"] = 1
             result["msg"] = query_check_info.get("msg")
             return HttpResponse(json.dumps(result), content_type="application/json")
         if query_check_info.get("has_star") and config.get("disable_star") is True:
-            # 引擎内部判断为有 * 且禁止 * 选项打开
+            # Engine detected SELECT * while disable_star is enabled.
             result["status"] = 1
             result["msg"] = query_check_info.get("msg")
             return HttpResponse(json.dumps(result), content_type="application/json")
         sql_content = query_check_info["filtered_sql"]
 
-        # 查询权限校验，并且获取limit_num
+        # Permission check and effective limit_num.
         priv_check_info = query_priv_check(
             user, instance, db_name, sql_content, limit_num
         )
@@ -80,17 +80,17 @@ def query(request):
             result["status"] = priv_check_info["status"]
             result["msg"] = priv_check_info["msg"]
             return HttpResponse(json.dumps(result), content_type="application/json")
-        # explain的limit_num设置为0
+        # EXPLAIN should run without limit.
         limit_num = 0 if re.match(r"^explain", sql_content.lower()) else limit_num
 
-        # 对查询sql增加limit限制或者改写语句
+        # Add limit or rewrite query SQL.
         sql_content = query_engine.filter_sql(sql=sql_content, limit_num=limit_num)
 
-        # 先获取查询连接，用于后面查询复用连接以及终止会话
+        # Get connection in advance for reuse and session kill scheduling.
         query_engine.get_connection(db_name=db_name)
         thread_id = query_engine.thread_id
         max_execution_time = int(config.get("max_execution_time", 60))
-        # 执行查询语句，并增加一个定时终止语句的schedule，timeout=max_execution_time
+        # Execute query and add kill schedule for timeout protection.
         if thread_id:
             schedule_name = f"query-{time.time()}"
             run_date = datetime.datetime.now() + datetime.timedelta(
@@ -98,7 +98,7 @@ def query(request):
             )
             add_kill_conn_schedule(schedule_name, run_date, instance.id, thread_id)
         with FuncTimer() as t:
-            # 获取主从延迟信息
+            # Get replication lag info.
             seconds_behind_master = query_engine.seconds_behind_master
             query_result = query_engine.query(
                 db_name,
@@ -109,15 +109,15 @@ def query(request):
                 max_execution_time=max_execution_time * 1000,
             )
         query_result.query_time = t.cost
-        # 返回查询结果后删除schedule
+        # Remove schedule after query returns.
         if thread_id:
             del_schedule(schedule_name)
 
-        # 查询异常
+        # Query error.
         if query_result.error:
             result["status"] = 1
             result["msg"] = query_result.error
-        # 数据脱敏，仅对查询无错误的结果集进行脱敏，并且按照query_check配置是否返回
+        # Data masking for successful query result sets.
         elif config.get("data_masking"):
             try:
                 with FuncTimer() as t:
@@ -125,47 +125,51 @@ def query(request):
                         db_name, sql_content, query_result
                     )
                 masking_result.mask_time = t.cost
-                # 脱敏出错
+                # Masking error.
                 if masking_result.error:
-                    # 开启query_check，直接返回异常，禁止执行
+                    # If query_check enabled, return error directly.
                     if config.get("query_check"):
                         result["status"] = 1
-                        result["msg"] = f"数据脱敏异常：{masking_result.error}"
-                    # 关闭query_check，忽略错误信息，返回未脱敏数据，权限校验标记为跳过
+                        result["msg"] = f"Data masking error: {masking_result.error}"
+                    # If query_check disabled, allow query and return unmasked data.
                     else:
                         logger.warning(
-                            f"数据脱敏异常，按照配置放行，查询语句：{sql_content}，错误信息：{masking_result.error}"
+                            "Data masking error, allowed by config. "
+                            f"SQL: {sql_content}, error: {masking_result.error}"
                         )
                         query_result.error = None
                         result["data"] = query_result.__dict__
-                # 正常脱敏
+                # Masking succeeded.
                 else:
                     result["data"] = masking_result.__dict__
             except Exception as msg:
                 logger.error(traceback.format_exc())
-                # 抛出未定义异常，并且开启query_check，直接返回异常，禁止执行
+                # Unexpected masking exception.
                 if config.get("query_check"):
                     result["status"] = 1
-                    result["msg"] = f"数据脱敏异常，请联系管理员，错误信息：{msg}"
-                # 关闭query_check，忽略错误信息，返回未脱敏数据，权限校验标记为跳过
+                    result["msg"] = (
+                        f"Data masking error, contact admin. Error details: {msg}"
+                    )
+                # If query_check disabled, allow query and return unmasked data.
                 else:
                     logger.warning(
-                        f"数据脱敏异常，按照配置放行，查询语句：{sql_content}，错误信息：{msg}"
+                        "Data masking error, allowed by config. "
+                        f"SQL: {sql_content}, error: {msg}"
                     )
                     query_result.error = None
                     result["data"] = query_result.__dict__
-        # 无需脱敏的语句
+        # Statements not requiring masking.
         else:
             result["data"] = query_result.__dict__
 
-        # 仅将成功的查询语句记录存入数据库
+        # Persist only successful query logs.
         if not query_result.error:
             result["data"]["seconds_behind_master"] = seconds_behind_master
             if int(limit_num) == 0:
                 limit_num = int(query_result.affected_rows)
             else:
                 limit_num = min(int(limit_num), int(query_result.affected_rows))
-            # 防止查询超时
+            # Avoid stale DB connections after timeout.
             if connection.connection and not connection.is_usable():
                 close_old_connections()
         else:
@@ -185,12 +189,14 @@ def query(request):
         query_log.save()
     except Exception as e:
         logger.error(
-            f"查询异常报错，查询语句：{sql_content}\n，错误信息：{traceback.format_exc()}"
+            "Query error.\n"
+            f"SQL: {sql_content}\n"
+            f"Error details: {traceback.format_exc()}"
         )
         result["status"] = 1
-        result["msg"] = f"查询异常报错，错误信息：{e}"
+        result["msg"] = f"Query error, details: {e}"
         return HttpResponse(json.dumps(result), content_type="application/json")
-    # 返回查询结果
+    # Return query result.
     try:
         return HttpResponse(
             json.dumps(
@@ -201,7 +207,7 @@ def query(request):
             ),
             content_type="application/json",
         )
-    # 虽然能正常返回，但是依然会乱码
+    # Response is valid, but may still produce garbled text in edge cases.
     except UnicodeDecodeError:
         return HttpResponse(
             json.dumps(result, default=str, bigint_as_string=True, encoding="latin1"),
@@ -221,11 +227,11 @@ def querylog_audit(request):
 
 def _querylog(request):
     """
-    获取sql查询记录
+    Get SQL query logs.
     :param request:
     :return:
     """
-    # 获取用户信息
+    # Get user.
     user = request.user
 
     limit = int(request.GET.get("limit", 0))
@@ -238,16 +244,16 @@ def _querylog(request):
     start_date = request.GET.get("start_date", "")
     end_date = request.GET.get("end_date", "")
 
-    # 组合筛选项
+    # Build filter options.
     filter_dict = dict()
-    # 是否收藏
+    # Favorite only.
     if star:
         filter_dict["favorite"] = star
-    # 语句别名
+    # Query log alias.
     if query_log_id:
         filter_dict["id"] = query_log_id
 
-    # 管理员、审计员查看全部数据,普通用户查看自己的数据
+    # Admins/auditors can view all; regular users see only their own records.
     if not (user.is_superuser or user.has_perm("sql.audit_user")):
         filter_dict["username"] = user.username
 
@@ -257,10 +263,10 @@ def _querylog(request):
         ) + datetime.timedelta(days=1)
         filter_dict["create_time__range"] = (start_date, end_date)
 
-    # 过滤组合筛选项
+    # Apply combined filters.
     sql_log = QueryLog.objects.filter(**filter_dict)
 
-    # 过滤搜索信息
+    # Apply search filter.
     sql_log = sql_log.filter(
         Q(sqllog__icontains=search)
         | Q(user_display__icontains=search)
@@ -280,10 +286,10 @@ def _querylog(request):
         "alias",
         "create_time",
     )
-    # QuerySet 序列化
+    # Serialize QuerySet.
     rows = [row for row in sql_log_list]
     result = {"total": sql_log_count, "rows": rows}
-    # 返回查询结果
+    # Return query result.
     return HttpResponse(
         json.dumps(result, cls=ExtendJSONEncoder, bigint_as_string=True),
         content_type="application/json",
@@ -293,7 +299,7 @@ def _querylog(request):
 @permission_required("sql.menu_sqlquery", raise_exception=True)
 def favorite(request):
     """
-    收藏查询记录，并且设置别名
+    Favorite query log and set alias.
     :param request:
     :return:
     """
@@ -303,14 +309,14 @@ def favorite(request):
     QueryLog(id=query_log_id, favorite=star, alias=alias).save(
         update_fields=["favorite", "alias"]
     )
-    # 返回查询结果
+    # Return query result.
     return HttpResponse(
         json.dumps({"status": 0, "msg": "ok"}), content_type="application/json"
     )
 
 
 def kill_query_conn(instance_id, thread_id):
-    """终止查询会话，用于schedule调用"""
+    """Terminate query session, used by schedule task."""
     instance = Instance.objects.get(pk=instance_id)
     query_engine = get_engine(instance)
     query_engine.kill_connection(thread_id)
@@ -319,7 +325,7 @@ def kill_query_conn(instance_id, thread_id):
 @permission_required("sql.menu_sqlquery", raise_exception=True)
 def generate_sql(request):
     """
-    利用AI生成查询SQL, 传入数据基本结构和查询描述
+    Generate query SQL using AI from schema info and query description.
     :param request:
     :return:
     """
@@ -327,7 +333,9 @@ def generate_sql(request):
     db_type = request.POST.get("db_type")
     if not query_desc or not db_type:
         return HttpResponse(
-            json.dumps({"status": 1, "msg": "query_desc or db_type不存在", "data": []}),
+            json.dumps(
+                {"status": 1, "msg": "query_desc or db_type does not exist", "data": []}
+            ),
             content_type="application/json",
         )
 
@@ -336,7 +344,7 @@ def generate_sql(request):
         instance = Instance.objects.get(instance_name=instance_name)
     except Instance.DoesNotExist:
         return HttpResponse(
-            json.dumps({"status": 1, "msg": "实例不存在", "data": []}),
+            json.dumps({"status": 1, "msg": "Instance does not exist", "data": []}),
             content_type="application/json",
         )
     db_name = request.POST.get("db_name")
@@ -350,7 +358,7 @@ def generate_sql(request):
             db_name, tb_name, schema_name=schema_name
         )
         openai_client = OpenaiClient()
-        # 有些不存在表结构, 例如 redis
+        # Some engines may not have table schema, such as Redis.
         if len(query_result.rows) != 0:
             result["data"] = openai_client.generate_sql_by_openai(
                 db_type, query_result.rows[0][-1], query_desc
@@ -367,7 +375,7 @@ def generate_sql(request):
 
 def check_openai(request):
     """
-    校验openai配置是否存在
+    Validate whether OpenAI configuration exists.
     :param request:
     :return:
     """
@@ -377,7 +385,10 @@ def check_openai(request):
             json.dumps(
                 {
                     "status": 1,
-                    "msg": "openai 缺少配置, 必需配置[openai_base_url, openai_api_key, default_chat_model]",
+                    "msg": (
+                        "OpenAI config is missing. Required keys: "
+                        "[openai_base_url, openai_api_key, default_chat_model]"
+                    ),
                     "data": False,
                 }
             ),

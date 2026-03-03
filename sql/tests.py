@@ -37,11 +37,11 @@ class PickableMock(Mock):
 
 
 class TestView(TransactionTestCase):
-    """测试view视图"""
+    """View tests."""
 
     def setUp(self):
         """
-        准备用户和配置
+        Prepare users and configuration.
         """
         self.sys_config = SysConfig()
         self.client = Client()
@@ -92,8 +92,8 @@ class TestView(TransactionTestCase):
             group_name="some_group",
             workflow_id=1,
             workflow_type=1,
-            workflow_title="申请标题",
-            workflow_remark="申请备注",
+            workflow_title="Request title",
+            workflow_remark="Request note",
             audit_auth_groups="1,2,3",
             current_audit="1",
             next_audit="2",
@@ -102,7 +102,7 @@ class TestView(TransactionTestCase):
         self.wl = WorkflowLog.objects.create(
             audit_id=self.audit.audit_id, operation_type=1
         )
-        # 慢查询建表
+        # Create slow query review tables.
         with connection.cursor() as cursor:
             with open("src/init_sql/mysql_slow_query_review.sql") as fp:
                 content = fp.read()
@@ -123,187 +123,187 @@ class TestView(TransactionTestCase):
             )
 
     def test_index(self):
-        """测试index页面"""
+        """Test index page."""
         data = {}
         r = self.client.get("/index/", data=data)
         self.assertRedirects(r, f"/sqlworkflow/", fetch_redirect_response=False)
 
     def test_dashboard(self):
-        """测试dashboard页面"""
+        """Test dashboard page."""
         data = {}
         r = self.client.get("/dashboard/", data=data)
         self.assertEqual(r.status_code, 200)
-        self.assertContains(r, "SQL上线工单")
+        self.assertContains(r, "SQL")
 
     def test_sqlworkflow(self):
-        """测试sqlworkflow页面"""
+        """Test sqlworkflow page."""
         data = {}
         r = self.client.get("/sqlworkflow/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_submitsql(self):
-        """测试submitsql页面"""
+        """Test submitsql page."""
         data = {}
         r = self.client.get("/submitsql/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_rollback(self):
-        """测试rollback页面"""
+        """Test rollback page."""
         data = {"workflow_id": self.wf.id}
         r = self.client.get("/rollback/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_sqlanalyze(self):
-        """测试sqlanalyze页面"""
+        """Test sqlanalyze page."""
         data = {}
         r = self.client.get("/sqlanalyze/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_sqlquery(self):
-        """测试sqlquery页面"""
+        """Test sqlquery page."""
         data = {}
         r = self.client.get("/sqlquery/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_queryapplylist(self):
-        """测试queryapplylist页面"""
+        """Test queryapplylist page."""
         data = {}
         r = self.client.get("/queryapplylist/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_queryuserprivileges(self):
-        """测试queryuserprivileges页面"""
+        """Test queryuserprivileges page."""
         data = {}
         r = self.client.get(f"/queryuserprivileges/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_sqladvisor(self):
-        """测试sqladvisor页面"""
+        """Test sqladvisor page."""
         data = {}
         r = self.client.get(f"/sqladvisor/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_slowquery(self):
-        """测试slowquery页面"""
+        """Test slowquery page."""
         data = {}
         r = self.client.get(f"/slowquery/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_instance(self):
-        """测试instance页面"""
+        """Test instance page."""
         data = {}
         r = self.client.get(f"/instance/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_instanceaccount(self):
-        """测试instanceaccount页面"""
+        """Test instanceaccount page."""
         data = {}
         r = self.client.get(f"/instanceaccount/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_database(self):
-        """测试database页面"""
+        """Test database page."""
         data = {}
         r = self.client.get(f"/database/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_dbdiagnostic(self):
-        """测试dbdiagnostic页面"""
+        """Test dbdiagnostic page."""
         data = {}
         r = self.client.get(f"/dbdiagnostic/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_instanceparam(self):
-        """测试instance_param页面"""
+        """Test instance_param page."""
         data = {}
         r = self.client.get(f"/instanceparam/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_my2sql(self):
-        """测试my2sql页面"""
+        """Test my2sql page."""
         data = {}
         r = self.client.get(f"/my2sql/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_schemasync(self):
-        """测试schemasync页面"""
+        """Test schemasync page."""
         data = {}
         r = self.client.get(f"/schemasync/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_archive(self):
-        """测试archive页面"""
+        """Test archive page."""
         data = {}
         r = self.client.get(f"/archive/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_config(self):
-        """测试config页面"""
+        """Test config page."""
         data = {}
         r = self.client.get(f"/config/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_group(self):
-        """测试group页面"""
+        """Test group page."""
         data = {}
         r = self.client.get(f"/group/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_audit(self):
-        """测试audit页面"""
+        """Test audit page."""
         data = {}
         r = self.client.get(f"/audit/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_audit_sqlquery(self):
-        """测试audit_sqlquery页面"""
+        """Test audit_sqlquery page."""
         data = {}
         r = self.client.get(f"/audit_sqlquery/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_audit_sqlworkflow(self):
-        """测试audit_sqlworkflow页面"""
+        """Test audit_sqlworkflow page."""
         data = {}
         r = self.client.get(f"/audit_sqlworkflow/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_groupmgmt(self):
-        """测试groupmgmt页面"""
+        """Test groupmgmt page."""
         data = {}
         r = self.client.get(f"/grouprelations/{self.res_group.group_id}/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_workflows(self):
-        """测试workflows页面"""
+        """Test workflows page."""
         data = {}
         r = self.client.get(f"/workflow/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_workflowsdetail(self):
-        """测试workflows页面"""
+        """Test workflow detail page."""
         data = {}
         r = self.client.get(f"/workflow/{self.audit.audit_id}/", data=data)
         self.assertRedirects(r, f"/queryapplydetail/1/", fetch_redirect_response=False)
 
     def test_dbaprinciples(self):
-        """测试workflows页面"""
+        """Test DBA principles page."""
         data = {}
         r = self.client.get(f"/dbaprinciples/", data=data)
         self.assertEqual(r.status_code, 200)
 
 
 class TestSignUp(TestCase):
-    """注册测试"""
+    """Sign-up tests."""
 
     def setUp(self):
         """
-        创建默认组给注册关联用户, 打开注册
+        Create default group for sign-up and enable registration.
         """
         archer_config = SysConfig()
         archer_config.set("sign_up_enabled", "true")
         archer_config.get_all_config()
         self.client = Client()
-        Group.objects.create(id=1, name="默认组")
+        Group.objects.create(id=1, name="Default Group")
 
     def tearDown(self):
         SysConfig().purge()
@@ -312,25 +312,25 @@ class TestSignUp(TestCase):
 
     def test_sing_up_not_username(self):
         """
-        用户名不能为空
+        Username is missing.
         """
         response = self.client.post("/signup/", data={})
         data = json.loads(response.content)
-        content = {"status": 1, "msg": "用户名和密码不能为空", "data": None}
+        content = {"status": 1, "msg": "Username and password cannot be empty.", "data": None}
         self.assertEqual(data, content)
 
     def test_sing_up_not_password(self):
         """
-        密码不能为空
+        Password is missing.
         """
         response = self.client.post("/signup/", data={"username": "test"})
         data = json.loads(response.content)
-        content = {"status": 1, "msg": "用户名和密码不能为空", "data": None}
+        content = {"status": 1, "msg": "Username and password cannot be empty.", "data": None}
         self.assertEqual(data, content)
 
     def test_sing_up_not_display(self):
         """
-        中文名不能为空
+        Display name is missing.
         """
         response = self.client.post(
             "/signup/",
@@ -343,24 +343,24 @@ class TestSignUp(TestCase):
             },
         )
         data = json.loads(response.content)
-        content = {"status": 1, "msg": "请填写中文名", "data": None}
+        content = {"status": 1, "msg": "Display name is required.", "data": None}
         self.assertEqual(data, content)
 
     def test_sing_up_2password(self):
         """
-        两次输入密码不一致
+        Password entries do not match.
         """
         response = self.client.post(
             "/signup/",
             data={"username": "test", "password": "123456", "password2": "12345"},
         )
         data = json.loads(response.content)
-        content = {"status": 1, "msg": "两次输入密码不一致", "data": None}
+        content = {"status": 1, "msg": "The two password entries do not match.", "data": None}
         self.assertEqual(data, content)
 
     def test_sing_up_duplicate_uesrname(self):
         """
-        用户名已存在
+        Username already exists.
         """
         User.objects.create(username="test", password="123456")
         response = self.client.post(
@@ -368,12 +368,12 @@ class TestSignUp(TestCase):
             data={"username": "test", "password": "123456", "password2": "123456"},
         )
         data = json.loads(response.content)
-        content = {"status": 1, "msg": "用户名已存在", "data": None}
+        content = {"status": 1, "msg": "Username already exists.", "data": None}
         self.assertEqual(data, content)
 
     def test_sing_up_invalid(self):
         """
-        密码无效
+        Invalid password.
         """
         self.client.post(
             "/signup/",
@@ -391,7 +391,7 @@ class TestSignUp(TestCase):
     @patch("common.auth.init_user")
     def test_sing_up_valid(self, mock_init):
         """
-        正常注册
+        Successful sign-up.
         """
         self.client.post(
             "/signup/",
@@ -405,7 +405,7 @@ class TestSignUp(TestCase):
         )
         user = User.objects.get(username="test")
         self.assertTrue(user)
-        # 注册后登录
+        # Log in after registration.
         r = self.client.post(
             "/authenticate/",
             data={"username": "test", "password": "123456test"},
@@ -413,13 +413,13 @@ class TestSignUp(TestCase):
         )
         r_json = r.json()
         self.assertEqual(0, r_json["status"])
-        # 只允许初始化用户一次
+        # init_user should run only once.
         mock_init.assert_called_once()
 
 
 class TestUser(TestCase):
     def setUp(self):
-        self.u1 = User(username="test_user", display="中文显示", is_active=True)
+        self.u1 = User(username="test_user", display="Display Name", is_active=True)
         self.u1.set_password("test_password")
         self.u1.save()
 
@@ -428,7 +428,7 @@ class TestUser(TestCase):
 
     @patch("common.auth.init_user")
     def testLogin(self, mock_init):
-        """login 页面测试"""
+        """Login page test."""
         r = self.client.get("/login/")
         self.assertEqual(r.status_code, 200)
         self.assertTemplateUsed(r, "login.html")
@@ -438,24 +438,24 @@ class TestUser(TestCase):
         )
         r_json = r.json()
         self.assertEqual(0, r_json["status"])
-        # 登录后直接跳首页
+        # Redirect to home after login.
         r = self.client.get("/login/", follow=True)
         self.assertRedirects(r, "/sqlworkflow/")
-        # init 只调用一次
+        # init_user should be called once.
         mock_init.assert_called_once()
 
     def test_out_ranged_failed_login_count(self):
-        # 正常保存
+        # Normal save.
         self.u1.failed_login_count = 64
         self.u1.save()
         self.u1.refresh_from_db()
         self.assertEqual(64, self.u1.failed_login_count)
-        # 超过127视为127
+        # Values above 127 are capped at 127.
         self.u1.failed_login_count = 256
         self.u1.save()
         self.u1.refresh_from_db()
         self.assertEqual(127, self.u1.failed_login_count)
-        # 小于0视为0
+        # Values below 0 are capped at 0.
         self.u1.failed_login_count = -1
         self.u1.save()
         self.u1.refresh_from_db()
@@ -486,10 +486,10 @@ class TestQuery(TransactionTestCase):
         self.slave2.save()
         self.superuser1 = User.objects.create(username="super1", is_superuser=True)
         self.u1 = User.objects.create(
-            username="test_user", display="中文显示", is_active=True
+            username="test_user", display="Display Name", is_active=True
         )
         self.u2 = User.objects.create(
-            username="test_user2", display="中文显示", is_active=True
+            username="test_user2", display="Display Name", is_active=True
         )
         self.query_log = QueryLog.objects.create(
             instance_name=self.slave1.instance_name,
@@ -649,7 +649,7 @@ class TestQuery(TransactionTestCase):
         _get_engine.return_value.kill_connection.return_value = ResultSet()
 
     def test_query_log(self):
-        """测试获取查询历史"""
+        """Test query history retrieval."""
         c = Client()
         c.force_login(self.superuser1)
         QueryLog(id=self.query_log.id, favorite=True, alias="test_a").save(
@@ -665,7 +665,7 @@ class TestQuery(TransactionTestCase):
         self.assertEqual(r.json()["total"], 1)
 
     def test_star(self):
-        """测试查询语句收藏"""
+        """Test query favorite."""
         c = Client()
         c.force_login(self.superuser1)
         r = c.post(
@@ -681,7 +681,7 @@ class TestQuery(TransactionTestCase):
         self.assertEqual(query_log.alias, "test_alias")
 
     def test_un_star(self):
-        """测试查询语句取消收藏"""
+        """Test query favorite removal."""
         c = Client()
         c.force_login(self.superuser1)
         r = c.post(
@@ -702,16 +702,16 @@ class TestWorkflowView(TransactionTestCase):
         can_execute_resource_permission = Permission.objects.get(
             codename="sql_execute_for_resource_group"
         )
-        self.u1 = User(username="some_user", display="用户1")
+        self.u1 = User(username="some_user", display="User 1")
         self.u1.save()
         self.u1.user_permissions.add(can_view_permission)
-        self.u2 = User(username="some_user2", display="用户2")
+        self.u2 = User(username="some_user2", display="User 2")
         self.u2.save()
         self.u2.user_permissions.add(can_view_permission)
-        self.u3 = User(username="some_user3", display="用户3")
+        self.u3 = User(username="some_user3", display="User 3")
         self.u3.save()
         self.u3.user_permissions.add(can_view_permission)
-        self.executor1 = User(username="some_executor", display="执行者")
+        self.executor1 = User(username="some_executor", display="Executor")
         self.executor1.save()
         self.executor1.user_permissions.add(
             can_view_permission, can_execute_permission, can_execute_resource_permission
@@ -792,7 +792,7 @@ class TestWorkflowView(TransactionTestCase):
         SysConfig().purge()
 
     def testWorkflowStatus(self):
-        """测试获取工单状态"""
+        """Test workflow status retrieval."""
         c = Client(header={})
         c.force_login(self.u1)
         r = c.post("/getWorkflowStatus/", {"workflow_id": self.wf1.id})
@@ -801,7 +801,7 @@ class TestWorkflowView(TransactionTestCase):
 
     @patch("sql.utils.workflow_audit.Audit.can_review")
     def test_alter_run_date_no_perm(self, _can_review):
-        """测试修改可执行时间，无权限"""
+        """Test modifying execution window without permission."""
         sql_review = Permission.objects.get(codename="sql_review")
         self.u1.user_permissions.add(sql_review)
         _can_review.return_value = False
@@ -809,11 +809,11 @@ class TestWorkflowView(TransactionTestCase):
         c.force_login(self.u1)
         data = {"workflow_id": self.wf1.id}
         r = c.post("/alter_run_date/", data=data)
-        self.assertContains(r, "你无权操作当前工单")
+        self.assertContains(r, "You are not allowed to operate on this workflow!")
 
     @patch("sql.utils.workflow_audit.Audit.can_review")
     def test_alter_run_date(self, _can_review):
-        """测试修改可执行时间，有权限"""
+        """Test modifying execution window with permission."""
         sql_review = Permission.objects.get(codename="sql_review")
         self.u1.user_permissions.add(sql_review)
         _can_review.return_value = True
@@ -826,63 +826,63 @@ class TestWorkflowView(TransactionTestCase):
         )
 
     def testWorkflowListView(self):
-        """测试工单列表"""
+        """Test workflow list."""
         c = Client()
         c.force_login(self.superuser1)
         r = c.post("/sqlworkflow_list/", {"limit": 10, "offset": 0, "navStatus": ""})
         r_json = r.json()
         self.assertEqual(r_json["total"], 2)
-        # 列表按创建时间倒序排列, 第二个是wf1 , 是已正常结束
+        # Sorted by creation time descending; second item is wf1 (finished).
         self.assertEqual(r_json["rows"][1]["status"], "workflow_finish")
 
-        # u1拿到u1的
+        # u1 gets only u1's workflows.
         c.force_login(self.u1)
         r = c.post("/sqlworkflow_list/", {"limit": 10, "offset": 0, "navStatus": ""})
         r_json = r.json()
         self.assertEqual(r_json["total"], 1)
         self.assertEqual(r_json["rows"][0]["id"], self.wf1.id)
 
-        # u3拿到None
+        # u3 gets none.
         c.force_login(self.u3)
         r = c.post("/sqlworkflow_list/", {"limit": 10, "offset": 0, "navStatus": ""})
         r_json = r.json()
         self.assertEqual(r_json["total"], 0)
 
     def testWorkflowListViewFilter(self):
-        """测试工单列表筛选"""
+        """Test workflow list filters."""
         c = Client()
         c.force_login(self.superuser1)
-        # 工单状态
+        # Workflow status.
         r = c.post(
             "/sqlworkflow_list/",
             {"limit": 10, "offset": 0, "navStatus": "workflow_finish"},
         )
         r_json = r.json()
         self.assertEqual(r_json["total"], 1)
-        # 列表按创建时间倒序排列
+        # Sorted by creation time descending.
         self.assertEqual(r_json["rows"][0]["status"], "workflow_finish")
 
-        # 实例
+        # Instance.
         r = c.post(
             "/sqlworkflow_list/",
             {"limit": 10, "offset": 0, "instance_id": self.wf1.instance_id},
         )
         r_json = r.json()
         self.assertEqual(r_json["total"], 2)
-        # 列表按创建时间倒序排列, 第二个是wf1
+        # Sorted by creation time descending; second item is wf1.
         self.assertEqual(r_json["rows"][1]["workflow_name"], self.wf1.workflow_name)
 
-        # 资源组
+        # Resource group.
         r = c.post(
             "/sqlworkflow_list/",
             {"limit": 10, "offset": 0, "resource_group_id": self.wf1.group_id},
         )
         r_json = r.json()
         self.assertEqual(r_json["total"], 2)
-        # 列表按创建时间倒序排列, 第二个是wf1
+        # Sorted by creation time descending; second item is wf1.
         self.assertEqual(r_json["rows"][1]["workflow_name"], self.wf1.workflow_name)
 
-        # 时间
+        # Time range.
         start_date = datetime.strftime(self.now, "%Y-%m-%d")
         end_date = datetime.strftime(self.now, "%Y-%m-%d")
         r = c.post(
@@ -896,13 +896,13 @@ class TestWorkflowView(TransactionTestCase):
     @patch("sql.notify.auto_notify")
     @patch("sql.utils.workflow_audit.AuditV2.operate")
     def testWorkflowPassedView(self, mock_operate, _auto_notify, mock_async_task):
-        """测试审核工单"""
+        """Test workflow approval."""
         c = Client()
         c.force_login(self.superuser1)
         r = c.post("/passed/")
-        self.assertContains(r, "workflow_id参数为空.")
+        self.assertContains(r, "workflow_id parameter is empty.")
         r = c.post("/passed/", {"workflow_id": 999999})
-        self.assertContains(r, "工单不存在")
+        self.assertContains(r, "Workflow does not exist")
         mock_operate.side_effect = AuditException("mock audit failed")
         r = c.post("/passed/", {"workflow_id": self.wf2.id})
         self.assertContains(r, "mock audit failed")
@@ -910,8 +910,8 @@ class TestWorkflowView(TransactionTestCase):
         self.assertEqual(self.wf2.status, "workflow_manreviewing")
         mock_operate.reset_mock(side_effect=True)
         mock_operate.return_value = None
-        # 因为 operate 被 mock 了, 为了测试审批流通过, 这里把审批流手动设置为通过, 仅 测试 view 层的逻辑
-        # audit operate 的测试由其他测试覆盖
+        # operate is mocked; force audit status to PASSED to verify view logic only.
+        # Audit operate behavior is covered by other tests.
         self.audit_flow.current_status = WorkflowStatus.PASSED
         self.audit_flow.save()
         r = c.post(
@@ -940,14 +940,14 @@ class TestWorkflowView(TransactionTestCase):
     @patch("sql.sql_workflow.Audit.detail_by_workflow_id")
     @patch("sql.sql_workflow.can_execute")
     def test_workflow_execute(self, mock_can_excute, _, _1, _2):
-        """测试工单执行"""
+        """Test workflow execution."""
         c = Client()
         c.force_login(self.executor1)
         r = c.post("/execute/")
-        self.assertContains(r, "workflow_id参数为空.")
+        self.assertContains(r, "workflow_id parameter is empty.")
         mock_can_excute.return_value = False
         r = c.post("/execute/", data={"workflow_id": self.wf2.id})
-        self.assertContains(r, "你无权操作当前工单！")
+        self.assertContains(r, "You are not allowed to operate on this workflow!")
         mock_can_excute.return_value = True
         r = c.post("/execute/", data={"workflow_id": self.wf2.id, "mode": "manual"})
         self.wf2.refresh_from_db()
@@ -956,27 +956,26 @@ class TestWorkflowView(TransactionTestCase):
     @patch("sql.sql_workflow.Audit.add_log")
     @patch("sql.notify.auto_notify")
     @patch("sql.utils.workflow_audit.AuditV2.operate")
-    # patch view里的can_cancel 而不是原始位置的can_cancel ,因为在调用时, 已经 import 了真的 can_cancel ,会导致mock失效
-    # 在import 静态函数时需要注意这一点, 动态对象因为每次都会重新生成,也可以 mock 原函数/方法/对象
-    # 参见 : https://docs.python.org/3/library/unittest.mock.html#where-to-patch
+    # Patch can_cancel in the view module import location to keep mock effective.
+    # See: https://docs.python.org/3/library/unittest.mock.html#where-to-patch
     @patch("sql.sql_workflow.can_cancel")
     def testWorkflowCancelView(
         self, _can_cancel, mock_audit_operate, mock_notify, _add_log
     ):
-        """测试工单驳回、取消"""
+        """Test workflow reject/cancel."""
         c = Client()
         c.force_login(self.u2)
         r = c.post("/cancel/")
-        self.assertContains(r, "workflow_id参数为空.")
+        self.assertContains(r, "workflow_id parameter is empty.")
         r = c.post("/cancel/", data={"workflow_id": self.wf2.id})
-        self.assertContains(r, "终止原因不能为空")
+        self.assertContains(r, "Cancellation reason cannot be empty")
         _can_cancel.return_value = False
         mock_audit_operate.return_value = None
         r = c.post(
             "/cancel/",
             data={"workflow_id": self.wf2.id, "cancel_remark": "some_reason"},
         )
-        self.assertContains(r, "你无权操作当前工单！")
+        self.assertContains(r, "You are not allowed to operate on this workflow!")
         _can_cancel.return_value = True
         _detail_by_id = 123
         c.post(
@@ -988,7 +987,7 @@ class TestWorkflowView(TransactionTestCase):
 
     @patch("sql.sql_workflow.get_engine")
     def test_osc_control(self, _get_engine):
-        """测试MySQL工单osc控制"""
+        """Test MySQL workflow OSC control."""
         c = Client()
         c.force_login(self.superuser1)
         request_data = {
@@ -1004,7 +1003,7 @@ class TestWorkflowView(TransactionTestCase):
 
     @patch("sql.sql_workflow.get_engine")
     def test_osc_control_exception(self, _get_engine):
-        """测试MySQL工单OSC控制异常"""
+        """Test MySQL workflow OSC control exception."""
         c = Client()
         c.force_login(self.superuser1)
         request_data = {
@@ -1021,13 +1020,13 @@ class TestWorkflowView(TransactionTestCase):
 
 class TestOptimize(TestCase):
     """
-    测试SQL优化
+    SQL optimization tests.
     """
 
     def setUp(self):
         self.superuser = User(username="super", is_superuser=True)
         self.superuser.save()
-        # 使用 travis.ci 时实例和测试service保持一致
+        # Keep instance and test service consistent in CI.
         self.master = Instance(
             instance_name="test_instance",
             type="master",
@@ -1050,7 +1049,7 @@ class TestOptimize(TestCase):
     @patch("sql.plugins.plugin.subprocess")
     def test_sqladvisor(self, _subprocess):
         """
-        测试SQLAdvisor报告
+        Test SQLAdvisor report.
         :return:
         """
         _subprocess.Popen.return_value.communicate.return_value = (
@@ -1060,7 +1059,7 @@ class TestOptimize(TestCase):
         r = self.client.post(path="/slowquery/optimize_sqladvisor/")
         self.assertEqual(
             json.loads(r.content),
-            {"status": 1, "msg": "页面提交参数可能为空", "data": []},
+            {"status": 1, "msg": "Submitted page parameters may be empty", "data": []},
         )
         r = self.client.post(
             path="/slowquery/optimize_sqladvisor/",
@@ -1068,7 +1067,7 @@ class TestOptimize(TestCase):
         )
         self.assertEqual(
             json.loads(r.content),
-            {"status": 1, "msg": "请配置SQLAdvisor路径！", "data": []},
+            {"status": 1, "msg": "Please configure the SQLAdvisor path!", "data": []},
         )
         self.sys_config.set("sqladvisor", "/opt/archery/src/plugins/sqladvisor")
         self.sys_config.get_all_config()
@@ -1101,7 +1100,7 @@ class TestOptimize(TestCase):
     @patch("sql.plugins.plugin.subprocess")
     def test_soar(self, _subprocess):
         """
-        测试SOAR报告
+        Test SOAR report.
         :return:
         """
         _subprocess.Popen.return_value.communicate.return_value = (
@@ -1111,7 +1110,7 @@ class TestOptimize(TestCase):
         r = self.client.post(path="/slowquery/optimize_soar/")
         self.assertEqual(
             json.loads(r.content),
-            {"status": 1, "msg": "页面提交参数可能为空", "data": []},
+            {"status": 1, "msg": "Submitted page parameters may be empty", "data": []},
         )
         r = self.client.post(
             path="/slowquery/optimize_soar/",
@@ -1123,7 +1122,7 @@ class TestOptimize(TestCase):
         )
         self.assertEqual(
             json.loads(r.content),
-            {"status": 1, "msg": "请配置soar_path和test_dsn！", "data": []},
+            {"status": 1, "msg": "Please configure soar_path and test_dsn!", "data": []},
         )
         self.sys_config.set("soar", "/opt/archery/src/plugins/soar")
         self.sys_config.set("soar_test_dsn", "root:@127.0.0.1:3306/information_schema")
@@ -1140,7 +1139,7 @@ class TestOptimize(TestCase):
 
     def test_tuning(self):
         """
-        测试SQLTuning报告
+        Test SQLTuning report.
         :return:
         """
         data = {
@@ -1152,10 +1151,10 @@ class TestOptimize(TestCase):
         r = self.client.post(path="/slowquery/optimize_sqltuning/", data=data)
         self.assertEqual(
             json.loads(r.content),
-            {"status": 1, "msg": "你所在组未关联该实例！", "data": []},
+            {"status": 1, "msg": "Your group is not associated with this instance!", "data": []},
         )
 
-        # 获取sys_parm
+        # Get sys_parm.
         data["instance_name"] = "test_instance"
         data["option[]"] = "sys_parm"
         r = self.client.post(path="/slowquery/optimize_sqltuning/", data=data)
@@ -1164,7 +1163,7 @@ class TestOptimize(TestCase):
             ["basic_information", "sys_parameter", "optimizer_switch", "sqltext"],
         )
 
-        # 获取sql_plan
+        # Get sql_plan.
         data["option[]"] = "sql_plan"
         r = self.client.post(path="/slowquery/optimize_sqltuning/", data=data)
         self.assertListEqual(
@@ -1172,14 +1171,14 @@ class TestOptimize(TestCase):
             ["optimizer_rewrite_sql", "plan", "sqltext"],
         )
 
-        # 获取obj_stat
+        # Get obj_stat.
         data["option[]"] = "obj_stat"
         r = self.client.post(path="/slowquery/optimize_sqltuning/", data=data)
         self.assertListEqual(
             list(json.loads(r.content)["data"].keys()), ["object_statistics", "sqltext"]
         )
 
-        # 获取sql_profile
+        # Get sql_profile.
         data["option[]"] = "sql_profile"
         r = self.client.post(path="/slowquery/optimize_sqltuning/", data=data)
         self.assertListEqual(
@@ -1189,13 +1188,13 @@ class TestOptimize(TestCase):
 
 class TestSchemaSync(TestCase):
     """
-    测试SchemaSync
+    SchemaSync tests.
     """
 
     def setUp(self):
         self.superuser = User(username="super", is_superuser=True)
         self.superuser.save()
-        # 使用 travis.ci 时实例和测试service保持一致
+        # Keep instance and test service consistent in CI.
         self.master = Instance(
             instance_name="test_instance",
             type="master",
@@ -1217,7 +1216,7 @@ class TestSchemaSync(TestCase):
 
     def test_schema_sync(self):
         """
-        测试SchemaSync
+        Test SchemaSync.
         :return:
         """
         data = {
@@ -1235,7 +1234,7 @@ class TestSchemaSync(TestCase):
 class TestAsync(TestCase):
     def setUp(self):
         self.now = datetime.now()
-        self.u1 = User(username="some_user", display="用户1")
+        self.u1 = User(username="some_user", display="User 1")
         self.u1.save()
         self.master1 = Instance(
             instance_name="test_master_instance",
@@ -1264,7 +1263,7 @@ class TestAsync(TestCase):
         self.wfc1 = SqlWorkflowContent.objects.create(
             workflow=self.wf1, sql_content="some_sql", execute_result=""
         )
-        # 初始化工单执行返回对象
+        # Initialize workflow execution callback result.
         self.task_result = MagicMock()
         self.task_result.args = [self.wf1.id]
         self.task_result.success = True
@@ -1294,7 +1293,7 @@ class TestAsync(TestCase):
             audit_id=123,
             operation_type=ANY,
             operation_type_desc=ANY,
-            operation_info="执行结果：已正常结束",
+            operation_info="Execution result: finished successfully",
             operator=ANY,
             operator_display=ANY,
         )
@@ -1303,13 +1302,13 @@ class TestAsync(TestCase):
 
 class TestSQLAnalyze(TestCase):
     """
-    测试SQL分析
+    SQL analysis tests.
     """
 
     def setUp(self):
         self.superuser = User(username="super", is_superuser=True)
         self.superuser.save()
-        # 使用 travis.ci 时实例和测试service保持一致
+        # Keep instance and test service consistent in CI.
         self.master = Instance(
             instance_name="test_instance",
             type="master",
@@ -1331,7 +1330,7 @@ class TestSQLAnalyze(TestCase):
 
     def test_generate_text_None(self):
         """
-        测试解析SQL，text为空
+        Test SQL generation with empty text.
         :return:
         """
         self.sys_config.set("soar", "/opt/archery/src/plugins/soar")
@@ -1340,7 +1339,7 @@ class TestSQLAnalyze(TestCase):
 
     def test_generate_text_not_None(self):
         """
-        测试解析SQL，text不为空
+        Test SQL generation with non-empty text.
         :return:
         """
         self.sys_config.set("soar", "/opt/archery/src/plugins/soar")
@@ -1359,7 +1358,7 @@ class TestSQLAnalyze(TestCase):
 
     def test_analyze_text_None(self):
         """
-        测试分析SQL，text为空
+        Test SQL analysis with empty text.
         :return:
         """
         r = self.client.post(path="/sql_analyze/analyze/", data={})
@@ -1368,7 +1367,7 @@ class TestSQLAnalyze(TestCase):
     @patch("sql.plugins.plugin.subprocess")
     def test_analyze_text_not_None(self, _subprocess):
         """
-        测试分析SQL，text不为空
+        Test SQL analysis with non-empty text.
         :return:
         """
         _subprocess.Popen.return_value.communicate.return_value = (
@@ -1391,7 +1390,7 @@ class TestSQLAnalyze(TestCase):
     @patch("sql.plugins.plugin.subprocess")
     def test_analyze_text_evil(self, _subprocess, mock_path):
         """
-        测试分析SQL，text不为空
+        Test SQL analysis with malicious text input.
         :return:
         """
         _subprocess.Popen.return_value.communicate.return_value = (
@@ -1407,18 +1406,18 @@ class TestSQLAnalyze(TestCase):
             path="/sql_analyze/analyze/",
             data={"text": text, "instance_name": instance_name, "db_name": db_name},
         )
-        self.assertEqual(r.json()["msg"], "SQL 语句不合法")
+        self.assertEqual(r.json()["msg"], "Invalid SQL statement")
 
 
 class TestBinLog(TestCase):
     """
-    测试Binlog相关
+    Binlog-related tests.
     """
 
     def setUp(self):
         self.superuser = User(username="super", is_superuser=True)
         self.superuser.save()
-        # 使用 travis.ci 时实例和测试service保持一致
+        # Keep instance and test service consistent in CI.
         self.master = Instance(
             instance_name="test_instance",
             type="master",
@@ -1440,18 +1439,18 @@ class TestBinLog(TestCase):
 
     def test_binlog_list_instance_not_exist(self):
         """
-        测试获取binlog列表，实例不存在
+        Test binlog list when instance does not exist.
         :return:
         """
         data = {"instance_name": "some_instance"}
         r = self.client.post(path="/binlog/list/", data=data)
         self.assertEqual(
-            json.loads(r.content), {"status": 1, "msg": "实例不存在", "data": []}
+            json.loads(r.content), {"status": 1, "msg": "Instance does not exist", "data": []}
         )
 
     def test_binlog_list_instance(self):
         """
-        测试获取binlog列表，实例存在
+        Test binlog list when instance exists.
         :return:
         """
         data = {"instance_name": "test_instance"}
@@ -1460,7 +1459,7 @@ class TestBinLog(TestCase):
 
     def test_my2sql_path_not_exist(self):
         """
-        测试获取解析binlog，path未设置
+        Test my2sql parsing when executable path is not configured.
         :return:
         """
         data = {
@@ -1486,13 +1485,13 @@ class TestBinLog(TestCase):
         r = self.client.post(path="/binlog/my2sql/", data=data)
         self.assertEqual(
             json.loads(r.content),
-            {"status": 1, "msg": "可执行文件路径不能为空！", "data": {}},
+            {"status": 1, "msg": "Executable path cannot be empty!", "data": {}},
         )
 
     @patch("sql.plugins.plugin.subprocess")
     def test_my2sql(self, _subprocess):
         """
-        测试获取解析binlog，path设置
+        Test my2sql parsing when executable path is configured.
         :param _subprocess:
         :return:
         """
@@ -1525,7 +1524,7 @@ class TestBinLog(TestCase):
     @patch("sql.plugins.plugin.subprocess")
     def test_my2sql_file(self, _open, _subprocess):
         """
-        测试保存文件
+        Test file save.
         :param _subprocess:
         :return:
         """
@@ -1560,7 +1559,7 @@ class TestBinLog(TestCase):
 
     def test_del_binlog_instance_not_exist(self):
         """
-        测试删除binlog，实例不存在
+        Test deleting binlog when instance does not exist.
         :return:
         """
         data = {
@@ -1569,61 +1568,61 @@ class TestBinLog(TestCase):
         }
         r = self.client.post(path="/binlog/del_log/", data=data)
         self.assertEqual(
-            json.loads(r.content), {"status": 1, "msg": "实例不存在", "data": []}
+            json.loads(r.content), {"status": 1, "msg": "Instance does not exist", "data": []}
         )
 
     def test_del_binlog_binlog_not_exist(self):
         """
-        测试删除binlog，实例存在,binlog 不存在
+        Test deleting binlog when binlog is not provided.
         :return:
         """
         data = {"instance_id": self.master.id, "binlog": ""}
         r = self.client.post(path="/binlog/del_log/", data=data)
         self.assertEqual(
             json.loads(r.content),
-            {"status": 1, "msg": "Error:未选择binlog！", "data": ""},
+            {"status": 1, "msg": "Error: no binlog selected!", "data": ""},
         )
 
     @patch("sql.engines.mysql.MysqlEngine.query")
     @patch("sql.engines.get_engine")
     def test_del_binlog(self, _get_engine, _query):
         """
-        测试删除binlog
+        Test deleting binlog.
         :return:
         """
         data = {"instance_id": self.master.id, "binlog": "mysql-bin.000001"}
         _query.return_value = ResultSet(full_sql="select 1")
         r = self.client.post(path="/binlog/del_log/", data=data)
         self.assertEqual(
-            json.loads(r.content), {"status": 0, "msg": "清理成功", "data": ""}
+            json.loads(r.content), {"status": 0, "msg": "Cleanup succeeded", "data": ""}
         )
 
     @patch("sql.engines.mysql.MysqlEngine.query")
     @patch("sql.engines.get_engine")
     def test_del_binlog_wrong(self, _get_engine, _query):
         """
-        测试删除binlog
+        Test deleting binlog with failure.
         :return:
         """
         data = {"instance_id": self.master.id, "binlog": "mysql-bin.000001"}
         _query.return_value = ResultSet(full_sql="select 1")
-        _query.return_value.error = "清理失败"
+        _query.return_value.error = "cleanup failed"
         r = self.client.post(path="/binlog/del_log/", data=data)
         self.assertEqual(
             json.loads(r.content),
-            {"status": 2, "msg": "清理失败,Error:清理失败", "data": ""},
+            {"status": 2, "msg": "Cleanup failed, Error: cleanup failed", "data": ""},
         )
 
 
 class TestParam(TestCase):
     """
-    测试实例参数修改
+    Instance parameter update tests.
     """
 
     def setUp(self):
         self.superuser = User(username="super", is_superuser=True)
         self.superuser.save()
-        # 使用 travis.ci 时实例和测试service保持一致
+        # Keep instance and test service consistent in CI.
         self.master = Instance(
             instance_name="test_instance",
             type="master",
@@ -1644,20 +1643,20 @@ class TestParam(TestCase):
 
     def test_param_list_instance_not_exist(self):
         """
-        测试获取参数列表，实例不存在
+        Test parameter list when instance does not exist.
         :return:
         """
         data = {"instance_id": 0}
         r = self.client.post(path="/param/list/", data=data)
         self.assertEqual(
-            json.loads(r.content), {"status": 1, "msg": "实例不存在", "data": []}
+            json.loads(r.content), {"status": 1, "msg": "Instance does not exist", "data": []}
         )
 
     @patch("sql.engines.mysql.MysqlEngine.get_variables")
     @patch("sql.engines.get_engine")
     def test_param_list_instance_exist(self, _get_engine, _get_variables):
         """
-        测试获取参数列表，实例存在
+        Test parameter list when instance exists.
         :return:
         """
         data = {"instance_id": self.master.id, "editable": True}
@@ -1666,7 +1665,7 @@ class TestParam(TestCase):
 
     def test_param_history(self):
         """
-        测试获取参数修改历史
+        Test parameter update history.
         :return:
         """
         data = {
@@ -1685,7 +1684,7 @@ class TestParam(TestCase):
         self, _get_engine, _get_variables, _set_variable
     ):
         """
-        测试参数修改，参数未在模板配置
+        Test parameter update when template is missing.
         :return:
         """
         data = {
@@ -1696,7 +1695,11 @@ class TestParam(TestCase):
         r = self.client.post(path="/param/edit/", data=data)
         self.assertEqual(
             json.loads(r.content),
-            {"data": [], "msg": "请先在参数模板中配置该参数！", "status": 1},
+            {
+                "data": [],
+                "msg": "Please configure this parameter in parameter template first!",
+                "status": 1,
+            },
         )
 
     @patch("sql.engines.mysql.MysqlEngine.set_variable")
@@ -1706,7 +1709,7 @@ class TestParam(TestCase):
         self, _get_engine, _get_variables, _set_variable
     ):
         """
-        测试参数修改，已在参数模板配置，但是值无变化
+        Test parameter update when value does not change.
         :return:
         """
         _get_variables.return_value.rows = (("binlog_format", "ROW"),)
@@ -1727,7 +1730,11 @@ class TestParam(TestCase):
         r = self.client.post(path="/param/edit/", data=data)
         self.assertEqual(
             json.loads(r.content),
-            {"status": 1, "msg": "参数值与实际运行值一致，未调整！", "data": []},
+            {
+                "status": 1,
+                "msg": "Parameter value matches runtime value; no update was made!",
+                "data": [],
+            },
         )
 
     @patch("sql.engines.mysql.MysqlEngine.set_variable")
@@ -1737,7 +1744,7 @@ class TestParam(TestCase):
         self, _get_engine, _get_variables, _set_variable
     ):
         """
-        测试参数修改，已在参数模板配置，且值有变化
+        Test parameter update when value changes.
         :return:
         """
         _get_variables.return_value.rows = (("binlog_format", "ROW"),)
@@ -1758,7 +1765,11 @@ class TestParam(TestCase):
         r = self.client.post(path="/param/edit/", data=data)
         self.assertEqual(
             json.loads(r.content),
-            {"status": 0, "msg": "修改成功，请手动持久化到配置文件！", "data": []},
+            {
+                "status": 0,
+                "msg": "Update succeeded. Please persist manually to config file!",
+                "data": [],
+            },
         )
 
     @patch("sql.engines.mysql.MysqlEngine.set_variable")
@@ -1768,11 +1779,11 @@ class TestParam(TestCase):
         self, _get_engine, _get_variables, _set_variable
     ):
         """
-        测试参数修改，已在参数模板配置，修改抛错
+        Test parameter update when engine returns error.
         :return:
         """
         _get_variables.return_value.rows = (("binlog_format", "ROW"),)
-        _set_variable.return_value.error = "修改报错"
+        _set_variable.return_value.error = "update failed"
         _set_variable.return_value.full_sql = "set global binlog_format='STATEMENT';"
 
         ParamTemplate.objects.create(
@@ -1789,26 +1800,26 @@ class TestParam(TestCase):
         r = self.client.post(path="/param/edit/", data=data)
         self.assertEqual(
             json.loads(r.content),
-            {"status": 1, "msg": "设置错误，错误信息：修改报错", "data": []},
+            {"status": 1, "msg": "Set variable failed, error: update failed", "data": []},
         )
 
 
 class TestDataDictionary(TestCase):
     """
-    测试数据字典
+    Data dictionary tests.
     """
 
     def setUp(self):
         self.sys_config = SysConfig()
         self.su = User.objects.create(
-            username="s_user", display="中文显示", is_active=True, is_superuser=True
+            username="s_user", display="Display Name", is_active=True, is_superuser=True
         )
         self.u1 = User.objects.create(
-            username="user1", display="中文显示", is_active=True
+            username="user1", display="Display Name", is_active=True
         )
         self.client = Client()
         self.client.force_login(self.su)
-        # 使用 travis.ci 时实例和测试service保持一致
+        # Keep instance and test service consistent in CI.
         self.ins = Instance.objects.create(
             instance_name="test_instance",
             type="slave",
@@ -1827,7 +1838,7 @@ class TestDataDictionary(TestCase):
 
     def test_data_dictionary_view(self):
         """
-        测试访问数据字典页面
+        Test data dictionary page access.
         :return:
         """
         r = self.client.get(path="/data_dictionary/")
@@ -1836,11 +1847,11 @@ class TestDataDictionary(TestCase):
     @patch("sql.data_dictionary.get_engine")
     def test_table_list(self, _get_engine):
         """
-        测试获取表清单
+        Test table list retrieval.
         :return:
         """
         _get_engine.return_value.get_group_tables_by_db.return_value = {
-            "t": [["test1", "测试表1"], ["test2", "测试表2"]]
+            "t": [["test1", "Test table 1"], ["test2", "Test table 2"]]
         }
         data = {
             "instance_name": self.ins.instance_name,
@@ -1851,22 +1862,22 @@ class TestDataDictionary(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertDictEqual(
             json.loads(r.content),
-            {"data": {"t": [["test1", "测试表1"], ["test2", "测试表2"]]}, "status": 0},
+            {"data": {"t": [["test1", "Test table 1"], ["test2", "Test table 2"]]}, "status": 0},
         )
 
     def test_table_list_not_param(self):
         """
-        测试获取表清单，参数不完整
+        Test table list with incomplete parameters.
         :return:
         """
         data = {"instance_name": "not exist ins", "db_type": "mysql"}
         r = self.client.get(path="/data_dictionary/table_list/", data=data)
         self.assertEqual(r.status_code, 200)
-        self.assertDictEqual(json.loads(r.content), {"msg": "非法调用！", "status": 1})
+        self.assertDictEqual(json.loads(r.content), {"msg": "Invalid request!", "status": 1})
 
     def test_table_list_instance_does_not_exist(self):
         """
-        测试获取表清单，实例不存在
+        Test table list when instance does not exist.
         :return:
         """
         data = {
@@ -1883,7 +1894,7 @@ class TestDataDictionary(TestCase):
     @patch("sql.data_dictionary.get_engine")
     def test_table_list_exception(self, _get_engine):
         """
-        测试获取表清单，异常
+        Test table list exception.
         :return:
         """
         _get_engine.side_effect = RuntimeError("test error")
@@ -1899,11 +1910,11 @@ class TestDataDictionary(TestCase):
     @patch("sql.data_dictionary.get_engine")
     def test_table_info(self, _get_engine):
         """
-        测试获取表信息
+        Test table info retrieval.
         :return:
         """
         _get_engine.return_value.query.return_value = ResultSet(
-            rows=(("test1", "测试表1"), ("test2", "测试表2"))
+            rows=(("test1", "Test table 1"), ("test2", "Test table 2"))
         )
         data = {
             "instance_name": self.ins.instance_name,
@@ -1920,7 +1931,7 @@ class TestDataDictionary(TestCase):
 
     def test_table_info_not_param(self):
         """
-        测试获取表清单，参数不完整
+        Test table info with incomplete parameters.
         :return:
         """
         data = {
@@ -1928,11 +1939,11 @@ class TestDataDictionary(TestCase):
         }
         r = self.client.get(path="/data_dictionary/table_info/", data=data)
         self.assertEqual(r.status_code, 200)
-        self.assertDictEqual(json.loads(r.content), {"msg": "非法调用！", "status": 1})
+        self.assertDictEqual(json.loads(r.content), {"msg": "Invalid request!", "status": 1})
 
     def test_table_info_instance_does_not_exist(self):
         """
-        测试获取表清单，实例不存在
+        Test table info when instance does not exist.
         :return:
         """
         data = {
@@ -1950,7 +1961,7 @@ class TestDataDictionary(TestCase):
     @patch("sql.data_dictionary.get_engine")
     def test_table_info_exception(self, _get_engine):
         """
-        测试获取表清单，异常
+        Test table info exception.
         :return:
         """
         _get_engine.side_effect = RuntimeError("test error")
@@ -1966,7 +1977,7 @@ class TestDataDictionary(TestCase):
 
     def test_export_instance_does_not_exist(self):
         """
-        测试导出实例不存在
+        Test export when instance does not exist.
         :return:
         """
         data = {
@@ -1977,14 +1988,14 @@ class TestDataDictionary(TestCase):
         r = self.client.get(path="/data_dictionary/export/", data=data)
         self.assertDictEqual(
             json.loads(r.content),
-            {"data": [], "msg": "你所在组未关联该实例！", "status": 1},
+            {"data": [], "msg": "Your group is not associated with this instance.", "status": 1},
         )
 
     @patch("sql.data_dictionary.user_instances")
     @patch("sql.data_dictionary.get_engine")
     def test_export_ins_no_perm(self, _get_engine, _user_instances):
         """
-        测试导出实例无权限
+        Test export without full-instance permission.
         :return:
         """
         self.client.force_login(self.u1)
@@ -1997,13 +2008,17 @@ class TestDataDictionary(TestCase):
         r = self.client.get(path="/data_dictionary/export/", data=data)
         self.assertDictEqual(
             json.loads(r.content),
-            {"status": 1, "msg": f"仅管理员可以导出整个实例的字典信息！", "data": []},
+            {
+                "status": 1,
+                "msg": "Only admins can export dictionary data for the full instance!",
+                "data": [],
+            },
         )
 
     @patch("sql.data_dictionary.get_engine")
     def test_export_db(self, _get_engine):
         """
-        测试导出
+        Test database-level export.
         :return:
         """
 
@@ -2073,7 +2088,7 @@ class TestDataDictionary(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertTrue(r.streaming)
 
-        # 测试恶意请求
+        # Test malicious request.
         data = {
             "instance_name": self.ins.instance_name,
             "db_name": "/../../../etc/passwd",
@@ -2085,7 +2100,7 @@ class TestDataDictionary(TestCase):
     @patch("sql.data_dictionary.get_engine")
     def test_export_instance(self, _get_engine):
         """
-        测试导出
+        Test instance-level export.
         :return:
         """
 
@@ -2153,11 +2168,14 @@ class TestDataDictionary(TestCase):
             json.loads(r.content),
             {
                 "data": [],
-                "msg": "实例test_instance数据字典导出成功，请到downloads目录下载！",
+                "msg": (
+                    "Data dictionary export for instance test_instance succeeded. "
+                    "Please download it from the downloads directory."
+                ),
                 "status": 0,
             },
         )
-        # 测试恶意请求
+        # Test malicious request.
         data = {
             "instance_name": self.ins.instance_name,
             "db_name": "/../../../etc/passwd",
@@ -2169,7 +2187,7 @@ class TestDataDictionary(TestCase):
     @patch("sql.data_dictionary.get_engine")
     def test_oracle_export_instance(self, _get_engine):
         """
-        oracle元数据测试导出
+        Test Oracle metadata export.
         :return:
         """
         _get_engine.return_value.get_all_databases.return_value.rows.return_value = (
@@ -2209,7 +2227,10 @@ class TestDataDictionary(TestCase):
             json.loads(r.content),
             {
                 "data": [],
-                "msg": "实例test_instance数据字典导出成功，请到downloads目录下载！",
+                "msg": (
+                    "Data dictionary export for instance test_instance succeeded. "
+                    "Please download it from the downloads directory."
+                ),
                 "status": 0,
             },
         )

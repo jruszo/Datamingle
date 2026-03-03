@@ -20,7 +20,7 @@ from .models import Instance, ParamTemplate, ParamHistory
 
 @permission_required("sql.menu_instance_list", raise_exception=True)
 def lists(request):
-    """获取实例列表"""
+    """Get instance list."""
     limit = int(request.POST.get("limit"))
     offset = int(request.POST.get("offset"))
     type = request.POST.get("type")
@@ -31,20 +31,21 @@ def lists(request):
     sortName = str(request.POST.get("sortName"))
     sortOrder = str(request.POST.get("sortOrder")).lower()
 
-    # 组合筛选项
+    # Build filter options.
     filter_dict = dict()
-    # 过滤搜索
+    # Filter by search keyword.
     if search:
         filter_dict["instance_name__icontains"] = search
-    # 过滤实例类型
+    # Filter by instance type.
     if type:
         filter_dict["type"] = type
-    # 过滤数据库类型
+    # Filter by database type.
     if db_type:
         filter_dict["db_type"] = db_type
 
     instances = Instance.objects.filter(**filter_dict)
-    # 过滤标签，返回同时包含全部标签的实例，TODO 循环会生成多表JOIN，如果数据量大会存在效率问题
+    # Filter by tags and return instances containing all selected tags.
+    # TODO: loop may generate multiple joins and impact large datasets.
     if tags:
         for tag in tags:
             instances = instances.filter(instance_tag=tag, instance_tag__active=True)
@@ -62,7 +63,7 @@ def lists(request):
         "id", "instance_name", "db_type", "type", "host", "port", "user"
     )
 
-    # QuerySet 序列化
+    # Serialize QuerySet.
     rows = [row for row in instances]
 
     result = {"total": count, "rows": rows}
@@ -75,7 +76,7 @@ def lists(request):
 @permission_required("sql.param_view", raise_exception=True)
 def param_list(request):
     """
-    获取实例参数列表
+    Get instance parameter list.
     :param request:
     :return:
     """
@@ -85,9 +86,9 @@ def param_list(request):
     try:
         ins = Instance.objects.get(id=instance_id)
     except Instance.DoesNotExist:
-        result = {"status": 1, "msg": "实例不存在", "data": []}
+        result = {"status": 1, "msg": "Instance does not exist", "data": []}
         return HttpResponse(json.dumps(result), content_type="application/json")
-    # 获取已配置参数列表
+    # Get configured parameter templates.
     cnf_params = dict()
     for param in ParamTemplate.objects.filter(
         db_type=ins.db_type, variable_name__contains=search
@@ -101,10 +102,10 @@ def param_list(request):
     ):
         param["variable_name"] = param["variable_name"].lower()
         cnf_params[param["variable_name"]] = param
-    # 获取实例参数列表
+    # Get runtime instance parameters.
     engine = get_engine(instance=ins)
     ins_variables = engine.get_variables()
-    # 处理结果
+    # Build output rows.
     rows = list()
     for variable in ins_variables.rows:
         variable_name = variable[0].lower()
@@ -116,7 +117,7 @@ def param_list(request):
         if variable_name in cnf_params.keys():
             row = dict(row, **cnf_params[variable_name])
         rows.append(row)
-    # 过滤参数
+    # Apply editable filter.
     if editable:
         rows = [row for row in rows if row["editable"]]
     else:
@@ -129,14 +130,14 @@ def param_list(request):
 
 @permission_required("sql.param_view", raise_exception=True)
 def param_history(request):
-    """实例参数修改历史"""
+    """Instance parameter change history."""
     limit = int(request.POST.get("limit"))
     offset = int(request.POST.get("offset"))
     limit = offset + limit
     instance_id = request.POST.get("instance_id")
     search = request.POST.get("search", "")
     phs = ParamHistory.objects.filter(instance__id=instance_id)
-    # 过滤搜索条件
+    # Apply search filter.
     if search:
         phs = ParamHistory.objects.filter(variable_name__contains=search)
     count = phs.count()
@@ -148,7 +149,7 @@ def param_history(request):
         "user_display",
         "create_time",
     )
-    # QuerySet 序列化
+    # Serialize QuerySet.
     rows = [row for row in phs]
 
     result = {"total": count, "rows": rows}
@@ -167,21 +168,29 @@ def param_edit(request):
     try:
         ins = Instance.objects.get(id=instance_id)
     except Instance.DoesNotExist:
-        result = {"status": 1, "msg": "实例不存在", "data": []}
+        result = {"status": 1, "msg": "Instance does not exist", "data": []}
         return HttpResponse(json.dumps(result), content_type="application/json")
 
-    # 修改参数
+    # Update parameter.
     engine = get_engine(instance=ins)
     variable_name = engine.escape_string(variable_name)
     variable_value = engine.escape_string(variable_value)
-    # 校验是否配置模板
+    # Validate parameter template exists.
     if not ParamTemplate.objects.filter(variable_name=variable_name).exists():
-        result = {"status": 1, "msg": "请先在参数模板中配置该参数！", "data": []}
+        result = {
+            "status": 1,
+            "msg": "Please configure this parameter in parameter template first!",
+            "data": [],
+        }
         return HttpResponse(json.dumps(result), content_type="application/json")
-    # 获取当前运行参数值
+    # Get current runtime value.
     runtime_value = engine.get_variables(variables=[variable_name]).rows[0][1]
     if variable_value == runtime_value:
-        result = {"status": 1, "msg": "参数值与实际运行值一致，未调整！", "data": []}
+        result = {
+            "status": 1,
+            "msg": "Parameter value matches runtime value; no update was made!",
+            "data": [],
+        }
         return HttpResponse(json.dumps(result), content_type="application/json")
     set_result = engine.set_variable(
         variable_name=variable_name, variable_value=variable_value
@@ -189,11 +198,11 @@ def param_edit(request):
     if set_result.error:
         result = {
             "status": 1,
-            "msg": f"设置错误，错误信息：{set_result.error}",
+            "msg": f"Set variable failed, error: {set_result.error}",
             "data": [],
         }
         return HttpResponse(json.dumps(result), content_type="application/json")
-    # 修改成功的保存修改记录
+    # Save change history after successful update.
     else:
         ParamHistory.objects.create(
             instance=ins,
@@ -204,13 +213,17 @@ def param_edit(request):
             user_name=user.username,
             user_display=user.display,
         )
-        result = {"status": 0, "msg": "修改成功，请手动持久化到配置文件！", "data": []}
+        result = {
+            "status": 0,
+            "msg": "Update succeeded. Please persist manually to config file!",
+            "data": [],
+        }
     return HttpResponse(json.dumps(result), content_type="application/json")
 
 
 @permission_required("sql.menu_schemasync", raise_exception=True)
 def schemasync(request):
-    """对比实例schema信息"""
+    """Compare schema information between instances."""
     instance_name = request.POST.get("instance_name")
     db_name = request.POST.get("db_name")
     target_instance_name = request.POST.get("target_instance_name")
@@ -223,18 +236,18 @@ def schemasync(request):
         "data": {"diff_stdout": "", "patch_stdout": "", "revert_stdout": ""},
     }
 
-    # 循环对比全部数据库
+    # Compare all databases in loop mode.
     if db_name == "all" or target_db_name == "all":
         db_name = "*"
         target_db_name = "*"
 
-    # 取出该实例的连接方式
+    # Load instance connection information.
     instance = Instance.objects.get(instance_name=instance_name)
     target_instance = Instance.objects.get(instance_name=target_instance_name)
 
-    # 提交给SchemaSync获取对比结果
+    # Run SchemaSync to get diff results.
     schema_sync = SchemaSync()
-    # 准备参数
+    # Prepare parameters.
     tag = int(time.time())
     output_directory = os.path.join(settings.BASE_DIR, "downloads/schemasync/")
     os.makedirs(output_directory, exist_ok=True)
@@ -251,22 +264,22 @@ def schemasync(request):
         "source": f"mysql://{username}:{password}@{instance.host}:{instance.port}/{db_name}",
         "target": f"mysql://{target_username}:{target_password}@{target_instance.host}:{target_instance.port}/{target_db_name}",
     }
-    # 参数检查
+    # Validate parameters.
     args_check_result = schema_sync.check_args(args)
     if args_check_result["status"] == 1:
         return HttpResponse(
             json.dumps(args_check_result), content_type="application/json"
         )
-    # 参数转换
+    # Convert parameters.
     cmd_args = schema_sync.generate_args2cmd(args)
-    # 执行命令
+    # Execute command.
     try:
         stdout, stderr = schema_sync.execute_cmd(cmd_args).communicate()
         diff_stdout = f"{stdout}{stderr}"
     except RuntimeError as e:
         diff_stdout = str(e)
 
-    # 非全部数据库对比可以读取对比结果并在前端展示
+    # For single-db comparison, return patch/revert scripts for frontend display.
     if db_name != "*":
         date = time.strftime("%Y%m%d", time.localtime())
         patch_sql_file = "%s%s_%s.%s.patch.sql" % (
@@ -309,7 +322,7 @@ def schemasync(request):
 @cache_page(60 * 5, key_prefix="insRes")
 def instance_resource(request):
     """
-    获取实例内的资源信息，database、schema、table、column
+    Get instance resources: database, schema, table, column.
     :param request:
     :return:
     """
@@ -326,7 +339,7 @@ def instance_resource(request):
         try:
             instance = Instance.objects.get(instance_name=instance_name)
         except Instance.DoesNotExist:
-            result = {"status": 1, "msg": "实例不存在", "data": []}
+            result = {"status": 1, "msg": "Instance does not exist", "data": []}
             return HttpResponse(json.dumps(result), content_type="application/json")
     result = {"status": 0, "msg": "ok", "data": []}
 
@@ -358,7 +371,7 @@ def instance_resource(request):
                 db_name=db_name, tb_name=tb_name, schema_name=schema_name
             )
         else:
-            raise TypeError("不支持的资源类型或者参数不完整！")
+            raise TypeError("Unsupported resource type or incomplete parameters!")
     except Exception as msg:
         result["status"] = 1
         result["msg"] = str(msg)
@@ -372,12 +385,12 @@ def instance_resource(request):
 
 
 def describe(request):
-    """获取表结构"""
+    """Get table structure."""
     instance_name = request.POST.get("instance_name")
     try:
         instance = Instance.objects.get(instance_name=instance_name)
     except Instance.DoesNotExist:
-        result = {"status": 1, "msg": "实例不存在", "data": []}
+        result = {"status": 1, "msg": "Instance does not exist", "data": []}
         return HttpResponse(json.dumps(result), content_type="application/json")
     db_name = request.POST.get("db_name")
     schema_name = request.POST.get("schema_name")

@@ -30,14 +30,14 @@ from sql.tests import User
 
 class TestOfflineDownload(TestCase):
     """
-    测试离线下载功能
+    Tests for offline download features.
     """
 
     def setUp(self):
-        # 创建测试用户
+        # Create test user.
         self.client = Client()
         self.superuser = User.objects.create(username="super", is_superuser=True)
-        # 创建测试实例
+        # Create test instance.
         self.instance = Instance.objects.create(
             instance_name="test_instance",
             type="master",
@@ -47,7 +47,7 @@ class TestOfflineDownload(TestCase):
             user=settings.DATABASES["default"]["USER"],
             password=settings.DATABASES["default"]["PASSWORD"],
         )
-        # 创建测试工单
+        # Create test workflow.
         self.workflow = SqlWorkflow.objects.create(
             workflow_name="test_workflow",
             group_id=1,
@@ -67,12 +67,12 @@ class TestOfflineDownload(TestCase):
             sql_content="SELECT * FROM test_table",
             execute_result="",
         )
-        # 设置系统配置
+        # Configure system settings.
         Config.objects.create(item="max_export_rows", value="10000")
         Config.objects.create(item="storage_type", value="local")
 
     def tearDown(self):
-        # 清理测试数据
+        # Clean test data.
         SqlWorkflow.objects.all().delete()
         SqlWorkflowContent.objects.all().delete()
         Instance.objects.all().delete()
@@ -82,10 +82,10 @@ class TestOfflineDownload(TestCase):
     @patch("sql.offlinedownload.get_engine")
     def test_pre_count_check_pass(self, mock_get_engine):
         """
-        测试pre_count_check方法 - 正常通过
+        Test pre_count_check - normal pass.
         """
 
-        # 模拟数据库查询结果
+        # Mock database query result.
         mock_engine = MagicMock()
         mock_result_set = MagicMock()
         mock_result_set.rows = [(500,)]
@@ -93,25 +93,25 @@ class TestOfflineDownload(TestCase):
         mock_engine.query.return_value = mock_result_set
         mock_get_engine.return_value = mock_engine
 
-        # 执行测试
+        # Execute test.
         offline_download = OffLineDownLoad()
-        # 修改workflow的sql_content以匹配测试
+        # Set workflow SQL for this test.
         self.workflow.sql_content = "SELECT * FROM test_table"
         result = offline_download.pre_count_check(self.workflow)
 
-        # 验证结果
+        # Verify result.
         self.assertEqual(result.error_count, 0)
         self.assertEqual(result.warning_count, 0)
-        self.assertEqual(result.rows[0].stagestatus, "行数统计完成")
+        self.assertEqual(result.rows[0].stagestatus, "Row count completed")
         self.assertEqual(result.rows[0].affected_rows, 500)
 
     @patch("sql.offlinedownload.get_engine")
     def test_pre_count_check_over_limit(self, mock_get_engine):
         """
-        测试pre_count_check方法 - 超过行数限制
+        Test pre_count_check - row count exceeds threshold.
         """
 
-        # 模拟数据库查询结果
+        # Mock database query result.
         mock_engine = MagicMock()
         mock_result_set = MagicMock()
         mock_result_set.rows = [(15000,)]
@@ -119,23 +119,23 @@ class TestOfflineDownload(TestCase):
         mock_engine.query.return_value = mock_result_set
         mock_get_engine.return_value = mock_engine
 
-        # 执行测试
+        # Execute test.
         offline_download = OffLineDownLoad()
         self.workflow.sql_content = "SELECT * FROM test_table"
         result = offline_download.pre_count_check(self.workflow)
 
-        # 验证结果
+        # Verify result.
         self.assertEqual(result.error_count, 1)
         self.assertEqual(result.warning_count, 0)
-        self.assertIn("超过阈值", result.rows[0].errormessage)
+        self.assertIn("exceeds threshold", result.rows[0].errormessage)
 
     @patch("sql.offlinedownload.get_engine")
     def test_pre_count_check_invalid_sql(self, mock_get_engine):
         """
-        测试pre_count_check方法 - 无效SQL语句
+        Test pre_count_check - invalid SQL statement.
         """
 
-        # 模拟get_engine返回值
+        # Mock get_engine return value.
         mock_engine = MagicMock()
         mock_get_engine.return_value = mock_engine
 
@@ -143,10 +143,10 @@ class TestOfflineDownload(TestCase):
         self.workflow.sql_content = "DELETE FROM test_table"
         result = offline_download.pre_count_check(self.workflow)
 
-        # 验证结果
+        # Verify result.
         self.assertEqual(result.error_count, 1)
         self.assertEqual(result.warning_count, 0)
-        self.assertEqual(result.rows[0].errormessage, "违规语句！")
+        self.assertEqual(result.rows[0].errormessage, "Disallowed statement!")
 
     @patch("sql.offlinedownload.get_engine")
     @patch("sql.offlinedownload.DynamicStorage")
@@ -156,10 +156,10 @@ class TestOfflineDownload(TestCase):
         self, mock_open_file, mock_save_format, mock_storage, mock_get_engine
     ):
         """
-        测试execute_offline_download方法 - 成功执行
+        Test execute_offline_download - success path.
         """
 
-        # 模拟依赖
+        # Mock dependencies.
         mock_engine = MagicMock()
         mock_result_set = MagicMock()
         mock_result_set.error = None
@@ -174,20 +174,20 @@ class TestOfflineDownload(TestCase):
         mock_storage_instance = MagicMock()
         mock_storage.return_value = mock_storage_instance
 
-        # 模拟文件打开
+        # Mock file open.
         mock_file = MagicMock()
         mock_open_file.return_value = mock_file
 
-        # 执行测试
+        # Execute test.
         offline_download = OffLineDownLoad()
         result = offline_download.execute_offline_download(self.workflow)
 
-        # 验证结果
+        # Verify result.
         self.assertEqual(result.error, None)
-        self.assertEqual(result.rows[0].stagestatus, "执行正常")
+        self.assertEqual(result.rows[0].stagestatus, "Execution succeeded")
         self.assertIn("test_file.zip", result.rows[0].errormessage)
 
-        # 验证workflow已更新
+        # Verify workflow update.
         updated_workflow = SqlWorkflow.objects.get(id=self.workflow.id)
         self.assertEqual(updated_workflow.file_name, "test_file.zip")
 
@@ -195,46 +195,46 @@ class TestOfflineDownload(TestCase):
     @patch("sql.offlinedownload.DynamicStorage")
     def test_execute_offline_download_error(self, mock_storage, mock_get_engine):
         """
-        测试execute_offline_download方法 - 执行错误
+        Test execute_offline_download - failure path.
         """
 
-        # 模拟数据库查询错误
+        # Mock database query error.
         mock_engine = MagicMock()
         mock_result_set = MagicMock()
         mock_result_set.error = "Database error"
         mock_engine.query.return_value = mock_result_set
         mock_get_engine.return_value = mock_engine
 
-        # 模拟DynamicStorage
+        # Mock DynamicStorage.
         mock_storage_instance = MagicMock()
         mock_storage.return_value = mock_storage_instance
 
-        # 执行测试
+        # Execute test.
         offline_download = OffLineDownLoad()
         result = offline_download.execute_offline_download(self.workflow)
 
-        # 验证结果
+        # Verify result.
         self.assertIsNotNone(result.error)
-        self.assertEqual(result.rows[0].stagestatus, "异常终止")
+        self.assertEqual(result.rows[0].stagestatus, "Aborted")
         self.assertEqual(result.rows[0].errormessage, "Database error")
 
     def test_save_csv(self):
         """
-        测试save_csv方法
+        Test save_csv.
         """
 
-        # 创建临时文件
+        # Create temporary file.
         temp_file = tempfile.NamedTemporaryFile(delete=False)
         temp_file.close()
 
-        # 测试数据
+        # Test data.
         result = [(1, "test1"), (2, None)]
         columns = ["id", "name"]
 
-        # 执行测试
+        # Execute test.
         save_csv(temp_file.name, result, columns)
 
-        # 验证结果
+        # Verify result.
         with open(temp_file.name, "r", encoding="utf-8") as f:
             reader = csv.reader(f)
             rows = list(reader)
@@ -242,19 +242,19 @@ class TestOfflineDownload(TestCase):
             self.assertEqual(rows[1], ["1", "test1"])
             self.assertEqual(rows[2], ["2", "null"])
 
-        # 清理
+        # Cleanup.
         os.unlink(temp_file.name)
 
     def test_save_csv_special_chars(self):
         """
-        测试save_csv方法处理特殊字符
+        Test save_csv with special characters.
         """
 
-        # 创建临时文件
+        # Create temporary file.
         temp_file = tempfile.NamedTemporaryFile(delete=False)
         temp_file.close()
 
-        # 测试数据包含特殊字符
+        # Test data with special characters.
         result = [
             (1, "Normal, value"),
             (2, 'Value with "quotes"'),
@@ -263,37 +263,37 @@ class TestOfflineDownload(TestCase):
         ]
         columns = ["id", "text"]
 
-        # 执行测试
+        # Execute test.
         save_csv(temp_file.name, result, columns)
 
-        # 验证结果
+        # Verify result.
         with open(temp_file.name, "r", encoding="utf-8") as f:
             content = f.read()
             self.assertIn('"Normal, value"', content)
-            self.assertIn('"Value with ""quotes"""', content)  # CSV标准转义
+            self.assertIn('"Value with ""quotes"""', content)  # CSV standard escaping.
             self.assertIn('"Line\nbreak"', content)
             self.assertIn('"Comma, and quote"""', content)
 
-        # 清理
+        # Cleanup.
         os.unlink(temp_file.name)
 
     def test_save_json(self):
         """
-        测试save_json方法
+        Test save_json.
         """
 
-        # 创建临时文件
+        # Create temporary file.
         temp_file = tempfile.NamedTemporaryFile(delete=False)
         temp_file.close()
 
-        # 测试数据
+        # Test data.
         result = [(1, "test1"), (2, "2023-01-01T00:00:00")]
         columns = ["id", "name"]
 
-        # 执行测试
+        # Execute test.
         save_json(temp_file.name, result, columns)
 
-        # 验证结果
+        # Verify result.
         with open(temp_file.name, "r", encoding="utf-8") as f:
             data = json.load(f)
             self.assertEqual(len(data), 2)
@@ -302,36 +302,36 @@ class TestOfflineDownload(TestCase):
             self.assertEqual(data[1]["id"], 2)
             self.assertEqual(data[1]["name"], "2023-01-01T00:00:00")
 
-        # 清理
+        # Cleanup.
         os.unlink(temp_file.name)
 
     def test_save_xml(self):
         """
-        测试save_xml方法
+        Test save_xml.
         """
 
-        # 创建临时文件
+        # Create temporary file.
         temp_file = tempfile.NamedTemporaryFile(delete=False)
         temp_file.close()
 
-        # 测试数据
+        # Test data.
         result = [(1, "test1"), (2, datetime(2023, 1, 1))]
         columns = ["id", "name"]
 
-        # 执行测试
+        # Execute test.
         save_xml(temp_file.name, result, columns)
 
-        # 验证结果
+        # Verify result.
         tree = ET.parse(temp_file.name)
         root = tree.getroot()
 
-        # 验证字段
+        # Verify fields.
         fields = root.find("fields")
         self.assertEqual(len(fields), 2)
         self.assertEqual(fields[0].text, "id")
         self.assertEqual(fields[1].text, "name")
 
-        # 验证数据
+        # Verify data.
         data = root.find("data")
         self.assertEqual(len(data), 2)
         row1 = data[0]
@@ -344,26 +344,26 @@ class TestOfflineDownload(TestCase):
         self.assertEqual(row2.find("column-1").text, "2")
         self.assertEqual(row2.find("column-2").text, "2023-01-01T00:00:00")
 
-        # 清理
+        # Cleanup.
         os.unlink(temp_file.name)
 
     def test_save_xlsx(self):
         """
-        测试save_xlsx方法
+        Test save_xlsx.
         """
 
-        # 创建临时文件
+        # Create temporary file.
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
         temp_file.close()
 
-        # 测试数据
+        # Test data.
         result = [(1, "test1"), (2, "test2")]
         columns = ["id", "name"]
 
-        # 执行测试
+        # Execute test.
         save_xlsx(temp_file.name, result, columns)
 
-        # 验证结果
+        # Verify result.
         df = pd.read_excel(temp_file.name)
         self.assertEqual(len(df), 2)
         self.assertEqual(list(df.columns), columns)
@@ -372,53 +372,56 @@ class TestOfflineDownload(TestCase):
         self.assertEqual(df.iloc[1]["id"], 2)
         self.assertEqual(df.iloc[1]["name"], "test2")
 
-        # 清理
+        # Cleanup.
         os.unlink(temp_file.name)
 
     @patch("sql.offlinedownload.pd.DataFrame")
     def test_save_xlsx_large_file(self, mock_dataframe):
         """
-        测试save_xlsx方法处理超过Excel行数限制的情况
+        Test save_xlsx when exceeding Excel row limit.
         """
 
-        # 创建临时文件
+        # Create temporary file.
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
         temp_file.close()
 
-        # 模拟pd.DataFrame.to_excel抛出异常
+        # Mock pd.DataFrame.to_excel raising an exception.
         mock_dataframe.return_value.to_excel.side_effect = ValueError(
             "Excel max rows exceeded"
         )
 
-        # 测试数据（不需要实际生成大量数据）
+        # Test data (no need to generate huge dataset).
         result = [(1, "test1")]
         columns = ["id", "name"]
 
-        # 执行测试并验证异常
+        # Execute test and verify exception.
         with self.assertRaises(ValueError) as context:
             save_xlsx(temp_file.name, result, columns)
-        self.assertIn("Excel最大支持行数为1048576,已超出!", str(context.exception))
+        self.assertIn(
+            "Excel supports at most 1048576 rows, limit exceeded!",
+            str(context.exception),
+        )
 
-        # 清理
+        # Cleanup.
         os.unlink(temp_file.name)
 
     def test_save_sql(self):
         """
-        测试save_sql方法
+        Test save_sql.
         """
 
-        # 创建临时文件
+        # Create temporary file.
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".sql")
         temp_file.close()
 
-        # 测试数据
+        # Test data.
         result = [(1, "test1"), (2, datetime(2023, 1, 1))]
         columns = ["id", "name"]
 
-        # 执行测试
+        # Execute test.
         save_sql(temp_file.name, result, columns)
 
-        # 验证结果
+        # Verify result.
         with open(temp_file.name, "r") as f:
             content = f.read()
             self.assertIn(
@@ -429,75 +432,75 @@ class TestOfflineDownload(TestCase):
                 content,
             )
 
-        # 清理
+        # Cleanup.
         os.unlink(temp_file.name)
 
     def test_save_sql_special_values(self):
         """
-        测试save_sql方法处理特殊值
+        Test save_sql with special values.
         """
 
-        # 创建临时文件
+        # Create temporary file.
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".sql")
         temp_file.close()
 
-        # 测试数据
+        # Test data.
         result = [(1, None), (2, ""), (3, "O'Reilly"), (4, "Special;value")]
         columns = ["id", "name"]
 
-        # 执行测试
+        # Execute test.
         save_sql(temp_file.name, result, columns)
 
-        # 验证结果
+        # Verify result.
         with open(temp_file.name, "r") as f:
             content = f.read()
             self.assertIn("(1, NULL);", content)
             self.assertIn("(2, '');", content)
-            self.assertIn("(3, 'O''Reilly');", content)  # 单引号转义
+            self.assertIn("(3, 'O''Reilly');", content)  # Single quote escaping.
             self.assertIn("(4, 'Special;value');", content)
 
-        # 清理
+        # Cleanup.
         os.unlink(temp_file.name)
 
     def test_save_to_format_file(self):
         """
-        测试save_to_format_file方法
+        Test save_to_format_file.
         """
 
-        # 创建临时目录
+        # Create temporary directory.
         temp_dir = tempfile.mkdtemp()
 
-        # 测试数据
+        # Test data.
         result = [(1, "test1"), (2, "test2")]
         columns = ["id", "name"]
 
-        # 测试CSV格式
+        # Test CSV format.
         csv_file_name = save_to_format_file(
             "csv", result, self.workflow, columns, temp_dir
         )
         self.assertTrue(csv_file_name.endswith(".zip"))
-        # 验证ZIP文件包含CSV
+        # Verify ZIP contains CSV.
         zip_file_path = os.path.join(temp_dir, csv_file_name)
         with zipfile.ZipFile(zip_file_path, "r") as zipf:
             file_list = zipf.namelist()
             self.assertEqual(len(file_list), 1)
             self.assertTrue(file_list[0].endswith(".csv"))
 
-        # 清理
+        # Cleanup.
         shutil.rmtree(temp_dir)
 
     def test_save_to_format_file_unsupported(self):
         """
-        测试save_to_format_file方法 - 不支持的格式
+        Test save_to_format_file - unsupported format.
         """
-        # 创建临时目录
+        # Create temporary directory.
         temp_dir = tempfile.mkdtemp()
 
-        # 测试数据
+        # Test data.
         result = [(1, "test1"), (2, "test2")]
         columns = ["id", "name"]
 
-        # 测试不支持的格式
+        # Test unsupported format.
         with self.assertRaises(ValueError) as context:
             save_to_format_file(
                 "invalid_format", result, self.workflow, columns, temp_dir
@@ -505,16 +508,16 @@ class TestOfflineDownload(TestCase):
 
         self.assertIn("Unsupported format type: invalid_format", str(context.exception))
 
-        # 清理
+        # Cleanup.
         shutil.rmtree(temp_dir)
 
     @patch("sql.offlinedownload.get_engine")
     def test_execute_offline_download_empty_result(self, mock_get_engine):
         """
-        测试execute_offline_download方法处理空结果集
+        Test execute_offline_download with empty result set.
         """
 
-        # 模拟依赖
+        # Mock dependencies.
         mock_engine = MagicMock()
         mock_result_set = MagicMock()
         mock_result_set.error = None
@@ -524,47 +527,48 @@ class TestOfflineDownload(TestCase):
         mock_engine.query.return_value = mock_result_set
         mock_get_engine.return_value = mock_engine
 
-        # 执行测试
+        # Execute test.
         offline_download = OffLineDownLoad()
         result = offline_download.execute_offline_download(self.workflow)
 
-        # 验证结果
+        # Verify result.
         self.assertEqual(result.error, None)
-        self.assertEqual(result.rows[0].stagestatus, "执行正常")
-        self.assertIn("保存文件", result.rows[0].errormessage)
+        self.assertEqual(result.rows[0].stagestatus, "Execution succeeded")
+        self.assertIn("Saved file", result.rows[0].errormessage)
 
     @patch("sql.offlinedownload.DynamicStorage")
     def test_offline_file_download_error(self, mock_storage):
         """
-        测试文件下载时的错误处理
+        Test error handling during file download.
         """
 
-        # 清除已有的审计日志
+        # Clear existing audit logs.
         AuditEntry.objects.all().delete()
 
-        # 配置mock
+        # Configure mock.
         mock_storage_instance = MagicMock()
         mock_storage.return_value = mock_storage_instance
-        mock_storage_instance.exists.return_value = False  # 文件不存在
+        mock_storage_instance.exists.return_value = False  # File does not exist.
 
-        # 创建请求对象
+        # Build request.
         request = HttpRequest()
         request.GET = {"file_name": "missing.zip", "workflow_id": "123"}
         request.method = "GET"
         request.user = self.superuser
 
-        # 执行测试
+        # Execute test.
         response = offline_file_download(request)
 
-        # 验证响应
+        # Verify response.
         self.assertEqual(response.status_code, 404)
-        self.assertEqual(json.loads(response.content)["error"], "文件不存在")
+        self.assertEqual(json.loads(response.content)["error"], "File does not exist")
 
-        # 验证审计日志
+        # Verify audit log.
         audit_entry = AuditEntry.objects.last()
         self.assertIsNotNone(audit_entry)
-        self.assertEqual(audit_entry.action, "离线下载")
+        self.assertEqual(audit_entry.action, "Offline download")
         self.assertIn(
-            "工单id：123，文件：missing.zip，error:文件不存在", audit_entry.extra_info
+            "Workflow ID: 123, file: missing.zip, error: file does not exist.",
+            audit_entry.extra_info,
         )
         self.assertEqual(audit_entry.user_id, self.superuser.id)
