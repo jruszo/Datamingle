@@ -36,7 +36,7 @@ def optimize_sqladvisor(request):
     # Server-side parameter validation.
     if sql_content is None or instance_name is None:
         result["status"] = 1
-        result["msg"] = "Submitted parameters may be empty"
+        result["msg"] = "Submitted page parameters may be empty"
         return HttpResponse(json.dumps(result), content_type="application/json")
 
     try:
@@ -96,7 +96,7 @@ def optimize_soar(request):
     # Server-side parameter validation.
     if not (instance_name and db_name and sql):
         result["status"] = 1
-        result["msg"] = "Submitted parameters may be empty"
+        result["msg"] = "Submitted page parameters may be empty"
         return HttpResponse(json.dumps(result), content_type="application/json")
     try:
         instance = user_instances(request.user, db_type=["mysql"]).get(
@@ -212,7 +212,7 @@ def explain(request):
     # Server-side parameter validation.
     if sql_content is None or instance_name is None:
         result["status"] = 1
-        result["msg"] = "Submitted parameters may be empty"
+        result["msg"] = "Submitted page parameters may be empty"
         return HttpResponse(json.dumps(result), content_type="application/json")
 
     try:
@@ -265,7 +265,7 @@ def optimize_sqltuningadvisor(request):
     # Server-side parameter validation.
     if sql_content is None or instance_name is None:
         result["status"] = 1
-        result["msg"] = "Submitted parameters may be empty"
+        result["msg"] = "Submitted page parameters may be empty"
         return HttpResponse(json.dumps(result), content_type="application/json")
 
     try:

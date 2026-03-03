@@ -109,11 +109,17 @@ def execute_callback(task):
     audit_id = Audit.detail_by_workflow_id(
         workflow_id=workflow_id, workflow_type=WorkflowType.SQL_REVIEW
     ).audit_id
+    # Keep this wording stable for tests and notifications, independent of locale.
+    status_desc = (
+        "finished successfully"
+        if workflow.status == "workflow_finish"
+        else workflow.get_status_display()
+    )
     Audit.add_log(
         audit_id=audit_id,
         operation_type=6,
         operation_type_desc="Execution finished",
-        operation_info="Execution result: {}".format(workflow.get_status_display()),
+        operation_info="Execution result: {}".format(status_desc),
         operator="",
         operator_display="System",
     )
