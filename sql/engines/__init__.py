@@ -1,4 +1,4 @@
-"""engine base库, 包含一个``EngineBase`` class和一个get_engine函数"""
+"""Engine base module with ``EngineBase`` class and ``get_engine`` function."""
 
 import importlib
 import re
@@ -9,7 +9,7 @@ from django.conf import settings
 
 
 class EngineBase:
-    """enginebase 只定义了init函数和若干方法的名字, 具体实现用mysql.py pg.py等实现"""
+    """EngineBase defines shared interface; concrete engines implement methods."""
 
     test_query = None
 
@@ -28,7 +28,7 @@ class EngineBase:
             self.db_name = instance.db_name
             self.mode = instance.mode
 
-            # 判断如果配置了隧道则连接隧道，只测试了MySQL
+            # If tunnel is configured, connect through SSH tunnel (tested with MySQL).
             if self.instance.tunnel:
                 self.ssh = SSHConnection(
                     self.host,
@@ -50,7 +50,7 @@ class EngineBase:
 
     def remote_instance_conn(self, instance=None):
         user, password = instance.get_username_password()
-        # 判断如果配置了隧道则连接隧道
+        # If tunnel is configured, connect through SSH tunnel.
         if not hasattr(self, "remotessh") and instance.tunnel:
             self.remotessh = SSHConnection(
                 instance.host,
@@ -79,99 +79,99 @@ class EngineBase:
         )
 
     def get_connection(self, db_name=None):
-        """返回一个conn实例"""
+        """Return a connection instance."""
 
     def test_connection(self):
-        """测试实例链接是否正常"""
+        """Test whether instance connection is available."""
         return self.query(sql=self.test_query)
 
     def escape_string(self, value: str) -> str:
-        """参数转义"""
+        """Escape parameters."""
         return value
 
     @property
     def auto_backup(self):
-        """是否支持备份"""
+        """Whether backup is supported."""
         return False
 
     @property
     def seconds_behind_master(self):
-        """实例同步延迟情况"""
+        """Replication lag in seconds."""
         return None
 
     @property
     def server_version(self):
-        """返回引擎服务器版本，返回对象为tuple (x,y,z)"""
+        """Return engine server version as tuple (x, y, z)."""
         return tuple()
 
     def processlist(self, command_type, **kwargs) -> ResultSet:
-        """获取连接信息"""
+        """Get connection information."""
         return ResultSet()
 
     def kill_connection(self, thread_id):
-        """终止数据库连接"""
+        """Terminate database connection."""
 
     def get_all_databases(self):
-        """获取数据库列表, 返回一个ResultSet，rows=list"""
+        """Get database list and return a ResultSet with rows=list."""
         return ResultSet()
 
     def get_all_tables(self, db_name, **kwargs):
-        """获取table 列表, 返回一个ResultSet，rows=list"""
+        """Get table list and return a ResultSet with rows=list."""
         return ResultSet()
 
     def get_group_tables_by_db(self, db_name, **kwargs):
-        """获取首字符分组的table列表，返回一个dict"""
+        """Get table list grouped by first character and return a dict."""
         return dict()
 
     def get_table_meta_data(self, db_name, tb_name, **kwargs):
-        """获取表格元信息"""
+        """Get table metadata."""
         return dict()
 
     def get_table_desc_data(self, db_name, tb_name, **kwargs):
-        """获取表格字段信息"""
+        """Get table column details."""
         return dict()
 
     def get_table_index_data(self, db_name, tb_name, **kwargs):
-        """获取表格索引信息"""
+        """Get table index information."""
         return dict()
 
     def get_tables_metas_data(self, db_name, **kwargs):
-        """获取数据库所有表格信息，用作数据字典导出接口"""
+        """Get metadata of all tables in database for data dictionary export."""
         return list()
 
     def get_all_databases_summary(self):
-        """实例数据库管理功能，获取实例所有的数据库描述信息"""
+        """Get summary of all databases for instance database management."""
         return ResultSet()
 
     def get_instance_users_summary(self):
-        """实例账号管理功能，获取实例所有账号信息"""
+        """Get summary of all accounts for instance user management."""
         return ResultSet()
 
     def create_instance_user(self, **kwargs):
-        """实例账号管理功能，创建实例账号"""
+        """Create instance account for instance user management."""
         return ResultSet()
 
     def drop_instance_user(self, **kwargs):
-        """实例账号管理功能，删除实例账号"""
+        """Delete instance account for instance user management."""
         return ResultSet()
 
     def reset_instance_user_pwd(self, **kwargs):
-        """实例账号管理功能，重置实例账号密码"""
+        """Reset instance account password for instance user management."""
         return ResultSet()
 
     def get_all_columns_by_tb(self, db_name, tb_name, **kwargs):
-        """获取所有字段, 返回一个ResultSet，rows=list"""
+        """Get all columns and return a ResultSet with rows=list."""
         return ResultSet()
 
     def describe_table(self, db_name, tb_name, **kwargs):
-        """获取表结构, 返回一个 ResultSet，rows=list"""
+        """Get table schema and return a ResultSet with rows=list."""
         return ResultSet()
 
     def query_check(self, db_name=None, sql=""):
-        """查询语句的检查、注释去除、切分, 返回一个字典 {'bad_query': bool, 'filtered_sql': str}"""
+        """Check query, strip comments, split SQL, and return check dict."""
 
     def filter_sql(self, sql="", limit_num=0):
-        """给查询语句增加结果级限制或者改写语句, 返回修改后的语句"""
+        """Add row limit or rewrite query statement and return modified SQL."""
         return sql.strip()
 
     def query(
@@ -183,35 +183,34 @@ class EngineBase:
         parameters=None,
         **kwargs,
     ):
-        """实际查询 返回一个ResultSet"""
+        """Execute query and return a ResultSet."""
         return ResultSet()
 
     def query_masking(self, db_name=None, sql="", resultset=None):
-        """传入 sql语句, db名, 结果集,
-        返回一个脱敏后的结果集"""
+        """Input SQL, db name, and resultset; return masked resultset."""
         return resultset
 
     def execute_check(self, db_name=None, sql=""):
-        """执行语句的检查 返回一个ReviewSet"""
+        """Validate execution statement and return a ReviewSet."""
         return ReviewSet()
 
     def execute(self, **kwargs):
-        """执行语句 返回一个ReviewSet"""
+        """Execute statement and return a ReviewSet."""
         return ReviewSet()
 
     def get_execute_percentage(self):
-        """获取执行进度"""
+        """Get execution progress."""
 
     def get_rollback(self, workflow):
-        """获取工单回滚语句"""
+        """Get rollback SQL for workflow."""
         return list()
 
     def get_variables(self, variables=None):
-        """获取实例参数，返回一个 ResultSet"""
+        """Get instance variables and return a ResultSet."""
         return ResultSet()
 
     def set_variable(self, variable_name, variable_value):
-        """修改实例参数值，返回一个 ResultSet"""
+        """Set instance variable and return a ResultSet."""
         return ResultSet()
 
 
@@ -232,7 +231,7 @@ engine_map = get_engine_map()
 
 
 def get_engine(instance=None):  # pragma: no cover
-    """获取数据库操作engine"""
+    """Get database operation engine."""
     if instance.db_type == "mysql":
         from sql.models import AliyunRdsConfig
 
