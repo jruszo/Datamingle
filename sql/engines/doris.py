@@ -74,45 +74,52 @@ class DorisEngine(MysqlEngine):
         return super(DorisEngine, self).kill(thread_ids, thread_ids_check)
 
     def execute_check(self, db_name=None, sql=""):
-        """上线单执行前的检查, 返回Review set"""
+        """Run checks before workflow execution and return a ReviewSet."""
         check_result = ReviewSet(full_sql=sql)
-        # 禁用/高危语句检查
+        # Check disabled/high-risk statements.
         line = 1
         critical_ddl_regex = self.config.get("critical_ddl_regex", "")
         p = re.compile(critical_ddl_regex)
-        check_result.syntax_type = 2  # TODO 工单类型 0、其他 1、DDL，2、DML
+        check_result.syntax_type = 2  # TODO Workflow type: 0 others, 1 DDL, 2 DML
         for statement in sqlparse.split(sql):
             statement = sqlparse.format(statement, strip_comments=True)
-            # 禁用语句
+            # Disabled statements.
             if re.match(r"^select|^show|^explain", statement.lower()):
                 result = ReviewResult(
                     id=line,
                     errlevel=2,
-                    stagestatus="驳回不支持语句",
-                    errormessage="仅支持DML和DDL语句，查询语句请使用SQL查询功能！",
+                    stagestatus="Rejected unsupported statement",
+                    errormessage=(
+                        "Only DML and DDL statements are supported. "
+                        "Use SQL query feature for SELECT statements."
+                    ),
                     sql=statement,
                 )
-            # 高危语句
+            # High-risk statements.
             elif critical_ddl_regex and p.match(statement.strip().lower()):
                 result = ReviewResult(
                     id=line,
                     errlevel=2,
-                    stagestatus="驳回高危SQL",
-                    errormessage="禁止提交匹配" + critical_ddl_regex + "条件的语句！",
+                    stagestatus="Rejected high-risk SQL",
+                    errormessage=(
+                        "Submitting statements that match "
+                        + critical_ddl_regex
+                        + " is prohibited!"
+                    ),
                     sql=statement,
                 )
-            # 驳回未带where数据修改语句，如确实需做全部删除或更新，显示的带上where 1=1
+            # Reject UPDATE/DELETE statements without WHERE.
             elif re.match(
                 r"^update((?!where).)*$|^delete((?!where).)*$", statement.lower()
             ):
                 result = ReviewResult(
                     id=line,
                     errlevel=2,
-                    stagestatus="驳回未带where数据修改",
-                    errormessage="数据修改需带where条件！",
+                    stagestatus="Rejected data modification without WHERE",
+                    errormessage="Data modification statements must include a WHERE clause!",
                     sql=statement,
                 )
-            # 正常语句
+            # Valid statement.
             else:
                 result = ReviewResult(
                     id=line,
@@ -123,12 +130,12 @@ class DorisEngine(MysqlEngine):
                     affected_rows=0,
                     execute_time=0,
                 )
-            # 判断工单类型
+            # Determine workflow syntax type.
             if get_syntax_type(statement) == "DDL":
                 check_result.syntax_type = 1
             check_result.rows += [result]
             line += 1
-        # 统计警告和错误数量
+        # Count warnings and errors.
         for r in check_result.rows:
             if r.errlevel == 1:
                 check_result.warning_count += 1
@@ -142,7 +149,7 @@ class DorisEngine(MysqlEngine):
         )
 
     def execute(self, db_name=None, sql="", close_conn=True):
-        """执行sql语句 返回 Review set"""
+        """Execute SQL statements and return a ReviewSet."""
         execute_result = ReviewSet(full_sql=sql)
         conn = self.get_connection(db_name=db_name)
         rowid = 1
@@ -167,7 +174,7 @@ class DorisEngine(MysqlEngine):
                 )
             except Exception as e:
                 logger.warning(
-                    f"{self.name} 命令执行报错，语句：{sql}， 错误信息：{traceback.format_exc()}"
+                    f"{self.name} command execution failed, statement: {sql}, details: {traceback.format_exc()}"
                 )
                 execute_result.error = str(e)
                 execute_result.rows.append(
@@ -175,7 +182,7 @@ class DorisEngine(MysqlEngine):
                         id=rowid,
                         errlevel=2,
                         stagestatus="Execute Failed",
-                        errormessage=f"异常信息：{e}",
+                        errormessage=f"Exception: {e}",
                         sql=statement,
                         affected_rows=effect_row,
                         execute_time=t.cost,
@@ -190,7 +197,7 @@ class DorisEngine(MysqlEngine):
                         id=rowid + 1,
                         errlevel=2,
                         stagestatus="Audit Completed",
-                        errormessage="前序语句失败, 未执行",
+                        errormessage="Previous statement failed, not executed",
                         sql=statement,
                         affected_rows=0,
                         execute_time=0,
@@ -202,7 +209,7 @@ class DorisEngine(MysqlEngine):
         return execute_result
 
     def get_long_transaction(self, *args, **kwargs):
-        # 不支持的方法需要抛出错误
+        # Unsupported methods should raise an error.
         raise AttributeError(
             f"{self.__class__.__name__} has no attribute 'get_long_transaction'"
         )
