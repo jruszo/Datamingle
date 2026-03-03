@@ -44,7 +44,7 @@ redis:
   # dingdingUrl: "redis://127.0.0.1:6379/1"
   # dingdingUrlSecret: ""
   # dingdingUrlSecretKey: "DINGDING_CACHE_URL"
-  # embedded 为 false, 会使用外部的 redis, 下方的 redis 就不会生效
+  # When embedded is false, external Redis is used and the Redis config below will not take effect
   architecture: standalone
   auth:
     password: "REDIS_PASSWORD"
@@ -60,7 +60,7 @@ mysql:
   url: "mysql://root:@127.0.0.1:3306/archery"
   urlSecret: ""
   urlSecretKey: "DATABASE_URL"
-  # embedded 为 false时, 会使用外部的 mysql, 下方的 mysql 配置不会生效
+  # When embedded is false, external MySQL is used and the MySQL config below will not take effect
   architecture: standalone
   auth:
     database: archery
@@ -179,32 +179,32 @@ configMap:
   # admin password
   superuser:
     username: admin
-    password: archery # 请尽快修改
+    password: archery # Please change as soon as possible
     email: "archery@example.com"
   data:
     local_settings.py: |-
         # -*- coding: UTF-8 -*-
         # override your configs here
     soar.yaml: |-
-        # 是否允许测试环境与线上环境配置相同
+        # Whether test and production environments are allowed to share the same config
         allow-online-as-test: false
-        # 是否清理测试时产生的临时文件
+        # Whether to clean temporary files generated during testing
         drop-test-temporary: true
-        # 语法检查小工具
+        # Syntax-check helper mode
         only-syntax-check: false
         sampling-data-factor: 100
         sampling: false
         sampling-statistic-target: 100
         profiling: false
         trace: false
-        # 日志级别，[0:Emergency, 1:Alert, 2:Critical, 3:Error, 4:Warning, 5:Notice, 6:Informational, 7:Debug]
+        # Log level [0:Emergency, 1:Alert, 2:Critical, 3:Error, 4:Warning, 5:Notice, 6:Informational, 7:Debug]
         log-level: 3
         log-output: /opt/archery/logs/soar.log
-        # 优化建议输出格式
+        # Output format for optimization suggestions
         report-type: markdown
         ignore-rules:
         - ""
-        # 启发式算法相关配置
+        # Heuristic algorithm settings
         max-join-table-count: 5
         max-group-by-cols-count: 5
         max-distinct-count: 5
@@ -212,7 +212,7 @@ configMap:
         max-total-rows: 9999999
         spaghetti-query-length: 2048
         allow-drop-index: false
-        # EXPLAIN相关配置
+        # EXPLAIN settings
         explain-sql-report-type: pretty
         explain-type: extended
         explain-format: traditional
@@ -237,29 +237,29 @@ configMap:
         DIR="$( cd "$( dirname "$0"  )" && pwd  )"
         cd $DIR
         
-        #配置archery数据库的连接地址
+        # Configure Archery database connection
         monitor_db_host="archery-mysql"
         monitor_db_port=3306
         monitor_db_user="root"
         monitor_db_password="MYSQL_ROOT_PASSWORD"
         monitor_db_database="archery"
         
-        #实例慢日志位置
+        # Slow log path of the analyzed instance
         slowquery_file="/home/mysql/log_slow.log"
         pt_query_digest="/usr/bin/pt-query-digest"
         
-        #实例连接信息
-        hostname="mysql_host:mysql_port" # 和archery实例配置内容保持一致，用于archery做筛选
+        # Connection identifier of the analyzed instance
+        hostname="mysql_host:mysql_port" # Must match Archery instance config for filtering
         
-        #获取上次分析时间，初始化时请删除last_analysis_time_$hostname文件，可分析全部日志数据
+        # Get last analysis time; for initial full analysis, remove last_analysis_time_$hostname
         if [ -s last_analysis_time_$hostname ]; then
             last_analysis_time=`cat last_analysis_time_$hostname`
         else
             last_analysis_time='1000-01-01 00:00:00'
         fi
         
-        #收集日志
-        #RDS需要增加--no-version-check选项
+        # Collect logs
+        # Add --no-version-check for RDS
         $pt_query_digest \
         --user=$monitor_db_user --password=$monitor_db_password --port=$monitor_db_port \
         --review h=$monitor_db_host,D=$monitor_db_database,t=mysql_slow_query_review  \
