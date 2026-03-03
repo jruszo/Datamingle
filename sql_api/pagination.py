@@ -6,7 +6,7 @@ from django.conf import settings
 
 class CustomizedPagination(PageNumberPagination):
     """
-    自定义分页器
+    Custom pagination class.
     """
 
     page_size = (
