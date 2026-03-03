@@ -220,7 +220,8 @@ def submit_sql(request):
 
     # Ensure tag exists
     InstanceTag.objects.get_or_create(
-        tag_code="can_write", defaults={"tag_name": "Supports SQL Review", "active": True}
+        tag_code="can_write",
+        defaults={"tag_name": "Supports SQL Review", "active": True},
     )
 
     context = {
@@ -351,9 +352,7 @@ def rollback(request):
         return response
     # Fetch asynchronously and render in page; large datasets may load slowly.
     else:
-        rollback_workflow_name = (
-            f"[Rollback Workflow] Source workflow ID: {workflow_id}, {workflow.workflow_name}"
-        )
+        rollback_workflow_name = f"[Rollback Workflow] Source workflow ID: {workflow_id}, {workflow.workflow_name}"
         context = {
             "workflow_detail": workflow,
             "rollback_workflow_name": rollback_workflow_name,

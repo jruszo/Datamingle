@@ -663,5 +663,7 @@ class TestWorkflow(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(
             r.json(),
-            {"msg": "Execution started. Please check workflow detail page for results."},
+            {
+                "msg": "Execution started. Please check workflow detail page for results."
+            },
         )

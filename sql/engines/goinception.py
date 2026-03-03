@@ -172,7 +172,9 @@ class GoInceptionEngine(EngineBase):
             result_set.rows = rows
             result_set.affected_rows = effect_row
         except Exception as e:
-            logger.warning(f"goInception statement execution failed, details: {traceback.format_exc()}")
+            logger.warning(
+                f"goInception statement execution failed, details: {traceback.format_exc()}"
+            )
             result_set.error = str(e)
         if close_conn:
             self.close()

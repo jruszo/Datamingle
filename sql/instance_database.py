@@ -84,7 +84,11 @@ def create(request):
 
     if not all([db_name]):
         return JsonResponse(
-            {"status": 1, "msg": "Incomplete parameters, please verify and submit", "data": []}
+            {
+                "status": 1,
+                "msg": "Incomplete parameters, please verify and submit",
+                "data": [],
+            }
         )
 
     try:
@@ -154,7 +158,11 @@ def edit(request):
 
     if not all([db_name]):
         return JsonResponse(
-            {"status": 1, "msg": "Incomplete parameters, please verify and submit", "data": []}
+            {
+                "status": 1,
+                "msg": "Incomplete parameters, please verify and submit",
+                "data": [],
+            }
         )
 
     try:

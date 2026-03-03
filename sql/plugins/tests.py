@@ -62,7 +62,7 @@ class TestPlugin(TestCase):
         args_check_result = soar.check_args(args)
         self.assertDictEqual(
             args_check_result,
-            {"status": 1, "msg": "Executable file path cannot be empty!", "data": {}},
+            {"status": 1, "msg": "Executable path cannot be empty!", "data": {}},
         )
         # Path is not empty.
         self.sys_config.set("soar", "/opt/archery/src/plugins/soar")
@@ -90,7 +90,11 @@ class TestPlugin(TestCase):
         args_check_result = soar.check_args(args)
         self.assertDictEqual(
             args_check_result,
-            {"status": 1, "msg": "Argument allow-online-as-test is disabled", "data": {}},
+            {
+                "status": 1,
+                "msg": "Argument allow-online-as-test is disabled",
+                "data": {},
+            },
         )
 
     def test_check_args_required(self):
@@ -111,13 +115,21 @@ class TestPlugin(TestCase):
         args_check_result = soar.check_args(args)
         self.assertDictEqual(
             args_check_result,
-            {"status": 1, "msg": "Required argument query must be specified", "data": {}},
+            {
+                "status": 1,
+                "msg": "Required argument query must be specified",
+                "data": {},
+            },
         )
         args["query"] = ""
         args_check_result = soar.check_args(args)
         self.assertDictEqual(
             args_check_result,
-            {"status": 1, "msg": "Value for argument query cannot be empty", "data": {}},
+            {
+                "status": 1,
+                "msg": "Value for argument query cannot be empty",
+                "data": {},
+            },
         )
 
     def test_soar_generate_args2cmd(self):

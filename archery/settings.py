@@ -43,7 +43,10 @@ env = environ.Env(
         dict,
         {"username": "preferred_username", "display": "name", "email": "email"},
     ),
-    Q_CLUISTER_SYNC=(bool, False),  # qcluster sync mode; set to True for local debugging if needed
+    Q_CLUISTER_SYNC=(
+        bool,
+        False,
+    ),  # qcluster sync mode; set to True for local debugging if needed
     # CSRF_TRUSTED_ORIGINS=subdomain.example.com,subdomain.example2.com subdomain.example.com
     CSRF_TRUSTED_ORIGINS=(list, []),
     ENABLED_ENGINES=(
@@ -178,7 +181,7 @@ TEMPLATES = [
 WSGI_APPLICATION = "archery.wsgi.application"
 
 # Internationalization
-LANGUAGE_CODE = "zh-hans"
+LANGUAGE_CODE = "en-us"
 
 TIME_ZONE = "Asia/Shanghai"
 

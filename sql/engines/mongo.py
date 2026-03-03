@@ -712,8 +712,7 @@ class MongoEngine(EngineBase):
                                     )  # Get total document count.
                                     if count >= 5000000:
                                         check_result.warning = (
-                                            alert
-                                            + "More than 5 million documents, "
+                                            alert + "More than 5 million documents, "
                                             "please create index during low traffic"
                                         )
                                         check_result.warning_count += 1
@@ -1096,7 +1095,9 @@ class MongoEngine(EngineBase):
             collection_names = self.get_all_tables(db_name).rows
             is_in = collection_name in collection_names  # Check collection exists.
             if not is_in:
-                result["msg"] += f"\nError: collection `{collection_name}` does not exist!"
+                result[
+                    "msg"
+                ] += f"\nError: collection `{collection_name}` does not exist!"
                 result["bad_query"] = True
                 return result
         else:
@@ -1182,7 +1183,9 @@ class MongoEngine(EngineBase):
                 columns.append("index_list")
                 for k, v in cursor.items():
                     rows.append({k: v})
-            elif method == "aggregate" and sql.find("$group") >= 0:  # Build aggregate data.
+            elif (
+                method == "aggregate" and sql.find("$group") >= 0
+            ):  # Build aggregate data.
                 row = []
                 columns.insert(0, "mongodballdata")
                 for ro in cursor:

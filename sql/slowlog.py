@@ -79,7 +79,9 @@ def slowquery_review(request):
                 DBName=Max("slowqueryhistory__db_max"),  # Database
                 QueryTimeAvg=Sum("slowqueryhistory__query_time_sum")
                 / Sum("slowqueryhistory__ts_cnt"),  # Average execution time
-                MySQLTotalExecutionCounts=Sum("slowqueryhistory__ts_cnt"),  # Total execution count
+                MySQLTotalExecutionCounts=Sum(
+                    "slowqueryhistory__ts_cnt"
+                ),  # Total execution count
                 MySQLTotalExecutionTimes=Sum(
                     "slowqueryhistory__query_time_sum"
                 ),  # Total execution time

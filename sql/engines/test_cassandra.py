@@ -140,7 +140,8 @@ class CassandraEngineTest(TestCase):
         self.assertEqual(execute_result.rows[1].stagestatus, "Execute Failed")
         self.assertEqual(execute_result.rows[0].errormessage, "Exception: foo")
         self.assertEqual(
-            execute_result.rows[1].errormessage, "Previous statement failed, not executed"
+            execute_result.rows[1].errormessage,
+            "Previous statement failed, not executed",
         )
         mock_execute.assert_called()
 

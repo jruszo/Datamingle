@@ -149,7 +149,9 @@ class ClickHouseEngine(EngineBase):
             result_set.rows = rows
             result_set.affected_rows = len(rows)
         except Exception as e:
-            logger.warning(f"ClickHouse statement execution failed, sql: {sql}, error: {e}")
+            logger.warning(
+                f"ClickHouse statement execution failed, sql: {sql}, error: {e}"
+            )
             result_set.error = str(e).split("Stack trace")[0]
         finally:
             if close_conn:
@@ -507,7 +509,9 @@ class ClickHouseEngine(EngineBase):
                 cursor.execute(statement, parameters)
             cursor.close()
         except Exception as e:
-            logger.warning(f"ClickHouse statement execution failed, sql: {sql}, error: {e}")
+            logger.warning(
+                f"ClickHouse statement execution failed, sql: {sql}, error: {e}"
+            )
             result.error = str(e).split("Stack trace")[0]
         if close_conn:
             self.close()

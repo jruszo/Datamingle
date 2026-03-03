@@ -205,7 +205,9 @@ class Instance(models.Model, PasswordMixin):
 
     instance_name = models.CharField("Instance Name", max_length=50, unique=True)
     type = models.CharField(
-        "Instance Type", max_length=6, choices=(("master", "Primary"), ("slave", "Replica"))
+        "Instance Type",
+        max_length=6,
+        choices=(("master", "Primary"), ("slave", "Replica")),
     )
     db_type = models.CharField("Database Type", max_length=20, choices=DB_TYPE_CHOICES)
     mode = models.CharField(
@@ -340,7 +342,9 @@ class SqlWorkflow(models.Model, WorkflowAuditMixin):
         default=True,
     )
     engineer = models.CharField("Submitter", max_length=30)
-    engineer_display = models.CharField("Submitter Display Name", max_length=50, default="")
+    engineer_display = models.CharField(
+        "Submitter Display Name", max_length=50, default=""
+    )
     status = models.CharField(max_length=50, choices=SQL_WORKFLOW_CHOICES)
     audit_auth_groups = models.CharField("Audit Authorization Groups", max_length=255)
     run_date_start = models.DateTimeField("Execution Start Time", null=True, blank=True)
@@ -433,7 +437,9 @@ class WorkflowAudit(models.Model):
     next_audit = models.CharField("Next Audit Group", max_length=20)
     current_status = models.IntegerField("Audit Status", choices=WorkflowStatus.choices)
     create_user = models.CharField("Requester", max_length=30)
-    create_user_display = models.CharField("Requester Display Name", max_length=50, default="")
+    create_user_display = models.CharField(
+        "Requester Display Name", max_length=50, default=""
+    )
     create_time = models.DateTimeField("Request Time", auto_now_add=True)
     sys_time = models.DateTimeField("System Time", auto_now=True)
 
@@ -518,10 +524,12 @@ class WorkflowLog(models.Model):
         "Operation Type", choices=WorkflowAction.choices
     )
     # operation_type_desc is kept for backward compatibility.
-    operation_type_desc = models.CharField("Operation Type Description", max_length=10)
+    operation_type_desc = models.CharField("Operation Type Description", max_length=64)
     operation_info = models.CharField("Operation Info", max_length=1000)
     operator = models.CharField("Operator", max_length=30)
-    operator_display = models.CharField("Operator Display Name", max_length=50, default="")
+    operator_display = models.CharField(
+        "Operator Display Name", max_length=50, default=""
+    )
     operation_time = models.DateTimeField(auto_now_add=True)
 
     def __int__(self):
@@ -717,7 +725,9 @@ class DataMaskingRules(models.Model):
         max_length=255,
     )
     hide_group = models.IntegerField("Group To Hide")
-    rule_desc = models.CharField("Rule Description", max_length=100, default="", blank=True)
+    rule_desc = models.CharField(
+        "Rule Description", max_length=255, default="", blank=True
+    )
     sys_time = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -786,7 +796,9 @@ class ParamTemplate(models.Model):
     default_value = models.CharField("Default Value", max_length=1024)
     editable = models.BooleanField("Editable", default=False)
     valid_values = models.CharField(
-        "Valid Values, e.g. range [1-65535] or enum [ON|OFF]", max_length=1024, blank=True
+        "Valid Values, e.g. range [1-65535] or enum [ON|OFF]",
+        max_length=1024,
+        blank=True,
     )
     description = models.CharField("Parameter Description", max_length=1024, blank=True)
     create_time = models.DateTimeField("Created Time", auto_now_add=True)
@@ -829,7 +841,9 @@ class ArchiveConfig(models.Model, WorkflowAuditMixin):
 
     title = models.CharField("Archive Configuration Title", max_length=50)
     resource_group = models.ForeignKey(ResourceGroup, on_delete=models.CASCADE)
-    audit_auth_groups = models.CharField("Audit Authorization Groups", max_length=255, blank=True)
+    audit_auth_groups = models.CharField(
+        "Audit Authorization Groups", max_length=255, blank=True
+    )
     src_instance = models.ForeignKey(
         Instance, related_name="src_instance", on_delete=models.CASCADE
     )
@@ -842,13 +856,21 @@ class ArchiveConfig(models.Model, WorkflowAuditMixin):
         blank=True,
         null=True,
     )
-    dest_db_name = models.CharField("Destination Database", max_length=64, blank=True, null=True)
-    dest_table_name = models.CharField("Destination Table", max_length=64, blank=True, null=True)
+    dest_db_name = models.CharField(
+        "Destination Database", max_length=64, blank=True, null=True
+    )
+    dest_table_name = models.CharField(
+        "Destination Table", max_length=64, blank=True, null=True
+    )
     condition = models.CharField("Archive Condition (WHERE clause)", max_length=1000)
     mode = models.CharField(
         "Archive Mode",
         max_length=10,
-        choices=(("file", "File"), ("dest", "Other Instance"), ("purge", "Direct Delete")),
+        choices=(
+            ("file", "File"),
+            ("dest", "Other Instance"),
+            ("purge", "Direct Delete"),
+        ),
     )
     no_delete = models.BooleanField("Retain Source Data")
     sleep = models.IntegerField("Sleep Seconds After Each Limited Batch", default=1)
@@ -882,7 +904,11 @@ class ArchiveLog(models.Model):
     mode = models.CharField(
         "Archive Mode",
         max_length=10,
-        choices=(("file", "File"), ("dest", "Other Instance"), ("purge", "Direct Delete")),
+        choices=(
+            ("file", "File"),
+            ("dest", "Other Instance"),
+            ("purge", "Direct Delete"),
+        ),
     )
     no_delete = models.BooleanField("Retain Source Data")
     sleep = models.IntegerField("Sleep Seconds After Each Limited Batch", default=0)
@@ -910,7 +936,9 @@ class Config(models.Model):
 
     item = models.CharField("Config Item", max_length=100, unique=True)
     value = fields.EncryptedCharField(verbose_name="Config Value", max_length=500)
-    description = models.CharField("Description", max_length=200, default="", blank=True)
+    description = models.CharField(
+        "Description", max_length=200, default="", blank=True
+    )
 
     class Meta:
         managed = True
@@ -965,7 +993,9 @@ class AliyunRdsConfig(models.Model):
     instance = models.OneToOneField(Instance, on_delete=models.CASCADE)
     rds_dbinstanceid = models.CharField("Alibaba Cloud RDS Instance ID", max_length=100)
     ak = models.ForeignKey(
-        CloudAccessKey, verbose_name="RDS Access Key Configuration", on_delete=models.CASCADE
+        CloudAccessKey,
+        verbose_name="RDS Access Key Configuration",
+        on_delete=models.CASCADE,
     )
     is_enable = models.BooleanField("Enabled", default=False)
 
@@ -1013,7 +1043,10 @@ class Permission(models.Model):
             ("menu_openapi", "Menu OpenAPI"),
             ("sql_submit", "Submit SQL Deployment Workflow"),
             ("sql_review", "Review SQL Deployment Workflow"),
-            ("sql_execute_for_resource_group", "Execute SQL Deployment Workflow (Resource Group Scope)"),
+            (
+                "sql_execute_for_resource_group",
+                "Execute SQL Deployment Workflow (Resource Group Scope)",
+            ),
             ("sql_execute", "Execute SQL Deployment Workflow (Own Submissions Only)"),
             ("sql_analyze", "Execute SQL Analysis"),
             ("optimize_sqladvisor", "Execute SQLAdvisor"),

@@ -22,7 +22,9 @@ class Aliyun(object):
             secret = rds.ak.raw_key_secret
             self.clt = AcsClient(ak=ak, secret=secret)
         except Exception as m:
-            raise Exception(f"Alibaba Cloud authentication failed: {m}{traceback.format_exc()}")
+            raise Exception(
+                f"Alibaba Cloud authentication failed: {m}{traceback.format_exc()}"
+            )
 
     def request_api(self, request, *values):
         if values:

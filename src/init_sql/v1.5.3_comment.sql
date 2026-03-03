@@ -51,7 +51,7 @@ ALTER TABLE
     MODIFY  `rule_type` INT (11) NOT NULL COMMENT 'Rule type',
     MODIFY  `rule_regex` VARCHAR (255) NOT NULL COMMENT 'Regex used for masking; expression must use groups; hidden groups are replaced with ****',
     MODIFY  `hide_group` INT (11) NOT NULL COMMENT 'Group to hide',
-    MODIFY  `rule_desc` VARCHAR (100) NOT NULL COMMENT 'Rule description',
+    MODIFY  `rule_desc` VARCHAR (255) NOT NULL COMMENT 'Rule description',
     MODIFY  `sys_time` datetime (6) NOT NULL COMMENT 'System time';
 
 
@@ -318,7 +318,7 @@ ALTER TABLE
   workflow_log COMMENT 'Workflow log',
     MODIFY  `audit_id` BIGINT (20) NOT NULL COMMENT 'Workflow audit ID',
     MODIFY  `operation_type` TINYINT (4) NOT NULL COMMENT 'Operation type, 0 submit/pending review, 1 approved, 2 rejected, 3 canceled/cancel execution, 4 scheduled execution, 5 execute workflow, 6 execution finished',
-    MODIFY  `operation_type_desc` CHAR (10) NOT NULL COMMENT 'Operation type description',
+    MODIFY  `operation_type_desc` VARCHAR (64) NOT NULL COMMENT 'Operation type description',
     MODIFY  `operation_info` VARCHAR (200) NOT NULL COMMENT 'Operation info',
     MODIFY  `operator` VARCHAR (30) NOT NULL COMMENT 'Operator',
     MODIFY  `operator_display` VARCHAR (50) NOT NULL COMMENT 'Operator display name',

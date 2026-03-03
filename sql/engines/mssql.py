@@ -422,7 +422,9 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
         # For normal queries, validate whitelist.
         if not is_showplan and re.match(whitelist_pattern, sql_lower) is None:
             result["bad_query"] = True
-            result["msg"] = "Only {} syntax is supported!".format(",".join(sql_whitelist))
+            result["msg"] = "Only {} syntax is supported!".format(
+                ",".join(sql_whitelist)
+            )
             return result
         if re.search(star_patter, sql_lower) is not None:
             keyword_warning += "Using * keyword is forbidden\n"

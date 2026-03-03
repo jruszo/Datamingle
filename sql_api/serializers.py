@@ -103,10 +103,13 @@ class UserAuthSerializer(serializers.Serializer):
 
 class TwoFASerializer(serializers.Serializer):
     engineer = serializers.CharField(label="Username")
-    enable = serializers.ChoiceField(choices=["true", "false"], label="Enable or disable")
+    enable = serializers.ChoiceField(
+        choices=["true", "false"], label="Enable or disable"
+    )
     phone = serializers.CharField(required=False, label="Phone number")
     auth_type = serializers.ChoiceField(
-        choices=["totp", "sms"], label="Verification type: totp-Google Authenticator, sms-SMS code"
+        choices=["totp", "sms"],
+        label="Verification type: totp-Google Authenticator, sms-SMS code",
     )
 
     def validate(self, attrs):
@@ -332,7 +335,9 @@ class WorkflowSerializer(serializers.ModelSerializer):
         try:
             ResourceGroup.objects.get(pk=group_id)
         except ResourceGroup.DoesNotExist:
-            raise serializers.ValidationError({"errors": f"Resource group does not exist: {group_id}"})
+            raise serializers.ValidationError(
+                {"errors": f"Resource group does not exist: {group_id}"}
+            )
         return group_id
 
     class Meta:
@@ -370,7 +375,9 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
             try:
                 user = Users.objects.get(username=engineer)
             except Users.DoesNotExist:
-                raise serializers.ValidationError({"errors": f"User does not exist: {engineer}"})
+                raise serializers.ValidationError(
+                    {"errors": f"User does not exist: {engineer}"}
+                )
         # Submitter can only be self for non-admins
         else:
             user = self.context["request"].user
@@ -382,7 +389,9 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
             if workflow_data["is_offline_export"]:
                 pass
             else:
-                raise serializers.ValidationError({"errors": "The instance is not associated with your group."})
+                raise serializers.ValidationError(
+                    {"errors": "The instance is not associated with your group."}
+                )
 
         # Run engine check again to prevent bypass
         try:
@@ -473,7 +482,9 @@ class AuditWorkflowSerializer(serializers.Serializer):
         try:
             Users.objects.get(username=engineer)
         except Users.DoesNotExist:
-            raise serializers.ValidationError({"errors": f"User does not exist: {engineer}"})
+            raise serializers.ValidationError(
+                {"errors": f"User does not exist: {engineer}"}
+            )
 
         try:
             WorkflowAudit.objects.get(
@@ -492,7 +503,9 @@ class WorkflowAuditSerializer(serializers.Serializer):
         try:
             Users.objects.get(username=engineer)
         except Users.DoesNotExist:
-            raise serializers.ValidationError({"errors": f"User does not exist: {engineer}"})
+            raise serializers.ValidationError(
+                {"errors": f"User does not exist: {engineer}"}
+            )
         return engineer
 
 
@@ -545,7 +558,8 @@ class ExecuteWorkflowSerializer(serializers.Serializer):
     engineer = serializers.CharField(required=False, label="Operator")
     workflow_id = serializers.IntegerField(label="Workflow ID")
     workflow_type = serializers.ChoiceField(
-        choices=[2, 3], label="Workflow type: 1-query privilege apply, 2-SQL release apply, 3-data archive apply"
+        choices=[2, 3],
+        label="Workflow type: 1-query privilege apply, 2-SQL release apply, 3-data archive apply",
     )
     mode = serializers.ChoiceField(
         choices=["auto", "manual"],

@@ -326,7 +326,9 @@ class AuditV2:
             create_user_display = self.workflow.user_display
             self.workflow.audit_auth_groups = audit_setting.audit_auth_group_in_db
         else:
-            raise AuditException(f"Unsupported workflow type: {self.workflow_type.label}")
+            raise AuditException(
+                f"Unsupported workflow type: {self.workflow_type.label}"
+            )
         self.workflow.save()
         self.audit = WorkflowAudit(
             group_id=group_id,
@@ -385,7 +387,9 @@ class AuditV2:
             audit_id=self.audit.audit_id,
             operation_type=WorkflowAction.SUBMIT,
             operation_type_desc=WorkflowAction.SUBMIT.label,
-            operation_info="Waiting for approval, flow: {}".format(readable_review_flow),
+            operation_info="Waiting for approval, flow: {}".format(
+                readable_review_flow
+            ),
             operator=self.audit.create_user,
             operator_display=self.audit.create_user_display,
         )

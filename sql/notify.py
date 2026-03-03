@@ -233,7 +233,9 @@ Workflow Preview: {}""".format(
                 workflow_content,
             )
         elif status == WorkflowStatus.PASSED:  # Approved
-            msg_title = "[{}]Workflow Approved#{}".format(workflow_type_display, audit_id)
+            msg_title = "[{}]Workflow Approved#{}".format(
+                workflow_type_display, audit_id
+            )
             # Recipient: submitter only
             msg_to = [Users.objects.get(username=self.audit.create_user)]
             # Message content
@@ -249,7 +251,9 @@ Workflow Preview: {}""".format(
                 workflow_content,
             )
         elif status == WorkflowStatus.REJECTED:  # Rejected
-            msg_title = "[{}]Workflow Rejected#{}".format(workflow_type_display, audit_id)
+            msg_title = "[{}]Workflow Rejected#{}".format(
+                workflow_type_display, audit_id
+            )
             # Recipient: submitter only
             msg_to = [Users.objects.get(username=self.audit.create_user)]
             # Message content

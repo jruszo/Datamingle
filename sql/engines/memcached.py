@@ -46,7 +46,9 @@ class MemcachedEngine(EngineBase):
             )
             return conn
         except Exception as e:
-            raise Exception(f"Failed to connect to Memcached node {node_host}: {str(e)}")
+            raise Exception(
+                f"Failed to connect to Memcached node {node_host}: {str(e)}"
+            )
 
     def test_connection(self):
         """Test whether the instance connection is available."""

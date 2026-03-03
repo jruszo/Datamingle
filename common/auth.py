@@ -176,7 +176,11 @@ def authenticate_entry(request):
 def sign_up(request):
     sign_up_enabled = SysConfig().get("sign_up_enabled", False)
     if not sign_up_enabled:
-        result = {"status": 1, "msg": "Sign-up is disabled. Contact admin.", "data": None}
+        result = {
+            "status": 1,
+            "msg": "Sign-up is disabled. Contact admin.",
+            "data": None,
+        }
         return HttpResponse(json.dumps(result), content_type="application/json")
     username = request.POST.get("username")
     password = request.POST.get("password")

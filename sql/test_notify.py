@@ -282,7 +282,9 @@ class TestNotify(TestCase):
         )
         notifier.render()
         self.assertEqual(len(notifier.messages), 2)
-        self.assertIn("A new DDL statement finished execution", notifier.messages[1].msg_title)
+        self.assertIn(
+            "A new DDL statement finished execution", notifier.messages[1].msg_title
+        )
 
     def test_legacy_render_audit(self):
         notifier = LegacyRender(

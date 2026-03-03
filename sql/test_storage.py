@@ -178,7 +178,9 @@ class TestDynamicStorage(unittest.TestCase):
                     mock_init.return_value = mock_storage
 
                     # Simulate an exception from the underlying storage.
-                    getattr(mock_storage, method).side_effect = Exception("storage error")
+                    getattr(mock_storage, method).side_effect = Exception(
+                        "storage error"
+                    )
 
                     storage = DynamicStorage(config_dict=self.local_config)
 

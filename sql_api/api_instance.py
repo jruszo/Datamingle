@@ -82,7 +82,9 @@ class InstanceDetail(views.APIView):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    @extend_schema(summary="Delete Instance", description="Delete an instance configuration.")
+    @extend_schema(
+        summary="Delete Instance", description="Delete an instance configuration."
+    )
     def delete(self, request, pk):
         instance = self.get_object(pk)
         instance.delete()

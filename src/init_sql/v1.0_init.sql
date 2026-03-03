@@ -268,7 +268,7 @@ CREATE TABLE `data_masking_rules` (
   `rule_type` int(11) NOT NULL,
   `rule_regex` varchar(255) NOT NULL,
   `hide_group` int(11) NOT NULL,
-  `rule_desc` varchar(100) NOT NULL,
+  `rule_desc` varchar(255) NOT NULL,
   `sys_time` datetime(6) NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `rule_type` (`rule_type`)

@@ -242,7 +242,9 @@ class AuditWorkflow(views.APIView):
             if auditor.workflow.engineer == serializer.data["engineer"]:
                 action = WorkflowAction.ABORT
             else:
-                raise serializers.ValidationError({"errors": "User is not allowed to operate this workflow."})
+                raise serializers.ValidationError(
+                    {"errors": "User is not allowed to operate this workflow."}
+                )
         else:
             raise serializers.ValidationError(
                 {"errors": "audit_type can only be pass or cancel."}
@@ -329,10 +331,14 @@ class ExecuteWorkflow(views.APIView):
                 user.has_perm("sql.sql_execute")
                 or user.has_perm("sql.sql_execute_for_resource_group")
             ):
-                raise serializers.ValidationError({"errors": "You do not have permission to execute this workflow."})
+                raise serializers.ValidationError(
+                    {"errors": "You do not have permission to execute this workflow."}
+                )
 
             if can_execute(user, workflow_id) is False:
-                raise serializers.ValidationError({"errors": "You do not have permission to execute this workflow."})
+                raise serializers.ValidationError(
+                    {"errors": "You do not have permission to execute this workflow."}
+                )
 
             if on_correct_time_period(workflow_id) is False:
                 raise serializers.ValidationError(
@@ -412,7 +418,9 @@ class ExecuteWorkflow(views.APIView):
                 task_name=f"archive-{workflow_id}",
             )
 
-        return Response({"msg": "Execution started. Please check workflow detail page for results."})
+        return Response(
+            {"msg": "Execution started. Please check workflow detail page for results."}
+        )
 
 
 class WorkflowLogList(generics.ListAPIView):

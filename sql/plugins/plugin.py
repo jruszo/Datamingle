@@ -29,7 +29,11 @@ class Plugin:
         args_check_result = {"status": 0, "msg": "ok", "data": {}}
         # Check executable path.
         if self.path is None:
-            return {"status": 1, "msg": "Executable file path cannot be empty!", "data": {}}
+            return {
+                "status": 1,
+                "msg": "Executable path cannot be empty!",
+                "data": {},
+            }
         # Check disabled arguments.
         for arg in args.keys():
             if arg in self.disable_args:
@@ -43,13 +47,17 @@ class Plugin:
             if req_arg not in args.keys():
                 return {
                     "status": 1,
-                    "msg": "Required argument {arg} must be specified".format(arg=req_arg),
+                    "msg": "Required argument {arg} must be specified".format(
+                        arg=req_arg
+                    ),
                     "data": {},
                 }
             elif args[req_arg] is None or args[req_arg] == "":
                 return {
                     "status": 1,
-                    "msg": "Value for argument {arg} cannot be empty".format(arg=req_arg),
+                    "msg": "Value for argument {arg} cannot be empty".format(
+                        arg=req_arg
+                    ),
                     "data": {},
                 }
         return args_check_result

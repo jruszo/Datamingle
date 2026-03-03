@@ -266,7 +266,9 @@ def passed(request):
             )
         except AuditException as e:
             return render(
-                request, "error.html", {"errMsg": f"Audit failed, error details: {str(e)}"}
+                request,
+                "error.html",
+                {"errMsg": f"Audit failed, error details: {str(e)}"},
             )
         if auditor.audit.current_status == WorkflowStatus.PASSED:
             # If approval flow finished, mark workflow as review-passed.
@@ -481,7 +483,9 @@ def cancel(request):
         try:
             workflow_audit_detail = auditor.operate(action, request.user, audit_remark)
         except AuditException as e:
-            logger.error(f"Workflow cancellation failed, error details: {traceback.format_exc()}")
+            logger.error(
+                f"Workflow cancellation failed, error details: {traceback.format_exc()}"
+            )
             return render(request, "error.html", {"errMsg": f"{str(e)}"})
         # Set workflow status to manually aborted.
         sql_workflow.status = "workflow_abort"

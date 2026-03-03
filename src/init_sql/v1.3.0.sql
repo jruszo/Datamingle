@@ -3,7 +3,7 @@ CREATE TABLE `workflow_log` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
   `audit_id` bigint(20) NOT NULL DEFAULT '0' COMMENT 'Workflow audit ID',
   `operation_type` tinyint(4) NOT NULL DEFAULT '0' COMMENT 'Operation type: 0 submit/pending review, 1 approved, 2 rejected, 3 canceled/cancel execution, 4 scheduled execution, 5 execute workflow, 6 execution finished',
-  `operation_type_desc` char(10) NOT NULL DEFAULT '' COMMENT 'Operation type description',
+  `operation_type_desc` varchar(64) NOT NULL DEFAULT '' COMMENT 'Operation type description',
   `operation_info` varchar(200) NOT NULL DEFAULT '' COMMENT 'Operation info',
   `operator` varchar(30) NOT NULL DEFAULT '' COMMENT 'Operator',
   `operator_display` varchar(50) NOT NULL DEFAULT '' COMMENT 'Operator display name',

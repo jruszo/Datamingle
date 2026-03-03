@@ -316,7 +316,11 @@ class TestSignUp(TestCase):
         """
         response = self.client.post("/signup/", data={})
         data = json.loads(response.content)
-        content = {"status": 1, "msg": "Username and password cannot be empty.", "data": None}
+        content = {
+            "status": 1,
+            "msg": "Username and password cannot be empty.",
+            "data": None,
+        }
         self.assertEqual(data, content)
 
     def test_sing_up_not_password(self):
@@ -325,7 +329,11 @@ class TestSignUp(TestCase):
         """
         response = self.client.post("/signup/", data={"username": "test"})
         data = json.loads(response.content)
-        content = {"status": 1, "msg": "Username and password cannot be empty.", "data": None}
+        content = {
+            "status": 1,
+            "msg": "Username and password cannot be empty.",
+            "data": None,
+        }
         self.assertEqual(data, content)
 
     def test_sing_up_not_display(self):
@@ -355,7 +363,11 @@ class TestSignUp(TestCase):
             data={"username": "test", "password": "123456", "password2": "12345"},
         )
         data = json.loads(response.content)
-        content = {"status": 1, "msg": "The two password entries do not match.", "data": None}
+        content = {
+            "status": 1,
+            "msg": "The two password entries do not match.",
+            "data": None,
+        }
         self.assertEqual(data, content)
 
     def test_sing_up_duplicate_uesrname(self):
@@ -1122,7 +1134,11 @@ class TestOptimize(TestCase):
         )
         self.assertEqual(
             json.loads(r.content),
-            {"status": 1, "msg": "Please configure soar_path and test_dsn!", "data": []},
+            {
+                "status": 1,
+                "msg": "Please configure soar_path and test_dsn!",
+                "data": [],
+            },
         )
         self.sys_config.set("soar", "/opt/archery/src/plugins/soar")
         self.sys_config.set("soar_test_dsn", "root:@127.0.0.1:3306/information_schema")
@@ -1151,7 +1167,11 @@ class TestOptimize(TestCase):
         r = self.client.post(path="/slowquery/optimize_sqltuning/", data=data)
         self.assertEqual(
             json.loads(r.content),
-            {"status": 1, "msg": "Your group is not associated with this instance!", "data": []},
+            {
+                "status": 1,
+                "msg": "Your group is not associated with this instance!",
+                "data": [],
+            },
         )
 
         # Get sys_parm.
@@ -1445,7 +1465,8 @@ class TestBinLog(TestCase):
         data = {"instance_name": "some_instance"}
         r = self.client.post(path="/binlog/list/", data=data)
         self.assertEqual(
-            json.loads(r.content), {"status": 1, "msg": "Instance does not exist", "data": []}
+            json.loads(r.content),
+            {"status": 1, "msg": "Instance does not exist", "data": []},
         )
 
     def test_binlog_list_instance(self):
@@ -1568,7 +1589,8 @@ class TestBinLog(TestCase):
         }
         r = self.client.post(path="/binlog/del_log/", data=data)
         self.assertEqual(
-            json.loads(r.content), {"status": 1, "msg": "Instance does not exist", "data": []}
+            json.loads(r.content),
+            {"status": 1, "msg": "Instance does not exist", "data": []},
         )
 
     def test_del_binlog_binlog_not_exist(self):
@@ -1649,7 +1671,8 @@ class TestParam(TestCase):
         data = {"instance_id": 0}
         r = self.client.post(path="/param/list/", data=data)
         self.assertEqual(
-            json.loads(r.content), {"status": 1, "msg": "Instance does not exist", "data": []}
+            json.loads(r.content),
+            {"status": 1, "msg": "Instance does not exist", "data": []},
         )
 
     @patch("sql.engines.mysql.MysqlEngine.get_variables")
@@ -1800,7 +1823,11 @@ class TestParam(TestCase):
         r = self.client.post(path="/param/edit/", data=data)
         self.assertEqual(
             json.loads(r.content),
-            {"status": 1, "msg": "Set variable failed, error: update failed", "data": []},
+            {
+                "status": 1,
+                "msg": "Set variable failed, error: update failed",
+                "data": [],
+            },
         )
 
 
@@ -1862,7 +1889,10 @@ class TestDataDictionary(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertDictEqual(
             json.loads(r.content),
-            {"data": {"t": [["test1", "Test table 1"], ["test2", "Test table 2"]]}, "status": 0},
+            {
+                "data": {"t": [["test1", "Test table 1"], ["test2", "Test table 2"]]},
+                "status": 0,
+            },
         )
 
     def test_table_list_not_param(self):
@@ -1873,7 +1903,9 @@ class TestDataDictionary(TestCase):
         data = {"instance_name": "not exist ins", "db_type": "mysql"}
         r = self.client.get(path="/data_dictionary/table_list/", data=data)
         self.assertEqual(r.status_code, 200)
-        self.assertDictEqual(json.loads(r.content), {"msg": "Invalid request!", "status": 1})
+        self.assertDictEqual(
+            json.loads(r.content), {"msg": "Invalid request!", "status": 1}
+        )
 
     def test_table_list_instance_does_not_exist(self):
         """
@@ -1939,7 +1971,9 @@ class TestDataDictionary(TestCase):
         }
         r = self.client.get(path="/data_dictionary/table_info/", data=data)
         self.assertEqual(r.status_code, 200)
-        self.assertDictEqual(json.loads(r.content), {"msg": "Invalid request!", "status": 1})
+        self.assertDictEqual(
+            json.loads(r.content), {"msg": "Invalid request!", "status": 1}
+        )
 
     def test_table_info_instance_does_not_exist(self):
         """
@@ -1988,7 +2022,11 @@ class TestDataDictionary(TestCase):
         r = self.client.get(path="/data_dictionary/export/", data=data)
         self.assertDictEqual(
             json.loads(r.content),
-            {"data": [], "msg": "Your group is not associated with this instance.", "status": 1},
+            {
+                "data": [],
+                "msg": "Your group is not associated with this instance.",
+                "status": 1,
+            },
         )
 
     @patch("sql.data_dictionary.user_instances")

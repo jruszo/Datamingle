@@ -233,7 +233,9 @@ class ResourceGroupDetail(views.APIView):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    @extend_schema(summary="Delete Resource Group", description="Delete a resource group.")
+    @extend_schema(
+        summary="Delete Resource Group", description="Delete a resource group."
+    )
     def delete(self, request, pk):
         group = self.get_object(pk)
         group.delete()
@@ -276,7 +278,9 @@ class TwoFA(views.APIView):
 
     permission_classes = [permissions.AllowAny]
 
-    @extend_schema(summary="Configure 2FA", request=TwoFASerializer, description="Configure 2FA.")
+    @extend_schema(
+        summary="Configure 2FA", request=TwoFASerializer, description="Configure 2FA."
+    )
     def post(self, request):
         # Parameter validation
         serializer = TwoFASerializer(data=request.data)
@@ -292,9 +296,16 @@ class TwoFA(views.APIView):
         if not request.user.is_authenticated:
             if request_user:
                 if request_user != engineer:
-                    return Response({"status": 1, "msg": "Logged-in user does not match the user being validated."})
+                    return Response(
+                        {
+                            "status": 1,
+                            "msg": "Logged-in user does not match the user being validated.",
+                        }
+                    )
             else:
-                return Response({"status": 1, "msg": "User password must be verified first."})
+                return Response(
+                    {"status": 1, "msg": "User password must be verified first."}
+                )
 
         authenticator = get_authenticator(user=user, auth_type=auth_type)
         if enable == "true":
@@ -412,14 +423,23 @@ class TwoFAVerify(views.APIView):
         if not request.user.is_authenticated:
             if request_user:
                 if request_user != engineer:
-                    return Response({"status": 1, "msg": "Logged-in user does not match the user being validated."})
+                    return Response(
+                        {
+                            "status": 1,
+                            "msg": "Logged-in user does not match the user being validated.",
+                        }
+                    )
             else:
-                return Response({"status": 1, "msg": "User password must be verified first."})
+                return Response(
+                    {"status": 1, "msg": "User password must be verified first."}
+                )
 
             twofa_config = TwoFactorAuthConfig.objects.filter(user=user)
             if not twofa_config:
                 if not key:
-                    return Response({"status": 1, "msg": "User has not configured 2FA."})
+                    return Response(
+                        {"status": 1, "msg": "User has not configured 2FA."}
+                    )
 
         auth_type = request.data["auth_type"]
         authenticator = get_authenticator(user=user, auth_type=auth_type)

@@ -581,12 +581,12 @@ class ElasticsearchEngineBase(EngineBase):
             elif doc.method == "DELETE":
                 if not doc.doc_id:
                     result = ReviewResult(
-                            id=rowid,
-                            errlevel=2,
-                            stagestatus="Rejected: unsupported statement",
-                            errormessage="DELETE operation must include document ID.",
-                            sql=doc.sql,
-                        )
+                        id=rowid,
+                        errlevel=2,
+                        stagestatus="Rejected: unsupported statement",
+                        errormessage="DELETE operation must include document ID.",
+                        sql=doc.sql,
+                    )
                 else:
                     if is_pass == False:
                         is_pass = True
@@ -1134,7 +1134,9 @@ class ElasticsearchEngine(ElasticsearchEngineBase):
                     verify_certs=self.instance.verify_ssl,  # Enable certificate verification.
                 )
             except Exception as e:
-                raise Exception(f"Failed to establish Elasticsearch connection: {str(e)}")
+                raise Exception(
+                    f"Failed to establish Elasticsearch connection: {str(e)}"
+                )
         if not self.conn:
             raise Exception("Unable to establish Elasticsearch connection.")
         return self.conn

@@ -102,7 +102,11 @@ def create(request):
         instance.db_type == "mongo" and not all([db_name, user, password1, password2])
     ):
         return JsonResponse(
-            {"status": 1, "msg": "Incomplete parameters, please verify and submit", "data": []}
+            {
+                "status": 1,
+                "msg": "Incomplete parameters, please verify and submit",
+                "data": [],
+            }
         )
 
     if password1 != password2:
@@ -160,7 +164,11 @@ def edit(request):
         instance.db_type == "mongo" and not all([db_name, user])
     ):
         return JsonResponse(
-            {"status": 1, "msg": "Incomplete parameters, please verify and submit", "data": []}
+            {
+                "status": 1,
+                "msg": "Incomplete parameters, please verify and submit",
+                "data": [],
+            }
         )
 
     # Save to metadata table.
@@ -217,7 +225,11 @@ def grant(request):
             global_privs = privs["global_privs"]
             if not all([global_privs]):
                 return JsonResponse(
-                    {"status": 1, "msg": "Incomplete information, please verify and submit", "data": []}
+                    {
+                        "status": 1,
+                        "msg": "Incomplete information, please verify and submit",
+                        "data": [],
+                    }
                 )
             global_privs = ["GRANT OPTION" if g == "GRANT" else g for g in global_privs]
             if op_type == 0:
@@ -231,7 +243,11 @@ def grant(request):
             db_name = request.POST.getlist("db_name[]")
             if not all([db_privs, db_name]):
                 return JsonResponse(
-                    {"status": 1, "msg": "Incomplete information, please verify and submit", "data": []}
+                    {
+                        "status": 1,
+                        "msg": "Incomplete information, please verify and submit",
+                        "data": [],
+                    }
                 )
             for db in db_name:
                 db_privs = ["GRANT OPTION" if d == "GRANT" else d for d in db_privs]
@@ -250,7 +266,11 @@ def grant(request):
             tb_name = request.POST.getlist("tb_name[]")
             if not all([tb_privs, db_name, tb_name]):
                 return JsonResponse(
-                    {"status": 1, "msg": "Incomplete information, please verify and submit", "data": []}
+                    {
+                        "status": 1,
+                        "msg": "Incomplete information, please verify and submit",
+                        "data": [],
+                    }
                 )
             for tb in tb_name:
                 tb_privs = ["GRANT OPTION" if t == "GRANT" else t for t in tb_privs]
@@ -266,7 +286,11 @@ def grant(request):
             col_name = request.POST.getlist("col_name[]")
             if not all([col_privs, db_name, tb_name, col_name]):
                 return JsonResponse(
-                    {"status": 1, "msg": "Incomplete information, please verify and submit", "data": []}
+                    {
+                        "status": 1,
+                        "msg": "Incomplete information, please verify and submit",
+                        "data": [],
+                    }
                 )
             for priv in col_privs:
                 if op_type == 0:
@@ -326,7 +350,11 @@ def reset_pwd(request):
         instance.db_type == "mongo" and not all([db_name, user, reset_pwd1, reset_pwd2])
     ):
         return JsonResponse(
-            {"status": 1, "msg": "Incomplete parameters, please verify and submit", "data": []}
+            {
+                "status": 1,
+                "msg": "Incomplete parameters, please verify and submit",
+                "data": [],
+            }
         )
 
     if reset_pwd1 != reset_pwd2:
@@ -372,7 +400,11 @@ def lock(request):
 
     if not all([user_host]):
         return JsonResponse(
-            {"status": 1, "msg": "Incomplete parameters, please verify and submit", "data": []}
+            {
+                "status": 1,
+                "msg": "Incomplete parameters, please verify and submit",
+                "data": [],
+            }
         )
 
     try:
@@ -428,7 +460,11 @@ def delete(request):
         instance.db_type == "mongo" and not all([db_name_user])
     ):
         return JsonResponse(
-            {"status": 1, "msg": "Incomplete parameters, please verify and submit", "data": []}
+            {
+                "status": 1,
+                "msg": "Incomplete parameters, please verify and submit",
+                "data": [],
+            }
         )
 
     engine = get_engine(instance=instance)

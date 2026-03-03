@@ -13,7 +13,11 @@ def superuser_required(func):
         if user.is_superuser is False:
             is_ajax = request.META.get("HTTP_X_REQUESTED_WITH") == "XMLHttpRequest"
             if is_ajax:
-                result = {"status": 1, "msg": "You are not authorized. Contact admin.", "data": []}
+                result = {
+                    "status": 1,
+                    "msg": "You are not authorized. Contact admin.",
+                    "data": [],
+                }
                 return HttpResponse(json.dumps(result), content_type="application/json")
             else:
                 context = {"errMsg": "You are not authorized. Contact admin."}

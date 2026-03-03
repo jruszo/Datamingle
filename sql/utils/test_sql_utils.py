@@ -362,7 +362,9 @@ create table user(
         db_list = ["a_db", "b_db", "test_db", "prod_db"]
         regex = r".*_db$"  # Database names ending with "_db".
         result = filter_db_list(db_list, regex, is_match_regex=True)
-        self.assertEqual(result, ["a_db", "b_db", "test_db", "prod_db"])  # All should match.
+        self.assertEqual(
+            result, ["a_db", "b_db", "test_db", "prod_db"]
+        )  # All should match.
 
     def test_filter_with_string_list_not_match_regex(self):
         """

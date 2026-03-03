@@ -303,7 +303,9 @@ class TestMssql(TestCase):
         self.assertGreater(len(check_result.rows), 0)
         # SELECT statement should be rejected.
         self.assertEqual(check_result.rows[0].errlevel, 2)
-        self.assertIn("Rejected unsupported statement", check_result.rows[0].stagestatus)
+        self.assertIn(
+            "Rejected unsupported statement", check_result.rows[0].stagestatus
+        )
 
     @patch("sql.engines.mssql.MssqlEngine.get_connection")
     def test_execute_check_with_critical_ddl(self, mock_get_connection):

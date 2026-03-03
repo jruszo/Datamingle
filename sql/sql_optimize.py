@@ -233,7 +233,9 @@ def explain(request):
         # Filter out statements that do not start with EXPLAIN.
         if not re.match(r"^explain", sql_content, re.I):
             result["status"] = 1
-            result["msg"] = "Only statements starting with EXPLAIN are supported. Please check."
+            result["msg"] = (
+                "Only statements starting with EXPLAIN are supported. Please check."
+            )
             return HttpResponse(json.dumps(result), content_type="application/json")
 
     # Execute and get execution plan.

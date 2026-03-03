@@ -425,7 +425,9 @@ def offline_file_download(request):
     except Exception as e:
         extra_info = extra_info + f", error: {str(e)}"
         logger.error(extra_info)
-        return JsonResponse({"error": "Internal error, please contact admin."}, status=500)
+        return JsonResponse(
+            {"error": "Internal error, please contact admin."}, status=500
+        )
 
     finally:
         if request.method != "HEAD":

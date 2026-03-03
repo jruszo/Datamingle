@@ -438,7 +438,9 @@ def query_priv_audit(request):
         audit_status = WorkflowAction(int(request.POST["audit_status"]))
     except ValueError as e:
         return render(
-            request, "error.html", {"errMsg": f"Invalid audit_status parameter, {str(e)}"}
+            request,
+            "error.html",
+            {"errMsg": f"Invalid audit_status parameter, {str(e)}"},
         )
     audit_remark = request.POST.get("audit_remark")
 

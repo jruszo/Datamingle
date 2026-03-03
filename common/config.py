@@ -29,7 +29,9 @@ class SysConfig(object):
                 sys_config[items["item"]] = items["value"]
             self.sys_config = sys_config
         except Exception as m:
-            logger.error(f"Failed to load system configuration: {m}{traceback.format_exc()}")
+            logger.error(
+                f"Failed to load system configuration: {m}{traceback.format_exc()}"
+            )
             self.sys_config = {}
 
     def get(self, key, default_value=None):

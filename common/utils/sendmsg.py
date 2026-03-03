@@ -104,7 +104,9 @@ class MsgSender(object):
 
             # Message headers
             main_msg["Subject"] = Header(subject, "utf-8").encode()
-            main_msg["From"] = formataddr(["Archery Notification", self.MAIL_REVIEW_FROM_ADDR])
+            main_msg["From"] = formataddr(
+                ["Archery Notification", self.MAIL_REVIEW_FROM_ADDR]
+            )
             main_msg["To"] = ",".join(list(set(to)))
             main_msg["Cc"] = ", ".join(str(cc) for cc in list(set(list_cc)))
             main_msg["Date"] = email.utils.formatdate()
@@ -149,7 +151,9 @@ class MsgSender(object):
         r = requests.post(url=url, json=data)
         r_json = r.json()
         if r_json["errcode"] == 0:
-            logger.debug(f"DingTalk webhook sent successfully\nTarget:{url}\nContent:{content}")
+            logger.debug(
+                f"DingTalk webhook sent successfully\nTarget:{url}\nContent:{content}"
+            )
         else:
             logger.error(
                 f"DingTalk webhook failed\nRequest url:{url}\nRequest data:{data}\nResponse:{r_json}"
@@ -249,7 +253,9 @@ class MsgSender(object):
             or ("StatusCode" in r_json and r_json["StatusCode"] == 0)
             or ("code" in r_json and r_json["code"] == 0)
         ):
-            logger.debug(f"Feishu webhook sent successfully\nTarget:{url}\nContent:{content}")
+            logger.debug(
+                f"Feishu webhook sent successfully\nTarget:{url}\nContent:{content}"
+            )
         else:
             logger.error(
                 f"Feishu webhook failed\nRequest url:{url}\nRequest data:{data}\nResponse:{r_json}"

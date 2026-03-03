@@ -147,10 +147,16 @@ def archive_apply(request):
         )
         or no_delete is None
     ):
-        return JsonResponse({"status": 1, "msg": "Please complete all required fields!", "data": {}})
+        return JsonResponse(
+            {"status": 1, "msg": "Please complete all required fields!", "data": {}}
+        )
     if mode == "dest" and not all([dest_instance_name, dest_db_name, dest_table_name]):
         return JsonResponse(
-            {"status": 1, "msg": "Destination instance info is required for destination mode!", "data": {}}
+            {
+                "status": 1,
+                "msg": "Destination instance info is required for destination mode!",
+                "data": {},
+            }
         )
 
     # Get source instance info.
@@ -219,7 +225,11 @@ def archive_apply(request):
         except AuditException as e:
             logger.error(f"Failed to create approval flow: {str(e)}")
             return JsonResponse(
-                {"status": 1, "msg": "Failed to create approval flow. Contact admin.", "data": {}}
+                {
+                    "status": 1,
+                    "msg": "Failed to create approval flow. Contact admin.",
+                    "data": {},
+                }
             )
         audit_handler.workflow.status = audit_handler.audit.current_status
         if audit_handler.audit.current_status == WorkflowStatus.PASSED:
@@ -445,17 +455,23 @@ def archive(archive_id):
     if mode == "dest":
         # If deleting source data, check delete/write counts.
         if not no_delete and (insert_cnt != delete_cnt):
-            error_info = f"Delete and insert counts do not match: {insert_cnt}!={delete_cnt}"
+            error_info = (
+                f"Delete and insert counts do not match: {insert_cnt}!={delete_cnt}"
+            )
             success = False
     elif mode == "file":
         # If deleting source data, check select/delete counts.
         if not no_delete and (select_cnt != delete_cnt):
-            error_info = f"Select and delete counts do not match: {select_cnt}!={delete_cnt}"
+            error_info = (
+                f"Select and delete counts do not match: {select_cnt}!={delete_cnt}"
+            )
             success = False
     elif mode == "purge":
         # Purge mode: check select/delete counts.
         if select_cnt != delete_cnt:
-            error_info = f"Select and delete counts do not match: {select_cnt}!={delete_cnt}"
+            error_info = (
+                f"Select and delete counts do not match: {select_cnt}!={delete_cnt}"
+            )
             success = False
 
     # Save execution details to database.
