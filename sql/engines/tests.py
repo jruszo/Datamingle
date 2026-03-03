@@ -271,7 +271,7 @@ class TestRedis(TestCase):
         self.assertDictEqual(
             check_result,
             {
-                "msg": "禁止执行该命令！",
+                "msg": "This command is not allowed!",
                 "bad_query": True,
                 "filtered_sql": safe_cmd,
                 "has_star": False,
@@ -285,7 +285,7 @@ class TestRedis(TestCase):
         self.assertDictEqual(
             check_result,
             {
-                "msg": "禁止执行该命令！",
+                "msg": "This command is not allowed!",
                 "bad_query": True,
                 "filtered_sql": safe_cmd,
                 "has_star": False,
@@ -312,7 +312,7 @@ class TestRedis(TestCase):
             id=1,
             errlevel=0,
             stagestatus="Audit completed",
-            errormessage="暂不支持显示影响行数",
+            errormessage="Displaying affected rows is not supported yet",
             sql=sql,
             affected_rows=0,
             execute_time=0,
@@ -329,7 +329,7 @@ class TestRedis(TestCase):
             id=1,
             errlevel=0,
             stagestatus="Execute Successfully",
-            errormessage="暂不支持显示影响行数",
+            errormessage="Displaying affected rows is not supported yet",
             sql=sql,
             affected_rows=0,
             execute_time=0,
