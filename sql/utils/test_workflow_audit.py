@@ -35,10 +35,10 @@ class TestAudit(TestCase):
     def setUp(self):
         self.sys_config = SysConfig()
         self.user = User.objects.create(
-            username="test_user", display="中文显示", is_active=True
+            username="test_user", display="display_name", is_active=True
         )
         self.su = User.objects.create(
-            username="s_user", display="中文显示", is_active=True, is_superuser=True
+            username="s_user", display="display_name", is_active=True, is_superuser=True
         )
         tomorrow = datetime.datetime.today() + datetime.timedelta(days=1)
         self.ins = Instance.objects.create(
@@ -119,8 +119,8 @@ class TestAudit(TestCase):
             group_name="some_group",
             workflow_id=1,
             workflow_type=1,
-            workflow_title="申请标题",
-            workflow_remark="申请备注",
+            workflow_title="request title",
+            workflow_remark="request remark",
             audit_auth_groups="1,2,3",
             current_audit="1",
             next_audit="2",
@@ -145,19 +145,19 @@ class TestAudit(TestCase):
 
     @patch("sql.utils.workflow_audit.user_groups", return_value=[])
     def test_todo(self, _user_groups):
-        """TODO 测试todo数量,未断言"""
+        """TODO: test todo count, no assertion yet."""
         Audit.todo(self.user)
         Audit.todo(self.su)
 
     def test_detail(self):
-        """测试获取审核信息"""
+        """Test getting audit info."""
         result = Audit.detail(self.audit.audit_id)
         self.assertEqual(result, self.audit)
         result = Audit.detail(0)
         self.assertEqual(result, None)
 
     def test_detail_by_workflow_id(self):
-        """测试通过业务id获取审核信息"""
+        """Test getting audit info by workflow ID."""
         self.audit.workflow_type = WorkflowType.SQL_REVIEW
         self.audit.workflow_id = self.wf.id
         self.audit.save()
@@ -167,7 +167,7 @@ class TestAudit(TestCase):
         self.assertEqual(result, None)
 
     def test_settings(self):
-        """测试通过组和审核类型，获取审核配置信息"""
+        """Test getting audit settings by group and workflow type."""
         WorkflowAuditSetting.objects.create(
             workflow_type=1, group_id=1, audit_auth_groups="1,2,3"
         )
@@ -177,7 +177,7 @@ class TestAudit(TestCase):
         self.assertEqual(result, None)
 
     def test_change_settings_edit(self):
-        """修改配置信息"""
+        """Edit settings."""
         ws = WorkflowAuditSetting.objects.create(
             workflow_type=1, group_id=1, audit_auth_groups="1,2,3"
         )
@@ -186,7 +186,7 @@ class TestAudit(TestCase):
         self.assertEqual(ws.audit_auth_groups, "1,2")
 
     def test_change_settings_add(self):
-        """添加配置信息"""
+        """Add settings."""
         Audit.change_settings(workflow_type=1, group_id=1, audit_auth_groups="1,2")
         ws = WorkflowAuditSetting.objects.get(workflow_type=1, group_id=1)
         self.assertEqual(ws.audit_auth_groups, "1,2")
@@ -194,7 +194,7 @@ class TestAudit(TestCase):
     @patch("sql.utils.workflow_audit.auth_group_users")
     @patch("sql.utils.workflow_audit.Audit.detail_by_workflow_id")
     def test_can_review_sql_review(self, _detail_by_workflow_id, _auth_group_users):
-        """测试判断用户当前是否是可审核上线工单，非管理员拥有权限"""
+        """Test non-admin can review SQL workflows when properly authorized."""
         sql_review = Permission.objects.get(codename="sql_review")
         self.user.user_permissions.add(sql_review)
         aug = Group.objects.create(name="auth_group")
@@ -213,7 +213,7 @@ class TestAudit(TestCase):
     def test_cannot_review_self_sql_review(
         self, _detail_by_workflow_id, _auth_group_users
     ):
-        """测试确认用户不能审核自己提交的上线工单，非管理员拥有权限"""
+        """Test non-admin cannot review own SQL workflow when self-review is banned."""
         self.sys_config.set("ban_self_audit", "true")
         sql_review = Permission.objects.get(codename="sql_review")
         self.user.user_permissions.add(sql_review)
@@ -231,7 +231,7 @@ class TestAudit(TestCase):
     @patch("sql.utils.workflow_audit.auth_group_users")
     @patch("sql.utils.workflow_audit.Audit.detail_by_workflow_id")
     def test_can_review_query_review(self, _detail_by_workflow_id, _auth_group_users):
-        """测试判断用户当前是否是可审核查询工单，非管理员拥有权限"""
+        """Test non-admin can review query workflows when properly authorized."""
         query_review = Permission.objects.get(codename="query_review")
         self.user.user_permissions.add(query_review)
         aug = Group.objects.create(name="auth_group")
@@ -250,7 +250,7 @@ class TestAudit(TestCase):
     def test_can_review_sql_review_super(
         self, _detail_by_workflow_id, _auth_group_users
     ):
-        """测试判断用户当前是否是可审核查询工单，用户是管理员"""
+        """Test admin can review SQL workflows."""
         aug = Group.objects.create(name="auth_group")
         _detail_by_workflow_id.return_value.current_audit = aug.id
         _auth_group_users.return_value.filter.exists = True
@@ -263,7 +263,7 @@ class TestAudit(TestCase):
     @patch("sql.utils.workflow_audit.auth_group_users")
     @patch("sql.utils.workflow_audit.Audit.detail_by_workflow_id")
     def test_can_review_wrong_status(self, _detail_by_workflow_id, _auth_group_users):
-        """测试判断用户当前是否是可审核，非待审核工单"""
+        """Test non-waiting workflow cannot be reviewed."""
         aug = Group.objects.create(name="auth_group")
         _detail_by_workflow_id.return_value.current_audit = aug.id
         _auth_group_users.return_value.filter.exists = True
@@ -279,7 +279,7 @@ class TestAudit(TestCase):
     @patch("sql.utils.workflow_audit.auth_group_users")
     @patch("sql.utils.workflow_audit.Audit.detail_by_workflow_id")
     def test_can_review_no_prem(self, _detail_by_workflow_id, _auth_group_users):
-        """测试判断用户当前是否是可审核，普通用户无权限"""
+        """Test normal user without permission cannot review."""
         aug = Group.objects.create(name="auth_group")
         _detail_by_workflow_id.return_value.current_audit = aug.id
         _auth_group_users.return_value.filter.exists = True
@@ -296,7 +296,7 @@ class TestAudit(TestCase):
     def test_can_review_no_prem_exception(
         self, _detail_by_workflow_id, _auth_group_users
     ):
-        """测试判断用户当前是否是可审核，权限组不存在"""
+        """Test exception case when permission group is missing."""
         Group.objects.create(name="auth_group")
         _detail_by_workflow_id.side_effect = RuntimeError()
         _auth_group_users.return_value.filter.exists = True
@@ -304,23 +304,24 @@ class TestAudit(TestCase):
         self.audit.workflow_id = self.wf.id
         self.audit.save()
         with self.assertRaisesMessage(
-            Exception, "当前审批auth_group_id不存在，请检查并清洗历史数据"
+            Exception,
+            "Current review auth_group_id does not exist, please check and clean historical data",
         ):
             Audit.can_review(
                 self.user, self.audit.workflow_id, self.audit.workflow_type
             )
 
     def test_logs(self):
-        """测试获取工单日志"""
+        """Test getting workflow logs."""
         r = Audit.logs(self.audit.audit_id).first()
         self.assertEqual(r, self.wl)
 
 
-# AuditV2 测试
+# AuditV2 tests
 def test_create_audit(
     sql_workflow, sql_query_apply, archive_apply, resource_group, mocker: MockFixture
 ):
-    """测试正常创建, 可正常获取到一个 audit_setting"""
+    """Test normal creation and retrieval of one audit_setting."""
     mock_generate_audit_setting = mocker.patch.object(AuditV2, "generate_audit_setting")
     fake_audit_setting = AuditSetting(
         auto_pass=False,
@@ -354,14 +355,14 @@ def test_create_audit(
 def test_init_no_workflow_and_audit():
     with pytest.raises(ValueError) as e:
         AuditV2()
-    assert "WorkflowAudit 或 workflow" in str(e.value)
+    assert "WorkflowAudit or workflow is required" in str(e.value)
 
 
 def test_archive_init_no_resource_group(archive_apply):
-    """测试 archive 初始化时指定的资源组不存在"""
+    """Test archive init with missing resource group."""
     with pytest.raises(AuditException) as e:
         AuditV2(workflow=archive_apply, resource_group="not_exists_group")
-    assert "参数错误, 未发现资源组" in str(e.value)
+    assert "Invalid parameter: resource group" in str(e.value)
 
 
 def test_duplicate_create(sql_query_apply, fake_generate_audit_setting):
@@ -369,7 +370,7 @@ def test_duplicate_create(sql_query_apply, fake_generate_audit_setting):
     audit.create_audit()
     with pytest.raises(AuditException) as e:
         audit.create_audit()
-    assert "请勿重复提交" in str(e.value)
+    assert "pending approval" in str(e.value)
 
 
 def test_create_audit_auto_pass(sql_workflow, mocker: MockFixture):
@@ -413,12 +414,12 @@ def test_supported_operate(
     if not allowed:
         with pytest.raises(AuditException) as e:
             audit.operate(operation, super_user, "test")
-        assert "不允许的操作" in str(e.value)
+        assert "Operation not allowed" in str(e.value)
     else:
         result = audit.operate(operation, super_user, "test")
         assert isinstance(result, WorkflowAuditDetail)
         assert result.audit_id == audit.audit.audit_id
-        # 在 log 表里找对于的记录
+        # Find the corresponding record in workflow log.
         log = WorkflowLog.objects.filter(
             audit_id=audit.audit.audit_id, operation_type=operation
         ).all()
@@ -442,7 +443,7 @@ def test_generate_audit_setting_empty_config(sql_query_apply):
     audit = AuditV2(workflow=sql_query_apply)
     with pytest.raises(AuditException) as e:
         audit.generate_audit_setting()
-    assert "未配置审流" in str(e.value)
+    assert "Approval flow is not configured" in str(e.value)
 
 
 def test_get_workflow(
@@ -452,7 +453,7 @@ def test_get_workflow(
     resource_group,
     fake_generate_audit_setting,
 ):
-    """初始化时只传了 audit, 尝试取 workflow"""
+    """Initialize with audit only and load workflow from it."""
     sql_workflow, _ = sql_workflow
     for wf in [sql_query_apply, sql_workflow]:
         a = AuditV2(workflow=wf)
@@ -468,7 +469,7 @@ def test_get_workflow(
 
 
 def test_auto_review_non_sql_review(sql_query_apply):
-    """当前自动审核仅对 SQL 上线工单生效"""
+    """Auto review only applies to SQL review workflows."""
     audit = AuditV2(workflow=sql_query_apply)
     assert audit.is_auto_review() is False
 
@@ -476,24 +477,24 @@ def test_auto_review_non_sql_review(sql_query_apply):
 def test_auto_review_not_applicable(
     db_instance, sql_workflow, instance_tag, setup_sys_config
 ):
-    """未启用, 实例类型不匹配, 实例无对应标签, 正则匹配, 行数超规模"""
+    """Not enabled, db type mismatch, missing tag, regex match, row threshold."""
     sql_workflow, _ = sql_workflow
-    # 未启用
+    # Not enabled.
     setup_sys_config.set("auto_review", False)
     audit = AuditV2(workflow=sql_workflow, sys_config=setup_sys_config)
     assert audit.is_auto_review() is False
     setup_sys_config.set("auto_review", True)
-    # 实例类型不匹配
+    # DB type mismatch.
     db_instance.db_type = "redis"
     db_instance.save()
     audit.sys_config.set("auto_review_db_type", "mysql")
     assert audit.is_auto_review() is False
     audit.sys_config.set("auto_review_db_type", "redis")
-    # 实例无对应标签
+    # Instance has no matching tag.
     audit.sys_config.set("auto_review_tag", instance_tag.tag_code)
     assert audit.is_auto_review() is False
     db_instance.instance_tag.add(instance_tag)
-    # 匹配到高危语句
+    # Matched risky statement.
     audit.sys_config.set("auto_review_regex", "^drop")
     audit.workflow.sqlworkflowcontent.sql_content = "drop table"
     audit.workflow.sqlworkflowcontent.review_content = json.dumps(
@@ -502,11 +503,11 @@ def test_auto_review_not_applicable(
     audit.workflow.sqlworkflowcontent.save()
     assert audit.is_auto_review() is False
     audit.sys_config.set("auto_review_regex", "^select")
-    # 行数超规模
+    # Affected rows exceed threshold.
     audit.sys_config.set("auto_review_max_update_rows", 1)
     assert audit.is_auto_review() is False
     audit.sys_config.set("auto_review_max_update_rows", 1000)
-    # 全部条件满足, 自动审核通过
+    # All conditions satisfied, auto review passes.
     assert audit.is_auto_review() is True
 
 
@@ -529,24 +530,24 @@ def test_auto_review_with_default_regex(
     expected_result,
 ):
     """
-    自动审核逻辑中，测试auto_review_regex未配置时使用默认正则表达式的情况。
+    Test that default regex is used when auto_review_regex is not configured.
     """
     sql_workflow, _ = sql_workflow
-    # 设置系统配置未包含 auto_review_regex，模拟未配置的环境
+    # Configure system without auto_review_regex to simulate default behavior.
     setup_sys_config.set("auto_review", True)
     setup_sys_config.set("auto_review_db_type", "mysql")
     setup_sys_config.set("auto_review_tag", instance_tag.tag_code)
 
     db_instance.instance_tag.add(instance_tag)
 
-    # 创建 AuditV2 实例
+    # Create AuditV2 instance.
     audit = AuditV2(workflow=sql_workflow, sys_config=setup_sys_config)
-    # 设置审核内容SQL
+    # Set SQL content for review.
     audit.workflow.sqlworkflowcontent.sql_content = sql_command
     audit.workflow.sqlworkflowcontent.review_content = json.dumps(
         [{"sql": sql_command, "affected_rows": 0}]
     )
-    # 执行自动审核逻辑
+    # Execute auto-review logic.
     assert audit.is_auto_review() == expected_result
 
 
@@ -571,7 +572,7 @@ def test_get_review_info(
     assert review_info.nodes[1].is_current_node is False
     assert review_info.nodes[1].is_passed_node is False
 
-    # 将当前节点设置为第二个节点, 重新生成
+    # Set current node to second node and regenerate.
     audit.audit.current_audit = str(g2.id)
     audit.audit.save()
     review_info = audit.get_review_info()
@@ -586,20 +587,20 @@ def test_get_review_info_auto_pass(
     fake_generate_audit_setting,
     admin_client,
 ):
-    # 自动通过的情况
+    # Auto-pass case.
     fake_generate_audit_setting.return_value = AuditSetting(auto_pass=True)
     audit = AuditV2(workflow=sql_query_apply)
     audit.create_audit()
     review_info = audit.get_review_info()
     assert review_info.nodes[0].node_type == ReviewNodeType.AUTO_PASS
-    # 测一下详情页 get
+    # Verify detail page GET.
     response = admin_client.get(f"/queryapplydetail/{sql_query_apply.apply_id}/")
     assert response.status_code == 200
-    assert "无需审批" in response.content.decode("utf-8")
+    assert "No approval required" in response.content.decode("utf-8")
 
 
 def test_auto_review_with_auto_reject(sql_workflow, mocker: MockFixture):
-    """自动审和不通过时无法自动审批"""
+    """Auto review should not pass when auto reject condition is met."""
     mocker.patch.object(AuditV2, "is_auto_reject").return_value = True
     sql_workflow, _ = sql_workflow
     audit = AuditV2(workflow=sql_workflow)
@@ -607,13 +608,13 @@ def test_auto_review_with_auto_reject(sql_workflow, mocker: MockFixture):
 
 
 def test_auto_reject_non_sql_review(sql_query_apply):
-    """当前自动审核仅对 SQL 上线工单生效"""
+    """Auto reject logic only applies to SQL review workflows."""
     audit = AuditV2(workflow=sql_query_apply)
     assert audit.is_auto_reject() is False
 
 
 def test_auto_reject_not_applicable(sql_workflow, setup_sys_config):
-    """测试自动拒绝场景"""
+    """Test auto reject scenarios."""
     sql_workflow, _ = sql_workflow
     audit = AuditV2(workflow=sql_workflow, sys_config=setup_sys_config)
     # warning_count > 0 and auto_review_wrong == "1",
