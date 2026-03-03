@@ -18,45 +18,45 @@ logger = logging.getLogger("default")
 class Plugin:
     def __init__(self, path):
         self.path = path
-        self.required_args = []  # 必须参数
-        self.disable_args = []  # 禁用参数
+        self.required_args = []  # Required arguments.
+        self.disable_args = []  # Disabled arguments.
 
     def check_args(self, args):
         """
-        检查请求参数列表
+        Validate request arguments.
         :return: {'status': 0, 'msg': 'ok', 'data': {}}
         """
         args_check_result = {"status": 0, "msg": "ok", "data": {}}
-        # 检查路径
+        # Check executable path.
         if self.path is None:
-            return {"status": 1, "msg": "可执行文件路径不能为空！", "data": {}}
-        # 检查禁用参数
+            return {"status": 1, "msg": "Executable file path cannot be empty!", "data": {}}
+        # Check disabled arguments.
         for arg in args.keys():
             if arg in self.disable_args:
                 return {
                     "status": 1,
-                    "msg": "{arg}参数已被禁用".format(arg=arg),
+                    "msg": "Argument {arg} is disabled".format(arg=arg),
                     "data": {},
                 }
-        # 检查必须参数
+        # Check required arguments.
         for req_arg in self.required_args:
             if req_arg not in args.keys():
                 return {
                     "status": 1,
-                    "msg": "必须指定{arg}参数".format(arg=req_arg),
+                    "msg": "Required argument {arg} must be specified".format(arg=req_arg),
                     "data": {},
                 }
             elif args[req_arg] is None or args[req_arg] == "":
                 return {
                     "status": 1,
-                    "msg": "{arg}参数值不能为空".format(arg=req_arg),
+                    "msg": "Value for argument {arg} cannot be empty".format(arg=req_arg),
                     "data": {},
                 }
         return args_check_result
 
     def generate_args2cmd(self, args):
         """
-        将请求参数转换为命令行参数
+        Convert request arguments to command-line arguments.
         :return:
         """
         cmd_args = [self.path]
@@ -71,7 +71,7 @@ class Plugin:
     @staticmethod
     def execute_cmd(cmd_args):
         """
-        执行命令并且返回process
+        Execute command and return process.
         :return:
         """
         try:
@@ -84,5 +84,5 @@ class Plugin:
             )
             return p
         except Exception as e:
-            logger.error("命令执行失败\n{}".format(traceback.format_exc()))
-            raise RuntimeError("命令执行失败，失败原因:%s" % str(e))
+            logger.error("Command execution failed\n{}".format(traceback.format_exc()))
+            raise RuntimeError("Command execution failed, reason: %s" % str(e))
