@@ -14,21 +14,21 @@ class AliyunRDS(MysqlEngine):
         super().__init__(instance=instance)
         self.instance_name = instance.instance_name
 
-    # 将sql/aliyun_rds.py的函数迁移值此
+    # Functions migrated from sql/aliyun_rds.py.
     def processlist(self, command_type, **kwargs):
         if command_type is None or command_type == "":
             command_type = "Query"
 
-        # 通过实例名称获取关联的rds实例id
+        # Get related RDS instance ID by instance name.
         instance_info = AliyunRdsConfig.objects.get(
             instance__instance_name=self.instance_name
         )
-        # 调用aliyun接口获取进程数据
+        # Call Aliyun API to get process data.
         process_info = Aliyun(rds=instance_info).RequestServiceOfCloudDBA(
             "ShowProcessList", {"Language": "zh", "Command": command_type}
         )
 
-        # 提取进程列表
+        # Extract process list.
         process_list = json.loads(process_info)["AttrData"]
         process_list = json.loads(process_list)["ProcessList"]
 
@@ -38,11 +38,11 @@ class AliyunRDS(MysqlEngine):
         return result_set
 
     def get_kill_command(self, thread_ids):
-        # 通过实例名称获取关联的rds实例id
+        # Get related RDS instance ID by instance name.
         instance_info = AliyunRdsConfig.objects.get(
             instance__instance_name=self.instance_name
         )
-        # 调用aliyun接口获取进程数据
+        # Call Aliyun API to get process data.
         request_info = Aliyun(rds=instance_info).RequestServiceOfCloudDBA(
             "CreateKillSessionRequest", {"Language": "zh", "ThreadIDs": thread_ids}
         )
@@ -58,38 +58,38 @@ class AliyunRDS(MysqlEngine):
             kill_sql = kill_sql + f"kill {i};"
         result = ResultSet(full_sql=kill_sql)
         try:
-            # 通过实例名称获取关联的rds实例id
+            # Get related RDS instance ID by instance name.
             instance_info = AliyunRdsConfig.objects.get(
                 instance__instance_name=self.instance_name
             )
-            # 调用aliyun接口获取终止进程
+            # Call Aliyun API to terminate process.
             service_request_param = {"Language": "zh"}
             kill_result = Aliyun(rds=instance_info).RequestServiceOfCloudDBA(
                 "ConfirmKillSessionRequest", service_request_param
             )
 
-            # 获取处理结果
+            # Get processed result.
             kill_result = json.loads(kill_result)["AttrData"]
 
             result.rows = kill_result
         except Exception as e:
             logger.warning(
-                f"aliyun rds语句执行报错，语句：{kill_sql}，错误信息{traceback.format_exc()}"
+                f"Aliyun RDS statement execution failed, sql: {kill_sql}, details: {traceback.format_exc()}"
             )
             result.error = str(e)
         return result
 
     def tablespace(self, offset, limit):
-        # 通过实例名称获取关联的rds实例id
+        # Get related RDS instance ID by instance name.
         instance_info = AliyunRdsConfig.objects.get(
             instance__instance_name=self.instance_name
         )
-        # 调用aliyun接口获取进程数据
+        # Call Aliyun API to get process data.
         space_info = Aliyun(rds=instance_info).RequestServiceOfCloudDBA(
             "GetSpaceStatForTables", {"Language": "zh", "OrderType": "Data"}
         )
 
-        # 提取进程列表
+        # Extract process list.
         space_list = json.loads(space_info)["ListData"]
         if space_list:
             space_list = json.loads(space_list)
@@ -101,29 +101,29 @@ class AliyunRDS(MysqlEngine):
 
         return result
 
-    # 获取SQL慢日志统计
+    # Get SQL slow log summary.
     def slowquery_review(self, start_time, end_time, db_name, limit, offset):
-        # 计算页数
+        # Calculate page number.
         page_number = (int(offset) + int(limit)) / int(limit)
         values = {"PageSize": int(limit), "PageNumber": int(page_number)}
-        # DBName非必传
+        # DBName is optional.
         if db_name:
             values["DBName"] = db_name
 
-        # UTC时间转化成阿里云需求的时间格式
+        # Convert UTC time to format required by Aliyun.
         start_time = "%sZ" % start_time
         end_time = "%sZ" % end_time
 
-        # 通过实例名称获取关联的rds实例id
+        # Get related RDS instance ID by instance name.
         instance_info = AliyunRdsConfig.objects.get(
             instance__instance_name=self.instance_name
         )
-        # 调用aliyun接口获取SQL慢日志统计
+        # Call Aliyun API to fetch SQL slow log summary.
         slowsql = Aliyun(rds=instance_info).DescribeSlowLogs(
             start_time, end_time, **values
         )
 
-        # 解决table数据丢失精度、格式化时间
+        # Handle table precision and format time.
         sql_slow_log = json.loads(slowsql)["Items"]["SQLSlowLog"]
         for SlowLog in sql_slow_log:
             SlowLog["SQLId"] = str(SlowLog["SQLHASH"])
@@ -137,39 +137,39 @@ class AliyunRDS(MysqlEngine):
             "PageSize": json.loads(slowsql)["PageRecordCount"],
             "PageNumber": json.loads(slowsql)["PageNumber"],
         }
-        # 返回查询结果
+        # Return query result.
         return result
 
-    # 获取SQL慢日志明细
+    # Get SQL slow log details.
     def slowquery_review_history(
         self, start_time, end_time, db_name, sql_id, limit, offset
     ):
-        # 计算页数
+        # Calculate page number.
         page_number = (int(offset) + int(limit)) / int(limit)
         values = {"PageSize": int(limit), "PageNumber": int(page_number)}
-        # SQLId、DBName非必传
+        # SQLId and DBName are optional.
         if sql_id:
             values["SQLHASH"] = sql_id
         if db_name:
             values["DBName"] = db_name
 
-        # UTC时间转化成阿里云需求的时间格式
+        # Convert UTC time to format required by Aliyun.
         start_time = datetime.datetime.strptime(
             start_time, "%Y-%m-%d"
         ).date() - datetime.timedelta(days=1)
         start_time = "%sT16:00Z" % start_time
         end_time = "%sT15:59Z" % end_time
 
-        # 通过实例名称获取关联的rds实例id
+        # Get related RDS instance ID by instance name.
         instance_info = AliyunRdsConfig.objects.get(
             instance__instance_name=self.instance_name
         )
-        # 调用aliyun接口获取SQL慢日志统计
+        # Call Aliyun API to fetch SQL slow log summary.
         slowsql = Aliyun(rds=instance_info).DescribeSlowLogRecords(
             start_time, end_time, **values
         )
 
-        # 格式化时间\过滤HostAddress
+        # Format time and filter HostAddress.
         sql_slow_record = json.loads(slowsql)["Items"]["SQLSlowRecord"]
         for SlowRecord in sql_slow_record:
             SlowRecord["ExecutionStartTime"] = Aliyun.utc2local(
@@ -184,5 +184,5 @@ class AliyunRDS(MysqlEngine):
             "PageNumber": json.loads(slowsql)["PageNumber"],
         }
 
-        # 返回查询结果
+        # Return query result.
         return result
