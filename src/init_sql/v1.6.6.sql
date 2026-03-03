@@ -1,4 +1,4 @@
--- 增加查询语句收藏/置顶功能
+-- Add query statement favorite/pin feature
 alter table query_log
-  add favorite tinyint not null default 0 comment '是否收藏',
-  add alias varchar(100) not null default '' comment '语句标识/别名';
+  add favorite tinyint not null default 0 comment 'Is favorited',
+  add alias varchar(100) not null default '' comment 'Statement identifier/alias';
