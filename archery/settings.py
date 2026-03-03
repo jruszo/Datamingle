@@ -23,16 +23,17 @@ env = environ.Env(
     SECRET_KEY=(
         str,
         "",
-    ),  # 参考 https://docs.djangoproject.com/zh-hans/4.0/ref/settings/#secret-key
+    ),  # Reference: https://docs.djangoproject.com/en/4.0/ref/settings/#secret-key
     DATABASE_URL=(str, "mysql://root:@127.0.0.1:3306/archery"),
     CACHE_URL=(str, "redis://127.0.0.1:6379/0"),
-    # 系统外部认证目前支持LDAP、OIDC、DINGDING三种，认证方式只能启用其中一种，如果启用多个，实际生效的只有一个，优先级LDAP > DINGDING > OIDC
+    # External authentication currently supports LDAP, OIDC, and DINGDING.
+    # Only one method should be enabled. If multiple are enabled, only one takes effect with priority LDAP > DINGDING > OIDC.
     ENABLE_LDAP=(bool, False),
     ENABLE_OIDC=(bool, False),
     ENABLE_DINGDING=(
         bool,
         False,
-    ),  # 钉钉认证方式参考文档：https://open.dingtalk.com/document/orgapp/tutorial-obtaining-user-personal-information
+    ),  # DingTalk authentication reference: https://open.dingtalk.com/document/orgapp/tutorial-obtaining-user-personal-information
     AUTH_LDAP_ALWAYS_UPDATE_USER=(bool, True),
     AUTH_LDAP_USER_ATTR_MAP=(
         dict,
@@ -42,7 +43,7 @@ env = environ.Env(
         dict,
         {"username": "preferred_username", "display": "name", "email": "email"},
     ),
-    Q_CLUISTER_SYNC=(bool, False),  # qcluster 同步模式, debug 时可以调整为 True
+    Q_CLUISTER_SYNC=(bool, False),  # qcluster sync mode; set to True for local debugging if needed
     # CSRF_TRUSTED_ORIGINS=subdomain.example.com,subdomain.example2.com subdomain.example.com
     CSRF_TRUSTED_ORIGINS=(list, []),
     ENABLED_ENGINES=(
@@ -93,10 +94,10 @@ ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 # https://docs.djangoproject.com/en/4.0/ref/settings/#csrf-trusted-origins
 CSRF_TRUSTED_ORIGINS = env("CSRF_TRUSTED_ORIGINS")
 
-# 解决nginx部署跳转404
+# Fix 404 redirects behind nginx deployment
 USE_X_FORWARDED_HOST = True
 
-# 请求限制
+# Request limits
 DATA_UPLOAD_MAX_MEMORY_SIZE = 15728640
 
 AVAILABLE_ENGINES = {
@@ -185,7 +186,7 @@ USE_I18N = True
 
 USE_TZ = False
 
-# 时间格式化
+# Time formatting
 USE_L10N = False
 DATETIME_FORMAT = "Y-m-d H:i:s"
 DATE_FORMAT = "Y-m-d"
@@ -198,10 +199,10 @@ STATICFILES_DIRS = [
 ]
 STATICFILES_STORAGE = "common.storage.ForgivingManifestStaticFilesStorage"
 
-# 扩展django admin里users字段用到，指定了sql/models.py里的class users
+# Used to extend users field in Django admin, pointing to sql/models.py Users class
 AUTH_USER_MODEL = "sql.Users"
 
-# 密码校验
+# Password validation
 AUTH_PASSWORD_VALIDATORS = [
     {
         "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
@@ -220,14 +221,14 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-############### 以下部分需要用户根据自己环境自行修改 ###################
+############### The following section should be adjusted based on your environment ###################
 
-# SESSION 设置
-SESSION_COOKIE_AGE = 60 * 300  # 300分钟
+# SESSION settings
+SESSION_COOKIE_AGE = 60 * 300  # 300 minutes
 SESSION_SAVE_EVERY_REQUEST = True
-SESSION_EXPIRE_AT_BROWSER_CLOSE = True  # 关闭浏览器，则COOKIE失效
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True  # Cookie expires when browser is closed
 
-# 该项目本身的mysql数据库地址
+# MySQL database address for this project
 DATABASES = {
     "default": {
         **env.db(),
@@ -258,10 +259,10 @@ Q_CLUSTER = {
     "queue_limit": 50,
     "label": "Django Q",
     "django_redis": "default",
-    "sync": env("Q_CLUISTER_SYNC"),  # 本地调试可以修改为True，使用同步模式
+    "sync": env("Q_CLUISTER_SYNC"),  # Set to True for local synchronous debugging
 }
 
-# 缓存配置
+# Cache settings
 CACHES = {
     "default": env.cache(),
 }
@@ -273,22 +274,22 @@ DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
-    # 鉴权
+    # Authentication
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ),
-    # 权限
+    # Permissions
     "DEFAULT_PERMISSION_CLASSES": ("sql_api.permissions.IsInUserWhitelist",),
-    # 限速（anon：未认证用户  user：认证用户）
+    # Throttling (anon: unauthenticated users, user: authenticated users)
     "DEFAULT_THROTTLE_CLASSES": (
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
     ),
     "DEFAULT_THROTTLE_RATES": {"anon": "120/min", "user": "600/min"},
-    # 过滤
+    # Filtering
     "DEFAULT_FILTER_BACKENDS": ("django_filters.rest_framework.DjangoFilterBackend",),
-    # 分页
+    # Pagination
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 5,
 }
@@ -321,7 +322,7 @@ if ENABLE_OIDC:
 
     OIDC_RP_WELLKNOWN_URL = env(
         "OIDC_RP_WELLKNOWN_URL"
-    )  # 例如 https://keycloak.example.com/realms/<your realm>/.well-known/openid-configuration
+    )  # Example: https://keycloak.example.com/realms/<your realm>/.well-known/openid-configuration
     OIDC_RP_CLIENT_ID = env("OIDC_RP_CLIENT_ID")
     OIDC_RP_CLIENT_SECRET = env("OIDC_RP_CLIENT_SECRET")
 
@@ -360,8 +361,8 @@ if ENABLE_LDAP:
     from django_auth_ldap.config import LDAPSearch
 
     AUTHENTICATION_BACKENDS = (
-        "django_auth_ldap.backend.LDAPBackend",  # 配置为先使用LDAP认证，如通过认证则不再使用后面的认证方式
-        "django.contrib.auth.backends.ModelBackend",  # django系统中手动创建的用户也可使用，优先级靠后。注意这2行的顺序
+        "django_auth_ldap.backend.LDAPBackend",  # Use LDAP authentication first; fallback to later backends only if LDAP fails
+        "django.contrib.auth.backends.ModelBackend",  # Users created in Django can also log in; keep this backend after LDAP
     )
 
     AUTH_LDAP_SERVER_URI = env("AUTH_LDAP_SERVER_URI", default="ldap://xxx")
@@ -383,10 +384,10 @@ if ENABLE_LDAP:
         )
     AUTH_LDAP_ALWAYS_UPDATE_USER = env(
         "AUTH_LDAP_ALWAYS_UPDATE_USER", default=True
-    )  # 每次登录从ldap同步用户信息
+    )  # Sync user info from LDAP on each login
     AUTH_LDAP_USER_ATTR_MAP = env("AUTH_LDAP_USER_ATTR_MAP")
 
-# CAS认证
+# CAS authentication
 ENABLE_CAS = env("ENABLE_CAS", default=False)
 if ENABLE_CAS:
     INSTALLED_APPS += ("django_cas_ng",)
@@ -396,19 +397,19 @@ if ENABLE_CAS:
         "django_cas_ng.backends.CASBackend",
     )
 
-    # CAS 的地址
+    # CAS server URL
     CAS_SERVER_URL = env("CAS_SERVER_URL")
-    # CAS 版本
+    # CAS version
     CAS_VERSION = env("CAS_VERSION")
-    # 存入所有 CAS 服务端返回的 User 数据。
+    # Store all user attributes returned by CAS server.
     CAS_APPLY_ATTRIBUTES_TO_USER = True
-    # 关闭浏览器退出登录
+    # Log out when browser closes
     SESSION_EXPIRE_AT_BROWSER_CLOSE = True
-    #  忽略  SSL  证书校验
+    # Ignore SSL certificate verification
     CAS_VERIFY_SSL_CERTIFICATE = env("CAS_VERIFY_SSL_CERTIFICATE", default=False)
-    #  忽略来源验证
+    # Ignore referer validation
     CAS_IGNORE_REFERER = True
-    # https请求问题
+    # HTTPS request handling
     CAS_FORCE_SSL_SERVICE_URL = env("CAS_FORCE_SSL_SERVICE_URL", default=False)
     CAS_RETRY_TIMEOUT = 1
     CAS_RETRY_LOGIN = True
@@ -421,24 +422,24 @@ SUPPORTED_AUTHENTICATION = [
     ("OIDC", ENABLE_OIDC),
     ("CAS", ENABLE_CAS),
 ]
-# 计算当前启用的外部认证方式数量
+# Count currently enabled external authentication methods
 ENABLE_AUTHENTICATION_COUNT = len(
     [enabled for (name, enabled) in SUPPORTED_AUTHENTICATION if enabled]
 )
 if ENABLE_AUTHENTICATION_COUNT > 0:
     if ENABLE_AUTHENTICATION_COUNT > 1:
         logger.warning(
-            "系统外部认证目前支持LDAP、DINGDING、OIDC、CAS四种，认证方式只能启用其中一种，如果启用多个，实际生效的只有一个，优先级LDAP > DINGDING > OIDC > CAS"
+            "External authentication currently supports LDAP, DINGDING, OIDC, and CAS. Only one method should be enabled. If multiple are enabled, only one takes effect with priority LDAP > DINGDING > OIDC > CAS."
         )
-    authentication = ""  # 默认为空
+    authentication = ""  # Empty by default
     for name, enabled in SUPPORTED_AUTHENTICATION:
         if enabled:
             authentication = name
             break
-    logger.info("当前生效的外部认证方式：" + authentication)
-    logger.info("认证后端：" + AUTHENTICATION_BACKENDS.__str__())
+    logger.info("Current effective external authentication method: " + authentication)
+    logger.info("Authentication backends: " + AUTHENTICATION_BACKENDS.__str__())
 
-# LOG配置
+# Logging configuration
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -471,16 +472,16 @@ LOGGING = {
         },
     },
     "loggers": {
-        "default": {  # default日志
+        "default": {  # default logs
             "handlers": ["console", "default"],
             "level": "WARNING",
         },
-        "django-q": {  # django_q模块相关日志
+        "django-q": {  # logs for django_q module
             "handlers": ["console", "django-q"],
             "level": "WARNING",
             "propagate": False,
         },
-        "django_auth_ldap": {  # django_auth_ldap模块相关日志
+        "django_auth_ldap": {  # logs for django_auth_ldap module
             "handlers": ["console", "default"],
             "level": "WARNING",
             "propagate": False,
@@ -490,12 +491,12 @@ LOGGING = {
             "level": "WARNING",
             "propagate": False,
         },
-        # 'django.db': {  # 打印SQL语句，方便开发
+        # 'django.db': {  # print SQL statements for development
         #     'handlers': ['console', 'default'],
         #     'level': 'DEBUG',
         #     'propagate': False
         # },
-        # 'django.request': {  # 打印请求错误堆栈信息，方便开发
+        # 'django.request': {  # print request error stack traces for development
         #     'handlers': ['console', 'default'],
         #     'level': 'DEBUG',
         #     'propagate': False
@@ -503,7 +504,8 @@ LOGGING = {
     },
 }
 
-# 在网站标题及登录页面追加此内容, 可用于多archery实例的区分。Archery后台也有相同配置，如都做了配置，以后台配置为准
+# Append this content to website title and login page to distinguish multiple Archery instances.
+# The same option exists in Archery admin; if both are set, admin configuration takes precedence.
 CUSTOM_TITLE_SUFFIX = env("CUSTOM_TITLE_SUFFIX", default="")
 
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
