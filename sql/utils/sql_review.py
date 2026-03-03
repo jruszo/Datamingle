@@ -12,30 +12,31 @@ from sql.utils.sql_utils import remove_comments
 
 def can_execute(user, workflow_id):
     """
-    判断用户当前是否可执行，两种情况下用户有执行权限
-    1.登录用户有资源组粒度执行权限，并且为组内用户
-    2.当前登录用户为提交人，并且有执行权限
+    Determine whether the user can execute now.
+    User has execution permission in two cases:
+    1. User has resource-group-level execution permission and is in the group.
+    2. User is the submitter and has execution permission.
     :param user:
     :param workflow_id:
     :return:
     """
     result = False
-    # 保证工单当前是可执行状态
+    # Ensure current workflow status is executable.
     with transaction.atomic():
         workflow_detail = SqlWorkflow.objects.select_for_update().get(id=workflow_id)
-        # 只有审核通过和定时执行的数据才可以立即执行
+        # Only approved and scheduled workflows can be executed immediately.
         if workflow_detail.status not in [
             "workflow_review_pass",
             "workflow_timingtask",
         ]:
             return False
-    # 当前登录用户有资源组粒度执行权限，并且为组内用户
+    # User has resource-group-level execution permission and is in the group.
     group_ids = [group.group_id for group in user_groups(user)]
     if workflow_detail.group_id in group_ids and user.has_perm(
         "sql.sql_execute_for_resource_group"
     ):
         result = True
-    # 当前登录用户为提交人，并且有执行权限
+    # User is submitter and has execution permission.
     if workflow_detail.engineer == user.username and user.has_perm("sql.sql_execute"):
         result = True
     return result
@@ -43,7 +44,8 @@ def can_execute(user, workflow_id):
 
 def on_correct_time_period(workflow_id, run_date=None):
     """
-    判断是否在可执行时间段内，包括人工执行和定时执行
+    Check whether current time is within executable time period.
+    Includes manual execution and scheduled execution.
     :param workflow_id:
     :param run_date:
     :return:
@@ -60,24 +62,25 @@ def on_correct_time_period(workflow_id, run_date=None):
 
 def can_timingtask(user, workflow_id):
     """
-    判断用户当前是否可定时执行，两种情况下用户有定时执行权限
-    1.登录用户有资源组粒度执行权限，并且为组内用户
-    2.当前登录用户为提交人，并且有执行权限
+    Determine whether the user can schedule execution now.
+    User has scheduling permission in two cases:
+    1. User has resource-group-level execution permission and is in the group.
+    2. User is the submitter and has execution permission.
     :param user:
     :param workflow_id:
     :return:
     """
     workflow_detail = SqlWorkflow.objects.get(id=workflow_id)
     result = False
-    # 只有审核通过和定时执行的数据才可以执行
+    # Only approved and scheduled workflows can be executed.
     if workflow_detail.status in ["workflow_review_pass", "workflow_timingtask"]:
-        # 当前登录用户有资源组粒度执行权限，并且为组内用户
+        # User has resource-group-level execution permission and is in the group.
         group_ids = [group.group_id for group in user_groups(user)]
         if workflow_detail.group_id in group_ids and user.has_perm(
             "sql.sql_execute_for_resource_group"
         ):
             result = True
-        # 当前登录用户为提交人，并且有执行权限
+        # User is submitter and has execution permission.
         if workflow_detail.engineer == user.username and user.has_perm(
             "sql.sql_execute"
         ):
@@ -87,15 +90,15 @@ def can_timingtask(user, workflow_id):
 
 def can_cancel(user, workflow_id):
     """
-    判断用户当前是否是可终止，
-    审核中、审核通过的的工单，审核人和提交人可终止
+    Determine whether current user can cancel workflow.
+    For in-review and approved workflows, reviewer and submitter can cancel.
     :param user:
     :param workflow_id:
     :return:
     """
     workflow_detail = SqlWorkflow.objects.get(id=workflow_id)
     result = False
-    # 审核中的工单，审核人和提交人可终止
+    # In-review workflows: reviewer and submitter can cancel.
     if workflow_detail.status == "workflow_manreviewing":
         from sql.utils.workflow_audit import Audit
 
@@ -114,26 +117,28 @@ def can_cancel(user, workflow_id):
 
 def can_view(user, workflow_id):
     """
-    判断用户当前是否可以查看工单信息，和列表过滤逻辑保存一致
+    Determine whether current user can view workflow details.
+    Keep logic consistent with workflow list filtering.
     :param user:
     :param workflow_id:
     :return:
     """
     workflow_detail = SqlWorkflow.objects.get(id=workflow_id)
     result = False
-    # 管理员，可查看所有工单
+    # Superuser can view all workflows.
     if user.is_superuser:
         result = True
-    # 非管理员，拥有审核权限、资源组粒度执行权限的，可以查看组内所有工单
+    # Non-admin users with review permission or resource-group-level execution
+    # permission can view all workflows in their groups.
     elif user.has_perm("sql.sql_review") or user.has_perm(
         "sql.sql_execute_for_resource_group"
     ):
-        # 先获取用户所在资源组列表
+        # Get user's resource groups first.
         group_list = user_groups(user)
         group_ids = [group.group_id for group in group_list]
         if workflow_detail.group_id in group_ids:
             result = True
-    # 其他人只能查看自己提交的工单
+    # Others can only view workflows submitted by themselves.
     else:
         if workflow_detail.engineer == user.username:
             result = True
@@ -142,15 +147,16 @@ def can_view(user, workflow_id):
 
 def can_rollback(user, workflow_id):
     """
-    判断用户当前是否可以查看回滚信息，和工单详情保持一致
-    执行结束并且开启备份的工单可以查看回滚信息
+    Determine whether current user can view rollback details.
+    Keep behavior consistent with workflow detail page.
+    Rollback can be viewed only for finished/exception workflows with backup enabled.
     :param user:
     :param workflow_id:
     :return:
     """
     workflow_detail = SqlWorkflow.objects.get(id=workflow_id)
     result = False
-    # 执行结束并且开启备份的工单可以查看回滚信息
+    # Rollback is available only after execution ends and backup is enabled.
     if workflow_detail.is_backup and workflow_detail.status in (
         "workflow_finish",
         "workflow_exception",
