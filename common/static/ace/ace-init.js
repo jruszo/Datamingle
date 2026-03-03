@@ -1,10 +1,10 @@
-//初始化ace编辑器对象
+// Initialize the ACE editor object
 var editor = ace.edit("sql_content_editor");
 ace.config.set('basePath', '/static/ace');
 ace.config.set('modePath', '/static/ace');
 ace.config.set('themePath', '/static/ace');
 
-//设置风格和语言（更多风格和语言，请到github上相应目录查看）
+// Set theme and language (for more options, check the ACE GitHub directories)
 var theme = "textmate";
 var language = "text";
 editor.setTheme("ace/theme/" + theme);
@@ -12,17 +12,17 @@ editor.session.setMode("ace/mode/" + language);
 editor.$blockScrolling = Infinity;
 editor.setValue("");
 
-//字体大小
+// Font size
 editor.setFontSize(12);
 
-//设置只读（true时只读，用于展示代码）
+// Set read-only mode (true means read-only, used for code display)
 editor.setReadOnly(false);
 
-//自动换行,设置为off关闭
+// Enable word wrap; set to off to disable
 editor.setOption("wrap", "free");
 editor.getSession().setUseWrapMode(true);
 
-//启用提示菜单
+// Enable autocomplete menu
 ace.require("ace/ext/language_tools");
 editor.setOptions({
     enableBasicAutocompletion: true,
@@ -30,10 +30,10 @@ editor.setOptions({
     enableLiveAutocompletion: true
 });
 
-//启用搜索扩展
+// Enable search extension
 ace.require("ace/ext/language_tools");
 
-//绑定查询快捷键
+// Bind query shortcut
 editor.commands.addCommand({
     name: "alter",
     bindKey: {win: "Ctrl-Enter", mac: "Command-Enter"},
@@ -45,7 +45,7 @@ editor.commands.addCommand({
     }
 });
 
-//设置自动提示代码
+// Set autocomplete entries
 var setCompleteData = function (data) {
     var langTools = ace.require("ace/ext/language_tools");
     langTools.addCompleter({
@@ -59,7 +59,7 @@ var setCompleteData = function (data) {
     });
 };
 
-//增加数据库提示
+// Add database suggestions
 function setDbsCompleteData(result) {
     var tables = [];
     for (var i = 0; i < result.length; i++) {
@@ -75,7 +75,7 @@ function setDbsCompleteData(result) {
     setCompleteData(tables);
 }
 
-//增加模式提示
+// Add schema suggestions
 function setSchemasCompleteData(result) {
     var tables = [];
     for (var i = 0; i < result.length; i++) {
@@ -92,7 +92,7 @@ function setSchemasCompleteData(result) {
 }
 
 
-//增加表提示
+// Add table suggestions
 function setTablesCompleteData(result) {
     var meta = $("#db_name").val();
     if ($("#schema_name").val()) {
@@ -112,7 +112,7 @@ function setTablesCompleteData(result) {
     setCompleteData(tables);
 }
 
-//增加字段提示
+// Add column suggestions
 function setColumnsCompleteData(result) {
     if (result) {
         var tables = [];
@@ -163,18 +163,18 @@ function setColumnsCompleteData(result) {
     }
 }
 
-// 实例变更时修改language
+// Update language when instance changes
 $("#instance_name").change(function () {
     let optgroup = $('#instance_name :selected').parent().attr('label');
     if (optgroup === "MySQL") {
         editor.setTheme("ace/theme/" + "textmate");
         editor.session.setMode("ace/mode/" + "mysql");
-        // 提示信息
+        // Prompt text
         let pathname = window.location.pathname;
         if (pathname === "/submitsql/" && !editor.getValue()) {
-            editor.setValue("-- 请在此输入SQL，以分号结尾，仅支持DML和DDL语句，查询语句请使用SQL查询功能。\n");
+            editor.setValue("-- Please enter SQL here. End with a semicolon. Only DML and DDL statements are supported. Use SQL Query for query statements.\n");
             editor.clearSelection();
-            editor.focus();  //获取焦点
+            editor.focus();  // Focus editor
         }
     } else if (optgroup === "MsSQL") {
         editor.setTheme("ace/theme/" + "sqlserver");
@@ -185,11 +185,11 @@ $("#instance_name").change(function () {
         editor.setOptions({
             enableSnippets: false,
         });
-        // 提示信息
+        // Prompt text
         let pathname = window.location.pathname;
         if (pathname === "/submitsql/" && !editor.getValue()) {
-            editor.setValue("请在此输入命令，多个命令请换行填写，在提交时请删除此行说明");
-            editor.focus();  //获取焦点
+            editor.setValue("Please enter commands here. Put multiple commands on separate lines and remove this instruction line before submitting.");
+            editor.focus();  // Focus editor
         }
     } else if (optgroup === "PgSQL") {
         editor.setTheme("ace/theme/" + "textmate");
