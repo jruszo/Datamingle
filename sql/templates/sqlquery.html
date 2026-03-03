@@ -1,44 +1,44 @@
 {% extends "base.html" %}
 
 {% block content %}
-    <!-- 自定义操作按钮-->
+    <!-- Custom action buttons -->
     <div id="query-log-toolbar" class="form-inline pull-left">
         <div class="form-group">
             <select id="filter-star" class="form-control selectpicker"
-                    title="全部">
-                <option value="" selected="selected">全部</option>
-                <option value="true">已收藏</option>
-                <option value="false">未收藏</option>
+                    title="All">
+                <option value="" selected="selected">All</option>
+                <option value="true">Starred</option>
+                <option value="false">Unstarred</option>
             </select>
         </div>
         <div class="form-group">
             <select id="filter-alias" class="form-control selectpicker"
                     data-live-search="true"
-                    title="全部">
-                <option value="" selected="selected">全部</option>
+                    title="All">
+                <option value="" selected="selected">All</option>
                 {% for sql in favorites %}
                     <option value={{ sql.id }}>{{ sql.alias }}</option>
                 {% endfor %}
             </select>
         </div>
     </div>
-    <!-- 收藏信息弹出框-->
+    <!-- Favorite info modal -->
     <div class="modal fade" id="favorite">
         <div class="modal-dialog modal-sm">
             <div class="modal-content message_align">
                 <div class="modal-header">
                     <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span
                             aria-hidden="true">×</span></button>
-                    <h4 class="modal-title text-danger">收藏语句</h4>
+                    <h4 class="modal-title text-danger">Favorite SQL</h4>
                 </div>
                 <div class="modal-body">
                     <input type="hidden" id="query_log_id">
                     <input id="alias" name="alias" type='text' autocomplete="off" class="form-control"
-                           placeholder="请输入语句别名"/>
+                           placeholder="Please enter SQL alias"/>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-info" data-dismiss="modal">取消</button>
-                    <button type="button" id="btn-star" class="btn btn-danger" onclick="star()">收藏</button>
+                    <button type="button" class="btn btn-info" data-dismiss="modal">Cancel</button>
+                    <button type="button" id="btn-star" class="btn btn-danger" onclick="star()">Favorite</button>
                 </div>
             </div>
         </div>
@@ -47,11 +47,11 @@
         <div class="col-md-12">
             <div class="panel panel-default">
                 <div class="panel-heading form-inline">
-                    SQL查询
+                    SQL Query
                     <select id="favorites" name="favorites"
                             class="form-control selectpicker"
-                            data-live-search="true" data-live-search-placeholder="搜索"
-                            title="常用查询"
+                            data-live-search="true" data-live-search-placeholder="Search"
+                            title="Common Queries"
                             required>
                         {% for sql in favorites %}
                             <option value={{ sql.id }}>{{ sql.alias }}</option>
@@ -62,14 +62,14 @@
                             {% if can_offline_download == 1 %}
                                 <button id="btn-exportsubmit" type="button" class="btn btn-default">
                                     <span class="glyphicon glyphicon-plus" aria-hidden="true"></span>
-                                    提交导出工单
+                                    Submit Export Workflow
                                 </button>
                             {% endif %}
                         {% endif %}
                     </div>
-                    <textarea id="generateDesc" class="form-control" style="display: none;width: 70%;" placeholder="AI 查询描述" rows=1></textarea>
-                    <input id="btn-generatesql" type="button" class="btn btn-info" style="display: none" value="生成SQL"/>
-                    <button id="btn-openaiTooltip" type="button" class="btn" style="display: none" data-toggle="tooltip" title="仅此操作会与 AI 交互, 收集数据库类型、表结构以及输入框信息, 交给 AI 生成 SQL 并置于下面的语句框中" >
+                    <textarea id="generateDesc" class="form-control" style="display: none;width: 70%;" placeholder="AI query description" rows=1></textarea>
+                    <input id="btn-generatesql" type="button" class="btn btn-info" style="display: none" value="Generate SQL"/>
+                    <button id="btn-openaiTooltip" type="button" class="btn" style="display: none" data-toggle="tooltip" title="Only this action interacts with AI. It collects database type, table structure, and input content, then asks AI to generate SQL into the editor below." >
                         <span class="fa fa-question-circle" />
                     </button>
                 </div>
@@ -83,9 +83,9 @@
                             <div class="form-group">
                                 <select id="instance_name" name="instance_name"
                                         class="selectpicker show-tick form-control bs-select-hidden"
-                                        data-live-search="true" data-live-search-placeholder="搜索您所在组的实例"
-                                        title="请选择实例:"
-                                        data-placeholder="请选择实例:" required>
+                                        data-live-search="true" data-live-search-placeholder="Search instances in your groups"
+                                        title="Please select instance:"
+                                        data-placeholder="Please select instance:" required>
                                 {% for name,engine in engines.items %}
                                     <optgroup id="optgroup-{{ name }}" label="{{ engine.name }}"></optgroup>
                                 {% endfor %}
@@ -94,48 +94,48 @@
                             <div class="form-group">
                                 <select id="db_name" name="db_name"
                                         class="form-control selectpicker show-tick bs-select-hidden"
-                                        data-live-search="true" data-live-search-placeholder="搜索您要查询的数据库"
-                                        title="请选择数据库:"
-                                        data-placeholder="请选择数据库:" required>
+                                        data-live-search="true" data-live-search-placeholder="Search target databases"
+                                        title="Please select database:"
+                                        data-placeholder="Please select database:" required>
                                 </select>
                             </div>
                             <div id="div-schema_name" class="form-group" style="display: none">
                                 <select id="schema_name" name="schema_name"
                                         class="form-control selectpicker show-tick bs-select-hidden"
                                         data-live-search="true"
-                                        title="请选择模式:"
-                                        data-placeholder="请选择模式:" required>
+                                        title="Please select schema:"
+                                        data-placeholder="Please select schema:" required>
                                 </select>
                             </div>
                             <div id="div-table_name" class="form-group">
                                 <select id="table_name" name="table_name"
                                         class="form-control selectpicker show-tick bs-select-hidden"
-                                        data-live-search="true" data-live-search-placeholder="搜索您要查询的表"
-                                        data-name="查看表结构"
-                                        title="查看表结构:"
-                                        data-placeholder="查看表结构:" required>
+                                        data-live-search="true" data-live-search-placeholder="Search target tables"
+                                        data-name="Show Table Structure"
+                                        title="Show Table Structure:"
+                                        data-placeholder="Show Table Structure:" required>
                                 </select>
                             </div>
                             <div class="form-group">
                                 <select id="limit_num" name="limit_num"
                                         class="form-control selectpicker show-tick bs-select-hidden"
-                                        data-placeholder="返回行数:" required>
-                                    <option value="is-empty" disabled="">返回行数:</option>
+                                        data-placeholder="Row Limit:" required>
+                                    <option value="is-empty" disabled="">Row Limit:</option>
                                     <option value=100 selected="selected">100</option>
                                     <option value=500>500</option>
                                     <option value=1000>1000</option>
-                                    <option value=0>max(最大限制行数)</option>
+                                    <option value=0>max (maximum row limit)</option>
                                 </select>
                             </div>
                             <div class="form-group">
-                                <input id="btn-format" type="button" class="btn btn-info" value="美化"/>
-                                <input id="btn-explain" type="button" class="btn btn-warning" value="执行计划"/>
-                                <input id="btn-sqlquery" type="button" class="btn btn-success" value="SQL查询"/>
+                                <input id="btn-format" type="button" class="btn btn-info" value="Format"/>
+                                <input id="btn-explain" type="button" class="btn btn-warning" value="Execution Plan"/>
+                                <input id="btn-sqlquery" type="button" class="btn btn-success" value="Run Query"/>
                             </div>
                         </div>
                         <div class="text-info">
-                            <li>支持注释行，可选择指定语句执行，默认执行第一条;</li>
-                            <li>查询结果行数限制见权限管理，会选择查询涉及表的最小limit值</li>
+                            <li>Comment lines are supported. You can select a specific statement to run, otherwise the first one is executed.</li>
+                            <li>Row limits are controlled by permission settings and use the minimum limit across referenced tables.</li>
                         </div>
                     </form>
                 </div>
@@ -144,7 +144,7 @@
         <div class="col-md-12 column">
             <div class="panel panel-default">
                 <div class="panel-heading">
-                    查询结果 <span style="color: red">
+                    Query Results <span style="color: red">
                         <small id="seconds_behind_master"></small>
                     </span>
                 </div>
@@ -152,7 +152,7 @@
                     <!-- Nav tabs -->
                     <ul id="nav-tabs" class="nav nav-tabs" role="tablist">
                         <li class="active" id="sqllog_tab">
-                            <a href="#sql_log_result" role="tab" data-toggle="tab">查询历史</a>
+                            <a href="#sql_log_result" role="tab" data-toggle="tab">Query History</a>
                         </li>
                         <button class="btn btn-default btn-sm pull-right" onclick="tab_remove()">
                             <span class="glyphicon glyphicon-minus"></span>
@@ -168,7 +168,7 @@
                             <div class="col-sm-12">
                                 <div class="radio i-checks">
                                     <label> <input type="radio" value="key" name="operate" checked
-                                                   onclick="show(this)"> <i> Key操作 </i></label>
+                                                   onclick="show(this)"> <i> Key Operations </i></label>
                                     <label> <input type="radio" value="string" name="operate"
                                                    onclick="show(this)"> <i> String </i></label>
                                     <label> <input type="radio" value="hash" name="operate"
@@ -180,69 +180,62 @@
                                 </div>
 
                                 <div id="keyHelp" class="alert alert-info" style="display: block">
-                                    <i> 1、exists key　检查key是否存在，若key存在返回1，否则返回0</i></br>
-                                    <i> 2、keys pattern 查找所有符合给定模式的key，通常用于查找key</i></br>
-                                    <i> 3、expire key seconds 为key设置超时时间（单位：秒），当key过期时，会被系统自动删除</i></br>
-                                    <i> 4、ttl key 以秒为单位返回key的剩余生存时间（time to
-                                        live），当key不存在时返回-2，当key存在未设置生存时间时返回-1</i></br>
-                                    <i> 5、pttl key 这个命令和ttl类似，它以毫秒为单位返回key的剩余生存时间</i></br>
-                                    <i> 6、move key db 将key移动到指定数据库中</i></br>
-                                    <i> 7、type key
-                                        返回key存储的值的类型，返回none（不存在）、string（字符串）、list（列表）、set（集合）、zset（有序集合）、hash（哈希表）</i>
+                                    <i>1. `exists key`: return `1` if key exists, else `0`.</i></br>
+                                    <i>2. `keys pattern`: find keys matching a pattern.</i></br>
+                                    <i>3. `expire key seconds`: set key expiration in seconds.</i></br>
+                                    <i>4. `ttl key`: key remaining lifetime in seconds (`-2` missing, `-1` no expiry).</i></br>
+                                    <i>5. `pttl key`: remaining lifetime in milliseconds.</i></br>
+                                    <i>6. `move key db`: move key to target database.</i></br>
+                                    <i>7. `type key`: return value type: none, string, list, set, zset, hash.</i>
                                 </div>
 
                                 <div id="stringHelp" class="alert alert-info" style="display: none">
-                                    <i> 1、get key 返回key的值，若key不存在则返回nil，若key存储的值不是字符串则返回错误</i></br>
-                                    <i> 2、mget key [key...] 依次返回一个或多个key的值，若key不存在返回nil，若key存在但不是字符串返回nil</i></br>
-                                    <i> 3、strlen key 返回key所存储的字符串的长度，当key不存在时返回0，当key存在但不是字符串时返回错误</i></br>
-                                    <i> 4、append key value 将指定的值追加到key末尾，若key不存在，则创建并赋值，返回追加后的字符串长度</i></br>
-                                    <i> 5、set key value [ex seconds] [px milliseconds] [nx|xx]
-                                        为key设置值,ex和px均为设置过期时间只不过单位不同，nx表示只有key不存在时才进行操作，xx表示只有key存在时才进行操作</i></br>
-                                    <i> 6、setex key seconds value 设置带生存时间的key的值，以秒为单位</i></br>
-                                    <i> 7、setnx key value 为key设置值，若key已存在则不进行任何操作</i></br>
-                                    <i> 8、mset key value [key value...]
-                                        为一组或多组key设置值，该操作为原子操作，要么一组都设置成功，要么一组都设置失败</i></br>
-                                    <i> 9、msetnx key value [key value...] 与mset不同的是msetnx中的key必须是不存在的，若有一个已存在则会整体失败</i>
+                                    <i>1. `get key`: get value; returns nil if key missing.</i></br>
+                                    <i>2. `mget key [key...]`: get one or more values.</i></br>
+                                    <i>3. `strlen key`: string length (`0` if missing).</i></br>
+                                    <i>4. `append key value`: append and return final length.</i></br>
+                                    <i>5. `set key value [ex|px] [nx|xx]`: set value with optional expiry/conditions.</i></br>
+                                    <i>6. `setex key seconds value`: set value with expiry in seconds.</i></br>
+                                    <i>7. `setnx key value`: set only if key does not exist.</i></br>
+                                    <i>8. `mset key value [key value...]`: atomically set multiple keys.</i></br>
+                                    <i>9. `msetnx key value [key value...]`: set multiple keys only if none exist.</i>
                                 </div>
 
                                 <div id="hashHelp" class="alert alert-info" style="display: none">
-                                    <i> 1、hgetall key 获取hash表中所有field的值</i></br>
-                                    <i> 2、hexists key field 判断hash表中指定field是否存在，返回1；若key或field不存在则返回0</i></br>
-                                    <i> 3、hget key field 获取hash表中指定field的值，key或field不存在时返回nil</i></br>
-                                    <i> 4、hmget key field[field...]
-                                        获取hash表中多个指定field的值，若key不存在返回空，若field不存在返回nil</i></br>
-                                    <i> 5、hkeys key 返回hash表中的所有field，若key不存在返回空</i></br>
-                                    <i> 6、hvals key 返回hash表中的所有val，若key不存在返回空</i></br>
-                                    <i> 7、hdel key field[field...] 删除hash表中指定field，若key或field不存在则会忽略</i></br>
-                                    <i> 8、hset key field value
-                                        将field-value设置到hash表中，若key不存在会新建hash表再赋值，若field已存在则会覆盖现有值</i></br>
-                                    <i> 9、hsetnx key field value 和hset类似，但是hsetnx要求field不存在才能进行此操作，否则会返回0</i>
+                                    <i>1. `hgetall key`: get all field-value pairs.</i></br>
+                                    <i>2. `hexists key field`: return `1` if field exists, else `0`.</i></br>
+                                    <i>3. `hget key field`: get field value.</i></br>
+                                    <i>4. `hmget key field [field...]`: get multiple field values.</i></br>
+                                    <i>5. `hkeys key`: get all fields.</i></br>
+                                    <i>6. `hvals key`: get all values.</i></br>
+                                    <i>7. `hdel key field [field...]`: delete one or more fields.</i></br>
+                                    <i>8. `hset key field value`: set field value (create if absent, overwrite if present).</i></br>
+                                    <i>9. `hsetnx key field value`: set only if field does not exist.</i>
                                 </div>
 
                                 <div id="setHelp" class="alert alert-info" style="display: none">
-                                    <i> 1、smembers key 列出集合key中的所有成员</i></br>
-                                    <i> 2、scard key 返回集合key中元素的个数</i></br>
-                                    <i> 3、sdiff key[key...] 获取集合的差集，若key为1个则返回集合的全部成员</i></br>
-                                    <i> 4、sunion key[key...] 返回集合的并集，不存在的key会被当做空集处理</i></br>
-                                    <i> 5、spop key 移除并返回集合中的一个随机元素，当key不存在时返回NULL</i></br>
-                                    <i> 6、sismember key member 判断member在key中是否已存在返回0或1</i></br>
-                                    <i> 7、sadd key member[member...] 将一个或多个member元素加入到集合key中，若member已存在那么会忽略此元素</i></br>
-                                    <i> 8、smove source destination member
-                                        将元素member从source移动到destination；若member在destination中已存在只会删除source中的数据，若source或member不存在会返回0，若destination不存在则会创建后再进行操作</i></br>
-                                    <i> 9、srem key member[member]　移除key中的一个或多个member元素，不存在的member会被忽略</i>
+                                    <i>1. `smembers key`: list all set members.</i></br>
+                                    <i>2. `scard key`: number of set elements.</i></br>
+                                    <i>3. `sdiff key [key...]`: set difference.</i></br>
+                                    <i>4. `sunion key [key...]`: set union.</i></br>
+                                    <i>5. `spop key`: remove and return a random element.</i></br>
+                                    <i>6. `sismember key member`: membership check (`0`/`1`).</i></br>
+                                    <i>7. `sadd key member [member...]`: add one or more members.</i></br>
+                                    <i>8. `smove source destination member`: move member between sets.</i></br>
+                                    <i>9. `srem key member [member...]`: remove one or more members.</i>
                                 </div>
 
                                 <div id="zsetHelp" class="alert alert-info" style="display: none">
                                     <button class="close" data-dismiss="alert">
                                         <i class="ace-icon fa fa-times"></i>
                                     </button>
-                                    <i class="ace-icon fa fa-hand-o-right"> 帮助文档：</i></br>
-                                    <i> 1、zrange key start stop [WITHSCORES] 通过索引区间返回有序集合指定区间内的成员</i></br>
-                                    <i> 2、zrangebyscore key min max [WITHSCORES] [LIMIT] 通过分数返回有序集合指定区间内的成员</i></br>
-                                    <i> 3、zscore key member 返回有序集中，成员的分数值</i></br>
-                                    <i> 4、zcard key 获取有序集合的成员数</i></br>
-                                    <i> 5、zcount key min max 计算在有序集合中指定区间分数的成员数</i></br>
-                                    <i> 6、zrank key member 返回有序集合中指定成员的索引</i></br>
+                                    <i class="ace-icon fa fa-hand-o-right"> Help:</i></br>
+                                    <i>1. `zrange key start stop [WITHSCORES]`: members by index range.</i></br>
+                                    <i>2. `zrangebyscore key min max [WITHSCORES] [LIMIT]`: members by score range.</i></br>
+                                    <i>3. `zscore key member`: member score.</i></br>
+                                    <i>4. `zcard key`: sorted set size.</i></br>
+                                    <i>5. `zcount key min max`: count members in score range.</i></br>
+                                    <i>6. `zrank key member`: member rank index.</i></br>
                                 </div>
                             </div>
                         </div>
@@ -271,46 +264,46 @@
     <script src="{% static 'bootstrap-table/js/bootstrap-table-export.min.js' %}"></script>
     <script src="{% static 'bootstrap-table/js/tableExport.min.js' %}"></script>
 
-    <!-- 查询历史  -->
+    <!-- Query history -->
     <script>
-        //获取查询列表
+        // Get query list.
         function get_querylog(query_log_id) {
             var showExport = {{can_download}}===1
-            //初始化table
+            // Initialize table.
             $('#sql-log').bootstrapTable('destroy').bootstrapTable({
                 escape: true,
                 method: 'get',
                 contentType: "application/x-www-form-urlencoded",
                 url: "/query/querylog/",
-                striped: true,                      //是否显示行间隔色
-                cache: false,                       //是否使用缓存，默认为true，所以一般情况下需要设置一下这个属性（*）
-                pagination: true,                   //是否显示分页（*）
-                sortable: true,                     //是否启用排序
-                sortOrder: "asc",                   //排序方式
-                sidePagination: "server",           //分页方式：client客户端分页，server服务端分页（*）
-                pageNumber: 1,                      //初始化加载第一页，默认第一页,并记录
-                pageSize: 20,                       //每页的记录行数（*）
-                pageList: [10, 30, 50, 100],        //可供选择的每页的行数（*）
-                showExport: showExport,                   //是否显示导出按钮
+                striped: true,                      // Show row stripe.
+                cache: false,                       // Disable cache.
+                pagination: true,                   // Enable pagination.
+                sortable: true,                     // Enable sorting.
+                sortOrder: "asc",                   // Sort order.
+                sidePagination: "server",           // Server-side pagination.
+                pageNumber: 1,                      // Initial page number.
+                pageSize: 20,                       // Rows per page.
+                pageList: [10, 30, 50, 100],        // Page size options.
+                showExport: showExport,             // Show export button.
                 exportTypes: ['json', 'sql', 'csv', 'txt', 'xml', 'xlsx'],
                 exportOptions: {
-                    ignoreColumn: [0],  //忽略某些列的索引数组
-                    fileName: 'query_log'  //文件名称设置
+                    ignoreColumn: [0],  // Ignore selected column indices.
+                    fileName: 'query_log'  // Export filename.
                 },
-                search: true,                       //是否显示表格搜索
-                strictSearch: false,                //是否全匹配搜索
-                showColumns: true,                  //是否显示所有的列（选择显示的列）
-                showRefresh: true,                  //是否显示刷新按钮
-                minimumCountColumns: 2,             //最少允许的列数
-                clickToSelect: true,                //是否启用点击选中行
-                uniqueId: "id",                     //每一行的唯一标识，一般为主键列
-                showToggle: true,                   //是否显示详细视图和列表视图的切换按钮
-                cardView: false,                    //是否显示详细视图
-                detailView: true,                   //是否显示父子表
-                locale: 'zh-CN',                    //本地化
-                toolbar: "#query-log-toolbar",      //指明自定义的toolbar
+                search: true,                       // Enable table search.
+                strictSearch: false,                // Use fuzzy search.
+                showColumns: true,                  // Show column selector.
+                showRefresh: true,                  // Show refresh button.
+                minimumCountColumns: 2,             // Minimum visible columns.
+                clickToSelect: true,                // Enable row selection.
+                uniqueId: "id",                     // Unique row identifier.
+                showToggle: true,                   // Show list/card toggle.
+                cardView: false,                    // Disable card view.
+                detailView: true,                   // Enable detail view.
+                locale: 'en-US',                    // Localization.
+                toolbar: "#query-log-toolbar",      // Custom toolbar selector.
                 queryParamsType: 'limit',
-                //获取查询列表请求服务数据时所传参数
+                // Request parameters sent to backend for query list.
                 queryParams:
                     function (params) {
                         return {
@@ -321,21 +314,21 @@
                             search: params.search
                         }
                     },
-                //格式化详情
+                // Format detail view.
                 detailFormatter: function (index, row) {
                     var html = [];
                     $.each(row, function (key, value) {
                         if (key === 'sqllog') {
                             let sql = value;
-                            //替换标签
+                            // Escape HTML tags.
                             sql = sql.replace(/&/g, "&amp;");
                             sql = sql.replace(/</g, "&lt;");
                             sql = sql.replace(/>/g, "&gt;");
                             sql = sql.replace(/"/g, "&quot;");
-                            //替换所有的换行符
+                            // Replace line breaks.
                             sql = sql.replace(/\r\n/g, "<br>");
                             sql = sql.replace(/\n/g, "<br>");
-                            //替换所有的空格
+                            // Replace spaces.
                             sql = sql.replace(/\s/g, "&nbsp;");
                             html.push('<span>' + sql + '</span>');
                         }
@@ -343,32 +336,32 @@
                     return html.join('');
                 },
                 columns: [{
-                    title: '操作',
+                    title: 'Actions',
                     field: '',
                     formatter: function (value, row, index) {
                         if (row.favorite) {
-                            var btn_favorite = "<button type=\"button\" class=\"btn btn-xs\" data-toggle=\"tooltip\" title=\"取消收藏\" onclick=\"unstar(" + row.id + ")" + "\"><span class=\"fa fa-star\"></span></button>\n";
+                            var btn_favorite = "<button type=\"button\" class=\"btn btn-xs\" data-toggle=\"tooltip\" title=\"Unfavorite\" onclick=\"unstar(" + row.id + ")" + "\"><span class=\"fa fa-star\"></span></button>\n";
                         } else {
                             var btn_favorite = "<button type=\"button\" class=\"btn btn-xs\" data-toggle=\"modal\" data-target=\"#favorite\" onclick=\"star(" + row.id + ")" + "\"><span class=\"fa fa-star-o\"></span></button>\n";
                         }
-                        let btn_re_query = "<button type=\"button\" class=\"btn btn-xs\"  data-toggle=\"tooltip\" title=\"一键查询\" onclick=\"re_query(" + row.id + ")" + "\"><span class=\"fa fa-search\"></span></button>";
+                        let btn_re_query = "<button type=\"button\" class=\"btn btn-xs\"  data-toggle=\"tooltip\" title=\"Quick Query\" onclick=\"re_query(" + row.id + ")" + "\"><span class=\"fa fa-search\"></span></button>";
                         return btn_favorite + btn_re_query
                     }
 
                 }, {
-                    title: '用户',
+                    title: 'User',
                     field: 'user_display'
                 }, {
-                    title: '实例',
+                    title: 'Instance',
                     field: 'instance_name'
                 }, {
-                    title: '数据库',
+                    title: 'Database',
                     field: 'db_name'
                 }, {
-                    title: '查询时间',
+                    title: 'Query Time',
                     field: 'create_time'
                 }, {
-                    title: '语句',
+                    title: 'Statement',
                     field: 'sqllog',
                     formatter: function (value, row, index) {
                         var _sql=row.sqllog
@@ -380,14 +373,14 @@
                         }
                     }
                 }, {
-                    title: '完整语句',
+                    title: 'Full Statement',
                     field: 'sqllog',
-                    visible: false // 默认不显示
+                    visible: false // Hidden by default.
                 }, {
-                    title: '返回行数',
+                    title: 'Rows Returned',
                     field: 'effect_row'
                 }, {
-                    title: '耗时(秒)',
+                    title: 'Duration (s)',
                     field: 'cost_time'
                 }],
                 onLoadSuccess: function () {
@@ -397,17 +390,17 @@
                 },
                 onLoadError: onLoadErrorCallback,
                 onSearch: function (e) {
-                    //传搜索参数给服务器
+                    // Pass search parameters to backend.
                     queryParams(e)
                 },
                 responseHandler: function (res) {
-                    //在ajax获取到数据，渲染表格之前，修改数据源
+                    // Transform data before rendering table.
                     return res;
                 }
             });
         }
 
-        // 筛选
+        // Filter.
         $("#filter-star").change(function () {
             get_querylog();
         });
@@ -415,7 +408,7 @@
             get_querylog()
         });
 
-        // 快捷查询
+        // Quick query.
         $("#favorites").change(function () {
             let query_log_id = $("#favorites").val();
             $("#filter-alias").val(query_log_id);
@@ -424,7 +417,7 @@
             get_querylog(query_log_id);
         });
 
-        // 收藏
+        // Favorite.
         function star(query_log_id) {
             if (query_log_id) {
                 $("#query_log_id").val(query_log_id);
@@ -453,11 +446,11 @@
                     }
                 });
             } else {
-                alert('请输入语句别名！')
+                alert('Please enter SQL alias!')
             }
         }
 
-        // 取消收藏
+        // Unfavorite.
         function unstar(query_log_id) {
             $.ajax({
                 type: "post",
@@ -482,7 +475,7 @@
             });
         }
 
-        // 一键重新查询
+        // One-click re-query.
         function re_query(query_log_id) {
             sessionStorage.setItem('re_query', 'true');
             let row_data = $('#sql-log').bootstrapTable('getRowByUniqueId', query_log_id);
@@ -506,12 +499,12 @@
                 $('input[type=button]').prop('disabled', true);
                 sqlquery()
             } else {
-                alert("信息不完整，无法一键查询！")
+                alert("Incomplete information, cannot perform one-click re-query!")
             }
             sessionStorage.removeItem('re_query');
         }
 
-        // 获取sysconfig
+        // Get system config.
         function check_openai() {
             $.ajax({
                 type: "get",
@@ -533,112 +526,112 @@
             });
         }
     </script>
-    <!-- 执行结果  -->
+    <!-- Execution results -->
     <script>
-        // 添加redis帮助页
+        // Add Redis help tab.
         function redis_help_tab_add() {
             redis_help_tab_remove();
-            //增加执行结果tab页
-            var li = document.createElement("li"); //创建li
+            // Add execution-result tab.
+            var li = document.createElement("li"); // Create li.
             li.setAttribute("id", "redis_help_tab");
             li.setAttribute("role", "presentation");
 
-            var href_a = document.createElement("a"); //创建li中的链接a
+            var href_a = document.createElement("a"); // Create link a in li.
             href_a.setAttribute("href", "#redis_help");
             href_a.setAttribute("role", "tab");
             href_a.setAttribute("data-toggle", "tab");
-            href_a.innerHTML = "Redis帮助文档"; //链接显示文本（相当于标签标题）
-            li.appendChild(href_a);//将a添加到li
+            href_a.innerHTML = "Redis Help";
+            li.appendChild(href_a); // Append a to li.
 
-            $("#nav-tabs").prepend(li);//li添加到ul
+            $("#nav-tabs").prepend(li); // Append li to ul.
             $("#nav-tabs a:first").tab('show')
         }
 
-        // 删除redis帮助页
+        // Remove Redis help tab.
         function redis_help_tab_remove() {
             $("#redis_help_tab").remove();
-            //激活最后一个tab
+            // Activate the last tab.
             $("#nav-tabs a:last").tab('show');
         }
 
-        //添加执行结果页面
+        // Add execution result page.
         function tab_add(tab_title) {
             var tab_number = sessionStorage.getItem('tab_num');
 
-            //增加执行结果tab页
-            var li = document.createElement("li"); //创建li
+            // Add execution-result tab.
+            var li = document.createElement("li"); // Create li.
             li.setAttribute("id", "execute_result_tab" + (Number(tab_number) + 1));
             li.setAttribute("role", "presentation");
 
-            var href_a = document.createElement("a"); //创建li中的链接a
+            var href_a = document.createElement("a"); // Create link a in li.
             href_a.setAttribute("href", "#sqlquery_result" + (Number(tab_number) + 1));
             href_a.setAttribute("role", "tab");
             href_a.setAttribute("data-toggle", "tab");
             if (tab_title) {
-                href_a.innerHTML = tab_title; //链接显示文本（相当于标签标题）
+                href_a.innerHTML = tab_title; // Tab title text.
             } else {
-                href_a.innerHTML = "执行结果" + (Number(tab_number) + 1); //链接显示文本（相当于标签标题）
+                href_a.innerHTML = "Execution Result " + (Number(tab_number) + 1); // Tab title text.
 
             }
-            li.appendChild(href_a);//将a添加到li
+            li.appendChild(href_a); // Append a to li.
 
-            //缓存sql
+            // Cache SQL.
             var cache_sql = document.createElement("input");
             cache_sql.setAttribute("type", "hidden")
             cache_sql.setAttribute("sql_cache", editor.getValue())
             li.appendChild(cache_sql);
 
-            $("#nav-tabs").append(li);//li添加到ul
+            $("#nav-tabs").append(li); // Append li to ul.
 
-            //执行结果tab数量加1
+            // Increase execution-result tab count by 1.
             sessionStorage.setItem('tab_num', Number(tab_number) + 1);
-            //重新获取tab数
+            // Reload tab count.
             tab_number = sessionStorage.getItem('tab_num');
 
-            //增加查询结果显示div
+            // Add query-result display div.
             var div =
                 "<div id=\"sqlquery_result" + tab_number + "\" role=\"tabpanel\" class=\"tab-pane fade table-responsive\">\n" +
                 "    <div id=\"query_time" + tab_number + "\" class=\"navbar-text\" >\n" +
-                "        <small>查询时间 : <strong id=\"time" + tab_number + "\"> sec </strong></small>\n" +
+                "        <small>Query Time : <strong id=\"time" + tab_number + "\"> sec </strong></small>\n" +
                 "    </div>\n" +
                 "    <div id=\"mask_time" + tab_number + "\" class=\"navbar-text\" >\n" +
-                "        <small>脱敏时间 : <strong id=\"masking_time" + tab_number + "\"> sec </strong></small>\n" +
+                "        <small>Masking Time : <strong id=\"masking_time" + tab_number + "\"> sec </strong></small>\n" +
                 "    </div>\n" +
                 "    <table id=\"query_result" + tab_number + "\" data-toggle=\"table\" class=\"table table-condensed\"\n" +
                 "           style=\"table-layout:inherit;white-space:pre;overflow:hidden;text-overflow:ellipsis;\"></table>\n" +
                 "</div>\t";
-            $("#tab-content").append(div);//div添加到div
+            $("#tab-content").append(div); // Append div to container.
 
-            //激活添加的tab
+            // Activate the added tab.
             $("#nav-tabs a:last").tab('show')
 
         }
 
-        //删除执行结果页面
+        // Delete execution result page.
         function tab_remove() {
             var tab_number = sessionStorage.getItem('tab_num');
             var active_li_id = sessionStorage.getItem('active_li_id');
 
             if (active_li_id === 'sqllog_tab') {
-                //alert("查询历史tab不允许删除")
+                // Query history tab cannot be removed.
             }
-            //非查询历史时，删除当前激活的tab
+            // When not on query-history tab, remove active tab.
             else if (active_li_id.match(/^execute_result_tab*/)) {
-                //sqlquery_result的tab数量大于0才执行
+                // Execute only when execution-result tab count is greater than 0.
                 if (Number(tab_number) > 0) {
                     var n = active_li_id.split("execute_result_tab")[1];
                     $("#" + active_li_id).remove();
                     $("#" + 'sqlquery_result' + n).remove();
 
-                    //激活最后一个tab
+                    // Activate the last tab.
                     $("#nav-tabs a:last").tab('show');
                     sessionStorage.setItem('tab_num', Number(tab_number) - 1);
-                    //页面只剩下最后一个查询tab，则激活历史查询页
+                    // If only one query tab remains, activate query history tab.
                 }
             }
         }
 
-        //表单验证
+        // Form validation.
         function sqlquery_validate() {
             var result = true;
             var instance_name = $("#instance_name").val();
@@ -649,19 +642,19 @@
                 sqlContent = select_sqlContent
             }
             if (!instance_name) {
-                alert("请选择实例！");
+                alert("Please select an instance!");
                 return result = false;
             } else if (!db_name) {
-                alert("请选择数据库！");
+                alert("Please select a database!");
                 return result = false;
             } else if (!sqlContent) {
-                alert("SQL内容不能为空！");
+                alert("SQL content cannot be empty!");
                 return result = false;
             }
             return result;
         }
 
-        //提交AI生成sql语句请求
+        // Submit request to generate SQL with AI.
         $("#btn-generatesql").click(function () {
                 var check = false
                 var optgroup = $('#instance_name :selected').parent().attr('label')
@@ -671,13 +664,13 @@
                 var query_desc = $("#generateDesc").val()
 
                 if (!instance_name) {
-                    alert("请选择实例！")
+                    alert("Please select an instance!")
                 } else if (!db_name) {
-                    alert("请选择数据库！")
+                    alert("Please select a database!")
                 } else if (optgroup !== 'Redis' && !tb_name){
-                    alert("请选择表结构！")
+                    alert("Please select table structure!")
                 } else if (!query_desc) {
-                    alert("请输入查询描述！")
+                    alert("Please enter query description!")
                 } else {
                     check = true
                 }
@@ -687,7 +680,7 @@
             }
         );
 
-        //先做表单验证，验证成功再成功提交查询请求
+        // Validate form first, then submit query request.
         $("#btn-sqlquery").click(function () {
                 dosqlquery();
             }
@@ -711,7 +704,7 @@
         }
 
         
-        //先做表单验证，验证成功再成功提交执行计划查看
+        // Validate form first, then request execution plan.
         $("#btn-explain").click(function () {
                 if (sqlquery_validate()) {
                     const inputButton = $('input[type=button]')
@@ -722,7 +715,7 @@
             }
         );
 
-        //先做表单验证，验证成功再成功提交格式化sql
+        // Validate form first, then format SQL.
         $("#btn-format").click(function () {
                 var select_sqlContent = editor.session.getTextRange(editor.getSelectionRange());
                 var optgroup = $('#instance_name :selected').parent().attr('label');
@@ -738,17 +731,17 @@
             }
         );
 
-        //实时保存编辑器的文字，防止刷新丢失
+        // Save editor content in real-time to prevent loss on refresh.
         editor.session.on('change', function (delta) {
             var sqlContent = editor.getValue();
             window.sessionStorage.setItem('sqlContent', sqlContent);
-            //获取当前的标签页
+            // Get current active tab.
             var active_li_id = sessionStorage.getItem('active_li_id');
             var active_li_title = sessionStorage.getItem('active_li_title');
-            if (active_li_title.match(/^执行结果\d$/)){
-                //当前激活的执行结果页
+            if (active_li_title.match(/^Execution Result \d+$/)){
+                // Currently active execution result tab.
                 var n = active_li_id.split("execute_result_tab")[1];
-                //填入sql
+                // Fill SQL.
               var inputs = $("#execute_result_tab"+n + " input");
               if(inputs.length > 0){
                     inputs[0].setAttribute("sql_cache", sqlContent)
@@ -777,17 +770,17 @@
             });
         }
 
-        // 展示数据
+        // Display data.
         function display_data(data, target='') {
             var result = data.data;
             var query_str = target+'|'+result['full_sql'];
-            //获取当前的标签页,如果当前不在执行结果页，则默认新增一个页面
+            // Get current active tab; if not on result tab, create a new one.
             var active_li_id = sessionStorage.getItem('active_li_id');
             let active_li_title = sessionStorage.getItem('active_li_title');
             let tb_name, n
             let need_describe_display = false
             if (data.status === 0) {
-                // 查看表结构默认新增tab，相同表结构获取不新增
+                // For table structure view, create a new tab unless same table already active.
                 if (result['full_sql'].match(/^show\s+create\s+table\s+(.*)/)) {
                     need_describe_display = true
                     if (data.is_describe===undefined || !data.is_describe) {
@@ -806,22 +799,22 @@
                         need_describe_display = true
                     }
                 }
-                // 执行结果页默认不新增
-                else if (active_li_title.match(/^执行结果\d$/)) {
+                // Do not add a new tab if already on execution-result tab.
+                else if (active_li_title.match(/^Execution Result \d+$/)) {
                     n = active_li_id.split("execute_result_tab")[1];
                 } else {
                     tab_add();
                     n = sessionStorage.getItem('tab_num');
                 }
-                // 因为一个tab可能对应多个执行，因此移除所有的p元素，新增一个隐藏的p元素
+                // One tab may map to multiple executions: remove all <p> and add one hidden <p>.
                 for (let i=0; i<$("#execute_result_tab"+n+" p").length; i++) {
                     $("#execute_result_tab"+n+" p").remove();
                 }
                 $("#execute_result_tab"+n).append("<p style=\"display:none\">"+query_str+"</p>");
 
-                //显示查询结果
+                // Show query result.
                 if (result['column_list']) {
-                    //异步获取要动态生成的列
+                    // Asynchronously get dynamically generated columns.
                     let columns = [];
                     $.each(result['column_list'], function (i, column) {
                         var iswholeCol = true;
@@ -855,7 +848,7 @@
                         });
                     });
                     if (need_describe_display) {
-                        //初始化表结构显示
+                        // Initialize table-structure display.
                         $(`#query_result${n}`).bootstrapTable('destroy').bootstrapTable({
                                 escape: false,
                                 data: result['rows'],
@@ -864,24 +857,24 @@
                                     field: 1,
                                     formatter: function (value, row, index) {
                                         let sql = window.sqlFormatter.format(value);
-                                        //替换标签
+                                        // Escape HTML tags.
                                         sql = sql.replace(/&/g, "&amp;");
                                         sql = sql.replace(/</g, "&lt;");
                                         sql = sql.replace(/>/g, "&gt;");
                                         sql = sql.replace(/"/g, "&quot;");
-                                        //替换所有的换行符
+                                        // Replace line breaks.
                                         sql = sql.replace(/\r\n/g, "<br>");
                                         sql = sql.replace(/\n/g, "<br>");
-                                        //替换所有的空格
+                                        // Replace spaces.
                                         return sql;
                                     },
                                 }
                                 ],
-                                locale: 'zh-CN'
+                                locale: 'en-US'
                             }
                         );
                     } else {
-                        //初始化查询结果
+                        // Initialize query result.
                         var isdetail = false
                         var optgroup = $('#instance_name :selected').parent().attr('label');
                         if (optgroup === 'Mongo' || optgroup === 'Redis') {
@@ -897,10 +890,10 @@
                             exportDataType: "all",
                             exportTypes: ['json', 'sql', 'csv', 'txt', 'xml', 'xlsx'],
                             exportOptions: {
-                                //ignoreColumn: [0],  //忽略某些列的索引数组
+                                // ignoreColumn: [0],  // Ignore selected column indices.
                                 fileName: function () {
-                                var userInput = prompt('请输入文件名：');  // 弹出对话框让用户输入文件名
-                                return userInput || 'export_result';  // 若用户未输入文件名，则使用默认文件名
+                                var userInput = prompt('Please enter file name:');  // Prompt user for filename.
+                                return userInput || 'export_result';  // Use default if user leaves blank.
                                 },
                                 onFileSave: function (e) {
                                     var url = e.currentTarget.href;
@@ -920,7 +913,7 @@
                                 }
                             },
                             undefinedText: '(null)',
-                            detailView: isdetail, //开启显示行首"+"
+                            detailView: isdetail, // Enable row-leading "+" detail view.
                             showColumns: true,
                             showToggle: true,
                             clickToSelect: true,
@@ -928,13 +921,13 @@
                             pagination: true,
                             pageSize: 30,
                             pageList: [30, 50, 100, 500, 1000],
-                            search: true,                      //是否显示表格搜索
-                            strictSearch: false,                //是否全匹配搜索
-                            //格式化详情
+                            search: true,                      // Enable table search.
+                            strictSearch: false,               // Use fuzzy search.
+                            // Format detail view.
                             detailFormatter: function (index, row) {
                                 var html = [];
                                 $.each(row, function (key, value) {
-                                    if (key === 0) {//mongodb这里要修改
+                                    if (key === 0) { // MongoDB logic may require adjustment here.
                                         let rs = value;
                                         if (optgroup === 'Redis') {
                                             try {
@@ -943,7 +936,7 @@
                                                     rs = JSON.stringify(rs, null, 2)
                                                 }
                                             } catch (e) {
-                                                html.push('<strong>' + "非json格式，无法格式化！" + '</strong>');
+                                                html.push('<strong>' + "Non-JSON format, cannot pretty-print." + '</strong>');
                                                 return false;
                                             }
                                         }
@@ -953,20 +946,20 @@
                                 return html.join('');
                             },
                             onPostBody: function(data) {
-                                //此处的属性及样式名称，来自于bootstrap-table.js
-                                //有detail的表头，添加sytle
+                                // Attribute/style names here come from bootstrap-table.js.
+                                // Add style for table headers with detail column.
                                 var thHasDetail=$(`#${query_result_id} th.detail`);
                                 thHasDetail.css('white-space', 'nowrap');
-                                //有详情+号的的td,添加sytle。
+                                // Add style for td with detail "+" icon.
                                 var tdHasDetail=$(`#${query_result_id} tr[data-has-detail-view="true"] .detail-icon`).parent('td');
                                 tdHasDetail.css('white-space', 'nowrap');
                             },
-                            locale: 'zh-CN',
+                            locale: 'en-US',
                             onExportSaved: function (e) {
                                 var tabs = $("#nav-tabs li")
                                 for(let i=0;i<tabs.length;i++){
                                     if(tabs[i].getAttribute("class") === "active") {
-                                        // sql内容固定隐藏绑定在第二个子元素
+                                        // SQL content is hidden in the second child element.
                                         var instance_name = $("#instance_name").val()
                                         var db_name =$("#db_name").val()
                                         var extraInfo = instance_name+"/"+db_name+"|"+$(tabs[i].children[1]).attr('sql_cache')+"|"+e.length;
@@ -975,18 +968,18 @@
                                             url: "/audit/input/",
                                             dataType: "json",
                                             data: {
-                                                action:"下载",
+                                                action:"download",
                                                 extra_info: extraInfo
                                             },
                                             complete: function () {
-                                                console.log("回调触发")
+                                                console.log("callback triggered")
                                             },
                                             success: function (data) {
-                                                console.log("回调成功")
+                                                console.log("callback success")
                                                 console.log(data)
                                             },
                                             error: function (XMLHttpRequest, textStatus, errorThrown) {
-                                                console.log("回调失败")
+                                                console.log("callback failed")
                                             }
                                         });
                                     }
@@ -994,18 +987,18 @@
                             },
                         });
                     }
-                    //执行时间和脱敏时间赋值
+                    // Set query and masking time.
                     $("#" + ('time') + n).text(result['query_time'] + ' sec');
                     $("#" + ('masking_time') + n).text(result['mask_time'] + ' sec');
-                    //主从延迟赋值，仅在出现延迟时展示，null和0都不展示
+                    // Set replication delay; show only when non-null and non-zero.
                     if (result['seconds_behind_master']) {
                         $("#seconds_behind_master").text('Seconds_Behind_Master:  ' + result['seconds_behind_master']);
                     }
                 }
 
             } else {
-                //查询报错失败信息
-                if (active_li_title.match(/^执行结果\d$/)) {
+                // Query error information.
+                if (active_li_title.match(/^Execution Result \d+$/)) {
                     n = active_li_id.split("execute_result_tab")[1];
                 } else {
                     tab_add();
@@ -1017,9 +1010,9 @@
                         field: 'error',
                         title: 'Error',
                         formatter: function (value, row, index) {
-                            //staus为2的时候，增加申请链接
+                            // Add request link when status is 2.
                             if (data.status === 2) {
-                                return value + "<a href=\"/queryapplylist/\">" + "（提交申请）" + "</a>"
+                                return value + "<a href=\"/queryapplylist/\">" + "(Submit Request)" + "</a>"
                             } else {
                                 return value
                             }
@@ -1032,7 +1025,7 @@
             }
         }
 
-        //将数据通过ajax提交给后端进行检查
+        // Send data to backend via AJAX for processing.
         function sqlquery(sql) {
             var optgroup = $('#instance_name :selected').parent().attr('label');
             var select_sqlContent = editor.session.getTextRange(editor.getSelectionRange());
@@ -1043,45 +1036,45 @@
 
             }
             if (optgroup === "Oracle") {
-                //查看执行计划
+                // Show execution plan.
                 if (sql === 'explain') {
                     sqlContent = 'explain plan for ' + sqlContent
                 }
-                //查看表结构
+                // Show table structure.
                 else if (sql === 'show create table') {
                     sqlContent = "desc " + $("#table_name").val() + ";"
                 }
             } else if (optgroup === "MySQL" || optgroup === "PgSQL" ) {
-                //查看执行计划
+                // Show execution plan.
                 if (sql === 'explain') {
                     sqlContent = 'explain ' + sqlContent
                 }
-                //查看表结构
+                // Show table structure.
                 else if (sql === 'show create table') {
                     sqlContent = "show create table " + $("#table_name").val() + ";"
                 }
             } else if (optgroup === "Mongo") {
-                //查看执行计划
+                // Show execution plan.
                 if (sql === 'explain') {
                     sqlContent = 'explain ' + sqlContent
                 }
             } else if (optgroup === "ClickHouse") {
-                //查看执行计划
+                // Show execution plan.
                 if (sql === 'explain') {
                     sqlContent = 'explain ' + sqlContent
                 }
             } else if (optgroup === "Doris") {
-                //查看执行计划
+                // Show execution plan.
                 if (sql === 'explain') {
                     sqlContent = 'explain ' + sqlContent
                 }
             } else if (optgroup === "MsSQL") {
-                //查看执行计划
+                // Show execution plan.
                 if (sql === 'explain') {
                     sqlContent = 'SET SHOWPLAN_ALL ON; ' + sqlContent + '; SET SHOWPLAN_ALL OFF;'
                 }
             }
-            //提交请求
+            // Submit request.
             $.ajax({
                 type: "post",
                 url: "/query/",
@@ -1119,7 +1112,7 @@
                 tb_name: $("#table_name").val(),
                 query_desc: $("#generateDesc").val(),
             }
-            //提交请求
+            // Submit request.
             $.ajax({
                 type: "post",
                 url: "/query/generate_sql/",
@@ -1150,7 +1143,7 @@
     </script>
     <!-- common -->
     <script>
-        // 按钮和控制器展示配置
+        // Button and controller display config.
         const defaultDisplayConfig = {
             showTableName: true,
             showSchemaName: false,
@@ -1172,10 +1165,10 @@
             "Mongo": createDisplayConfig({showFormat: false}),
             "Phoenix": createDisplayConfig({showExplain: false}),
             "Cassandra": createDisplayConfig({showExplain: false}),
-            // 如有特殊的显示需求, 在此处添加配置, 并在下方的optgroup_control中添加对应的控制逻辑
-            // 如无特殊需求, 可以直接不填写, 这样会使用默认配置
+            // Add custom display config here for special display requirements.
+            // If no special needs, leave empty and default config will be used.
         };
-        //控制按钮和选择器显示
+        // Control button and selector display.
         function optgroup_control(change) {
             let optgroup = $('#instance_name :selected').parent().attr('label');
             let displayConfig = engineDisplayConfig[optgroup] || defaultDisplayConfig
@@ -1208,7 +1201,7 @@
             }
         }
 
-        //实例变更获取数据库
+        // On instance change, load databases.
         $("#instance_name").change(function () {
             if (sessionStorage.getItem('re_query')) {
                 get_instance(false)
@@ -1223,7 +1216,7 @@
             $('#db_name').selectpicker('render');
             $('#db_name').selectpicker('refresh');
             sessionStorage.setItem('sql_query_instance_name', $("#instance_name").val());
-            //获取db_name
+            // Get db_name.
             $.ajax({
                 type: "get",
                 url: "/instance/instance_resource/",
@@ -1256,7 +1249,7 @@
                         }
                         $('#db_name').selectpicker('render');
                         $('#db_name').selectpicker('refresh');
-                        //自动补全提示
+                        // Autocomplete hint.
                         setCompleteData(dbs)
                     } else {
                         alert(data.msg);
@@ -1269,7 +1262,7 @@
             });
         }
 
-        //数据库变更获取表/模式名称
+        // On database change, load table/schema names.
         $("#db_name").change(function () {
             $("#table_name").empty();
             $('#table_name').selectpicker('render');
@@ -1277,11 +1270,11 @@
             $("#schema_name").empty();
             $('#schema_name').selectpicker('render');
             $('#schema_name').selectpicker('refresh');
-            // PgSQL需要选择模式再获取表
+            // PgSQL requires schema selection before loading tables.
             var optgroup = $('#instance_name :selected').parent().attr('label');
             var resource_type = "table";
             if (optgroup === "PgSQL") {
-                //获取schema
+                // Get schema.
                 resource_type = "schema"
             }
             $.ajax({
@@ -1295,7 +1288,7 @@
                 },
                 complete: function () {
                     if (optgroup === "PgSQL") {
-                        //获取schema
+                        // Get schema.
                         $("#div-schema_name").show();
                         $("#schema_name").selectpicker('val', db_name);
                         if ($("#schema_name").val()) {
@@ -1308,7 +1301,7 @@
                         var result = data.data;
                         if (resource_type === "table") {
                             if (optgroup == 'Mongo') {
-                                $("#table_name").prepend("<option value=\"is-empty\" disabled=\"\" selected=\"selected\">查看集合字段:</option>")
+                                $("#table_name").prepend("<option value=\"is-empty\" disabled=\"\" selected=\"selected\">View Collection Fields:</option>")
                             }
                             for (var i = 0; i < result.length; i++) {
                                 var name = "<option>" + result[i] + "</option>";
@@ -1316,7 +1309,7 @@
                             }
                             $('#table_name').selectpicker('render');
                             $('#table_name').selectpicker('refresh');
-                            //自动补全提示
+                            // Autocomplete hint.
                             $("#schema_name").val('');
                             setTablesCompleteData(result)
                         } else {
@@ -1326,7 +1319,7 @@
                             }
                             $('#schema_name').selectpicker('render');
                             $('#schema_name').selectpicker('refresh');
-                            //自动补全提示
+                            // Autocomplete hint.
                             setSchemasCompleteData(result)
                         }
 
@@ -1340,12 +1333,12 @@
             });
         });
 
-        //模式变更获取表
+        // On schema change, load tables.
         $("#schema_name").change(function () {
             $("#table_name").empty();
             $('#table_name').selectpicker('render');
             $('#table_name').selectpicker('refresh');
-            //获取table
+            // Get table.
             $.ajax({
                 type: "get",
                 url: "/instance/instance_resource/",
@@ -1368,7 +1361,7 @@
                         }
                         $('#table_name').selectpicker('render');
                         $('#table_name').selectpicker('refresh');
-                        //自动补全提示
+                        // Autocomplete hint.
                         setTablesCompleteData(result)
                     } else {
                         alert(data.msg);
@@ -1380,7 +1373,7 @@
             });
         });
 
-        //获取表结构
+        // Get table structure.
         $("#table_name").change(function () {
             $.ajax({
                 type: "post",
@@ -1398,22 +1391,22 @@
                     display_data(data, target);
                 },
             });
-            //自动补全提示
+            // Autocomplete hint.
             setColumnsCompleteData()
         });
 
 
-        //激活标签页时保存当前标签页的id
+        // Save current tab id when tab is activated.
         $(function () {
             $("#nav-tabs").on('shown.bs.tab', "li", function (e) {
-                //当前激活的标签id
+                // Current active tab id.
                 sessionStorage.setItem('active_li_id', $(e.target).parents().attr('id'));
-                //当前激活的标签标题
+                // Current active tab title.
                 sessionStorage.setItem('active_li_title', e.target.innerText);
                 if ($(e.target).parents().attr('id') === 'sqllog_tab') {
                     get_querylog();
                 }
-                //回填sql
+                // Refill SQL.
                 let li_sql = $(e.target).parent().children("input");
                 if(li_sql.length>0){
                     var sql = li_sql[0].getAttribute('sql_cache');
@@ -1426,15 +1419,15 @@
             });
         });
 
-        //初始化
+        // Initialization.
         $(document).ready(function () {
-            //重置执行结果的tab数量
+            // Reset execution-result tab count.
             sessionStorage.setItem('tab_num', 0);
-            //设置当前激活的标签id
+            // Set current active tab id.
             sessionStorage.setItem('active_li_id', 'sqllog_tab');
-            sessionStorage.setItem('active_li_title', '查询历史');
+            sessionStorage.setItem('active_li_title', 'Query History');
 
-            //读取上次保存的sqlContent
+            // Load previously saved sqlContent.
             let sqlContent = window.sessionStorage.getItem('sqlContent');
             if (sqlContent != null) {
                 editor.setValue(sqlContent);
@@ -1442,13 +1435,13 @@
                 editor.setValue("");
             }
             
-            // check openai 配置是否存在以支持AI生成查询语句功能
+            // Check whether OpenAI config exists to support AI SQL generation.
             check_openai()
 
-            //默认获取查询历史
+            // Load query history by default.
             get_querylog();
 
-            //获取用户实例列表
+            // Get user instance list.
             $(function () {
                 $.ajax({
                     type: "get",
@@ -1458,7 +1451,7 @@
                         tag_codes: ['can_read']
                     },
                     complete: function () {
-                        //填充实例名
+                        // Fill instance name.
                         $("#instance_name").selectpicker('val', sessionStorage.getItem('sql_query_instance_name'));
                         if ($("#instance_name").val()) {
                             $("#instance_name").selectpicker().trigger("change");
@@ -1517,4 +1510,3 @@
         }
     </script>
 {% endblock %}
-
