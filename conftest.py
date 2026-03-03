@@ -22,7 +22,7 @@ from sql.utils.workflow_audit import AuditV2, AuditSetting
 @pytest.fixture
 def normal_user(django_user_model):
     user = django_user_model.objects.create(
-        username="test_user", display="中文显示", is_active=True
+        username="test_user", display="Chinese Display", is_active=True
     )
     yield user
     user.delete()
@@ -31,7 +31,7 @@ def normal_user(django_user_model):
 @pytest.fixture
 def super_user(django_user_model):
     user = django_user_model.objects.create(
-        username="super_user", display="超级用户", is_active=True, is_superuser=True
+        username="super_user", display="Super User", is_active=True, is_superuser=True
     )
     yield user
     user.delete()
@@ -155,7 +155,7 @@ def fake_generate_audit_setting(mocker: MockFixture, super_user, create_auth_gro
 
 @pytest.fixture
 def instance_tag(db):
-    tag = InstanceTag.objects.create(tag_code="test_tag", tag_name="测试标签")
+    tag = InstanceTag.objects.create(tag_code="test_tag", tag_name="Test Tag")
     yield tag
     tag.delete()
 
@@ -180,8 +180,8 @@ def create_audit_workflow(normal_user, create_resource_group):
         group_name=create_resource_group.group_name,
         workflow_id=1,
         workflow_type=2,
-        workflow_title="申请标题",
-        workflow_remark="申请备注",
+        workflow_title="Apply Title",
+        workflow_remark="Apply Remark",
         audit_auth_groups="1",
         current_audit="1",
         next_audit="2",
