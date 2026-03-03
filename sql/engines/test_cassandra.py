@@ -6,7 +6,7 @@ from sql.models import Instance
 from sql.engines.cassandra import CassandraEngine, split_sql
 from sql.engines.models import ResultSet
 
-# 启用后, 会运行全部测试, 包括一些集成测试
+# When enabled, all tests run, including some integration tests.
 integration_test_enabled = False
 integration_test_host = "localhost"
 
@@ -69,7 +69,7 @@ class CassandraEngineTest(TestCase):
 
     @patch("sql.engines.cassandra.CassandraEngine.query")
     def test_get_all_tables(self, mock_query):
-        # 下面是查表示例返回结果
+        # Example return value for table list query.
         mock_query.return_value = ResultSet(rows=[("u",), ("v",), ("w",)])
 
         table_list = self.engine.get_all_tables("some_db")
@@ -138,8 +138,10 @@ class CassandraEngineTest(TestCase):
         execute_result = self.engine.execute(db_name="test_db", sql=sql)
         self.assertEqual(execute_result.rows[0].stagestatus, "Execute Failed")
         self.assertEqual(execute_result.rows[1].stagestatus, "Execute Failed")
-        self.assertEqual(execute_result.rows[0].errormessage, "异常信息：foo")
-        self.assertEqual(execute_result.rows[1].errormessage, "前序语句失败, 未执行")
+        self.assertEqual(execute_result.rows[0].errormessage, "Exception: foo")
+        self.assertEqual(
+            execute_result.rows[1].errormessage, "Previous statement failed, not executed"
+        )
         mock_execute.assert_called()
 
     def test_filter_sql(self):
@@ -179,13 +181,13 @@ class CassandraIntegrationTest(TestCase):
 
         self.keyspace = "test"
         self.table = "test_table"
-        # 新建 keyspace
+        # Create keyspace.
         self.engine.execute(
             sql=f"create keyspace {self.keyspace} with replication = "
             "{'class': 'org.apache.cassandra.locator.SimpleStrategy', "
             "'replication_factor': '1'};"
         )
-        # 建表
+        # Create table.
         self.engine.execute(
             db_name=self.keyspace,
             sql=f"""create table if not exists {self.table}( name text primary key );""",
