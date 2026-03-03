@@ -22,7 +22,7 @@ from mirage.tools import Migrator
 
 
 def info(request):
-    # 获取django_q信息
+    # Get django_q information.
     django_q_version = ".".join(str(i) for i in django_q.VERSION)
 
     system_info = {
@@ -36,22 +36,22 @@ def info(request):
 
 @superuser_required
 def debug(request):
-    # 获取完整信息
+    # Return full details when requested.
     full = request.GET.get("full")
 
-    # 系统配置
+    # System configuration.
     config = SysConfig()
     config.get_all_config()
     sys_config = config.sys_config
 
-    # MySQL信息
+    # MySQL information.
     cursor = connection.cursor()
     mysql_info = {
         "mysql_server_info": cursor.db.mysql_server_info,
         "timezone_name": cursor.db.timezone_name,
     }
 
-    # Redis信息
+    # Redis information.
     try:
         redis_conn = get_redis_connection("default")
         full_redis_info = redis_conn.info()
@@ -63,7 +63,7 @@ def debug(request):
             "used_memory_human": full_redis_info.get("used_memory_human"),
         }
     except Exception as e:
-        redis_info = f"获取Redis信息报错:{e}"
+        redis_info = f"Failed to get Redis info: {e}"
         full_redis_info = redis_info
 
     # django_q
@@ -106,14 +106,14 @@ def debug(request):
             "q_cluster_stats": (
                 q_cluster_stats
                 if q_cluster_stats
-                else "没有正在运行的集群信息，请检查django_q状态"
+                else "No running cluster information found. Check django_q status."
             ),
             "q_broker_stats": q_broker_stats,
         }
     except Exception as e:
-        django_q_info = f"获取django_q信息报错:{e}"
+        django_q_info = f"Failed to get django_q info: {e}"
 
-    # Inception和goInception信息
+    # Inception and goInception information.
     go_inception_host = sys_config.get("go_inception_host")
     go_inception_port = sys_config.get("go_inception_port", 0)
     go_inception_user = sys_config.get("go_inception_user", "")
@@ -150,10 +150,10 @@ def debug(request):
             "ghost_on": full_goinception_info.get("ghost_on"),
         }
     except Exception as e:
-        goinception_info = f"获取goInception信息报错:{e}"
+        goinception_info = f"Failed to get goInception info: {e}"
         full_goinception_info = goinception_info
 
-    # 备份库
+    # Backup database.
     try:
         bak_conn = MySQLdb.connect(
             host=inception_remote_backup_host,
@@ -166,7 +166,7 @@ def debug(request):
         cursor.execute("select 1;")
         backup_info = "normal"
     except Exception as e:
-        backup_info = f"无法连接goInception备份库\n{e}"
+        backup_info = f"Unable to connect to goInception backup database\n{e}"
 
     # PACKAGES
     installed_packages = pkg_resources.working_set
@@ -174,7 +174,7 @@ def debug(request):
         ["%s==%s" % (i.key, i.version) for i in installed_packages]
     )
 
-    # 敏感信息处理
+    # Mask sensitive information.
     secret_keys = [
         "inception_remote_backup_password",
         "ding_app_secret",
@@ -187,7 +187,7 @@ def debug(request):
     ]
     sys_config.update({k: "******" for k in secret_keys})
 
-    # 最终集合
+    # Final output.
     system_info = {
         "archery": {"version": archery.display_version},
         "django_q": django_q_info,
@@ -210,21 +210,21 @@ def debug(request):
 
 @superuser_required
 def mirage(request):
-    """迁移加密的Instance数据，保留一定版本后删除"""
+    """Migrate encrypted Instance data. Remove after enough versions."""
     try:
         pc = Prpcrypt()
         mg_user = Migrator(app="sql", model="Instance", field="user")
         mg_password = Migrator(app="sql", model="Instance", field="password")
-        # 还原密码
+        # Restore password first.
         for ins in Instance.objects.all():
-            # 忽略解密错误的数据(本身为异常数据)
+            # Ignore records that cannot be decrypted (already invalid data).
             try:
                 Instance(pk=ins.pk, password=pc.decrypt(ins.password)).save(
                     update_fields=["password"]
                 )
             except:
                 pass
-        # 使用django-mirage-field重新加密
+        # Re-encrypt with django-mirage-field.
         mg_user.encrypt()
         mg_password.encrypt()
         return JsonResponse({"msg": "ok"})
