@@ -1,5 +1,6 @@
 # -*- coding: UTF-8 -*-
 import logging
+import os
 import re
 import traceback
 import MySQLdb
@@ -34,10 +35,20 @@ class GoInceptionEngine(EngineBase):
             )
             return self.conn
         archer_config = SysConfig()
-        go_inception_host = archer_config.get("go_inception_host")
-        go_inception_port = int(archer_config.get("go_inception_port", 4000))
-        go_inception_user = archer_config.get("go_inception_user", "")
-        go_inception_password = archer_config.get("go_inception_password", "")
+        go_inception_host = archer_config.get(
+            "go_inception_host", os.environ.get("GO_INCEPTION_HOST", "127.0.0.1")
+        )
+        go_inception_port = int(
+            archer_config.get(
+                "go_inception_port", os.environ.get("GO_INCEPTION_PORT", "4000")
+            )
+        )
+        go_inception_user = archer_config.get(
+            "go_inception_user", os.environ.get("GO_INCEPTION_USER", "")
+        )
+        go_inception_password = archer_config.get(
+            "go_inception_password", os.environ.get("GO_INCEPTION_PASSWORD", "")
+        )
         self.conn = MySQLdb.connect(
             host=go_inception_host,
             port=go_inception_port,
@@ -51,10 +62,24 @@ class GoInceptionEngine(EngineBase):
     @staticmethod
     def get_backup_connection():
         archer_config = SysConfig()
-        backup_host = archer_config.get("inception_remote_backup_host")
-        backup_port = int(archer_config.get("inception_remote_backup_port", 3306))
-        backup_user = archer_config.get("inception_remote_backup_user")
-        backup_password = archer_config.get("inception_remote_backup_password", "")
+        backup_host = archer_config.get(
+            "inception_remote_backup_host",
+            os.environ.get("INCEPTION_REMOTE_BACKUP_HOST", "127.0.0.1"),
+        )
+        backup_port = int(
+            archer_config.get(
+                "inception_remote_backup_port",
+                os.environ.get("INCEPTION_REMOTE_BACKUP_PORT", "3306"),
+            )
+        )
+        backup_user = archer_config.get(
+            "inception_remote_backup_user",
+            os.environ.get("INCEPTION_REMOTE_BACKUP_USER", ""),
+        )
+        backup_password = archer_config.get(
+            "inception_remote_backup_password",
+            os.environ.get("INCEPTION_REMOTE_BACKUP_PASSWORD", ""),
+        )
         return MySQLdb.connect(
             host=backup_host,
             port=backup_port,
