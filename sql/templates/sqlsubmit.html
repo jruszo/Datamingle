@@ -155,7 +155,8 @@
     </div>
 {% endblock content %}
 {% block js %}
-    {% load static %}
+    {% load static i18n %}
+    {% get_current_language as LANGUAGE_CODE %}
     <link href="{% static 'bootstrap-fileinput/css/fileinput.min.css' %}" rel="stylesheet">
     <link href="{% static 'daterangepicker/css/daterangepicker.css' %}" rel="stylesheet" type="text/css"/>
     <script src="{% static 'ace/ace.js' %}"></script>
@@ -165,7 +166,9 @@
     <script src="{% static 'ace/snippets/mysql.js' %}"></script>
     <script src="{% static 'ace/ace-init.js' %}"></script>
     <script src="{% static 'bootstrap-fileinput/js/fileinput.min.js' %}"></script>
+    {% if LANGUAGE_CODE|slice:":2" == "zh" %}
     <script src="{% static 'bootstrap-fileinput/js/locales/zh.js' %}"></script>
+    {% endif %}
     <script src="{% static 'daterangepicker/js/moment.min.js' %}"></script>
     <script src="{% static 'daterangepicker/js/daterangepicker.js' %}"></script>
 
@@ -208,7 +211,7 @@
         // Initialize upload control.
         function init_upload() {
             $("#sql-upload").fileinput({
-                language: 'zh',
+                language: '{% if LANGUAGE_CODE|slice:":2" == "zh" %}zh{% else %}en{% endif %}',
                 allowedFileExtensions: ['sql'], // Accepted file suffixes.
                 showCaption: true, // Show title.
                 initialCaption: 'Only SQL files up to 10MB are supported',

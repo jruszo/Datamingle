@@ -165,15 +165,22 @@
 {% endblock content %}
 
 {% block js %}
-    {% load static %}
+    {% load static i18n %}
+    {% get_current_language as LANGUAGE_CODE %}
     <link href="{% static 'datetimepicker/css/bootstrap-datetimepicker.css' %}" rel="stylesheet" type="text/css"/>
     <script src="{% static 'daterangepicker/js/moment.min.js' %}"></script>
     <script src="{% static 'datetimepicker/js/bootstrap-datetimepicker.js' %}"></script>
+    {% if LANGUAGE_CODE|slice:":2" == "zh" %}
     <script src="{% static 'datetimepicker/js/bootstrap-datetimepicker.zh-CN.js' %}"></script>
+    {% endif %}
     <script src="{% static 'bootstrap-table/js/bootstrap-table-export.min.js' %}"></script>
     <script src="{% static 'bootstrap-table/js/tableExport.min.js' %}"></script>
     <script>
-        $(".form_datetime").datetimepicker({format: 'yyyy-mm-dd hh:ii:ss', language: 'en', autoclose: true});
+        $(".form_datetime").datetimepicker({
+            format: 'yyyy-mm-dd hh:ii:ss',
+            language: '{% if LANGUAGE_CODE|slice:":2" == "zh" %}zh-CN{% else %}en{% endif %}',
+            autoclose: true
+        });
 
         // Get user instance list.
         $(function () {

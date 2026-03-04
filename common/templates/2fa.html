@@ -2,7 +2,7 @@
 <html>
 <head>
     <title>Archery - Two-Factor Authentication</title>
-    {% load static %}
+    {% load static i18n %}
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- Include Bootstrap -->
     <link href="{% static 'bootstrap/css/bootstrap.min.css' %}" rel="stylesheet">
@@ -86,7 +86,10 @@
 <script src="{% static 'jquery/jquery.min.js' %}"></script>
 <script src="{% static 'bootstrap/js/bootstrap.min.js' %}"></script>
 <script src="{% static 'bootstrap-select/js/bootstrap-select.min.js' %}"></script>
+{% get_current_language as LANGUAGE_CODE %}
+{% if LANGUAGE_CODE|slice:":2" == "zh" %}
 <script src="{% static 'bootstrap-select/js/i18n/defaults-zh_CN.min.js' %}"></script>
+{% endif %}
 <script src="{% static 'dist/js/utils.js' %}"></script>
 </body>
 <!-- CSRF helper -->
