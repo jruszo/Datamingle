@@ -215,7 +215,7 @@ class GoInceptionEngine(EngineBase):
         if not query_result.rows:
             raise RuntimeError("Inception Error: failed to retrieve syntax information")
         # Handle edge cases where returned content is audit result.
-        # Upstream reference: Archery issue #1826
+        # https://github.com/hhyo/Archery/issues/1826
         print_info = query_result.to_dict()[0]
         if "error_level" in print_info:
             raise RuntimeError(f'Inception Error: {print_info.get("error_message")}')
