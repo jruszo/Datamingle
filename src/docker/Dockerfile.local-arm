@@ -1,0 +1,45 @@
+FROM python:3.11-bookworm
+
+ENV TZ=UTC \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /opt/archery
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        nginx \
+        mariadb-client \
+        build-essential \
+        default-libmysqlclient-dev \
+        libldap2-dev \
+        libsasl2-dev \
+        libpq-dev \
+        unixodbc-dev \
+        curl \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv /opt/venv4archery
+ENV PATH="/opt/venv4archery/bin:${PATH}"
+
+COPY requirements.txt /tmp/requirements.txt
+
+# cx-Oracle in this repo targets x86/legacy client libraries and breaks ARM builds.
+RUN sed '/^cx-Oracle==/Id' /tmp/requirements.txt > /tmp/requirements.local.txt \
+    && sed -i '/^OpenAI$/Id' /tmp/requirements.local.txt \
+    && pip install --upgrade pip \
+    && pip install -r /tmp/requirements.local.txt \
+    && pip install openai
+
+COPY . /opt/archery
+
+RUN useradd -r -s /usr/sbin/nologin nginx || true \
+    && cp -f /opt/archery/src/docker/nginx.conf /etc/nginx/nginx.conf \
+    && cp -f /opt/archery/src/docker/supervisord.conf /etc/supervisord.conf \
+    && mkdir -p /opt/archery/logs /opt/archery/downloads /opt/archery/keys
+
+EXPOSE 9123
+
+ENTRYPOINT ["bash", "/opt/archery/src/docker/startup.sh"]

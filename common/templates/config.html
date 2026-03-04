@@ -1411,7 +1411,22 @@
                     </div>
                     <div id="div-workflow-config" class="form-inline form-group" style="display: none">
                         <h5 class="control-label text-bold" style="color: red">
-                            Rule: <b>Selecting multiple permission groups creates a multi-level approval flow in selection order; any user in a selected group can approve.</b></h5>
+                            How it works:
+                            <b>Select approver groups in order to build the approval chain (left to right).
+                                Any user in the current group can approve and move the workflow to the next group.</b>
+                        </h5>
+                        <h6 class="control-label" style="color: #666; line-height: 1.6;">
+                            Group meaning reference (convention):
+                            <b>Default</b> = general fallback approvers,
+                            <b>PM</b> = Product Managers,
+                            <b>RD</b> = Engineers/Developers,
+                            <b>QA</b> = Quality Assurance.
+                            Actual members are managed in user/group settings.
+                        </h6>
+                        <h6 class="control-label" style="color: #666; line-height: 1.6;">
+                            Tip: each pick appends one step (e.g. <b>DBA -&gt; QA -&gt; PM</b>).
+                            Use <b>Reset</b> to clear and rebuild the sequence.
+                        </h6>
                         <br>
                         <h5 class="control-label text-bold">Current Approval Flow: <b id="workflow_auditors"></b></h5>
                         <br>
@@ -1434,7 +1449,7 @@
                         </div>
                         <div class="form-group">
                             <button id="btn-workflow-config" class="btn btn-default">Change</button>
-                            <button id="btn-workflow-config-clean" class="btn btn-default">Refresh</button>
+                            <button id="btn-workflow-config-clean" class="btn btn-default">Reset</button>
                         </div>
                     </div>
                 </div>

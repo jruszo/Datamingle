@@ -12,8 +12,8 @@ class Const(object):
 
 class WorkflowType(models.IntegerChoices):
     QUERY = 1, "Query privilege request"
-    SQL_REVIEW = 2, "SQL deployment request"
-    ARCHIVE = 3, "Data archive request"
+    SQL_REVIEW = 2, "DDL/DML request"
+    ARCHIVE = 3, "Data Archival request"
 
 
 class WorkflowStatus(models.IntegerChoices):
