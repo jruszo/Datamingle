@@ -64,10 +64,13 @@
     </div>
 {% endblock content %}
 {% block js %}
-    {% load static %}
+    {% load static i18n %}
+    {% get_current_language as LANGUAGE_CODE %}
     <link href="{% static 'bootstrap-fileinput/css/fileinput.min.css' %}" rel="stylesheet">
     <script src="{% static 'bootstrap-fileinput/js/fileinput.min.js' %}"></script>
+    {% if LANGUAGE_CODE|slice:":2" == "zh" %}
     <script src="{% static 'bootstrap-fileinput/js/locales/zh.js' %}"></script>
+    {% endif %}
     <script src="{% static 'bootstrap-table/js/bootstrap-table-export.min.js' %}"></script>
     <script src="{% static 'bootstrap-table/js/tableExport.min.js' %}"></script>
     <script src="{% static 'dist/js/marked.min.js' %}"></script>
@@ -76,7 +79,7 @@
         // Initialize upload control.
         $(function init_upload() {
             $("#sql-upload").fileinput({
-                language: 'en',
+                language: '{% if LANGUAGE_CODE|slice:":2" == "zh" %}zh{% else %}en{% endif %}',
                 allowedFileExtensions: ['sql', 'xml'],// Accepted file suffixes.
                 showCaption: true,// Show title.
                 initialCaption: 'SQL/MyBatis3 Mapper XML file',

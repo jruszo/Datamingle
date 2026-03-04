@@ -237,7 +237,8 @@
 {% endblock content %}
 
 {% block js %}
-    {% load static %}
+    {% load static i18n %}
+    {% get_current_language as LANGUAGE_CODE %}
     <script src="{% static 'ace/ace.js' %}"></script>
     <script src="{% static 'ace/ext-language_tools.js' %}"></script>
     <script src="{% static 'ace/mode-mysql.js' %}"></script>
@@ -606,7 +607,7 @@
                         pagination: true,
                         pageSize: 100,
                         pageList: [100, 500],
-                        locale: 'zh-CN'
+                        locale: '{% if LANGUAGE_CODE|slice:":2" == "zh" %}zh-CN{% else %}en-US{% endif %}'
                     });
                 }
                 $("#explain_result").show();
