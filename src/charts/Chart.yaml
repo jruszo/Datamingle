@@ -5,7 +5,7 @@ description: Archery Helm chart for Kubernetes
 name: archery
 version: 0.2.0
 sources:
-  - https://github.com/hhyo/Archery
+  - https://github.com/jruszo/Datamingle
 
 maintainers:
   - name: AceRyuunosuke

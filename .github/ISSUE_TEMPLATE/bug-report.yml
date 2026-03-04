@@ -1,38 +1,38 @@
-name: 🐛 报告BUG
-description: 报告BUG请务必使用这个模板，不规范的提交可能会被直接关闭
-title: "请对问题进行简要的描述"
+name: 🐛 Bug Report
+description: Please use this template for bug reports. Incomplete submissions may be closed.
+title: "Briefly describe the issue"
 body:
   - type: markdown
     attributes:
       value: |
-        感谢你花费时间来报告这个问题，在提交前请先查阅 [WIKI](https://github.com/hhyo/archery/wiki) | [FAQ](https://github.com/hhyo/archery/wiki/FAQ) 等文档，确保这是一个需要修复的问题🐛。如果是对于使用方法的咨询🤔🙏，或者你有好的想法和建议💡，请通过[Discussions](https://github.com/hhyo/Archery/discussions)来发布，再次感谢你对Archery的贡献 🎉🎉🎉
+        Thanks for taking the time to report this issue. Before submitting, please check the [Wiki](https://github.com/jruszo/Datamingle/wiki) and [FAQ](https://github.com/jruszo/Datamingle/wiki/FAQ) to confirm this is a bug that needs a fix. For usage questions or ideas/suggestions, please post in [Discussions](https://github.com/jruszo/Datamingle/discussions). Thanks again for contributing to Datamingle.
   - type: textarea
     id: what-happened
     attributes:
-      label: 重现步骤
-      description: 现在告诉我们你遇到了什么问题，并描述问题出现场景和重现步骤
+      label: Reproduction Steps
+      description: Describe what happened, where it happened, and how to reproduce it.
       placeholder: |
-        1. 把冰箱门打开
-        2. 把大象放进去
-        3. 把冰箱门关上
+        1. Open the refrigerator door
+        2. Put the elephant inside
+        3. Close the refrigerator door
     validations:
       required: true
   - type: textarea
     id: current-behavior
     attributes:
-      label: 预期外的结果
+      label: Unexpected Result
       description: |
-        告诉我们你遇到了什么错误，如果可以请提供相关截图信息
-        
-        Tip: 你可以将文件拖拽过来以添加图片，但请确保已经处理了其中包含的敏感信息
+        Describe the error you encountered. If possible, include screenshots.
+
+        Tip: You can drag and drop files to attach images. Please make sure sensitive information is removed.
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
-      label: 日志文本
+      label: Logs
       description: |
-        你可以将相关日志信息粘贴到此处，将会自动格式化处理，关于日志的查看方式
+        Paste related log output here. It will be auto-formatted. Common log locations:
         1. logs/archery.log
         2. logs/qcluster.log
         3. docker logs archery -f --tail=10
@@ -42,30 +42,30 @@ body:
   - type: input
     id: version
     attributes:
-      label: 版本
-      description: 请告诉我们你正在使用的Archery版本
+      label: Version
+      description: Tell us which Datamingle version you are using.
       placeholder: 1.9.1
     validations:
       required: true
   - type: dropdown
     id: deploy
     attributes:
-      label: 部署方式
-      description: 请告诉我们你的应用部署方式
+      label: Deployment Method
+      description: Tell us how your application is deployed.
       options:
         - Docker
         - K8S
-        - 手工部署
+        - Manual Deployment
     validations:
       required: true
   - type: textarea
     id: other-msg
     attributes:
-      label: 是否还有其他可以辅助定位问题的信息？比如数据库版本等
+      label: Additional context (for example database version)
       description: |
-        部分信息可以在Archery的debug api中获取：[参考debug地址](https://demo.archerydms.com/api/debug?full=true)
+        Some details can be collected from the Datamingle debug API: [Example debug endpoint](https://demo.archerydms.com/api/debug?full=true)
         - **MySQL**: 5.7.26
-        - **Browsers**: Chrome
+        - **Browser**: Chrome
         - **goInception**: v1.2.5-49
     validations:
       required: false

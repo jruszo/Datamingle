@@ -11,7 +11,7 @@
 
 [Repository](https://github.com/jruszo/Datamingle)
 
-![](https://github.com/hhyo/Archery/wiki/images/dashboard.png)
+![](https://github.com/jruszo/Datamingle/wiki/images/dashboard.png)
 
 </div>
 

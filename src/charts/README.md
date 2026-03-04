@@ -2,7 +2,7 @@
 
 > [!IMPORTANT]  
 > This Helm chart is no longer recommended for active use. It is kept for historical reasons only.
-> Please read the [wiki](https://github.com/hhyo/Archery/wiki/k8s) for the latest deployment guide.
+> Please read the [wiki](https://github.com/jruszo/Datamingle/wiki/k8s) for the latest deployment guide.
 
 ## 1. Install Dependencies
 

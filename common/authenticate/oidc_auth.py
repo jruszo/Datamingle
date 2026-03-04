@@ -53,7 +53,7 @@ class OIDCAuthenticationBackend(auth.OIDCAuthenticationBackend):
                     "Please ensure your .env file contains a correct OIDC_USER_ATTR_MAP.\n"
                     "Example:\n"
                     "    OIDC_USER_ATTR_MAP=username=preferred_username,display=name,email=email\n"
-                    "Or refer to https://github.com/hhyo/archery/wiki for more details."
+                    "Or refer to https://github.com/jruszo/Datamingle/wiki for more details."
                 ).format(
                     missing=", ".join(missing_fields),
                     claims=claims,
