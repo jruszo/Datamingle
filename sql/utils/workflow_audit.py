@@ -256,7 +256,7 @@ class AuditV2:
         review_content = self.workflow.sqlworkflowcontent.review_content
         for review_row in json.loads(review_content):
             review_result = ReviewResult(**review_row)
-            # Remove SQL comments https://github.com/hhyo/Archery/issues/949
+            # Remove SQL comments (upstream Archery issue #949)
             sql = remove_comments(review_result.sql).replace("\n", "").replace("\r", "")
             # Regex match.
             if p.match(sql):

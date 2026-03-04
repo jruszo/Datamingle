@@ -44,7 +44,7 @@ services:
   archery:
     # The image reference below is only an example. Check the sources below for the version you need:
     # dockerhub https://hub.docker.com/r/hhyo/archery
-    # github packages https://github.com/hhyo/Archery/pkgs/container/archery
+    # github packages https://github.com/jruszo/Datamingle/pkgs/container/archery
     # If needed, you can also build your own Docker image and replace this image reference.
     image: hhyo/archery:v1.13.0
     container_name: archery
