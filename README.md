@@ -1,23 +1,24 @@
 <div align="center">
 
-# <a href="https://archerydms.com/" target="_blank" rel="noopener noreferrer">Archery</a>
-<h4> SQL Review and Query Platform<h4>
-
-[![Django CI](https://github.com/hhyo/Archery/actions/workflows/django.yml/badge.svg)](https://github.com/hhyo/Archery/actions/workflows/django.yml)
-[![Release](https://img.shields.io/github/release/hhyo/archery.svg)](https://github.com/hhyo/archery/releases/)
-[![codecov](https://codecov.io/gh/hhyo/archery/branch/master/graph/badge.svg)](https://codecov.io/gh/hhyo/archery)
+[![Repository](https://img.shields.io/badge/GitHub-jruszo%2FDatamingle-181717?logo=github)](https://github.com/jruszo/Datamingle)
 [![version](https://img.shields.io/pypi/pyversions/django)](https://img.shields.io/pypi/pyversions/django/)
 [![version](https://img.shields.io/badge/django-4.1-brightgreen.svg)](https://docs.djangoproject.com/en/4.1/)
-[![Publish Docker image](https://github.com/hhyo/Archery/actions/workflows/docker-image.yml/badge.svg)](https://github.com/hhyo/Archery/actions/workflows/docker-image.yml)
-[![docker_pulls](https://img.shields.io/docker/pulls/hhyo/archery.svg)](https://hub.docker.com/r/hhyo/archery/)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](http://github.com/hhyo/archery/blob/master/LICENSE)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-[Documentation](https://archerydms.com/) | [FAQ](https://github.com/hhyo/archery/wiki/FAQ) | [Releases](https://github.com/hhyo/archery/releases/)
+# Datamingle
+<h4>SQL Review and Query Platform</h4>
+
+[Repository](https://github.com/jruszo/Datamingle)
 
 ![](https://github.com/hhyo/Archery/wiki/images/dashboard.png)
 
 </div>
+
+Fork Attribution
+===============
+Datamingle is a fork of [Archery](https://github.com/hhyo/Archery), and we retain attribution in accordance with the Apache-2.0 license.
+Original project copyright and license notices are preserved in this repository.
 
 Feature Matrix
 ====
@@ -39,18 +40,14 @@ Feature Matrix
 Quick Start
 ===============
 ### Live Demo
-[Online Demo](https://demo.archerydms.com)
-
-| Account | Password |
-| --- | --- |
-| archer | archer |
+Public Datamingle demo: coming soon.
 
 ### Docker
-Refer to https://github.com/hhyo/archery/wiki/docker
+Use the Docker and compose files in this repository (`src/docker` and `src/docker-compose`).
 
 Manual Installation
 ===============
-[Deployment Guide](https://github.com/hhyo/archery/wiki/manual)
+Use this repository as the source of truth: https://github.com/jruszo/Datamingle
 
 Run Tests
 ===============
@@ -111,10 +108,10 @@ Dependencies
 
 Contributing
 ===============
-You can check the roadmap and dependency list on the project homepage, claim related issues, or submit a PR directly. Thanks for contributing to Archery.
+You can check the roadmap and dependency list in this repository, claim related issues, or submit a PR directly. Thanks for contributing to Datamingle.
 
 Contributions include but are not limited to:
-- [Wiki documentation](https://github.com/hhyo/Archery/wiki) (open editing)
+- [Wiki documentation](https://github.com/jruszo/Datamingle/wiki) (if enabled)
 - Bug fixes
 - New features
 - Code optimization
@@ -122,11 +119,12 @@ Contributions include but are not limited to:
 
 Feedback
 ===============
-- Usage questions and requirements discussion: [Discussions](https://github.com/hhyo/Archery/discussions)
-- Bug reports: [Issues](https://github.com/hhyo/archery/issues)
+- Usage questions and requirements discussion: [Discussions](https://github.com/jruszo/Datamingle/discussions)
+- Bug reports: [Issues](https://github.com/jruszo/Datamingle/issues)
 
 Acknowledgements
 ===============
+- [Archery](https://github.com/hhyo/Archery) Datamingle is forked from Archery.
 - [archer](https://github.com/jly8866/archer) Archery is based on secondary development of archer.
 - [goInception](https://github.com/hanchuanchuan/goInception) A MySQL operations tool integrating review, execution, backup, and rollback SQL generation.
 - [JetBrains Open Source](https://www.jetbrains.com/opensource/) for providing free IDE licenses to this project.
