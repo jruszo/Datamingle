@@ -1,4 +1,4 @@
-from rest_framework import views, generics, status, permissions
+from rest_framework import views, generics, status
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
 from drf_spectacular.utils import extend_schema
@@ -18,13 +18,10 @@ from .permissions import IsOwner
 from .filters import UserFilter
 from django_redis import get_redis_connection
 from django.contrib.auth.models import Group
-from django.contrib.auth import authenticate, login
-from django.conf import settings
+from django.contrib.auth import authenticate
 from django.http import Http404
 from sql.models import Users, ResourceGroup, TwoFactorAuthConfig
-from common.twofa import TwoFactorAuthBase, get_authenticator
-from common.config import SysConfig
-from common.utils.ding_api import get_ding_user_id
+from common.twofa import get_authenticator
 import random
 import json
 import time
@@ -296,7 +293,7 @@ class TwoFA(views.APIView):
     Configure 2FA.
     """
 
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [IsOwner]
 
     @extend_schema(
         summary="Configure 2FA", request=TwoFASerializer, description="Configure 2FA."
@@ -311,21 +308,6 @@ class TwoFA(views.APIView):
         enable = request.data["enable"]
         auth_type = request.data["auth_type"]
         user = Users.objects.get(username=engineer)
-        request_user = request.session.get("user")
-
-        if not request.user.is_authenticated:
-            if request_user:
-                if request_user != engineer:
-                    return Response(
-                        {
-                            "status": 1,
-                            "msg": "Logged-in user does not match the user being validated.",
-                        }
-                    )
-            else:
-                return Response(
-                    {"status": 1, "msg": "User password must be verified first."}
-                )
 
         authenticator = get_authenticator(user=user, auth_type=auth_type)
         if enable == "true":
@@ -420,7 +402,7 @@ class TwoFAVerify(views.APIView):
     Verify 2FA code.
     """
 
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [IsOwner]
 
     @extend_schema(
         summary="Verify 2FA Code",
@@ -438,28 +420,9 @@ class TwoFAVerify(views.APIView):
         key = request.data["key"] if "key" in request.data.keys() else None
         phone = request.data["phone"] if "phone" in request.data.keys() else None
         user = Users.objects.get(username=engineer)
-        request_user = request.session.get("user")
-
-        if not request.user.is_authenticated:
-            if request_user:
-                if request_user != engineer:
-                    return Response(
-                        {
-                            "status": 1,
-                            "msg": "Logged-in user does not match the user being validated.",
-                        }
-                    )
-            else:
-                return Response(
-                    {"status": 1, "msg": "User password must be verified first."}
-                )
-
-            twofa_config = TwoFactorAuthConfig.objects.filter(user=user)
-            if not twofa_config:
-                if not key:
-                    return Response(
-                        {"status": 1, "msg": "User has not configured 2FA."}
-                    )
+        twofa_config = TwoFactorAuthConfig.objects.filter(user=user)
+        if not twofa_config and not key:
+            return Response({"status": 1, "msg": "User has not configured 2FA."})
 
         auth_type = request.data["auth_type"]
         authenticator = get_authenticator(user=user, auth_type=auth_type)
@@ -467,14 +430,5 @@ class TwoFAVerify(views.APIView):
             result = authenticator.verify(otp, phone)
         else:
             result = authenticator.verify(otp, key)
-
-        # Auto-login after successful verification and refresh expire_date
-        if result["status"] == 0 and not request.user.is_authenticated:
-            login(request, user, backend="django.contrib.auth.backends.ModelBackend")
-            request.session.set_expiry(settings.SESSION_COOKIE_AGE)
-
-            # Update user's ding_user_id
-            if SysConfig().get("ding_to_person") is True and "admin" not in engineer:
-                get_ding_user_id(engineer)
 
         return Response(result)

@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 from django.test import TestCase
 from django.contrib.auth import get_user_model
@@ -25,6 +25,7 @@ from sql.models import (
     TwoFactorAuthConfig,
 )
 import json
+import pyotp
 
 User = get_user_model()
 
@@ -236,6 +237,109 @@ class TestUser(APITestCase):
         r = self.client.post(f"/api/v1/user/2fa/verify/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.json()["status"], 1)
+
+
+class TestTokenAuth2FA(APITestCase):
+    """Test token auth with stateless 2FA checks."""
+
+    def setUp(self):
+        self.user = User(
+            username="token_2fa_user",
+            display="Token 2FA User",
+            is_active=True,
+        )
+        self.user.set_password("test_password")
+        self.user.save()
+
+    def tearDown(self):
+        self.user.delete()
+        TwoFactorAuthConfig.objects.all().delete()
+        SysConfig().purge()
+
+    def test_token_requires_2fa_when_user_has_totp(self):
+        secret = pyotp.random_base32(32)
+        TwoFactorAuthConfig.objects.create(
+            username=self.user.username,
+            auth_type="totp",
+            secret_key=secret,
+            user=self.user,
+        )
+        r = self.client.post(
+            "/api/auth/token/",
+            {"username": self.user.username, "password": "test_password"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(r.json()["code"][0], "2fa_required")
+        self.assertEqual(r.json()["available_auth_types"], ["totp"])
+
+    def test_token_totp_success(self):
+        secret = pyotp.random_base32(32)
+        TwoFactorAuthConfig.objects.create(
+            username=self.user.username,
+            auth_type="totp",
+            secret_key=secret,
+            user=self.user,
+        )
+        otp = pyotp.TOTP(secret).now()
+        r = self.client.post(
+            "/api/auth/token/",
+            {
+                "username": self.user.username,
+                "password": "test_password",
+                "auth_type": "totp",
+                "otp": otp,
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertIn("access", r.json())
+        self.assertIn("refresh", r.json())
+
+    def test_token_enforce_2fa_requires_setup(self):
+        SysConfig().set("enforce_2fa", True)
+        r = self.client.post(
+            "/api/auth/token/",
+            {"username": self.user.username, "password": "test_password"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(r.json()["code"][0], "2fa_setup_required")
+
+    def test_request_sms_login_otp_requires_sms_config(self):
+        r = self.client.post(
+            "/api/auth/token/sms/",
+            {"username": self.user.username, "password": "test_password"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            r.json()["errors"], "SMS 2FA is not configured for this account."
+        )
+
+    @patch("sql_api.api_auth.get_redis_connection")
+    @patch("sql_api.api_auth.get_authenticator")
+    def test_request_sms_login_otp_success(self, mock_get_authenticator, mock_get_redis):
+        TwoFactorAuthConfig.objects.create(
+            username=self.user.username,
+            auth_type="sms",
+            phone="13800138000",
+            user=self.user,
+        )
+        mock_auth = Mock()
+        mock_auth.get_captcha.return_value = {"status": 0, "msg": "ok"}
+        mock_get_authenticator.return_value = mock_auth
+        mock_redis = Mock()
+        mock_get_redis.return_value = mock_redis
+
+        r = self.client.post(
+            "/api/auth/token/sms/",
+            {"username": self.user.username, "password": "test_password"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.json()["status"], 0)
+        mock_redis.set.assert_called_once()
 
 
 class TestInstance(APITestCase):

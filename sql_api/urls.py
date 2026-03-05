@@ -2,7 +2,6 @@ from django.urls import path, include
 from sql_api import views
 from rest_framework import routers
 from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
     TokenRefreshView,
     TokenVerifyView,
 )
@@ -11,13 +10,14 @@ from drf_spectacular.views import (
     SpectacularRedocView,
     SpectacularSwaggerView,
 )
-from . import api_user, api_instance, api_workflow
+from . import api_user, api_instance, api_workflow, api_auth
 
 router = routers.DefaultRouter()
 
 urlpatterns = [
     path("v1/", include(router.urls)),
-    path("auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("auth/token/", api_auth.SPATokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("auth/token/sms/", api_auth.TokenSMSCaptchaView.as_view(), name="token_sms_captcha"),
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("auth/token/verify/", TokenVerifyView.as_view(), name="token_verify"),
     path("schema/", SpectacularAPIView.as_view(), name="schema"),
