@@ -6,7 +6,7 @@ from drf_spectacular.views import (
     SpectacularRedocView,
     SpectacularSwaggerView,
 )
-from . import api_user, api_instance, api_workflow, api_auth, api_query
+from . import api_user, api_instance, api_workflow, api_auth, api_query, api_dashboard
 
 router = routers.DefaultRouter()
 
@@ -43,6 +43,7 @@ urlpatterns = [
     ),
     path("v1/user/", api_user.UserList.as_view()),
     path("v1/me/", api_user.CurrentUser.as_view()),
+    path("v1/dashboard/", api_dashboard.DashboardOverview.as_view()),
     path("v1/user/<int:pk>/", api_user.UserDetail.as_view()),
     path("v1/user/group/", api_user.GroupList.as_view()),
     path("v1/user/group/<int:pk>/", api_user.GroupDetail.as_view()),

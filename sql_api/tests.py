@@ -1466,3 +1466,152 @@ class TestWorkflow(APITestCase):
                 audit_id=self.audit1.audit_id, operation_type=6
             ).exists()
         )
+
+
+class TestDashboardAPI(APITestCase):
+    def setUp(self):
+        self.user = User(
+            username="dashboard_user",
+            display="Dashboard User",
+            is_active=True,
+            is_superuser=True,
+        )
+        self.user.set_password("test_password")
+        self.user.save()
+
+        self.ins = Instance.objects.create(
+            instance_name="dashboard_instance",
+            type="master",
+            db_type="mysql",
+            host="127.0.0.1",
+            port=3306,
+            user="root",
+            password="pwd",
+        )
+        self.workflow = SqlWorkflow.objects.create(
+            workflow_name="dashboard-wf",
+            demand_url="",
+            group_id=1,
+            group_name="DBA",
+            instance=self.ins,
+            db_name="mysql",
+            syntax_type=2,
+            is_backup=False,
+            engineer=self.user.username,
+            engineer_display=self.user.display,
+            status="workflow_finish",
+            audit_auth_groups="1",
+        )
+        QueryPrivilegesApply.objects.create(
+            group_id=1,
+            group_name="DBA",
+            title="query-apply",
+            user_name=self.user.username,
+            user_display=self.user.display,
+            instance=self.ins,
+            db_list="mysql",
+            table_list="",
+            valid_date=(datetime.now() + timedelta(days=30)).date(),
+            limit_num=100,
+            priv_type=1,
+            status=WorkflowStatus.WAITING,
+            audit_auth_groups="1",
+        )
+        QueryLog.objects.create(
+            username=self.user.username,
+            user_display=self.user.display,
+            db_name="mysql",
+            instance_name=self.ins.instance_name,
+            sqllog="select 1",
+            effect_row=10,
+            cost_time="0.1",
+        )
+
+        login_response = self.client.post(
+            "/api/auth/token/",
+            {"username": "dashboard_user", "password": "test_password"},
+            format="json",
+        )
+        self.token = response_data(login_response)["access"]
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + self.token)
+
+    def tearDown(self):
+        QueryLog.objects.all().delete()
+        QueryPrivilegesApply.objects.all().delete()
+        SqlWorkflow.objects.all().delete()
+        Instance.objects.all().delete()
+        User.objects.filter(
+            username__in=["dashboard_user", "dashboard_no_perm"]
+        ).delete()
+
+    def test_dashboard_overview_success(self):
+        start_date = (datetime.now() - timedelta(days=6)).strftime("%Y-%m-%d")
+        end_date = datetime.now().strftime("%Y-%m-%d")
+        response = self.client.get(
+            "/api/v1/dashboard/",
+            {"start_date": start_date, "end_date": end_date},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        data = response_data(response)
+        self.assertIn("summary", data)
+        self.assertIn("charts", data)
+        self.assertEqual(data["summary"]["sql_workflow_count"], 1)
+        self.assertEqual(data["summary"]["query_workflow_count"], 1)
+        self.assertEqual(data["summary"]["instance_count"], 1)
+
+        charts = data["charts"]
+        self.assertIn("query_activity", charts)
+        self.assertIn("workflow_by_date", charts)
+        self.assertIn("instance_type_distribution", charts)
+        self.assertEqual(
+            len(charts["workflow_by_date"]["labels"]),
+            len(charts["workflow_by_date"]["values"]),
+        )
+        self.assertEqual(
+            len(charts["query_activity"]["labels"]),
+            len(charts["query_activity"]["query_count"]),
+        )
+        self.assertEqual(
+            len(charts["query_activity"]["labels"]),
+            len(charts["query_activity"]["scanned_rows"]),
+        )
+
+    def test_dashboard_overview_default_date_range(self):
+        response = self.client.get("/api/v1/dashboard/", format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response_data(response)
+        self.assertIn("start_date", data)
+        self.assertIn("end_date", data)
+
+    def test_dashboard_overview_invalid_date_range(self):
+        response = self.client.get(
+            "/api/v1/dashboard/",
+            {"start_date": "2026-03-05", "end_date": "2026-03-01"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("errors", response.json())
+
+    def test_dashboard_overview_requires_permission(self):
+        self.client.credentials()
+        no_perm_user = User(
+            username="dashboard_no_perm",
+            display="No Perm",
+            is_active=True,
+            is_superuser=False,
+        )
+        no_perm_user.set_password("test_password")
+        no_perm_user.save()
+
+        login_response = self.client.post(
+            "/api/auth/token/",
+            {"username": "dashboard_no_perm", "password": "test_password"},
+            format="json",
+        )
+        token = response_data(login_response)["access"]
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
+
+        response = self.client.get("/api/v1/dashboard/", format="json")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
