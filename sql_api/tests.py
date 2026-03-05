@@ -39,6 +39,13 @@ def response_data(response):
     return payload.get("data", payload)
 
 
+def assert_success_envelope(testcase, response):
+    payload = response.json()
+    testcase.assertIn("detail", payload)
+    testcase.assertIn("data", payload)
+    return payload["data"]
+
+
 class InfoTest(TestCase):
     def setUp(self) -> None:
         self.superuser = User.objects.create(username="super", is_superuser=True)
@@ -107,6 +114,20 @@ class TestUser(APITestCase):
         self.assertIn("permissions", r_data)
         self.assertIn("groups", r_data)
         self.assertIn("resource_groups", r_data)
+
+    def test_success_envelope_shape_for_paginated_and_detail_endpoints(self):
+        """Success responses should use unified envelope for list and detail."""
+        r1 = self.client.get("/api/v1/user/", format="json")
+        self.assertEqual(r1.status_code, status.HTTP_200_OK)
+        list_data = assert_success_envelope(self, r1)
+        self.assertEqual(
+            set(list_data.keys()), {"count", "next", "previous", "results"}
+        )
+
+        r2 = self.client.get("/api/v1/me/", format="json")
+        self.assertEqual(r2.status_code, status.HTTP_200_OK)
+        me_data = assert_success_envelope(self, r2)
+        self.assertEqual(me_data["username"], self.user.username)
 
     def test_get_user_list_with_delegated_permission(self):
         """Non-superuser can access with explicit delegated permission."""
@@ -321,6 +342,63 @@ class TestTokenAuth2FA(APITestCase):
         self.assertIn("access", response_data(r))
         self.assertIn("refresh", response_data(r))
 
+    def test_token_refresh_success_envelope(self):
+        login_resp = self.client.post(
+            "/api/auth/token/",
+            {"username": self.user.username, "password": "test_password"},
+            format="json",
+        )
+        self.assertEqual(login_resp.status_code, status.HTTP_200_OK)
+        refresh_token = response_data(login_resp)["refresh"]
+
+        r = self.client.post(
+            "/api/auth/token/refresh/",
+            {"refresh": refresh_token},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        refreshed = assert_success_envelope(self, r)
+        self.assertIn("access", refreshed)
+
+    def test_token_verify_success_envelope(self):
+        login_resp = self.client.post(
+            "/api/auth/token/",
+            {"username": self.user.username, "password": "test_password"},
+            format="json",
+        )
+        self.assertEqual(login_resp.status_code, status.HTTP_200_OK)
+        access_token = response_data(login_resp)["access"]
+
+        r = self.client.post(
+            "/api/auth/token/verify/",
+            {"token": access_token},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(assert_success_envelope(self, r), {})
+
+    def test_token_refresh_invalid_token_returns_error_contract(self):
+        r = self.client.post(
+            "/api/auth/token/refresh/",
+            {"refresh": "invalid.refresh.token"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertIn("detail", r.json())
+        self.assertIn("code", r.json())
+        self.assertNotIn("data", r.json())
+
+    def test_token_verify_invalid_token_returns_error_contract(self):
+        r = self.client.post(
+            "/api/auth/token/verify/",
+            {"token": "invalid.access.token"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertIn("detail", r.json())
+        self.assertIn("code", r.json())
+        self.assertNotIn("data", r.json())
+
     def test_token_enforce_2fa_requires_setup(self):
         SysConfig().set("enforce_2fa", True)
         r = self.client.post(
@@ -505,6 +583,39 @@ class TestQueryAPI(APITestCase):
         self.assertEqual(log_obj.favorite, True)
         self.assertEqual(log_obj.alias, "fav1")
 
+    def test_query_log_audit_requires_audit_permission(self):
+        r = self.client.get("/api/v1/query/log/audit/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_query_log_audit_list_for_auditor(self):
+        audit_user_perm = Permission.objects.get(codename="audit_user")
+        self.user.user_permissions.add(audit_user_perm)
+
+        QueryLog.objects.create(
+            username=self.user.username,
+            user_display=self.user.display,
+            db_name="db1",
+            instance_name=self.ins.instance_name,
+            sqllog="select 1",
+            effect_row=1,
+            cost_time="0.1",
+        )
+        QueryLog.objects.create(
+            username="another_user",
+            user_display="Another",
+            db_name="db1",
+            instance_name=self.ins.instance_name,
+            sqllog="select 2",
+            effect_row=1,
+            cost_time="0.1",
+        )
+
+        r = self.client.get("/api/v1/query/log/audit/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        audit_data = assert_success_envelope(self, r)
+        self.assertEqual(audit_data["count"], 2)
+        self.assertEqual(len(audit_data["results"]), 2)
+
     @patch("sql_api.api_query.async_task")
     @patch("sql_api.api_query._query_apply_audit_call_back")
     @patch("sql_api.api_query.get_auditor")
@@ -580,6 +691,91 @@ class TestQueryAPI(APITestCase):
         self.assertEqual(r3.status_code, status.HTTP_200_OK)
         priv.refresh_from_db()
         self.assertEqual(priv.is_deleted, 1)
+
+    def test_query_privilege_patch_requires_manage_permission(self):
+        priv = QueryPrivileges.objects.create(
+            user_name=self.user.username,
+            user_display=self.user.display,
+            instance=self.ins,
+            db_name="db1",
+            table_name="",
+            valid_date=datetime.now().date() + timedelta(days=3),
+            limit_num=10,
+            priv_type=1,
+            is_deleted=0,
+        )
+        self.user.user_permissions.remove(
+            Permission.objects.get(codename="query_mgtpriv")
+        )
+
+        r = self.client.patch(
+            f"/api/v1/query/privilege/{priv.privilege_id}/",
+            {"valid_date": "2099-12-31", "limit_num": 200},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_query_privilege_patch_requires_valid_date_and_limit_num(self):
+        priv = QueryPrivileges.objects.create(
+            user_name=self.user.username,
+            user_display=self.user.display,
+            instance=self.ins,
+            db_name="db1",
+            table_name="",
+            valid_date=datetime.now().date() + timedelta(days=3),
+            limit_num=10,
+            priv_type=1,
+            is_deleted=0,
+        )
+
+        r = self.client.patch(
+            f"/api/v1/query/privilege/{priv.privilege_id}/",
+            {"valid_date": "2099-12-31"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        error_msg = r.json()["errors"]
+        if isinstance(error_msg, list):
+            error_msg = error_msg[0]
+        self.assertEqual(
+            error_msg, "valid_date and limit_num are required when type is 2."
+        )
+
+    def test_query_privilege_review_requires_review_permission(self):
+        apply_obj = QueryPrivilegesApply.objects.create(
+            group_id=self.res_group.group_id,
+            group_name=self.res_group.group_name,
+            title="apply one",
+            user_name=self.user.username,
+            user_display=self.user.display,
+            instance=self.ins,
+            db_list="db1",
+            table_list="",
+            valid_date=datetime.now().date() + timedelta(days=3),
+            limit_num=10,
+            priv_type=1,
+            status=WorkflowStatus.WAITING,
+            audit_auth_groups="1",
+        )
+        self.user.user_permissions.remove(
+            Permission.objects.get(codename="query_review")
+        )
+
+        r = self.client.post(
+            f"/api/v1/query/privilege/apply/{apply_obj.apply_id}/reviews/",
+            {"audit_status": WorkflowAction.PASS, "audit_remark": "ok"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_query_privilege_review_rejects_invalid_audit_status(self):
+        r = self.client.post(
+            "/api/v1/query/privilege/apply/999/reviews/",
+            {"audit_status": 999, "audit_remark": "invalid"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("Invalid audit_status parameter", r.json()["errors"])
 
     @patch("sql_api.api_query.async_task")
     @patch("sql_api.api_query._query_apply_audit_call_back")
@@ -874,6 +1070,14 @@ class TestWorkflow(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(response_data(r)["count"], 1)
 
+    def test_workflow_list_uses_unified_success_envelope(self):
+        r = self.client.get("/api/v1/workflow/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        list_data = assert_success_envelope(self, r)
+        self.assertEqual(
+            set(list_data.keys()), {"count", "next", "previous", "results"}
+        )
+
     def test_get_audit_list(self):
         """Test getting pending audit workflow list."""
         r = self.client.get("/api/v1/workflow/auditlist/", format="json")
@@ -1001,6 +1205,24 @@ class TestWorkflow(APITestCase):
         )
         self.assertListEqual(list(sqlcheck_data["rows"][0].keys()), column_list)
 
+    @patch("sql_api.api_workflow.get_engine")
+    def test_sqlcheck_uses_unified_success_envelope(self, _get_engine):
+        json_data = {
+            "full_sql": "use mysql",
+            "db_name": "test_db",
+            "instance_id": self.ins.id,
+        }
+        _get_engine.return_value.execute_check.return_value = ReviewSet(
+            warning_count=0,
+            error_count=0,
+            column_list=[],
+            rows=[],
+        )
+        r = self.client.post("/api/v1/workflow/sqlcheck/", json_data, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        data = assert_success_envelope(self, r)
+        self.assertIn("rows", data)
+
     def test_submit_workflow(self):
         """Test submitting SQL release workflow."""
         json_data = {
@@ -1096,6 +1318,64 @@ class TestWorkflow(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.json()["detail"], "canceled")
 
+    def test_audit_workflow_invalid_audit_type(self):
+        r = self.client.post(
+            f"/api/v1/workflow/{self.wf1.id}/reviews/",
+            {
+                "audit_remark": "noop",
+                "workflow_type": self.audit1.workflow_type,
+                "audit_type": "reject",
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("audit_type", r.json())
+
+    def test_audit_cancel_denies_non_owner(self):
+        user2 = User.objects.create(
+            username="workflow_user2",
+            display="Workflow User 2",
+            is_active=True,
+        )
+        user2.set_password("test_password")
+        user2.save()
+        r_login = self.client.post(
+            "/api/auth/token/",
+            {"username": "workflow_user2", "password": "test_password"},
+            format="json",
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION="Bearer " + response_data(r_login)["access"]
+        )
+        r = self.client.post(
+            f"/api/v1/workflow/{self.wf1.id}/reviews/",
+            {
+                "audit_remark": "cancel by non-owner",
+                "workflow_type": self.audit1.workflow_type,
+                "audit_type": "cancel",
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            r.json()["errors"], "User is not allowed to operate this workflow."
+        )
+        user2.delete()
+
+    def test_audit_pass_updates_workflow_status(self):
+        r = self.client.post(
+            f"/api/v1/workflow/{self.wf1.id}/reviews/",
+            {
+                "audit_remark": "approved",
+                "workflow_type": self.audit1.workflow_type,
+                "audit_type": "pass",
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.wf1.refresh_from_db()
+        self.assertEqual(self.wf1.status, "workflow_review_pass")
+
     def test_execute_workflow(self):
         """Test executing workflow."""
         # Audit first
@@ -1119,4 +1399,70 @@ class TestWorkflow(APITestCase):
         self.assertEqual(
             r.json()["detail"],
             "Execution started. Please check workflow detail page for results.",
+        )
+
+    def test_execute_workflow_requires_execute_permission(self):
+        self.user.user_permissions.remove(
+            Permission.objects.get(codename="sql_execute")
+        )
+        self.user.user_permissions.remove(
+            Permission.objects.get(codename="sql_execute_for_resource_group")
+        )
+        r = self.client.post(
+            f"/api/v1/workflow/{self.wf1.id}/executions/",
+            {"workflow_type": self.audit1.workflow_type, "mode": "manual"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            r.json()["errors"], "You do not have permission to execute this workflow."
+        )
+
+    @patch("sql_api.api_workflow.can_execute", return_value=False)
+    def test_execute_workflow_denied_by_resource_scope(self, _can_execute):
+        r = self.client.post(
+            f"/api/v1/workflow/{self.wf1.id}/executions/",
+            {"workflow_type": self.audit1.workflow_type, "mode": "manual"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            r.json()["errors"], "You do not have permission to execute this workflow."
+        )
+
+    def test_execute_workflow_requires_mode_for_sql_review(self):
+        r = self.client.post(
+            f"/api/v1/workflow/{self.wf1.id}/executions/",
+            {"workflow_type": self.audit1.workflow_type},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        error_msg = r.json()["errors"]
+        if isinstance(error_msg, list):
+            error_msg = error_msg[0]
+        self.assertEqual(error_msg, "Missing mode.")
+
+    def test_execute_manual_updates_workflow_status_and_log(self):
+        self.client.post(
+            f"/api/v1/workflow/{self.wf1.id}/reviews/",
+            {
+                "audit_remark": "approved",
+                "workflow_type": self.audit1.workflow_type,
+                "audit_type": "pass",
+            },
+            format="json",
+        )
+        r = self.client.post(
+            f"/api/v1/workflow/{self.wf1.id}/executions/",
+            {"workflow_type": self.audit1.workflow_type, "mode": "manual"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.wf1.refresh_from_db()
+        self.assertEqual(self.wf1.status, "workflow_finish")
+        self.assertIsNotNone(self.wf1.finish_time)
+        self.assertTrue(
+            WorkflowLog.objects.filter(
+                audit_id=self.audit1.audit_id, operation_type=6
+            ).exists()
         )
