@@ -95,9 +95,7 @@ class SPATokenObtainPairSerializer(TokenObtainPairSerializer):
         if verify_result.get("status") != 0:
             raise serializers.ValidationError(
                 {
-                    "errors": verify_result.get(
-                        "msg", "Invalid verification code."
-                    ),
+                    "errors": verify_result.get("msg", "Invalid verification code."),
                     "code": "2fa_invalid",
                 }
             )

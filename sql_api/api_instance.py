@@ -36,7 +36,9 @@ class InstanceList(generics.ListAPIView):
         responses={200: InstanceSerializer},
         description="List all instances (filtering, pagination).",
     )
-    @method_decorator(permission_required("sql.menu_instance_list", raise_exception=True))
+    @method_decorator(
+        permission_required("sql.menu_instance_list", raise_exception=True)
+    )
     def get(self, request):
         instances = self.filter_queryset(self.queryset)
         page_ins = self.paginate_queryset(queryset=instances)

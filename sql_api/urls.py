@@ -16,8 +16,16 @@ router = routers.DefaultRouter()
 
 urlpatterns = [
     path("v1/", include(router.urls)),
-    path("auth/token/", api_auth.SPATokenObtainPairView.as_view(), name="token_obtain_pair"),
-    path("auth/token/sms/", api_auth.TokenSMSCaptchaView.as_view(), name="token_sms_captcha"),
+    path(
+        "auth/token/",
+        api_auth.SPATokenObtainPairView.as_view(),
+        name="token_obtain_pair",
+    ),
+    path(
+        "auth/token/sms/",
+        api_auth.TokenSMSCaptchaView.as_view(),
+        name="token_sms_captcha",
+    ),
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("auth/token/verify/", TokenVerifyView.as_view(), name="token_verify"),
     path("schema/", SpectacularAPIView.as_view(), name="schema"),

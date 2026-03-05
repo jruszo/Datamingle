@@ -266,9 +266,7 @@ class AuditWorkflow(views.APIView):
             )
 
         try:
-            workflow_audit_detail = auditor.operate(
-                action, user, data["audit_remark"]
-            )
+            workflow_audit_detail = auditor.operate(action, user, data["audit_remark"])
         except AuditException as e:
             raise serializers.ValidationError({"errors": f"Operation failed, {str(e)}"})
 
@@ -428,7 +426,9 @@ class ExecuteWorkflow(views.APIView):
         elif workflow_type == 3:
             if not request.user.has_perm("sql.archive_mgt"):
                 raise serializers.ValidationError(
-                    {"errors": "You do not have permission to execute archive workflows."}
+                    {
+                        "errors": "You do not have permission to execute archive workflows."
+                    }
                 )
             async_task(
                 "sql.archiver.archive",
@@ -491,7 +491,9 @@ class WorkflowLogList(generics.ListAPIView):
         workflow_type = request.query_params.get("workflow_type")
         if workflow_id is None or workflow_type is None:
             raise serializers.ValidationError(
-                {"errors": "workflow_id and workflow_type are required query parameters."}
+                {
+                    "errors": "workflow_id and workflow_type are required query parameters."
+                }
             )
         try:
             workflow_id = int(workflow_id)

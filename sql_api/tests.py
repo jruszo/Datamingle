@@ -315,7 +315,9 @@ class TestTokenAuth2FA(APITestCase):
 
     @patch("sql_api.api_auth.get_redis_connection")
     @patch("sql_api.api_auth.get_authenticator")
-    def test_request_sms_login_otp_success(self, mock_get_authenticator, mock_get_redis):
+    def test_request_sms_login_otp_success(
+        self, mock_get_authenticator, mock_get_redis
+    ):
         TwoFactorAuthConfig.objects.create(
             username=self.user.username,
             auth_type="sms",
@@ -480,7 +482,9 @@ class TestWorkflow(APITestCase):
             codename="sql_execute_for_resource_group"
         )
         can_review_permission = Permission.objects.get(codename="sql_review")
-        menu_sqlworkflow_permission = Permission.objects.get(codename="menu_sqlworkflow")
+        menu_sqlworkflow_permission = Permission.objects.get(
+            codename="menu_sqlworkflow"
+        )
         self.user = User(username="test_user", display="Test User", is_active=True)
         self.user.set_password("test_password")
         self.user.save()
