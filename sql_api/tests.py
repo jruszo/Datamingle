@@ -70,7 +70,6 @@ class TestUser(APITestCase):
         )
         self.token = r.data["access"]
         self.client.credentials(HTTP_AUTHORIZATION="Bearer " + self.token)
-        SysConfig().set("api_user_whitelist", self.user.id)
 
     def tearDown(self):
         self.user.delete()
@@ -78,12 +77,11 @@ class TestUser(APITestCase):
         self.res_group.delete()
         SysConfig().purge()
 
-    def test_user_not_in_whitelist(self):
-        """Test API user whitelist parameter."""
+    def test_user_list_not_gated_by_whitelist(self):
+        """API access is no longer gated by api_user_whitelist."""
         SysConfig().set("api_user_whitelist", "")
         r = self.client.get("/api/v1/user/", format="json")
-        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertIn("detail", r.json())
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
 
     def test_get_user_list(self):
         """Test getting user list."""
@@ -377,7 +375,6 @@ class TestInstance(APITestCase):
         )
         self.token = r.data["access"]
         self.client.credentials(HTTP_AUTHORIZATION="Bearer " + self.token)
-        SysConfig().set("api_user_whitelist", self.user.id)
 
     def tearDown(self):
         self.user.delete()
@@ -552,7 +549,6 @@ class TestWorkflow(APITestCase):
         )
         self.token = r.data["access"]
         self.client.credentials(HTTP_AUTHORIZATION="Bearer " + self.token)
-        SysConfig().set("api_user_whitelist", self.user.id)
         self.notify_patcher = patch("sql.notify.auto_notify")
         self.notify_patcher.start()
 
