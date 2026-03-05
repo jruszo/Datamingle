@@ -15,6 +15,7 @@ from .serializers import (
 )
 from .pagination import CustomizedPagination
 from .filters import UserFilter
+from .response import success_response
 from django_redis import get_redis_connection
 from django.contrib.auth.models import Group
 from django.contrib.auth import authenticate
@@ -38,10 +39,11 @@ def _require_any_permission(request, *perm_list):
 
 def _response_from_authenticator(result, default_error_message):
     if result.get("status") == 0:
-        payload = {"detail": result.get("msg", "ok")}
-        if "data" in result:
-            payload["data"] = result["data"]
-        return Response(payload, status=status.HTTP_200_OK)
+        return success_response(
+            data=result.get("data", {}),
+            detail=result.get("msg", "ok"),
+            status_code=status.HTTP_200_OK,
+        )
     return Response(
         {"errors": result.get("msg", default_error_message)},
         status=status.HTTP_400_BAD_REQUEST,
@@ -84,7 +86,7 @@ class CurrentUser(views.APIView):
             ),
         }
         serializer = CurrentUserSerializer(payload)
-        return Response(serializer.data)
+        return success_response(data=serializer.data)
 
 
 class UserList(generics.ListAPIView):
@@ -121,7 +123,9 @@ class UserList(generics.ListAPIView):
         serializer = UserSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return success_response(
+                data=serializer.data, status_code=status.HTTP_201_CREATED
+            )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -150,7 +154,7 @@ class UserDetail(views.APIView):
         serializer = UserDetailSerializer(user, data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data)
+            return success_response(data=serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @extend_schema(summary="Delete User", description="Delete a user.")
@@ -158,7 +162,7 @@ class UserDetail(views.APIView):
         _require_any_permission(request, "sql.menu_system", "sql.delete_users")
         user = self.get_object(pk)
         user.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return success_response()
 
 
 class GroupList(generics.ListAPIView):
@@ -194,7 +198,9 @@ class GroupList(generics.ListAPIView):
         serializer = GroupSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return success_response(
+                data=serializer.data, status_code=status.HTTP_201_CREATED
+            )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -223,7 +229,7 @@ class GroupDetail(views.APIView):
         serializer = GroupSerializer(group, data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data)
+            return success_response(data=serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @extend_schema(summary="Delete Group", description="Delete a group.")
@@ -231,7 +237,7 @@ class GroupDetail(views.APIView):
         _require_any_permission(request, "sql.menu_system", "auth.delete_group")
         group = self.get_object(pk)
         group.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return success_response()
 
 
 class ResourceGroupList(generics.ListAPIView):
@@ -267,7 +273,9 @@ class ResourceGroupList(generics.ListAPIView):
         serializer = ResourceGroupSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return success_response(
+                data=serializer.data, status_code=status.HTTP_201_CREATED
+            )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -296,7 +304,7 @@ class ResourceGroupDetail(views.APIView):
         serializer = ResourceGroupSerializer(group, data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data)
+            return success_response(data=serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @extend_schema(
@@ -306,7 +314,7 @@ class ResourceGroupDetail(views.APIView):
         _require_any_permission(request, "sql.menu_system", "sql.delete_resourcegroup")
         group = self.get_object(pk)
         group.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return success_response()
 
 
 class UserAuth(views.APIView):
@@ -337,7 +345,7 @@ class UserAuth(views.APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        return Response({"detail": "Authentication successful."})
+        return success_response(detail="Authentication successful.")
 
 
 class TwoFA(views.APIView):
@@ -395,17 +403,13 @@ class TwoFAState(views.APIView):
         description="Query 2FA configuration status.",
     )
     def get(self, request):
-        result = {"data": {}}
+        data = {}
         user = request.user
         configs = TwoFactorAuthConfig.objects.filter(user=user)
-        result["data"]["totp"] = (
-            "enabled" if configs.filter(auth_type="totp") else "disabled"
-        )
-        result["data"]["sms"] = (
-            "enabled" if configs.filter(auth_type="sms") else "disabled"
-        )
+        data["totp"] = "enabled" if configs.filter(auth_type="totp") else "disabled"
+        data["sms"] = "enabled" if configs.filter(auth_type="sms") else "disabled"
 
-        return Response(result)
+        return success_response(data=data)
 
 
 class TwoFASave(views.APIView):

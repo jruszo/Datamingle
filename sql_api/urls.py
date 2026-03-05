@@ -1,10 +1,6 @@
 from django.urls import path, include
 from sql_api import views
 from rest_framework import routers
-from rest_framework_simplejwt.views import (
-    TokenRefreshView,
-    TokenVerifyView,
-)
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularRedocView,
@@ -26,8 +22,16 @@ urlpatterns = [
         api_auth.TokenSMSCaptchaView.as_view(),
         name="token_sms_captcha",
     ),
-    path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
-    path("auth/token/verify/", TokenVerifyView.as_view(), name="token_verify"),
+    path(
+        "auth/token/refresh/",
+        api_auth.SPATokenRefreshView.as_view(),
+        name="token_refresh",
+    ),
+    path(
+        "auth/token/verify/",
+        api_auth.SPATokenVerifyView.as_view(),
+        name="token_verify",
+    ),
     path("schema/", SpectacularAPIView.as_view(), name="schema"),
     path(
         "swagger/",
@@ -56,9 +60,15 @@ urlpatterns = [
     path("v1/instance/rds/", api_instance.AliyunRdsList.as_view()),
     path("v1/workflow/", api_workflow.WorkflowList.as_view()),
     path("v1/workflow/sqlcheck/", api_workflow.ExecuteCheck.as_view()),
-    path("v1/workflow/audit/", api_workflow.AuditWorkflow.as_view()),
     path("v1/workflow/auditlist/", api_workflow.WorkflowAuditList.as_view()),
-    path("v1/workflow/execute/", api_workflow.ExecuteWorkflow.as_view()),
+    path(
+        "v1/workflow/<int:workflow_id>/reviews/",
+        api_workflow.WorkflowReviewCreate.as_view(),
+    ),
+    path(
+        "v1/workflow/<int:workflow_id>/executions/",
+        api_workflow.WorkflowExecutionCreate.as_view(),
+    ),
     path("v1/workflow/log/", api_workflow.WorkflowLogList.as_view()),
     path("v1/query/", api_query.QueryExecute.as_view()),
     path("v1/query/log/", api_query.QueryLogList.as_view()),
@@ -69,8 +79,14 @@ urlpatterns = [
         api_query.QueryPrivilegesApplyListCreate.as_view(),
     ),
     path("v1/query/privilege/", api_query.QueryPrivilegesList.as_view()),
-    path("v1/query/privilege/modify/", api_query.QueryPrivilegesModify.as_view()),
-    path("v1/query/privilege/audit/", api_query.QueryPrivilegesAudit.as_view()),
+    path(
+        "v1/query/privilege/<int:privilege_id>/",
+        api_query.QueryPrivilegeDetail.as_view(),
+    ),
+    path(
+        "v1/query/privilege/apply/<int:apply_id>/reviews/",
+        api_query.QueryPrivilegeApplicationReviewCreate.as_view(),
+    ),
     path("info", views.info),
     path("debug", views.debug),
     path("do_once/mirage", views.mirage),

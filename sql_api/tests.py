@@ -34,6 +34,11 @@ import pyotp
 User = get_user_model()
 
 
+def response_data(response):
+    payload = response.json()
+    return payload.get("data", payload)
+
+
 class InfoTest(TestCase):
     def setUp(self) -> None:
         self.superuser = User.objects.create(username="super", is_superuser=True)
@@ -72,7 +77,7 @@ class TestUser(APITestCase):
             {"username": "test_user", "password": "test_password"},
             format="json",
         )
-        self.token = r.data["access"]
+        self.token = response_data(r)["access"]
         self.client.credentials(HTTP_AUTHORIZATION="Bearer " + self.token)
 
     def tearDown(self):
@@ -91,16 +96,17 @@ class TestUser(APITestCase):
         """Test getting user list."""
         r = self.client.get("/api/v1/user/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json()["count"], 1)
+        self.assertEqual(response_data(r)["count"], 1)
 
     def test_get_current_user_context(self):
         """Test SPA bootstrap current-user endpoint."""
         r = self.client.get("/api/v1/me/", format="json")
+        r_data = response_data(r)
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json()["username"], self.user.username)
-        self.assertIn("permissions", r.json())
-        self.assertIn("groups", r.json())
-        self.assertIn("resource_groups", r.json())
+        self.assertEqual(r_data["username"], self.user.username)
+        self.assertIn("permissions", r_data)
+        self.assertIn("groups", r_data)
+        self.assertIn("resource_groups", r_data)
 
     def test_get_user_list_with_delegated_permission(self):
         """Non-superuser can access with explicit delegated permission."""
@@ -125,7 +131,7 @@ class TestUser(APITestCase):
         }
         r = self.client.post("/api/v1/user/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(r.json()["username"], "test_user2")
+        self.assertEqual(response_data(r)["username"], "test_user2")
 
     def test_update_user(self):
         """Test updating user."""
@@ -143,22 +149,24 @@ class TestUser(APITestCase):
             "display": "Test User 2",
         }
         r1 = self.client.post("/api/v1/user/", json_data, format="json")
-        r2 = self.client.delete(f'/api/v1/user/{r1.json()["id"]}/', format="json")
-        self.assertEqual(r2.status_code, status.HTTP_204_NO_CONTENT)
+        r2 = self.client.delete(
+            f'/api/v1/user/{response_data(r1)["id"]}/', format="json"
+        )
+        self.assertEqual(r2.status_code, status.HTTP_200_OK)
         self.assertEqual(User.objects.filter(username="test_user2").count(), 0)
 
     def test_get_user_group_list(self):
         """Test getting user group list."""
         r = self.client.get("/api/v1/user/group/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json()["count"], 1)
+        self.assertEqual(response_data(r)["count"], 1)
 
     def test_create_user_group(self):
         """Test creating user group."""
         json_data = {"name": "RD"}
         r = self.client.post("/api/v1/user/group/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(r.json()["name"], "RD")
+        self.assertEqual(response_data(r)["name"], "RD")
 
     def test_update_user_group(self):
         """Test updating user group."""
@@ -173,14 +181,14 @@ class TestUser(APITestCase):
     def test_delete_user_group(self):
         """Test deleting user group."""
         r = self.client.delete(f"/api/v1/user/group/{self.group.id}/", format="json")
-        self.assertEqual(r.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(Group.objects.filter(name="DBA").count(), 0)
 
     def test_get_resource_group_list(self):
         """Test getting resource group list."""
         r = self.client.get("/api/v1/user/resourcegroup/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json()["count"], 1)
+        self.assertEqual(response_data(r)["count"], 1)
 
     def test_create_resource_group(self):
         """Test creating resource group."""
@@ -190,7 +198,7 @@ class TestUser(APITestCase):
         }
         r = self.client.post("/api/v1/user/resourcegroup/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(r.json()["group_name"], "prod")
+        self.assertEqual(response_data(r)["group_name"], "prod")
 
     def test_update_resource_group(self):
         """Test updating resource group."""
@@ -209,7 +217,7 @@ class TestUser(APITestCase):
         r = self.client.delete(
             f"/api/v1/user/resourcegroup/{self.res_group.group_id}/", format="json"
         )
-        self.assertEqual(r.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(Group.objects.filter(name="test").count(), 0)
 
     def test_user_auth(self):
@@ -217,7 +225,7 @@ class TestUser(APITestCase):
         json_data = {"password": "test_password"}
         r = self.client.post(f"/api/v1/user/auth/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json(), {"detail": "Authentication successful."})
+        self.assertEqual(r.json()["detail"], "Authentication successful.")
 
     def test_2fa_config(self):
         """Test user 2FA configuration."""
@@ -239,9 +247,10 @@ class TestUser(APITestCase):
     def test_2fa_state(self):
         """Test querying user 2FA status."""
         r = self.client.get(f"/api/v1/user/2fa/state/", format="json")
+        r_data = response_data(r)
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json()["data"]["totp"], "disabled")
-        self.assertEqual(r.json()["data"]["sms"], "disabled")
+        self.assertEqual(r_data["totp"], "disabled")
+        self.assertEqual(r_data["sms"], "disabled")
 
     def test_2fa_verify(self):
         """Test 2FA code verification."""
@@ -309,8 +318,8 @@ class TestTokenAuth2FA(APITestCase):
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertIn("access", r.json())
-        self.assertIn("refresh", r.json())
+        self.assertIn("access", response_data(r))
+        self.assertIn("refresh", response_data(r))
 
     def test_token_enforce_2fa_requires_setup(self):
         SysConfig().set("enforce_2fa", True)
@@ -405,7 +414,7 @@ class TestQueryAPI(APITestCase):
             {"username": "query_user", "password": "test_password"},
             format="json",
         )
-        self.token = r.data["access"]
+        self.token = response_data(r)["access"]
         self.client.credentials(HTTP_AUTHORIZATION="Bearer " + self.token)
 
     def tearDown(self):
@@ -482,9 +491,9 @@ class TestQueryAPI(APITestCase):
 
         r1 = self.client.get("/api/v1/query/log/", format="json")
         self.assertEqual(r1.status_code, status.HTTP_200_OK)
-        self.assertEqual(r1.json()["count"], 1)
+        self.assertEqual(response_data(r1)["count"], 1)
 
-        query_log_id = r1.json()["results"][0]["id"]
+        query_log_id = response_data(r1)["results"][0]["id"]
         r2 = self.client.post(
             "/api/v1/query/favorite/",
             {"query_log_id": query_log_id, "star": True, "alias": "fav1"},
@@ -556,27 +565,18 @@ class TestQueryAPI(APITestCase):
 
         r1 = self.client.get("/api/v1/query/privilege/", format="json")
         self.assertEqual(r1.status_code, status.HTTP_200_OK)
-        self.assertEqual(r1.json()["count"], 1)
+        self.assertEqual(response_data(r1)["count"], 1)
 
-        r2 = self.client.post(
-            "/api/v1/query/privilege/modify/",
-            {
-                "privilege_id": priv.privilege_id,
-                "type": 2,
-                "valid_date": "2099-12-31",
-                "limit_num": 200,
-            },
+        r2 = self.client.patch(
+            f"/api/v1/query/privilege/{priv.privilege_id}/",
+            {"valid_date": "2099-12-31", "limit_num": 200},
             format="json",
         )
         self.assertEqual(r2.status_code, status.HTTP_200_OK)
         priv.refresh_from_db()
         self.assertEqual(priv.limit_num, 200)
 
-        r3 = self.client.post(
-            "/api/v1/query/privilege/modify/",
-            {"privilege_id": priv.privilege_id, "type": 1},
-            format="json",
-        )
+        r3 = self.client.delete(f"/api/v1/query/privilege/{priv.privilege_id}/")
         self.assertEqual(r3.status_code, status.HTTP_200_OK)
         priv.refresh_from_db()
         self.assertEqual(priv.is_deleted, 1)
@@ -610,12 +610,8 @@ class TestQueryAPI(APITestCase):
         mock_get_auditor.return_value = mock_handler
 
         r = self.client.post(
-            "/api/v1/query/privilege/audit/",
-            {
-                "apply_id": apply_obj.apply_id,
-                "audit_status": WorkflowAction.PASS,
-                "audit_remark": "ok",
-            },
+            f"/api/v1/query/privilege/apply/{apply_obj.apply_id}/reviews/",
+            {"audit_status": WorkflowAction.PASS, "audit_remark": "ok"},
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
@@ -657,7 +653,7 @@ class TestInstance(APITestCase):
             {"username": "test_user", "password": "test_password"},
             format="json",
         )
-        self.token = r.data["access"]
+        self.token = response_data(r)["access"]
         self.client.credentials(HTTP_AUTHORIZATION="Bearer " + self.token)
 
     def tearDown(self):
@@ -672,7 +668,7 @@ class TestInstance(APITestCase):
         """Test getting instance list."""
         r = self.client.get("/api/v1/instance/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json()["count"], 1)
+        self.assertEqual(response_data(r)["count"], 1)
 
     def test_create_instance(self):
         """Test creating instance."""
@@ -685,7 +681,7 @@ class TestInstance(APITestCase):
         }
         r = self.client.post("/api/v1/instance/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(r.json()["instance_name"], "test_ins")
+        self.assertEqual(response_data(r)["instance_name"], "test_ins")
 
     def test_update_instance(self):
         """Test updating instance."""
@@ -700,14 +696,14 @@ class TestInstance(APITestCase):
     def test_delete_instance(self):
         """Test deleting instance."""
         r = self.client.delete(f"/api/v1/instance/{self.ins.id}/", format="json")
-        self.assertEqual(r.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(Instance.objects.filter(instance_name="some_ins").count(), 0)
 
     def test_get_aliyunrds_list(self):
         """Test getting Aliyun RDS list."""
         r = self.client.get("/api/v1/instance/rds/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json()["count"], 1)
+        self.assertEqual(response_data(r)["count"], 1)
 
     def test_create_aliyunrds(self):
         """Test creating Aliyun RDS config."""
@@ -731,20 +727,20 @@ class TestInstance(APITestCase):
         }
         r = self.client.post("/api/v1/instance/rds/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(r.json()["rds_dbinstanceid"], "bbc")
+        self.assertEqual(response_data(r)["rds_dbinstanceid"], "bbc")
 
     def test_get_tunnel_list(self):
         """Test getting tunnel list."""
         r = self.client.get("/api/v1/instance/tunnel/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json()["count"], 1)
+        self.assertEqual(response_data(r)["count"], 1)
 
     def test_create_tunnel(self):
         """Test creating tunnel."""
         json_data = {"tunnel_name": "tunnel_test", "host": "one_host", "port": 22}
         r = self.client.post("/api/v1/instance/tunnel/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(r.json()["tunnel_name"], "tunnel_test")
+        self.assertEqual(response_data(r)["tunnel_name"], "tunnel_test")
 
     @patch("sql_api.api_instance.get_engine")
     def test_get_instance_resource(self, mock_get_engine):
@@ -768,7 +764,7 @@ class TestInstance(APITestCase):
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json()["count"], 1)
+        self.assertEqual(response_data(r)["count"], 1)
 
 
 class TestWorkflow(APITestCase):
@@ -857,7 +853,7 @@ class TestWorkflow(APITestCase):
             {"username": "test_user", "password": "test_password"},
             format="json",
         )
-        self.token = r.data["access"]
+        self.token = response_data(r)["access"]
         self.client.credentials(HTTP_AUTHORIZATION="Bearer " + self.token)
         self.notify_patcher = patch("sql.notify.auto_notify")
         self.notify_patcher.start()
@@ -876,13 +872,13 @@ class TestWorkflow(APITestCase):
         """Test getting SQL release workflow list."""
         r = self.client.get("/api/v1/workflow/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json()["count"], 1)
+        self.assertEqual(response_data(r)["count"], 1)
 
     def test_get_audit_list(self):
         """Test getting pending audit workflow list."""
         r = self.client.get("/api/v1/workflow/auditlist/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json()["count"], 1)
+        self.assertEqual(response_data(r)["count"], 1)
 
     def test_get_workflow_log_list(self):
         """Test getting workflow logs."""
@@ -895,7 +891,7 @@ class TestWorkflow(APITestCase):
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json()["count"], 1)
+        self.assertEqual(response_data(r)["count"], 1)
 
     def test_get_workflow_log_list_missing_params(self):
         """workflow_id and workflow_type are required query params."""
@@ -985,8 +981,9 @@ class TestWorkflow(APITestCase):
             warning_count=0, error_count=0, column_list=column_list, rows=rows
         )
         r = self.client.post("/api/v1/workflow/sqlcheck/", json_data, format="json")
+        sqlcheck_data = response_data(r)
         self.assertListEqual(
-            list(json.loads(r.content).keys()),
+            list(sqlcheck_data.keys()),
             [
                 "is_execute",
                 "checked",
@@ -1002,7 +999,7 @@ class TestWorkflow(APITestCase):
                 "affected_rows",
             ],
         )
-        self.assertListEqual(list(json.loads(r.content)["rows"][0].keys()), column_list)
+        self.assertListEqual(list(sqlcheck_data["rows"][0].keys()), column_list)
 
     def test_submit_workflow(self):
         """Test submitting SQL release workflow."""
@@ -1018,10 +1015,11 @@ class TestWorkflow(APITestCase):
             "sql_content": "alter table abc add column note varchar(64);",
         }
         r = self.client.post("/api/v1/workflow/", json_data, format="json")
+        r_data = response_data(r)
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(r.json()["workflow"]["workflow_name"], "Release Workflow 1")
-        self.assertEqual(r.json()["workflow"]["engineer"], self.user.username)
-        self.assertEqual(r.json()["workflow"]["engineer_display"], self.user.display)
+        self.assertEqual(r_data["workflow"]["workflow_name"], "Release Workflow 1")
+        self.assertEqual(r_data["workflow"]["engineer"], self.user.username)
+        self.assertEqual(r_data["workflow"]["engineer_display"], self.user.display)
 
     def test_submit_workflow_super(self):
         """Test admin submitting SQL release workflow with specified user."""
@@ -1044,10 +1042,11 @@ class TestWorkflow(APITestCase):
             "sql_content": "alter table abc add column note varchar(64);",
         }
         r = self.client.post("/api/v1/workflow/", json_data, format="json")
+        r_data = response_data(r)
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(r.json()["workflow"]["workflow_name"], "Release Workflow 1")
-        self.assertEqual(r.json()["workflow"]["engineer"], user2.username)
-        self.assertEqual(r.json()["workflow"]["engineer_display"], user2.display)
+        self.assertEqual(r_data["workflow"]["workflow_name"], "Release Workflow 1")
+        self.assertEqual(r_data["workflow"]["engineer"], user2.username)
+        self.assertEqual(r_data["workflow"]["engineer_display"], user2.display)
 
     @patch("sql.utils.workflow_audit.AuditV2.generate_audit_setting")
     def test_submit_workflow_auto_pass(self, mock_generate_settings):
@@ -1064,7 +1063,7 @@ class TestWorkflow(APITestCase):
         }
         mock_generate_settings.return_value = AuditSetting(auto_pass=True)
         r = self.client.post("/api/v1/workflow/", json_data, format="json")
-        return_data = r.json()
+        return_data = response_data(r)
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         workflow_in_db = SqlWorkflow.objects.get(id=return_data["workflow"]["id"])
         assert workflow_in_db.status == "workflow_review_pass"
@@ -1087,36 +1086,37 @@ class TestWorkflow(APITestCase):
     def test_audit_workflow(self):
         """Test auditing workflow."""
         json_data = {
-            "workflow_id": self.wf1.id,
             "audit_remark": "cancel",
             "workflow_type": self.audit1.workflow_type,
             "audit_type": "cancel",
         }
-        r = self.client.post("/api/v1/workflow/audit/", json_data, format="json")
+        r = self.client.post(
+            f"/api/v1/workflow/{self.wf1.id}/reviews/", json_data, format="json"
+        )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json(), {"detail": "canceled"})
+        self.assertEqual(r.json()["detail"], "canceled")
 
     def test_execute_workflow(self):
         """Test executing workflow."""
         # Audit first
         audit_data = {
-            "workflow_id": self.wf1.id,
             "audit_remark": "approved",
             "workflow_type": self.audit1.workflow_type,
             "audit_type": "pass",
         }
-        self.client.post("/api/v1/workflow/audit/", audit_data, format="json")
+        self.client.post(
+            f"/api/v1/workflow/{self.wf1.id}/reviews/", audit_data, format="json"
+        )
         # Then execute
         execute_data = {
-            "workflow_id": self.wf1.id,
             "workflow_type": self.audit1.workflow_type,
             "mode": "manual",
         }
-        r = self.client.post("/api/v1/workflow/execute/", execute_data, format="json")
+        r = self.client.post(
+            f"/api/v1/workflow/{self.wf1.id}/executions/", execute_data, format="json"
+        )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(
-            r.json(),
-            {
-                "detail": "Execution started. Please check workflow detail page for results."
-            },
+            r.json()["detail"],
+            "Execution started. Please check workflow detail page for results.",
         )

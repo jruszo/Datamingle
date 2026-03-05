@@ -37,6 +37,7 @@ from sql.utils.tasks import add_kill_conn_schedule, del_schedule
 from sql.utils.workflow_audit import AuditException, get_auditor
 
 from .pagination import CustomizedPagination
+from .response import success_response
 from .serializers import (
     QueryExecuteResponseSerializer,
     QueryExecuteSerializer,
@@ -235,7 +236,7 @@ class QueryExecute(views.APIView):
         if error_message:
             raise serializers.ValidationError({"errors": error_message})
 
-        return Response({"detail": "ok", "data": result_data})
+        return success_response(data=result_data)
 
 
 class QueryLogBase(generics.ListAPIView):
@@ -378,7 +379,7 @@ class QueryFavorite(views.APIView):
         query_log.favorite = data["star"]
         query_log.alias = data["alias"]
         query_log.save(update_fields=["favorite", "alias"])
-        return Response({"detail": "ok"})
+        return success_response()
 
 
 class QueryPrivilegesApplyListCreate(views.APIView):
@@ -534,9 +535,9 @@ class QueryPrivilegesApplyListCreate(views.APIView):
             timeout=60,
             task_name=f"query-priv-apply-{audit_handler.workflow.apply_id}",
         )
-        return Response(
-            {"detail": "ok", "data": {"apply_id": audit_handler.workflow.apply_id}},
-            status=status.HTTP_201_CREATED,
+        return success_response(
+            data={"apply_id": audit_handler.workflow.apply_id},
+            status_code=status.HTTP_201_CREATED,
         )
 
 
@@ -610,17 +611,20 @@ class QueryPrivilegesList(generics.ListAPIView):
         return self.get_paginated_response(serializer.data)
 
 
-class QueryPrivilegesModify(views.APIView):
+class QueryPrivilegeDetail(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(
-        summary="Modify Query Privilege",
+        summary="Update Query Privilege",
         request=QueryPrivilegesModifySerializer,
-        description="Delete or update a query privilege record.",
+        description="Update a query privilege record.",
     )
-    def post(self, request):
+    def patch(self, request, privilege_id):
         _require_permission(request, "sql.query_mgtpriv")
-        serializer = QueryPrivilegesModifySerializer(data=request.data)
+        payload = request.data.copy()
+        payload["privilege_id"] = privilege_id
+        payload["type"] = 2
+        serializer = QueryPrivilegesModifySerializer(data=payload)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
@@ -631,28 +635,42 @@ class QueryPrivilegesModify(views.APIView):
                 {"errors": "Target privilege does not exist."}
             )
 
-        if data["type"] == 1:
-            privilege.is_deleted = 1
-            privilege.save(update_fields=["is_deleted"])
-        else:
-            privilege.valid_date = data["valid_date"]
-            privilege.limit_num = data["limit_num"]
-            privilege.save(update_fields=["valid_date", "limit_num"])
+        privilege.valid_date = data["valid_date"]
+        privilege.limit_num = data["limit_num"]
+        privilege.save(update_fields=["valid_date", "limit_num"])
+        return success_response()
 
-        return Response({"detail": "ok"})
+    @extend_schema(
+        summary="Delete Query Privilege",
+        description="Soft-delete a query privilege record.",
+    )
+    def delete(self, request, privilege_id):
+        _require_permission(request, "sql.query_mgtpriv")
+        try:
+            privilege = QueryPrivileges.objects.get(privilege_id=privilege_id)
+        except QueryPrivileges.DoesNotExist:
+            raise serializers.ValidationError(
+                {"errors": "Target privilege does not exist."}
+            )
+
+        privilege.is_deleted = 1
+        privilege.save(update_fields=["is_deleted"])
+        return success_response()
 
 
-class QueryPrivilegesAudit(views.APIView):
+class QueryPrivilegeApplicationReviewCreate(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(
-        summary="Audit Query Privilege Application",
+        summary="Create Query Privilege Review",
         request=QueryPrivilegesAuditSerializer,
-        description="Audit (approve/reject/cancel) a query privilege application.",
+        description="Create a review decision for a query privilege application.",
     )
-    def post(self, request):
+    def post(self, request, apply_id):
         _require_permission(request, "sql.query_review")
-        serializer = QueryPrivilegesAuditSerializer(data=request.data)
+        payload = request.data.copy()
+        payload["apply_id"] = apply_id
+        serializer = QueryPrivilegesAuditSerializer(data=payload)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
@@ -689,4 +707,4 @@ class QueryPrivilegesAudit(views.APIView):
             timeout=60,
             task_name=f"query-priv-audit-{data['apply_id']}",
         )
-        return Response({"detail": "ok"})
+        return success_response()

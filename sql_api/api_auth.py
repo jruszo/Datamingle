@@ -8,11 +8,16 @@ from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status, permissions, views
 from rest_framework.response import Response
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.views import (
+    TokenObtainPairView,
+    TokenRefreshView,
+    TokenVerifyView,
+)
 
 from common.config import SysConfig
 from common.twofa import get_authenticator
 from sql.models import TwoFactorAuthConfig
+from .response import success_response
 
 
 class TokenSMSCaptchaSerializer(serializers.Serializer):
@@ -107,6 +112,38 @@ class SPATokenObtainPairView(TokenObtainPairView):
     permission_classes = [permissions.AllowAny]
     serializer_class = SPATokenObtainPairSerializer
 
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+        if response.status_code < 400:
+            return success_response(
+                data=response.data, status_code=response.status_code
+            )
+        return response
+
+
+class SPATokenRefreshView(TokenRefreshView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+        if response.status_code < 400:
+            return success_response(
+                data=response.data, status_code=response.status_code
+            )
+        return response
+
+
+class SPATokenVerifyView(TokenVerifyView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+        if response.status_code < 400:
+            return success_response(
+                data=response.data, status_code=response.status_code
+            )
+        return response
+
 
 class TokenSMSCaptchaView(views.APIView):
     permission_classes = [permissions.AllowAny]
@@ -141,4 +178,4 @@ class TokenSMSCaptchaView(views.APIView):
         r = get_redis_connection("default")
         data = {"otp": otp, "update_time": int(time.time())}
         r.set(f"captcha-{sms_config.phone}", json.dumps(data), 300)
-        return Response({"detail": "ok"})
+        return success_response()

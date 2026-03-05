@@ -15,6 +15,7 @@ from .serializers import (
 )
 from .pagination import CustomizedPagination
 from .filters import InstanceFilter
+from .response import success_response
 from sql.models import Instance, Tunnel, AliyunRdsConfig
 from sql.engines import get_engine
 from django.http import Http404
@@ -56,7 +57,9 @@ class InstanceList(generics.ListAPIView):
         serializer = InstanceSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return success_response(
+                data=serializer.data, status_code=status.HTTP_201_CREATED
+            )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -85,7 +88,7 @@ class InstanceDetail(views.APIView):
         serializer = InstanceDetailSerializer(instance, data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data)
+            return success_response(data=serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @extend_schema(
@@ -95,7 +98,7 @@ class InstanceDetail(views.APIView):
     def delete(self, request, pk):
         instance = self.get_object(pk)
         instance.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return success_response()
 
 
 class TunnelList(generics.ListAPIView):
@@ -131,7 +134,9 @@ class TunnelList(generics.ListAPIView):
         serializer = TunnelSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return success_response(
+                data=serializer.data, status_code=status.HTTP_201_CREATED
+            )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -168,7 +173,9 @@ class AliyunRdsList(generics.ListAPIView):
         serializer = AliyunRdsSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return success_response(
+                data=serializer.data, status_code=status.HTTP_201_CREATED
+            )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -272,4 +279,4 @@ class InstanceResource(views.APIView):
             else:
                 resource = {"count": len(resource.rows), "result": resource.rows}
                 serializer_obj = InstanceResourceListSerializer(resource)
-                return Response(serializer_obj.data)
+                return success_response(data=serializer_obj.data)

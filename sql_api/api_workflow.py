@@ -27,6 +27,7 @@ from sql.utils.tasks import del_schedule
 from sql.utils.workflow_audit import Audit, get_auditor, AuditException
 from .filters import WorkflowFilter, WorkflowAuditFilter
 from .pagination import CustomizedPagination
+from .response import success_response
 from .serializers import (
     WorkflowContentSerializer,
     ExecuteCheckSerializer,
@@ -66,7 +67,7 @@ class ExecuteCheck(views.APIView):
             raise serializers.ValidationError({"errors": f"{e}"})
         check_result.rows = check_result.to_dict()
         serializer_obj = ExecuteCheckResultSerializer(check_result)
-        return Response(serializer_obj.data)
+        return success_response(data=serializer_obj.data)
 
 
 class WorkflowList(generics.ListAPIView):
@@ -153,7 +154,9 @@ class WorkflowList(generics.ListAPIView):
                 timeout=60,
                 task_name=f"sqlreview-submit-{workflow_content.workflow.id}",
             )
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return success_response(
+            data=serializer.data, status_code=status.HTTP_201_CREATED
+        )
 
 
 class WorkflowAuditList(generics.ListAPIView):
@@ -222,7 +225,7 @@ class WorkflowAuditList(generics.ListAPIView):
         return self.get_paginated_response(serializer_obj.data)
 
 
-class AuditWorkflow(views.APIView):
+class WorkflowReviewCreate(views.APIView):
     """
     Audit workflows, including query privilege applications, SQL release applications, and data archive applications.
     """
@@ -232,9 +235,11 @@ class AuditWorkflow(views.APIView):
         request=AuditWorkflowSerializer,
         description="Audit a workflow (approve or terminate).",
     )
-    def post(self, request):
+    def post(self, request, workflow_id):
         # Parameter validation
-        serializer = AuditWorkflowSerializer(data=request.data)
+        data = request.data.copy()
+        data["workflow_id"] = workflow_id
+        serializer = AuditWorkflowSerializer(data=data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         data = serializer.validated_data
@@ -310,10 +315,10 @@ class AuditWorkflow(views.APIView):
                 timeout=60,
                 task_name=f"notify-audit-{auditor.audit}-{WorkflowType(auditor.audit.workflow_type).label}",
             )
-        return Response({"detail": success_message})
+        return success_response(detail=success_message)
 
 
-class ExecuteWorkflow(views.APIView):
+class WorkflowExecutionCreate(views.APIView):
     """
     Execute workflows, including SQL release workflows and data archive workflows.
     """
@@ -323,15 +328,16 @@ class ExecuteWorkflow(views.APIView):
         request=ExecuteWorkflowSerializer,
         description="Execute a workflow.",
     )
-    def post(self, request):
+    def post(self, request, workflow_id):
         # Parameter validation
-        serializer = ExecuteWorkflowSerializer(data=request.data)
+        data = request.data.copy()
+        data["workflow_id"] = workflow_id
+        serializer = ExecuteWorkflowSerializer(data=data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         data = serializer.validated_data
 
         workflow_type = data["workflow_type"]
-        workflow_id = data["workflow_id"]
 
         # Execute SQL release workflow
         if workflow_type == 2:
@@ -436,10 +442,8 @@ class ExecuteWorkflow(views.APIView):
                 task_name=f"archive-{workflow_id}",
             )
 
-        return Response(
-            {
-                "detail": "Execution started. Please check workflow detail page for results."
-            }
+        return success_response(
+            detail="Execution started. Please check workflow detail page for results."
         )
 
 

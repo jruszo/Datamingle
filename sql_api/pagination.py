@@ -1,7 +1,7 @@
-from rest_framework.views import Response
 from rest_framework.pagination import PageNumberPagination
 from collections import OrderedDict
 from django.conf import settings
+from .response import success_response
 
 
 class CustomizedPagination(PageNumberPagination):
@@ -19,13 +19,13 @@ class CustomizedPagination(PageNumberPagination):
     max_page_size = None
 
     def get_paginated_response(self, data):
-        return Response(
-            OrderedDict(
-                [
+        return success_response(
+            data=OrderedDict(
+                (
                     ("count", self.page.paginator.count),
                     ("next", self.get_next_link()),
                     ("previous", self.get_previous_link()),
                     ("results", data),
-                ]
+                )
             )
         )
