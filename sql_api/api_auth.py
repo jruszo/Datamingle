@@ -133,9 +133,12 @@ class TokenSMSCaptchaView(views.APIView):
         authenticator = get_authenticator(user=user, auth_type="sms")
         result = authenticator.get_captcha(phone=sms_config.phone, otp=otp)
         if result.get("status") != 0:
-            return Response(result, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"errors": result.get("msg", "Failed to send SMS verification code.")},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         r = get_redis_connection("default")
         data = {"otp": otp, "update_time": int(time.time())}
         r.set(f"captcha-{sms_config.phone}", json.dumps(data), 300)
-        return Response({"status": 0, "msg": "ok"})
+        return Response({"msg": "ok"})

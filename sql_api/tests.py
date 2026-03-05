@@ -89,6 +89,15 @@ class TestUser(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.json()["count"], 1)
 
+    def test_get_current_user_context(self):
+        """Test SPA bootstrap current-user endpoint."""
+        r = self.client.get("/api/v1/me/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.json()["username"], self.user.username)
+        self.assertIn("permissions", r.json())
+        self.assertIn("groups", r.json())
+        self.assertIn("resource_groups", r.json())
+
     def test_get_user_list_with_delegated_permission(self):
         """Non-superuser can access with explicit delegated permission."""
         User.objects.filter(id=self.user.id).update(is_superuser=0)
@@ -204,7 +213,7 @@ class TestUser(APITestCase):
         json_data = {"password": "test_password"}
         r = self.client.post(f"/api/v1/user/auth/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json(), {"status": 0, "msg": "Authentication successful."})
+        self.assertEqual(r.json(), {"msg": "Authentication successful."})
 
     def test_2fa_config(self):
         """Test user 2FA configuration."""
@@ -223,6 +232,13 @@ class TestUser(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(TwoFactorAuthConfig.objects.count(), 1)
 
+    def test_2fa_state(self):
+        """Test querying user 2FA status."""
+        r = self.client.get(f"/api/v1/user/2fa/state/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.json()["data"]["totp"], "disabled")
+        self.assertEqual(r.json()["data"]["sms"], "disabled")
+
     def test_2fa_verify(self):
         """Test 2FA code verification."""
         json_data = {
@@ -231,8 +247,8 @@ class TestUser(APITestCase):
             "auth_type": "totp",
         }
         r = self.client.post(f"/api/v1/user/2fa/verify/", json_data, format="json")
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json()["status"], 1)
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(r.json()["errors"], "Invalid verification code.")
 
 
 class TestTokenAuth2FA(APITestCase):
@@ -336,7 +352,7 @@ class TestTokenAuth2FA(APITestCase):
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json()["status"], 0)
+        self.assertEqual(r.json()["msg"], "ok")
         mock_redis.set.assert_called_once()
 
 
@@ -461,6 +477,30 @@ class TestInstance(APITestCase):
         r = self.client.post("/api/v1/instance/tunnel/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         self.assertEqual(r.json()["tunnel_name"], "tunnel_test")
+
+    @patch("sql_api.api_instance.get_engine")
+    def test_get_instance_resource(self, mock_get_engine):
+        """Test querying instance resources."""
+        group = ResourceGroup.objects.create(group_name="instance_resource_test")
+        self.user.resource_group.add(group)
+        self.ins.resource_group.add(group)
+
+        mock_engine = Mock()
+        mock_engine.escape_string.side_effect = lambda x: x
+        mock_engine.instance = Mock(show_db_name_regex="", denied_db_name_regex="")
+        mock_resource = Mock()
+        mock_resource.rows = ["db1"]
+        mock_resource.error = ""
+        mock_engine.get_all_databases.return_value = mock_resource
+        mock_get_engine.return_value = mock_engine
+
+        r = self.client.get(
+            "/api/v1/instance/resource/",
+            {"instance_id": self.ins.id, "resource_type": "database"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.json()["count"], 1)
 
 
 class TestWorkflow(APITestCase):
@@ -617,7 +657,7 @@ class TestWorkflow(APITestCase):
             "db_name": "test_db",
             "instance_id": self.ins.id,
         }
-        r = self.client.post("/api/v1/workflow/sqlcheck/", json_data, format="json")
+        r = self.client.get("/api/v1/workflow/sqlcheck/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
 
     @patch("sql_api.api_workflow.get_engine")
@@ -629,7 +669,7 @@ class TestWorkflow(APITestCase):
             "instance_id": self.ins.id,
         }
         _get_engine.side_effect = RuntimeError("RuntimeError")
-        r = self.client.post("/api/v1/workflow/sqlcheck/", json_data, format="json")
+        r = self.client.get("/api/v1/workflow/sqlcheck/", json_data, format="json")
         print(json.loads(r.content))
         self.assertDictEqual(json.loads(r.content), {"errors": "RuntimeError"})
 
@@ -676,7 +716,7 @@ class TestWorkflow(APITestCase):
         _get_engine.return_value.execute_check.return_value = ReviewSet(
             warning_count=0, error_count=0, column_list=column_list, rows=rows
         )
-        r = self.client.post("/api/v1/workflow/sqlcheck/", json_data, format="json")
+        r = self.client.get("/api/v1/workflow/sqlcheck/", json_data, format="json")
         self.assertListEqual(
             list(json.loads(r.content).keys()),
             [

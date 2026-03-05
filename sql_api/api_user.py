@@ -7,11 +7,11 @@ from .serializers import (
     UserDetailSerializer,
     GroupSerializer,
     ResourceGroupSerializer,
+    CurrentUserSerializer,
     TwoFASerializer,
     UserAuthSerializer,
     TwoFAVerifySerializer,
     TwoFASaveSerializer,
-    TwoFAStateSerializer,
 )
 from .pagination import CustomizedPagination
 from .filters import UserFilter
@@ -34,6 +34,57 @@ def _require_any_permission(request, *perm_list):
     raise PermissionDenied(
         f"Missing required permission. Need one of: {', '.join(perm_list)}"
     )
+
+
+def _response_from_authenticator(result, default_error_message):
+    if result.get("status") == 0:
+        payload = {"msg": result.get("msg", "ok")}
+        if "data" in result:
+            payload["data"] = result["data"]
+        return Response(payload, status=status.HTTP_200_OK)
+    return Response(
+        {"errors": result.get("msg", default_error_message)},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
+
+
+class CurrentUser(views.APIView):
+    """Get bootstrap context for the authenticated user."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary="Current User Context",
+        responses={200: CurrentUserSerializer},
+        description="Get current user profile, groups, resource groups, permissions, and 2FA methods.",
+    )
+    def get(self, request):
+        user = request.user
+        payload = {
+            "id": user.id,
+            "username": user.username,
+            "display": user.display,
+            "email": user.email or "",
+            "is_superuser": user.is_superuser,
+            "is_staff": user.is_staff,
+            "is_active": user.is_active,
+            "groups": list(user.groups.values("id", "name").order_by("id")),
+            "resource_groups": list(
+                user.resource_group.values("group_id", "group_name").order_by(
+                    "group_id"
+                )
+            ),
+            "permissions": sorted(user.get_all_permissions()),
+            "two_factor_auth_types": sorted(
+                set(
+                    TwoFactorAuthConfig.objects.filter(user=user).values_list(
+                        "auth_type", flat=True
+                    )
+                )
+            ),
+        }
+        serializer = CurrentUserSerializer(payload)
+        return Response(serializer.data)
 
 
 class UserList(generics.ListAPIView):
@@ -276,15 +327,17 @@ class UserAuth(views.APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        result = {"status": 0, "msg": "Authentication successful."}
         password = serializer.validated_data["password"]
         user = request.user
 
         user = authenticate(username=user.username, password=password)
         if not user:
-            result = {"status": 1, "msg": "Incorrect username or password."}
+            return Response(
+                {"errors": "Incorrect username or password."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        return Response(result)
+        return Response({"msg": "Authentication successful."})
 
 
 class TwoFA(views.APIView):
@@ -327,7 +380,7 @@ class TwoFA(views.APIView):
         else:
             result = authenticator.disable(auth_type)
 
-        return Response(result)
+        return _response_from_authenticator(result, "Failed to update 2FA settings.")
 
 
 class TwoFAState(views.APIView):
@@ -339,16 +392,10 @@ class TwoFAState(views.APIView):
 
     @extend_schema(
         summary="Query 2FA Configuration",
-        request=TwoFAStateSerializer,
         description="Query 2FA configuration status.",
     )
-    def post(self, request):
-        # Parameter validation
-        serializer = TwoFAStateSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        result = {"status": 0, "msg": "ok", "data": {}}
+    def get(self, request):
+        result = {"data": {}}
         user = request.user
         configs = TwoFactorAuthConfig.objects.filter(user=user)
         result["data"]["totp"] = (
@@ -390,7 +437,7 @@ class TwoFASave(views.APIView):
         else:
             result = authenticator.save(key)
 
-        return Response(result)
+        return _response_from_authenticator(result, "Failed to save 2FA settings.")
 
 
 class TwoFAVerify(views.APIView):
@@ -417,7 +464,10 @@ class TwoFAVerify(views.APIView):
         user = request.user
         twofa_config = TwoFactorAuthConfig.objects.filter(user=user)
         if not twofa_config and not key:
-            return Response({"status": 1, "msg": "User has not configured 2FA."})
+            return Response(
+                {"errors": "User has not configured 2FA."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         auth_type = serializer.validated_data["auth_type"]
         authenticator = get_authenticator(user=user, auth_type=auth_type)
@@ -426,4 +476,4 @@ class TwoFAVerify(views.APIView):
         else:
             result = authenticator.verify(otp, key)
 
-        return Response(result)
+        return _response_from_authenticator(result, "2FA verification failed.")

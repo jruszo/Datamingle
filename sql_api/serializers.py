@@ -100,6 +100,30 @@ class UserAuthSerializer(serializers.Serializer):
     password = serializers.CharField(label="Password")
 
 
+class CurrentUserGroupSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+
+
+class CurrentUserResourceGroupSerializer(serializers.Serializer):
+    group_id = serializers.IntegerField()
+    group_name = serializers.CharField()
+
+
+class CurrentUserSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    username = serializers.CharField()
+    display = serializers.CharField(allow_blank=True)
+    email = serializers.CharField(allow_blank=True)
+    is_superuser = serializers.BooleanField()
+    is_staff = serializers.BooleanField()
+    is_active = serializers.BooleanField()
+    groups = CurrentUserGroupSerializer(many=True)
+    resource_groups = CurrentUserResourceGroupSerializer(many=True)
+    permissions = serializers.ListField(child=serializers.CharField())
+    two_factor_auth_types = serializers.ListField(child=serializers.CharField())
+
+
 class TwoFASerializer(serializers.Serializer):
     enable = serializers.ChoiceField(
         choices=["true", "false"], label="Enable or disable"

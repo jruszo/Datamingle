@@ -1,6 +1,6 @@
 from rest_framework import views, generics, status, serializers
 from rest_framework.response import Response
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 from django.contrib.auth.decorators import permission_required
 from django.utils.decorators import method_decorator
 from sql.utils.sql_utils import filter_db_list
@@ -179,23 +179,54 @@ class InstanceResource(views.APIView):
 
     @extend_schema(
         summary="Instance Resources",
-        request=InstanceResourceSerializer,
         responses={200: InstanceResourceListSerializer},
+        parameters=[
+            OpenApiParameter(
+                name="instance_id",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="Instance ID.",
+            ),
+            OpenApiParameter(
+                name="resource_type",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="Resource type: database, schema, table, column.",
+            ),
+            OpenApiParameter(
+                name="db_name",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description="Database name.",
+            ),
+            OpenApiParameter(
+                name="schema_name",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description="Schema name.",
+            ),
+            OpenApiParameter(
+                name="tb_name",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description="Table name.",
+            ),
+        ],
         description="Get resource information inside an instance.",
     )
-    def post(self, request):
+    def get(self, request):
         # Parameter validation
-        serializer = InstanceResourceSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer = InstanceResourceSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
 
-        instance_id = request.data["instance_id"]
-        resource_type = request.data["resource_type"]
-        db_name = request.data["db_name"] if "db_name" in request.data.keys() else ""
-        schema_name = (
-            request.data["schema_name"] if "schema_name" in request.data.keys() else ""
-        )
-        tb_name = request.data["tb_name"] if "tb_name" in request.data.keys() else ""
+        data = serializer.validated_data
+        instance_id = data["instance_id"]
+        resource_type = data["resource_type"]
+        db_name = data.get("db_name", "")
+        schema_name = data.get("schema_name", "")
+        tb_name = data.get("tb_name", "")
         if not user_instances(request.user).filter(id=instance_id).exists():
             raise serializers.ValidationError(
                 {"errors": "The instance is not associated with your group."}
@@ -234,7 +265,7 @@ class InstanceResource(views.APIView):
                     {"errors": "Unsupported resource type or incomplete parameters."}
                 )
         except Exception as msg:
-            raise serializers.ValidationError({"errors": msg})
+            raise serializers.ValidationError({"errors": str(msg)})
         else:
             if resource.error:
                 raise serializers.ValidationError({"errors": resource.error})

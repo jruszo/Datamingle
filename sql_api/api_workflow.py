@@ -45,24 +45,45 @@ class ExecuteCheck(views.APIView):
 
     @extend_schema(
         summary="SQL Check",
-        request=ExecuteCheckSerializer,
         responses={200: ExecuteCheckResultSerializer},
+        parameters=[
+            OpenApiParameter(
+                name="instance_id",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="Instance ID.",
+            ),
+            OpenApiParameter(
+                name="db_name",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="Database name.",
+            ),
+            OpenApiParameter(
+                name="full_sql",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="SQL content.",
+            ),
+        ],
         description="Perform syntax checks for the provided SQL.",
     )
     @method_decorator(permission_required("sql.sql_submit", raise_exception=True))
-    def post(self, request):
+    def get(self, request):
         # Parameter validation
-        serializer = ExecuteCheckSerializer(data=request.data)
+        serializer = ExecuteCheckSerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
         instance = serializer.get_instance()
         # Run check through engine
         try:
-            db_name = request.data["db_name"]
+            db_name = serializer.validated_data["db_name"]
+            full_sql = serializer.validated_data["full_sql"].strip()
             check_engine = get_engine(instance=instance)
             db_name = check_engine.escape_string(db_name)
-            check_result = check_engine.execute_check(
-                db_name=db_name, sql=request.data["full_sql"].strip()
-            )
+            check_result = check_engine.execute_check(db_name=db_name, sql=full_sql)
         except Exception as e:
             raise serializers.ValidationError({"errors": f"{e}"})
         check_result.rows = check_result.to_dict()
