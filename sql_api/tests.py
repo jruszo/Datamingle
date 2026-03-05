@@ -9,7 +9,7 @@ from rest_framework import status
 from common.config import SysConfig
 from sql.utils.workflow_audit import AuditSetting
 from sql.engines import ReviewSet
-from sql.engines.models import ReviewResult
+from sql.engines.models import ReviewResult, ResultSet
 from sql.models import (
     ResourceGroup,
     Instance,
@@ -23,7 +23,11 @@ from sql.models import (
     InstanceTag,
     WorkflowAuditSetting,
     TwoFactorAuthConfig,
+    QueryLog,
+    QueryPrivileges,
+    QueryPrivilegesApply,
 )
+from common.utils.const import WorkflowAction, WorkflowStatus
 import json
 import pyotp
 
@@ -354,6 +358,270 @@ class TestTokenAuth2FA(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.json()["detail"], "ok")
         mock_redis.set.assert_called_once()
+
+
+class TestQueryAPI(APITestCase):
+    """Test query/query-privilege API endpoints."""
+
+    def setUp(self):
+        self.user = User(username="query_user", display="Query User", is_active=True)
+        self.user.set_password("test_password")
+        self.user.save()
+
+        permissions = Permission.objects.filter(
+            codename__in=[
+                "query_submit",
+                "menu_sqlquery",
+                "menu_queryapplylist",
+                "query_applypriv",
+                "query_mgtpriv",
+                "query_review",
+            ]
+        )
+        self.user.user_permissions.add(*permissions)
+
+        self.group = Group.objects.create(name="Query Group")
+        self.user.groups.add(self.group)
+        self.res_group = ResourceGroup.objects.create(group_name="query_rg")
+        self.user.resource_group.add(self.res_group)
+
+        self.read_tag = InstanceTag.objects.create(
+            tag_code="can_read", tag_name="Can Read", active=1
+        )
+        self.ins = Instance.objects.create(
+            instance_name="query_instance",
+            type="master",
+            db_type="mysql",
+            host="127.0.0.1",
+            port=3306,
+            user="root",
+            password="pwd",
+        )
+        self.ins.resource_group.add(self.res_group)
+        self.ins.instance_tag.add(self.read_tag)
+
+        r = self.client.post(
+            "/api/auth/token/",
+            {"username": "query_user", "password": "test_password"},
+            format="json",
+        )
+        self.token = r.data["access"]
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + self.token)
+
+    def tearDown(self):
+        self.user.delete()
+        QueryLog.objects.all().delete()
+        QueryPrivileges.objects.all().delete()
+        QueryPrivilegesApply.objects.all().delete()
+        InstanceTag.objects.all().delete()
+        Instance.objects.all().delete()
+        ResourceGroup.objects.all().delete()
+        Group.objects.all().delete()
+        SysConfig().purge()
+
+    @patch("sql_api.api_query.query_priv_check")
+    @patch("sql_api.api_query.get_engine")
+    def test_query_execute_success(self, mock_get_engine, mock_query_priv_check):
+        SysConfig().set("data_masking", False)
+        SysConfig().set("disable_star", False)
+
+        mock_query_priv_check.return_value = {
+            "status": 0,
+            "msg": "ok",
+            "data": {"priv_check": True, "limit_num": 100},
+        }
+        mock_engine = Mock()
+        mock_engine.query_check.return_value = {
+            "bad_query": False,
+            "has_star": False,
+            "filtered_sql": "select 1",
+        }
+        mock_engine.filter_sql.return_value = "select 1"
+        mock_engine.thread_id = None
+        mock_engine.get_connection.return_value = None
+        mock_engine.seconds_behind_master = 0
+        result = ResultSet(rows=[(1,)], column_list=["v"], affected_rows=1)
+        result.error = None
+        mock_engine.query.return_value = result
+        mock_get_engine.return_value = mock_engine
+
+        r = self.client.post(
+            "/api/v1/query/",
+            {
+                "instance_name": self.ins.instance_name,
+                "sql_content": "select 1",
+                "db_name": "mysql",
+                "limit_num": 10,
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.json()["detail"], "ok")
+        self.assertEqual(r.json()["data"]["rows"][0]["v"], 1)
+        self.assertEqual(QueryLog.objects.count(), 1)
+
+    def test_query_log_and_favorite(self):
+        QueryLog.objects.create(
+            username=self.user.username,
+            user_display=self.user.display,
+            db_name="db1",
+            instance_name=self.ins.instance_name,
+            sqllog="select 1",
+            effect_row=1,
+            cost_time="0.1",
+        )
+        QueryLog.objects.create(
+            username="other",
+            user_display="Other",
+            db_name="db1",
+            instance_name=self.ins.instance_name,
+            sqllog="select 2",
+            effect_row=1,
+            cost_time="0.1",
+        )
+
+        r1 = self.client.get("/api/v1/query/log/", format="json")
+        self.assertEqual(r1.status_code, status.HTTP_200_OK)
+        self.assertEqual(r1.json()["count"], 1)
+
+        query_log_id = r1.json()["results"][0]["id"]
+        r2 = self.client.post(
+            "/api/v1/query/favorite/",
+            {"query_log_id": query_log_id, "star": True, "alias": "fav1"},
+            format="json",
+        )
+        self.assertEqual(r2.status_code, status.HTTP_200_OK)
+        self.assertEqual(r2.json()["detail"], "ok")
+        log_obj = QueryLog.objects.get(id=query_log_id)
+        self.assertEqual(log_obj.favorite, True)
+        self.assertEqual(log_obj.alias, "fav1")
+
+    @patch("sql_api.api_query.async_task")
+    @patch("sql_api.api_query._query_apply_audit_call_back")
+    @patch("sql_api.api_query.get_auditor")
+    def test_query_privilege_apply_create(
+        self, mock_get_auditor, mock_callback, mock_async_task
+    ):
+        mock_handler = Mock()
+        mock_handler.workflow.apply_id = 123
+        mock_handler.audit.current_status = WorkflowStatus.WAITING
+        mock_get_auditor.return_value = mock_handler
+
+        r = self.client.post(
+            "/api/v1/query/privilege/apply/",
+            {
+                "title": "apply db read",
+                "instance_name": self.ins.instance_name,
+                "group_name": self.res_group.group_name,
+                "priv_type": 1,
+                "db_list": ["db1"],
+                "valid_date": "2099-12-31",
+                "limit_num": 100,
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(r.json()["detail"], "ok")
+        self.assertEqual(r.json()["data"]["apply_id"], 123)
+        mock_callback.assert_called_once()
+        mock_async_task.assert_called_once()
+
+    def test_query_privilege_list_and_modify(self):
+        QueryPrivilegesApply.objects.create(
+            group_id=self.res_group.group_id,
+            group_name=self.res_group.group_name,
+            title="history apply",
+            user_name=self.user.username,
+            user_display=self.user.display,
+            instance=self.ins,
+            db_list="db1",
+            table_list="",
+            valid_date=datetime.now().date() + timedelta(days=3),
+            limit_num=10,
+            priv_type=1,
+            status=WorkflowStatus.WAITING,
+            audit_auth_groups="1",
+        )
+        priv = QueryPrivileges.objects.create(
+            user_name=self.user.username,
+            user_display=self.user.display,
+            instance=self.ins,
+            db_name="db1",
+            table_name="",
+            valid_date=datetime.now().date() + timedelta(days=3),
+            limit_num=10,
+            priv_type=1,
+            is_deleted=0,
+        )
+
+        r1 = self.client.get("/api/v1/query/privilege/", format="json")
+        self.assertEqual(r1.status_code, status.HTTP_200_OK)
+        self.assertEqual(r1.json()["count"], 1)
+
+        r2 = self.client.post(
+            "/api/v1/query/privilege/modify/",
+            {
+                "privilege_id": priv.privilege_id,
+                "type": 2,
+                "valid_date": "2099-12-31",
+                "limit_num": 200,
+            },
+            format="json",
+        )
+        self.assertEqual(r2.status_code, status.HTTP_200_OK)
+        priv.refresh_from_db()
+        self.assertEqual(priv.limit_num, 200)
+
+        r3 = self.client.post(
+            "/api/v1/query/privilege/modify/",
+            {"privilege_id": priv.privilege_id, "type": 1},
+            format="json",
+        )
+        self.assertEqual(r3.status_code, status.HTTP_200_OK)
+        priv.refresh_from_db()
+        self.assertEqual(priv.is_deleted, 1)
+
+    @patch("sql_api.api_query.async_task")
+    @patch("sql_api.api_query._query_apply_audit_call_back")
+    @patch("sql_api.api_query.get_auditor")
+    def test_query_privilege_audit(
+        self, mock_get_auditor, mock_callback, mock_async_task
+    ):
+        apply_obj = QueryPrivilegesApply.objects.create(
+            group_id=self.res_group.group_id,
+            group_name=self.res_group.group_name,
+            title="apply one",
+            user_name=self.user.username,
+            user_display=self.user.display,
+            instance=self.ins,
+            db_list="db1",
+            table_list="",
+            valid_date=datetime.now().date() + timedelta(days=3),
+            limit_num=10,
+            priv_type=1,
+            status=WorkflowStatus.WAITING,
+            audit_auth_groups="1",
+        )
+
+        mock_handler = Mock()
+        mock_handler.audit.workflow_id = apply_obj.apply_id
+        mock_handler.audit.current_status = WorkflowStatus.PASSED
+        mock_handler.operate.return_value = Mock()
+        mock_get_auditor.return_value = mock_handler
+
+        r = self.client.post(
+            "/api/v1/query/privilege/audit/",
+            {
+                "apply_id": apply_obj.apply_id,
+                "audit_status": WorkflowAction.PASS,
+                "audit_remark": "ok",
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.json()["detail"], "ok")
+        mock_callback.assert_called_once()
+        mock_async_task.assert_called_once()
 
 
 class TestInstance(APITestCase):
