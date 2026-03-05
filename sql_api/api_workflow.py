@@ -238,24 +238,20 @@ class AuditWorkflow(views.APIView):
         serializer = AuditWorkflowSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        if request.data["engineer"] != request.user.username:
-            return Response(
-                {"errors": "engineer must match authenticated user."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        data = serializer.validated_data
         # Already validated, record must exist
         workflow_audit = WorkflowAudit.objects.get(
-            workflow_id=serializer.data["workflow_id"],
-            workflow_type=serializer.data["workflow_type"],
+            workflow_id=data["workflow_id"],
+            workflow_type=data["workflow_type"],
         )
         sys_config = SysConfig()
         auditor = get_auditor(audit=workflow_audit)
         user = request.user
-        if serializer.data["audit_type"] == "pass":
+        if data["audit_type"] == "pass":
             action = WorkflowAction.PASS
             notify_config_key = "Pass"
             success_message = "passed"
-        elif serializer.data["audit_type"] == "cancel":
+        elif data["audit_type"] == "cancel":
             notify_config_key = "Cancel"
             success_message = "canceled"
             if auditor.audit.create_user == user.username:
@@ -271,7 +267,7 @@ class AuditWorkflow(views.APIView):
 
         try:
             workflow_audit_detail = auditor.operate(
-                action, user, serializer.data["audit_remark"]
+                action, user, data["audit_remark"]
             )
         except AuditException as e:
             raise serializers.ValidationError({"errors": f"Operation failed, {str(e)}"})
@@ -335,18 +331,14 @@ class ExecuteWorkflow(views.APIView):
         serializer = ExecuteWorkflowSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        data = serializer.validated_data
 
-        workflow_type = request.data["workflow_type"]
-        workflow_id = request.data["workflow_id"]
+        workflow_type = data["workflow_type"]
+        workflow_id = data["workflow_id"]
 
         # Execute SQL release workflow
         if workflow_type == 2:
-            mode = request.data["mode"]
-            engineer = request.data["engineer"]
-            if engineer != request.user.username:
-                raise serializers.ValidationError(
-                    {"errors": "engineer must match authenticated user."}
-                )
+            mode = data["mode"]
             user = request.user
 
             # Validate multiple permissions

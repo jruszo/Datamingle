@@ -1,4 +1,4 @@
-from rest_framework import views, generics, status
+from rest_framework import views, generics, status, permissions
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
 from drf_spectacular.utils import extend_schema
@@ -14,7 +14,6 @@ from .serializers import (
     TwoFAStateSerializer,
 )
 from .pagination import CustomizedPagination
-from .permissions import IsOwner
 from .filters import UserFilter
 from django_redis import get_redis_connection
 from django.contrib.auth.models import Group
@@ -264,7 +263,7 @@ class UserAuth(views.APIView):
     User authentication check.
     """
 
-    permission_classes = [IsOwner]
+    permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(
         summary="User Authentication Check",
@@ -278,10 +277,10 @@ class UserAuth(views.APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         result = {"status": 0, "msg": "Authentication successful."}
-        engineer = request.data["engineer"]
-        password = request.data["password"]
+        password = serializer.validated_data["password"]
+        user = request.user
 
-        user = authenticate(username=engineer, password=password)
+        user = authenticate(username=user.username, password=password)
         if not user:
             result = {"status": 1, "msg": "Incorrect username or password."}
 
@@ -293,7 +292,7 @@ class TwoFA(views.APIView):
     Configure 2FA.
     """
 
-    permission_classes = [IsOwner]
+    permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(
         summary="Configure 2FA", request=TwoFASerializer, description="Configure 2FA."
@@ -304,10 +303,9 @@ class TwoFA(views.APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        engineer = request.data["engineer"]
-        enable = request.data["enable"]
-        auth_type = request.data["auth_type"]
-        user = Users.objects.get(username=engineer)
+        enable = serializer.validated_data["enable"]
+        auth_type = serializer.validated_data["auth_type"]
+        user = request.user
 
         authenticator = get_authenticator(user=user, auth_type=auth_type)
         if enable == "true":
@@ -316,7 +314,7 @@ class TwoFA(views.APIView):
                 result = authenticator.generate_key()
             elif auth_type == "sms":
                 # Enable 2FA - send SMS verification code first
-                phone = request.data["phone"]
+                phone = serializer.validated_data["phone"]
                 otp = "{:06d}".format(random.randint(0, 999999))
                 result = authenticator.get_captcha(phone=phone, otp=otp)
                 if result["status"] == 0:
@@ -337,7 +335,7 @@ class TwoFAState(views.APIView):
     Query user 2FA configuration status.
     """
 
-    permission_classes = [IsOwner]
+    permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(
         summary="Query 2FA Configuration",
@@ -351,8 +349,7 @@ class TwoFAState(views.APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         result = {"status": 0, "msg": "ok", "data": {}}
-        engineer = request.data["engineer"]
-        user = Users.objects.get(username=engineer)
+        user = request.user
         configs = TwoFactorAuthConfig.objects.filter(user=user)
         result["data"]["totp"] = (
             "enabled" if configs.filter(auth_type="totp") else "disabled"
@@ -369,7 +366,7 @@ class TwoFASave(views.APIView):
     Save 2FA configuration (TOTP).
     """
 
-    permission_classes = [IsOwner]
+    permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(
         summary="Save 2FA Configuration",
@@ -382,11 +379,10 @@ class TwoFASave(views.APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        engineer = request.data["engineer"]
-        auth_type = request.data["auth_type"]
-        key = request.data["key"] if "key" in request.data.keys() else None
-        phone = request.data["phone"] if "phone" in request.data.keys() else None
-        user = Users.objects.get(username=engineer)
+        auth_type = serializer.validated_data["auth_type"]
+        key = serializer.validated_data.get("key")
+        phone = serializer.validated_data.get("phone")
+        user = request.user
 
         authenticator = get_authenticator(user=user, auth_type=auth_type)
         if auth_type == "sms":
@@ -402,7 +398,7 @@ class TwoFAVerify(views.APIView):
     Verify 2FA code.
     """
 
-    permission_classes = [IsOwner]
+    permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(
         summary="Verify 2FA Code",
@@ -415,16 +411,15 @@ class TwoFAVerify(views.APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        engineer = request.data["engineer"]
-        otp = request.data["otp"]
-        key = request.data["key"] if "key" in request.data.keys() else None
-        phone = request.data["phone"] if "phone" in request.data.keys() else None
-        user = Users.objects.get(username=engineer)
+        otp = serializer.validated_data["otp"]
+        key = serializer.validated_data.get("key")
+        phone = serializer.validated_data.get("phone")
+        user = request.user
         twofa_config = TwoFactorAuthConfig.objects.filter(user=user)
         if not twofa_config and not key:
             return Response({"status": 1, "msg": "User has not configured 2FA."})
 
-        auth_type = request.data["auth_type"]
+        auth_type = serializer.validated_data["auth_type"]
         authenticator = get_authenticator(user=user, auth_type=auth_type)
         if auth_type == "sms":
             result = authenticator.verify(otp, phone)

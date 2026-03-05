@@ -201,14 +201,14 @@ class TestUser(APITestCase):
 
     def test_user_auth(self):
         """Test user authentication check."""
-        json_data = {"engineer": "test_user", "password": "test_password"}
+        json_data = {"password": "test_password"}
         r = self.client.post(f"/api/v1/user/auth/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.json(), {"status": 0, "msg": "Authentication successful."})
 
     def test_2fa_config(self):
         """Test user 2FA configuration."""
-        json_data = {"engineer": "test_user", "auth_type": "totp", "enable": "false"}
+        json_data = {"auth_type": "totp", "enable": "false"}
         r = self.client.post(f"/api/v1/user/2fa/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(TwoFactorAuthConfig.objects.count(), 0)
@@ -216,7 +216,6 @@ class TestUser(APITestCase):
     def test_2fa_save(self):
         """Test saving user 2FA configuration."""
         json_data = {
-            "engineer": "test_user",
             "auth_type": "totp",
             "key": "ZUGRIJZP6H7LIOAL4LH5JA4GSXXT3WOK",
         }
@@ -227,7 +226,6 @@ class TestUser(APITestCase):
     def test_2fa_verify(self):
         """Test 2FA code verification."""
         json_data = {
-            "engineer": "test_user",
             "otp": 123456,
             "key": "ZUGRIJZP6H7LIOAL4LH5JA4GSXXT3WOK",
             "auth_type": "totp",
@@ -767,7 +765,6 @@ class TestWorkflow(APITestCase):
                 "demand_url": "test",
                 "group_id": 1,
                 "db_name": "test_db",
-                "engineer": self.user.username,
                 "instance": self.ins.id,
             },
             "sql_content": "",
@@ -778,7 +775,6 @@ class TestWorkflow(APITestCase):
     def test_audit_workflow(self):
         """Test auditing workflow."""
         json_data = {
-            "engineer": self.user.username,
             "workflow_id": self.wf1.id,
             "audit_remark": "cancel",
             "workflow_type": self.audit1.workflow_type,
@@ -792,7 +788,6 @@ class TestWorkflow(APITestCase):
         """Test executing workflow."""
         # Audit first
         audit_data = {
-            "engineer": self.user.username,
             "workflow_id": self.wf1.id,
             "audit_remark": "approved",
             "workflow_type": self.audit1.workflow_type,
@@ -801,7 +796,6 @@ class TestWorkflow(APITestCase):
         self.client.post("/api/v1/workflow/audit/", audit_data, format="json")
         # Then execute
         execute_data = {
-            "engineer": self.user.username,
             "workflow_id": self.wf1.id,
             "workflow_type": self.audit1.workflow_type,
             "mode": "manual",
