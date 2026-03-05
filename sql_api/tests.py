@@ -213,7 +213,7 @@ class TestUser(APITestCase):
         json_data = {"password": "test_password"}
         r = self.client.post(f"/api/v1/user/auth/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json(), {"msg": "Authentication successful."})
+        self.assertEqual(r.json(), {"detail": "Authentication successful."})
 
     def test_2fa_config(self):
         """Test user 2FA configuration."""
@@ -352,7 +352,7 @@ class TestTokenAuth2FA(APITestCase):
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json()["msg"], "ok")
+        self.assertEqual(r.json()["detail"], "ok")
         mock_redis.set.assert_called_once()
 
 
@@ -657,7 +657,7 @@ class TestWorkflow(APITestCase):
             "db_name": "test_db",
             "instance_id": self.ins.id,
         }
-        r = self.client.get("/api/v1/workflow/sqlcheck/", json_data, format="json")
+        r = self.client.post("/api/v1/workflow/sqlcheck/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
 
     @patch("sql_api.api_workflow.get_engine")
@@ -669,7 +669,7 @@ class TestWorkflow(APITestCase):
             "instance_id": self.ins.id,
         }
         _get_engine.side_effect = RuntimeError("RuntimeError")
-        r = self.client.get("/api/v1/workflow/sqlcheck/", json_data, format="json")
+        r = self.client.post("/api/v1/workflow/sqlcheck/", json_data, format="json")
         print(json.loads(r.content))
         self.assertDictEqual(json.loads(r.content), {"errors": "RuntimeError"})
 
@@ -716,7 +716,7 @@ class TestWorkflow(APITestCase):
         _get_engine.return_value.execute_check.return_value = ReviewSet(
             warning_count=0, error_count=0, column_list=column_list, rows=rows
         )
-        r = self.client.get("/api/v1/workflow/sqlcheck/", json_data, format="json")
+        r = self.client.post("/api/v1/workflow/sqlcheck/", json_data, format="json")
         self.assertListEqual(
             list(json.loads(r.content).keys()),
             [
@@ -826,7 +826,7 @@ class TestWorkflow(APITestCase):
         }
         r = self.client.post("/api/v1/workflow/audit/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json(), {"msg": "canceled"})
+        self.assertEqual(r.json(), {"detail": "canceled"})
 
     def test_execute_workflow(self):
         """Test executing workflow."""
@@ -849,6 +849,6 @@ class TestWorkflow(APITestCase):
         self.assertEqual(
             r.json(),
             {
-                "msg": "Execution started. Please check workflow detail page for results."
+                "detail": "Execution started. Please check workflow detail page for results."
             },
         )

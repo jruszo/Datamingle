@@ -45,36 +45,14 @@ class ExecuteCheck(views.APIView):
 
     @extend_schema(
         summary="SQL Check",
+        request=ExecuteCheckSerializer,
         responses={200: ExecuteCheckResultSerializer},
-        parameters=[
-            OpenApiParameter(
-                name="instance_id",
-                type=OpenApiTypes.INT,
-                location=OpenApiParameter.QUERY,
-                required=True,
-                description="Instance ID.",
-            ),
-            OpenApiParameter(
-                name="db_name",
-                type=OpenApiTypes.STR,
-                location=OpenApiParameter.QUERY,
-                required=True,
-                description="Database name.",
-            ),
-            OpenApiParameter(
-                name="full_sql",
-                type=OpenApiTypes.STR,
-                location=OpenApiParameter.QUERY,
-                required=True,
-                description="SQL content.",
-            ),
-        ],
-        description="Perform syntax checks for the provided SQL.",
+        description="Perform syntax checks for the provided SQL using request body.",
     )
     @method_decorator(permission_required("sql.sql_submit", raise_exception=True))
-    def get(self, request):
+    def post(self, request):
         # Parameter validation
-        serializer = ExecuteCheckSerializer(data=request.query_params)
+        serializer = ExecuteCheckSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         instance = serializer.get_instance()
         # Run check through engine
@@ -332,7 +310,7 @@ class AuditWorkflow(views.APIView):
                 timeout=60,
                 task_name=f"notify-audit-{auditor.audit}-{WorkflowType(auditor.audit.workflow_type).label}",
             )
-        return Response({"msg": success_message})
+        return Response({"detail": success_message})
 
 
 class ExecuteWorkflow(views.APIView):
@@ -459,7 +437,9 @@ class ExecuteWorkflow(views.APIView):
             )
 
         return Response(
-            {"msg": "Execution started. Please check workflow detail page for results."}
+            {
+                "detail": "Execution started. Please check workflow detail page for results."
+            }
         )
 
 

@@ -38,7 +38,7 @@ def _require_any_permission(request, *perm_list):
 
 def _response_from_authenticator(result, default_error_message):
     if result.get("status") == 0:
-        payload = {"msg": result.get("msg", "ok")}
+        payload = {"detail": result.get("msg", "ok")}
         if "data" in result:
             payload["data"] = result["data"]
         return Response(payload, status=status.HTTP_200_OK)
@@ -337,7 +337,7 @@ class UserAuth(views.APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        return Response({"msg": "Authentication successful."})
+        return Response({"detail": "Authentication successful."})
 
 
 class TwoFA(views.APIView):

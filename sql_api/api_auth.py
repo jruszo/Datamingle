@@ -141,4 +141,4 @@ class TokenSMSCaptchaView(views.APIView):
         r = get_redis_connection("default")
         data = {"otp": otp, "update_time": int(time.time())}
         r.set(f"captcha-{sms_config.phone}", json.dumps(data), 300)
-        return Response({"msg": "ok"})
+        return Response({"detail": "ok"})
