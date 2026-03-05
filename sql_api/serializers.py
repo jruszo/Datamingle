@@ -496,19 +496,6 @@ class AuditWorkflowSerializer(serializers.Serializer):
         return attrs
 
 
-class WorkflowAuditSerializer(serializers.Serializer):
-    engineer = serializers.CharField(label="Operator")
-
-    def validate_engineer(self, engineer):
-        try:
-            Users.objects.get(username=engineer)
-        except Users.DoesNotExist:
-            raise serializers.ValidationError(
-                {"errors": f"User does not exist: {engineer}"}
-            )
-        return engineer
-
-
 class WorkflowAuditListSerializer(serializers.ModelSerializer):
     class Meta:
         model = WorkflowAudit
@@ -520,27 +507,6 @@ class WorkflowAuditListSerializer(serializers.ModelSerializer):
             "create_user",
             "sys_time",
         ]
-
-
-class WorkflowLogSerializer(serializers.Serializer):
-    workflow_id = serializers.IntegerField(label="Workflow ID")
-    workflow_type = serializers.ChoiceField(
-        choices=[1, 2, 3],
-        label="Workflow type: 1-query privilege apply, 2-SQL release apply, 3-data archive apply",
-    )
-
-    def validate(self, attrs):
-        workflow_id = attrs.get("workflow_id")
-        workflow_type = attrs.get("workflow_type")
-
-        try:
-            WorkflowAudit.objects.get(
-                workflow_id=workflow_id, workflow_type=workflow_type
-            )
-        except WorkflowAudit.DoesNotExist:
-            raise serializers.ValidationError({"errors": "Workflow does not exist."})
-
-        return attrs
 
 
 class WorkflowLogListSerializer(serializers.ModelSerializer):

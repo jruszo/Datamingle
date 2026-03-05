@@ -1,5 +1,6 @@
 from rest_framework import views, generics, status, permissions
 from rest_framework.response import Response
+from rest_framework.exceptions import PermissionDenied
 from drf_spectacular.utils import extend_schema
 from .serializers import (
     UserSerializer,
@@ -29,6 +30,16 @@ import json
 import time
 
 
+def _require_any_permission(request, *perm_list):
+    if request.user.is_superuser:
+        return
+    if any(request.user.has_perm(perm) for perm in perm_list):
+        return
+    raise PermissionDenied(
+        f"Missing required permission. Need one of: {', '.join(perm_list)}"
+    )
+
+
 class UserList(generics.ListAPIView):
     """
     List all users or create a new user.
@@ -46,11 +57,11 @@ class UserList(generics.ListAPIView):
         description="List all users (filtering, pagination).",
     )
     def get(self, request):
+        _require_any_permission(request, "sql.menu_system", "sql.view_users")
         users = self.filter_queryset(self.queryset)
         page_user = self.paginate_queryset(queryset=users)
         serializer_obj = self.get_serializer(page_user, many=True)
-        data = {"data": serializer_obj.data}
-        return self.get_paginated_response(data)
+        return self.get_paginated_response(serializer_obj.data)
 
     @extend_schema(
         summary="Create User",
@@ -59,6 +70,7 @@ class UserList(generics.ListAPIView):
         description="Create a user.",
     )
     def post(self, request):
+        _require_any_permission(request, "sql.menu_system", "sql.add_users")
         serializer = UserSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
@@ -86,6 +98,7 @@ class UserDetail(views.APIView):
         description="Update a user.",
     )
     def put(self, request, pk):
+        _require_any_permission(request, "sql.menu_system", "sql.change_users")
         user = self.get_object(pk)
         serializer = UserDetailSerializer(user, data=request.data)
         if serializer.is_valid():
@@ -95,6 +108,7 @@ class UserDetail(views.APIView):
 
     @extend_schema(summary="Delete User", description="Delete a user.")
     def delete(self, request, pk):
+        _require_any_permission(request, "sql.menu_system", "sql.delete_users")
         user = self.get_object(pk)
         user.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -116,11 +130,11 @@ class GroupList(generics.ListAPIView):
         description="List all groups (filtering, pagination).",
     )
     def get(self, request):
+        _require_any_permission(request, "sql.menu_system", "auth.view_group")
         groups = self.filter_queryset(self.queryset)
         page_groups = self.paginate_queryset(queryset=groups)
         serializer_obj = self.get_serializer(page_groups, many=True)
-        data = {"data": serializer_obj.data}
-        return self.get_paginated_response(data)
+        return self.get_paginated_response(serializer_obj.data)
 
     @extend_schema(
         summary="Create Group",
@@ -129,6 +143,7 @@ class GroupList(generics.ListAPIView):
         description="Create a group.",
     )
     def post(self, request):
+        _require_any_permission(request, "sql.menu_system", "auth.add_group")
         serializer = GroupSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
@@ -156,6 +171,7 @@ class GroupDetail(views.APIView):
         description="Update a group.",
     )
     def put(self, request, pk):
+        _require_any_permission(request, "sql.menu_system", "auth.change_group")
         group = self.get_object(pk)
         serializer = GroupSerializer(group, data=request.data)
         if serializer.is_valid():
@@ -165,6 +181,7 @@ class GroupDetail(views.APIView):
 
     @extend_schema(summary="Delete Group", description="Delete a group.")
     def delete(self, request, pk):
+        _require_any_permission(request, "sql.menu_system", "auth.delete_group")
         group = self.get_object(pk)
         group.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -186,11 +203,11 @@ class ResourceGroupList(generics.ListAPIView):
         description="List all resource groups (filtering, pagination).",
     )
     def get(self, request):
+        _require_any_permission(request, "sql.menu_system", "sql.view_resourcegroup")
         groups = self.filter_queryset(self.queryset)
         page_groups = self.paginate_queryset(queryset=groups)
         serializer_obj = self.get_serializer(page_groups, many=True)
-        data = {"data": serializer_obj.data}
-        return self.get_paginated_response(data)
+        return self.get_paginated_response(serializer_obj.data)
 
     @extend_schema(
         summary="Create Resource Group",
@@ -199,6 +216,7 @@ class ResourceGroupList(generics.ListAPIView):
         description="Create a resource group.",
     )
     def post(self, request):
+        _require_any_permission(request, "sql.menu_system", "sql.add_resourcegroup")
         serializer = ResourceGroupSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
@@ -226,6 +244,7 @@ class ResourceGroupDetail(views.APIView):
         description="Update a resource group.",
     )
     def put(self, request, pk):
+        _require_any_permission(request, "sql.menu_system", "sql.change_resourcegroup")
         group = self.get_object(pk)
         serializer = ResourceGroupSerializer(group, data=request.data)
         if serializer.is_valid():
@@ -237,6 +256,7 @@ class ResourceGroupDetail(views.APIView):
         summary="Delete Resource Group", description="Delete a resource group."
     )
     def delete(self, request, pk):
+        _require_any_permission(request, "sql.menu_system", "sql.delete_resourcegroup")
         group = self.get_object(pk)
         group.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

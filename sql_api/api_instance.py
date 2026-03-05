@@ -1,7 +1,10 @@
 from rest_framework import views, generics, status, serializers
 from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
+from django.contrib.auth.decorators import permission_required
+from django.utils.decorators import method_decorator
 from sql.utils.sql_utils import filter_db_list
+from sql.utils.resource_group import user_instances
 from .serializers import (
     InstanceSerializer,
     InstanceDetailSerializer,
@@ -15,7 +18,6 @@ from .filters import InstanceFilter
 from sql.models import Instance, Tunnel, AliyunRdsConfig
 from sql.engines import get_engine
 from django.http import Http404
-import MySQLdb
 
 
 class InstanceList(generics.ListAPIView):
@@ -34,12 +36,12 @@ class InstanceList(generics.ListAPIView):
         responses={200: InstanceSerializer},
         description="List all instances (filtering, pagination).",
     )
+    @method_decorator(permission_required("sql.menu_instance_list", raise_exception=True))
     def get(self, request):
         instances = self.filter_queryset(self.queryset)
         page_ins = self.paginate_queryset(queryset=instances)
         serializer_obj = self.get_serializer(page_ins, many=True)
-        data = {"data": serializer_obj.data}
-        return self.get_paginated_response(data)
+        return self.get_paginated_response(serializer_obj.data)
 
     @extend_schema(
         summary="Create Instance",
@@ -47,6 +49,7 @@ class InstanceList(generics.ListAPIView):
         responses={201: InstanceSerializer},
         description="Create an instance configuration.",
     )
+    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
     def post(self, request):
         serializer = InstanceSerializer(data=request.data)
         if serializer.is_valid():
@@ -74,6 +77,7 @@ class InstanceDetail(views.APIView):
         responses={200: InstanceDetailSerializer},
         description="Update an instance configuration.",
     )
+    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
     def put(self, request, pk):
         instance = self.get_object(pk)
         serializer = InstanceDetailSerializer(instance, data=request.data)
@@ -85,6 +89,7 @@ class InstanceDetail(views.APIView):
     @extend_schema(
         summary="Delete Instance", description="Delete an instance configuration."
     )
+    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
     def delete(self, request, pk):
         instance = self.get_object(pk)
         instance.delete()
@@ -106,12 +111,12 @@ class TunnelList(generics.ListAPIView):
         responses={200: TunnelSerializer},
         description="List all tunnels (filtering, pagination).",
     )
+    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
     def get(self, request):
         tunnels = self.filter_queryset(self.queryset)
         page_tunnels = self.paginate_queryset(queryset=tunnels)
         serializer_obj = self.get_serializer(page_tunnels, many=True)
-        data = {"data": serializer_obj.data}
-        return self.get_paginated_response(data)
+        return self.get_paginated_response(serializer_obj.data)
 
     @extend_schema(
         summary="Create Tunnel",
@@ -119,6 +124,7 @@ class TunnelList(generics.ListAPIView):
         responses={201: TunnelSerializer},
         description="Create a tunnel configuration.",
     )
+    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
     def post(self, request):
         serializer = TunnelSerializer(data=request.data)
         if serializer.is_valid():
@@ -142,12 +148,12 @@ class AliyunRdsList(generics.ListAPIView):
         responses={200: AliyunRdsSerializer},
         description="List all Aliyun RDS configs (filtering, pagination).",
     )
+    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
     def get(self, request):
         aliyunrds = self.filter_queryset(self.queryset)
         page_rds = self.paginate_queryset(queryset=aliyunrds)
         serializer_obj = self.get_serializer(page_rds, many=True)
-        data = {"data": serializer_obj.data}
-        return self.get_paginated_response(data)
+        return self.get_paginated_response(serializer_obj.data)
 
     @extend_schema(
         summary="Create Aliyun RDS",
@@ -155,6 +161,7 @@ class AliyunRdsList(generics.ListAPIView):
         responses={201: AliyunRdsSerializer},
         description="Create an Aliyun RDS configuration (including a CloudAccessKey).",
     )
+    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
     def post(self, request):
         serializer = AliyunRdsSerializer(data=request.data)
         if serializer.is_valid():
@@ -187,6 +194,10 @@ class InstanceResource(views.APIView):
             request.data["schema_name"] if "schema_name" in request.data.keys() else ""
         )
         tb_name = request.data["tb_name"] if "tb_name" in request.data.keys() else ""
+        if not user_instances(request.user).filter(id=instance_id).exists():
+            raise serializers.ValidationError(
+                {"errors": "The instance is not associated with your group."}
+            )
         instance = Instance.objects.get(pk=instance_id)
 
         try:

@@ -52,7 +52,12 @@ class TestUser(APITestCase):
     """Test user-related APIs."""
 
     def setUp(self):
-        self.user = User(username="test_user", display="Test User", is_active=True)
+        self.user = User(
+            username="test_user",
+            display="Test User",
+            is_active=True,
+            is_superuser=True,
+        )
         self.user.set_password("test_password")
         self.user.save()
         self.group = Group.objects.create(id=1, name="DBA")
@@ -84,6 +89,20 @@ class TestUser(APITestCase):
         r = self.client.get("/api/v1/user/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.json()["count"], 1)
+
+    def test_get_user_list_with_delegated_permission(self):
+        """Non-superuser can access with explicit delegated permission."""
+        User.objects.filter(id=self.user.id).update(is_superuser=0)
+        self.user = User.objects.get(id=self.user.id)
+        self.user.user_permissions.clear()
+
+        r1 = self.client.get("/api/v1/user/", format="json")
+        self.assertEqual(r1.status_code, status.HTTP_403_FORBIDDEN)
+
+        delegated_permission = Permission.objects.get(codename="view_users")
+        self.user.user_permissions.add(delegated_permission)
+        r2 = self.client.get("/api/v1/user/", format="json")
+        self.assertEqual(r2.status_code, status.HTTP_200_OK)
 
     def test_create_user(self):
         """Test creating user."""
@@ -226,6 +245,9 @@ class TestInstance(APITestCase):
         self.user = User(username="test_user", display="Test User", is_active=True)
         self.user.set_password("test_password")
         self.user.save()
+        menu_instance_list = Permission.objects.get(codename="menu_instance_list")
+        menu_instance = Permission.objects.get(codename="menu_instance")
+        self.user.user_permissions.add(menu_instance_list, menu_instance)
         self.ins = Instance.objects.create(
             instance_name="some_ins",
             type="slave",
@@ -359,6 +381,7 @@ class TestWorkflow(APITestCase):
             codename="sql_execute_for_resource_group"
         )
         can_review_permission = Permission.objects.get(codename="sql_review")
+        menu_sqlworkflow_permission = Permission.objects.get(codename="menu_sqlworkflow")
         self.user = User(username="test_user", display="Test User", is_active=True)
         self.user.set_password("test_password")
         self.user.save()
@@ -367,6 +390,7 @@ class TestWorkflow(APITestCase):
             can_execute_permission,
             can_execute_resource_permission,
             can_review_permission,
+            menu_sqlworkflow_permission,
         )
         self.user.groups.add(self.group.id)
         self.user.resource_group.add(self.res_group.group_id)
@@ -446,20 +470,43 @@ class TestWorkflow(APITestCase):
 
     def test_get_audit_list(self):
         """Test getting pending audit workflow list."""
-        json_data = {"engineer": "test_user"}
-        r = self.client.post("/api/v1/workflow/auditlist/", json_data, format="json")
+        r = self.client.get("/api/v1/workflow/auditlist/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.json()["count"], 1)
 
     def test_get_workflow_log_list(self):
         """Test getting workflow logs."""
-        json_data = {
-            "workflow_id": self.wf1.id,
-            "workflow_type": self.audit1.workflow_type,
-        }
-        r = self.client.post("/api/v1/workflow/log/", json_data, format="json")
+        r = self.client.get(
+            "/api/v1/workflow/log/",
+            {
+                "workflow_id": self.wf1.id,
+                "workflow_type": self.audit1.workflow_type,
+            },
+            format="json",
+        )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.json()["count"], 1)
+
+    def test_get_workflow_log_list_missing_params(self):
+        """workflow_id and workflow_type are required query params."""
+        r = self.client.get("/api/v1/workflow/log/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            r.json()["errors"],
+            "workflow_id and workflow_type are required query parameters.",
+        )
+
+    def test_get_workflow_log_list_invalid_params(self):
+        """workflow_id and workflow_type must be integers."""
+        r = self.client.get(
+            "/api/v1/workflow/log/",
+            {"workflow_id": "abc", "workflow_type": "2"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            r.json()["errors"], "workflow_id and workflow_type must be integers."
+        )
 
     def test_check_param_is_None(self):
         """Test workflow SQL check with empty parameters."""
