@@ -8,6 +8,8 @@ from .serializers import (
     GroupSerializer,
     ResourceGroupSerializer,
     CurrentUserSerializer,
+    CurrentUserProfileUpdateSerializer,
+    CurrentUserPasswordChangeSerializer,
     TwoFASerializer,
     UserAuthSerializer,
     TwoFAVerifySerializer,
@@ -55,13 +57,8 @@ class CurrentUser(views.APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
-    @extend_schema(
-        summary="Current User Context",
-        responses={200: CurrentUserSerializer},
-        description="Get current user profile, groups, resource groups, permissions, and 2FA methods.",
-    )
-    def get(self, request):
-        user = request.user
+    @staticmethod
+    def _serialize_user(user):
         payload = {
             "id": user.id,
             "username": user.username,
@@ -86,7 +83,55 @@ class CurrentUser(views.APIView):
             ),
         }
         serializer = CurrentUserSerializer(payload)
-        return success_response(data=serializer.data)
+        return serializer.data
+
+    @extend_schema(
+        summary="Current User Context",
+        responses={200: CurrentUserSerializer},
+        description="Get current user profile, groups, resource groups, permissions, and 2FA methods.",
+    )
+    def get(self, request):
+        return success_response(data=self._serialize_user(request.user))
+
+    @extend_schema(
+        summary="Update Current User Profile",
+        request=CurrentUserProfileUpdateSerializer,
+        responses={200: CurrentUserSerializer},
+        description="Update the authenticated user's editable profile fields.",
+    )
+    def patch(self, request):
+        serializer = CurrentUserProfileUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        request.user.display = serializer.validated_data["display"]
+        request.user.save(update_fields=["display"])
+
+        return success_response(
+            data=self._serialize_user(request.user),
+            detail="Profile updated successfully.",
+        )
+
+
+class CurrentUserPassword(views.APIView):
+    """Change the authenticated user's password."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary="Change Current User Password",
+        request=CurrentUserPasswordChangeSerializer,
+        description="Change the authenticated user's password.",
+    )
+    def post(self, request):
+        serializer = CurrentUserPasswordChangeSerializer(
+            data=request.data, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+
+        request.user.set_password(serializer.validated_data["new_password"])
+        request.user.save(update_fields=["password"])
+
+        return success_response(detail="Password updated successfully.")
 
 
 class UserList(generics.ListAPIView):

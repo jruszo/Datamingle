@@ -126,6 +126,50 @@ class CurrentUserSerializer(serializers.Serializer):
     two_factor_auth_types = serializers.ListField(child=serializers.CharField())
 
 
+class CurrentUserProfileUpdateSerializer(serializers.Serializer):
+    display = serializers.CharField(max_length=50)
+
+    def validate_display(self, value):
+        display = value.strip()
+        if not display:
+            raise serializers.ValidationError("Display name cannot be blank.")
+        return display
+
+
+class CurrentUserPasswordChangeSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True)
+    new_password_confirm = serializers.CharField(write_only=True)
+
+    def validate_current_password(self, value):
+        user = self.context["request"].user
+        if not user.check_password(value):
+            raise serializers.ValidationError("Incorrect current password.")
+        return value
+
+    def validate(self, attrs):
+        if attrs["new_password"] != attrs["new_password_confirm"]:
+            raise serializers.ValidationError(
+                {"new_password_confirm": "Passwords do not match."}
+            )
+
+        if attrs["current_password"] == attrs["new_password"]:
+            raise serializers.ValidationError(
+                {
+                    "new_password": (
+                        "New password must be different from the current password."
+                    )
+                }
+            )
+
+        try:
+            validate_password(attrs["new_password"], user=self.context["request"].user)
+        except ValidationError as msg:
+            raise serializers.ValidationError({"new_password": msg.messages})
+
+        return attrs
+
+
 class TwoFASerializer(serializers.Serializer):
     enable = serializers.ChoiceField(
         choices=["true", "false"], label="Enable or disable"
