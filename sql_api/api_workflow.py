@@ -1,14 +1,13 @@
 import datetime
 import logging
-import traceback
 
 from django.contrib.auth.decorators import permission_required
 from django.contrib.auth.models import Group
-from django.db import transaction
 from django.utils.decorators import method_decorator
 from django_q.tasks import async_task
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 from rest_framework import views, generics, status, serializers, permissions
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from common.config import SysConfig
@@ -18,26 +17,22 @@ from sql.models import (
     SqlWorkflow,
     SqlWorkflowContent,
     WorkflowAudit,
-    Users,
     WorkflowLog,
-    ArchiveConfig,
-    QueryPrivilegesApply,
 )
 from sql.notify import notify_for_audit, notify_for_execute
 from sql.query_privileges import _query_apply_audit_call_back
 from sql.utils.resource_group import user_groups
-from sql.utils.sql_review import can_cancel, can_execute, on_correct_time_period
+from sql.utils.sql_review import can_execute, on_correct_time_period
 from sql.utils.tasks import del_schedule
 from sql.utils.workflow_audit import Audit, get_auditor, AuditException
 from .filters import WorkflowFilter, WorkflowAuditFilter
 from .pagination import CustomizedPagination
+from .response import success_response
 from .serializers import (
     WorkflowContentSerializer,
     ExecuteCheckSerializer,
     ExecuteCheckResultSerializer,
-    WorkflowAuditSerializer,
     WorkflowAuditListSerializer,
-    WorkflowLogSerializer,
     WorkflowLogListSerializer,
     AuditWorkflowSerializer,
     ExecuteWorkflowSerializer,
@@ -53,7 +48,7 @@ class ExecuteCheck(views.APIView):
         summary="SQL Check",
         request=ExecuteCheckSerializer,
         responses={200: ExecuteCheckResultSerializer},
-        description="Perform syntax checks for the provided SQL.",
+        description="Perform syntax checks for the provided SQL using request body.",
     )
     @method_decorator(permission_required("sql.sql_submit", raise_exception=True))
     def post(self, request):
@@ -63,17 +58,16 @@ class ExecuteCheck(views.APIView):
         instance = serializer.get_instance()
         # Run check through engine
         try:
-            db_name = request.data["db_name"]
+            db_name = serializer.validated_data["db_name"]
+            full_sql = serializer.validated_data["full_sql"].strip()
             check_engine = get_engine(instance=instance)
             db_name = check_engine.escape_string(db_name)
-            check_result = check_engine.execute_check(
-                db_name=db_name, sql=request.data["full_sql"].strip()
-            )
+            check_result = check_engine.execute_check(db_name=db_name, sql=full_sql)
         except Exception as e:
             raise serializers.ValidationError({"errors": f"{e}"})
         check_result.rows = check_result.to_dict()
         serializer_obj = ExecuteCheckResultSerializer(check_result)
-        return Response(serializer_obj.data)
+        return success_response(data=serializer_obj.data)
 
 
 class WorkflowList(generics.ListAPIView):
@@ -101,12 +95,12 @@ class WorkflowList(generics.ListAPIView):
         elif user.has_perm("sql.sql_review") or user.has_perm(
             "sql.sql_execute_for_resource_group"
         ):
-            filter_dict["group_id__in"] = [
+            filter_dict["workflow__group_id__in"] = [
                 group.group_id for group in user_groups(user)
             ]
         # Others can only view workflows they submitted
         else:
-            filter_dict["engineer"] = user.username
+            filter_dict["workflow__engineer"] = user.username
         return (
             SqlWorkflowContent.objects.filter(**filter_dict)
             .select_related("workflow")
@@ -120,11 +114,16 @@ class WorkflowList(generics.ListAPIView):
         description="List all SQL release workflows (filtering, pagination).",
     )
     def get(self, request):
-        workflows = self.filter_queryset(self.queryset)
+        if not (
+            request.user.is_superuser
+            or request.user.has_perm("sql.menu_sqlworkflow")
+            or request.user.has_perm("sql.audit_user")
+        ):
+            raise PermissionDenied("You do not have permission to view workflow list.")
+        workflows = self.filter_queryset(self.get_queryset())
         page_wf = self.paginate_queryset(queryset=workflows)
         serializer_obj = self.get_serializer(page_wf, many=True)
-        data = {"data": serializer_obj.data}
-        return self.get_paginated_response(data)
+        return self.get_paginated_response(serializer_obj.data)
 
     @extend_schema(
         summary="Submit SQL Release Workflow",
@@ -155,13 +154,17 @@ class WorkflowList(generics.ListAPIView):
                 timeout=60,
                 task_name=f"sqlreview-submit-{workflow_content.workflow.id}",
             )
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return success_response(
+            data=serializer.data, status_code=status.HTTP_201_CREATED
+        )
 
 
 class WorkflowAuditList(generics.ListAPIView):
     """
     List workflows currently waiting for review by the specified user.
     """
+
+    permission_classes = [permissions.IsAuthenticated]
 
     filterset_class = WorkflowAuditFilter
     pagination_class = CustomizedPagination
@@ -170,46 +173,59 @@ class WorkflowAuditList(generics.ListAPIView):
         current_status=WorkflowStatus.WAITING
     ).order_by("-audit_id")
 
-    @extend_schema(exclude=True)
-    def get(self, request):
-        return Response({"detail": 'Method "GET" not allowed.'})
-
     @extend_schema(
         summary="Pending Review List",
-        request=WorkflowAuditSerializer,
         responses={200: WorkflowAuditListSerializer},
-        description="List pending reviews for the specified user (filtering, pagination).",
+        parameters=[
+            OpenApiParameter(
+                name="workflow_title__icontains",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description="Filter by workflow title (contains).",
+            ),
+            OpenApiParameter(
+                name="workflow_type",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                description="Workflow type.",
+            ),
+            OpenApiParameter(
+                name="page",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                description="Page number.",
+            ),
+            OpenApiParameter(
+                name="size",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                description="Page size.",
+            ),
+        ],
+        description="List pending reviews for the authenticated user (filtering, pagination).",
     )
-    def post(self, request):
-        # Parameter validation
-        serializer = WorkflowAuditSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        # First get resource groups of the user
-        user = Users.objects.get(username=request.data["engineer"])
+    def get(self, request):
+        user = request.user
         group_list = user_groups(user)
         group_ids = [group.group_id for group in group_list]
 
-        # Then get permission groups of the user
         if user.is_superuser:
             auth_group_ids = [group.id for group in Group.objects.all()]
         else:
             auth_group_ids = [group.id for group in Group.objects.filter(user=user)]
 
-        self.queryset = self.queryset.filter(
+        queryset = self.queryset.filter(
             current_status=WorkflowStatus.WAITING,
             group_id__in=group_ids,
             current_audit__in=auth_group_ids,
         )
-        audit = self.filter_queryset(self.queryset)
+        audit = self.filter_queryset(queryset)
         page_audit = self.paginate_queryset(queryset=audit)
         serializer_obj = self.get_serializer(page_audit, many=True)
-        data = {"data": serializer_obj.data}
-        return self.get_paginated_response(data)
+        return self.get_paginated_response(serializer_obj.data)
 
 
-class AuditWorkflow(views.APIView):
+class WorkflowReviewCreate(views.APIView):
     """
     Audit workflows, including query privilege applications, SQL release applications, and data archive applications.
     """
@@ -219,27 +235,30 @@ class AuditWorkflow(views.APIView):
         request=AuditWorkflowSerializer,
         description="Audit a workflow (approve or terminate).",
     )
-    def post(self, request):
+    def post(self, request, workflow_id):
         # Parameter validation
-        serializer = AuditWorkflowSerializer(data=request.data)
+        data = request.data.copy()
+        data["workflow_id"] = workflow_id
+        serializer = AuditWorkflowSerializer(data=data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        data = serializer.validated_data
         # Already validated, record must exist
         workflow_audit = WorkflowAudit.objects.get(
-            workflow_id=serializer.data["workflow_id"],
-            workflow_type=serializer.data["workflow_type"],
+            workflow_id=data["workflow_id"],
+            workflow_type=data["workflow_type"],
         )
         sys_config = SysConfig()
         auditor = get_auditor(audit=workflow_audit)
-        user = Users.objects.get(username=serializer.data["engineer"])
-        if serializer.data["audit_type"] == "pass":
+        user = request.user
+        if data["audit_type"] == "pass":
             action = WorkflowAction.PASS
             notify_config_key = "Pass"
             success_message = "passed"
-        elif serializer.data["audit_type"] == "cancel":
+        elif data["audit_type"] == "cancel":
             notify_config_key = "Cancel"
             success_message = "canceled"
-            if auditor.workflow.engineer == serializer.data["engineer"]:
+            if auditor.audit.create_user == user.username:
                 action = WorkflowAction.ABORT
             else:
                 raise serializers.ValidationError(
@@ -251,9 +270,7 @@ class AuditWorkflow(views.APIView):
             )
 
         try:
-            workflow_audit_detail = auditor.operate(
-                action, user, serializer.data["audit_remark"]
-            )
+            workflow_audit_detail = auditor.operate(action, user, data["audit_remark"])
         except AuditException as e:
             raise serializers.ValidationError({"errors": f"Operation failed, {str(e)}"})
 
@@ -298,10 +315,10 @@ class AuditWorkflow(views.APIView):
                 timeout=60,
                 task_name=f"notify-audit-{auditor.audit}-{WorkflowType(auditor.audit.workflow_type).label}",
             )
-        return Response({"msg": success_message})
+        return success_response(detail=success_message)
 
 
-class ExecuteWorkflow(views.APIView):
+class WorkflowExecutionCreate(views.APIView):
     """
     Execute workflows, including SQL release workflows and data archive workflows.
     """
@@ -311,20 +328,21 @@ class ExecuteWorkflow(views.APIView):
         request=ExecuteWorkflowSerializer,
         description="Execute a workflow.",
     )
-    def post(self, request):
+    def post(self, request, workflow_id):
         # Parameter validation
-        serializer = ExecuteWorkflowSerializer(data=request.data)
+        data = request.data.copy()
+        data["workflow_id"] = workflow_id
+        serializer = ExecuteWorkflowSerializer(data=data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        data = serializer.validated_data
 
-        workflow_type = request.data["workflow_type"]
-        workflow_id = request.data["workflow_id"]
+        workflow_type = data["workflow_type"]
 
         # Execute SQL release workflow
         if workflow_type == 2:
-            mode = request.data["mode"]
-            engineer = request.data["engineer"]
-            user = Users.objects.get(username=engineer)
+            mode = data["mode"]
+            user = request.user
 
             # Validate multiple permissions
             if not (
@@ -411,6 +429,12 @@ class ExecuteWorkflow(views.APIView):
                     )
         # Execute data archive workflow
         elif workflow_type == 3:
+            if not request.user.has_perm("sql.archive_mgt"):
+                raise serializers.ValidationError(
+                    {
+                        "errors": "You do not have permission to execute archive workflows."
+                    }
+                )
             async_task(
                 "sql.archiver.archive",
                 workflow_id,
@@ -418,8 +442,8 @@ class ExecuteWorkflow(views.APIView):
                 task_name=f"archive-{workflow_id}",
             )
 
-        return Response(
-            {"msg": "Execution started. Please check workflow detail page for results."}
+        return success_response(
+            detail="Execution started. Please check workflow detail page for results."
         )
 
 
@@ -428,32 +452,74 @@ class WorkflowLogList(generics.ListAPIView):
     Get logs for a workflow.
     """
 
+    permission_classes = [permissions.IsAuthenticated]
+
     pagination_class = CustomizedPagination
     serializer_class = WorkflowLogListSerializer
     queryset = WorkflowLog.objects.all()
 
-    @extend_schema(exclude=True)
-    def get(self, request):
-        return Response({"detail": 'Method "GET" not allowed.'})
-
     @extend_schema(
         summary="Workflow Logs",
-        request=WorkflowLogSerializer,
         responses={200: WorkflowLogListSerializer},
+        parameters=[
+            OpenApiParameter(
+                name="workflow_id",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="Workflow ID.",
+            ),
+            OpenApiParameter(
+                name="workflow_type",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="Workflow type: 1, 2, or 3.",
+            ),
+            OpenApiParameter(
+                name="page",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                description="Page number.",
+            ),
+            OpenApiParameter(
+                name="size",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                description="Page size.",
+            ),
+        ],
         description="Get logs of a workflow (pagination).",
     )
-    def post(self, request):
-        # Parameter validation
-        serializer = WorkflowLogSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    def get(self, request):
+        workflow_id = request.query_params.get("workflow_id")
+        workflow_type = request.query_params.get("workflow_type")
+        if workflow_id is None or workflow_type is None:
+            raise serializers.ValidationError(
+                {
+                    "errors": "workflow_id and workflow_type are required query parameters."
+                }
+            )
+        try:
+            workflow_id = int(workflow_id)
+            workflow_type = int(workflow_type)
+        except (TypeError, ValueError):
+            raise serializers.ValidationError(
+                {"errors": "workflow_id and workflow_type must be integers."}
+            )
+        if workflow_type not in [1, 2, 3]:
+            raise serializers.ValidationError(
+                {"errors": "workflow_type can only be 1, 2, or 3."}
+            )
 
-        audit_id = WorkflowAudit.objects.get(
-            workflow_id=request.data["workflow_id"],
-            workflow_type=request.data["workflow_type"],
-        ).audit_id
+        try:
+            audit_id = WorkflowAudit.objects.get(
+                workflow_id=workflow_id,
+                workflow_type=workflow_type,
+            ).audit_id
+        except WorkflowAudit.DoesNotExist:
+            raise serializers.ValidationError({"errors": "Workflow does not exist."})
         workflow_logs = self.queryset.filter(audit_id=audit_id).order_by("-id")
         page_log = self.paginate_queryset(queryset=workflow_logs)
         serializer_obj = self.get_serializer(page_log, many=True)
-        data = {"data": serializer_obj.data}
-        return self.get_paginated_response(data)
+        return self.get_paginated_response(serializer_obj.data)

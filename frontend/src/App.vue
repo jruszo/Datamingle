@@ -1,0 +1,130 @@
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
+import {
+  ChartNoAxesCombined,
+  Database,
+  FileText,
+  LayoutGrid,
+  LogOut,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Settings,
+} from 'lucide-vue-next'
+
+import { Button } from '@/components/ui/button'
+import { useAuthStore } from '@/stores/auth'
+
+const authStore = useAuthStore()
+const router = useRouter()
+const route = useRoute()
+
+const showAppShell = computed(() => authStore.isAuthenticated)
+const isSidebarCollapsed = ref(false)
+
+const navigation = [
+  { to: '/', label: 'Dashboard', icon: LayoutGrid },
+  { to: '/workflows', label: 'Workflows', icon: FileText },
+  { to: '/queries', label: 'Queries', icon: Database },
+  { to: '/reports', label: 'Reports', icon: ChartNoAxesCombined },
+  { to: '/settings', label: 'Settings', icon: Settings },
+]
+
+const pageTitle = computed(() => {
+  const matched = navigation.find((item) => {
+    if (item.to === '/') {
+      return route.path === '/'
+    }
+    return route.path.startsWith(item.to)
+  })
+  return matched?.label || 'Dashboard'
+})
+
+function toggleSidebar() {
+  isSidebarCollapsed.value = !isSidebarCollapsed.value
+}
+
+async function logout() {
+  authStore.clearTokens()
+  await router.push('/login')
+}
+</script>
+
+<template>
+  <div class="min-h-screen bg-slate-100 text-slate-900">
+    <div v-if="showAppShell" class="flex min-h-screen">
+      <aside
+        :class="
+          isSidebarCollapsed
+            ? 'w-20'
+            : 'w-64'
+        "
+        class="flex min-h-screen flex-col border-r border-slate-200 bg-white transition-all duration-200"
+      >
+        <div class="flex h-16 items-center gap-3 border-b border-slate-200 px-4">
+          <div
+            class="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 text-sm font-bold text-white"
+          >
+            A
+          </div>
+          <div v-if="!isSidebarCollapsed">
+            <p class="text-sm font-semibold tracking-wide">Archery</p>
+            <p class="text-xs text-slate-500">SQL Platform</p>
+          </div>
+        </div>
+
+        <nav class="flex-1 space-y-1 p-3">
+          <RouterLink
+            v-for="item in navigation"
+            :key="item.to"
+            :to="item.to"
+            :title="isSidebarCollapsed ? item.label : undefined"
+            class="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+            active-class="bg-slate-100 text-slate-900"
+          >
+            <component :is="item.icon" class="h-4 w-4 shrink-0" />
+            <span v-if="!isSidebarCollapsed">{{ item.label }}</span>
+          </RouterLink>
+        </nav>
+      </aside>
+
+      <div class="flex min-h-screen flex-1 flex-col">
+        <header class="flex h-16 items-center justify-between border-b border-slate-200 bg-white px-4 lg:px-6">
+          <div class="flex items-center gap-3">
+            <Button variant="ghost" size="icon" @click="toggleSidebar">
+              <PanelLeftOpen v-if="isSidebarCollapsed" class="h-4 w-4" />
+              <PanelLeftClose v-else class="h-4 w-4" />
+            </Button>
+            <div>
+              <p class="text-xs uppercase tracking-wide text-slate-500">Workspace</p>
+              <h1 class="text-sm font-semibold text-slate-900">{{ pageTitle }}</h1>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <div class="hidden text-right sm:block">
+              <p class="text-sm font-semibold">Admin</p>
+              <p class="text-xs text-slate-500">Profile</p>
+            </div>
+            <div
+              class="flex h-9 w-9 items-center justify-center rounded-full bg-slate-900 text-xs font-semibold text-white"
+            >
+              AD
+            </div>
+            <Button variant="ghost" size="icon" title="Logout" @click="logout">
+              <LogOut class="h-4 w-4" />
+            </Button>
+          </div>
+        </header>
+
+        <main class="flex-1 p-4 lg:p-6">
+          <RouterView />
+        </main>
+      </div>
+    </div>
+
+    <main v-else class="mx-auto flex min-h-screen w-full max-w-md items-center px-6 py-8">
+      <RouterView />
+    </main>
+  </div>
+</template>

@@ -1,32 +1,92 @@
 from rest_framework import views, generics, status, permissions
 from rest_framework.response import Response
+from rest_framework.exceptions import PermissionDenied
 from drf_spectacular.utils import extend_schema
 from .serializers import (
     UserSerializer,
     UserDetailSerializer,
     GroupSerializer,
     ResourceGroupSerializer,
+    CurrentUserSerializer,
     TwoFASerializer,
     UserAuthSerializer,
     TwoFAVerifySerializer,
     TwoFASaveSerializer,
-    TwoFAStateSerializer,
 )
 from .pagination import CustomizedPagination
-from .permissions import IsOwner
 from .filters import UserFilter
+from .response import success_response
 from django_redis import get_redis_connection
 from django.contrib.auth.models import Group
-from django.contrib.auth import authenticate, login
-from django.conf import settings
+from django.contrib.auth import authenticate
 from django.http import Http404
 from sql.models import Users, ResourceGroup, TwoFactorAuthConfig
-from common.twofa import TwoFactorAuthBase, get_authenticator
-from common.config import SysConfig
-from common.utils.ding_api import get_ding_user_id
+from common.twofa import get_authenticator
 import random
 import json
 import time
+
+
+def _require_any_permission(request, *perm_list):
+    if request.user.is_superuser:
+        return
+    if any(request.user.has_perm(perm) for perm in perm_list):
+        return
+    raise PermissionDenied(
+        f"Missing required permission. Need one of: {', '.join(perm_list)}"
+    )
+
+
+def _response_from_authenticator(result, default_error_message):
+    if result.get("status") == 0:
+        return success_response(
+            data=result.get("data", {}),
+            detail=result.get("msg", "ok"),
+            status_code=status.HTTP_200_OK,
+        )
+    return Response(
+        {"errors": result.get("msg", default_error_message)},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
+
+
+class CurrentUser(views.APIView):
+    """Get bootstrap context for the authenticated user."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary="Current User Context",
+        responses={200: CurrentUserSerializer},
+        description="Get current user profile, groups, resource groups, permissions, and 2FA methods.",
+    )
+    def get(self, request):
+        user = request.user
+        payload = {
+            "id": user.id,
+            "username": user.username,
+            "display": user.display,
+            "email": user.email or "",
+            "is_superuser": user.is_superuser,
+            "is_staff": user.is_staff,
+            "is_active": user.is_active,
+            "groups": list(user.groups.values("id", "name").order_by("id")),
+            "resource_groups": list(
+                user.resource_group.values("group_id", "group_name").order_by(
+                    "group_id"
+                )
+            ),
+            "permissions": sorted(user.get_all_permissions()),
+            "two_factor_auth_types": sorted(
+                set(
+                    TwoFactorAuthConfig.objects.filter(user=user).values_list(
+                        "auth_type", flat=True
+                    )
+                )
+            ),
+        }
+        serializer = CurrentUserSerializer(payload)
+        return success_response(data=serializer.data)
 
 
 class UserList(generics.ListAPIView):
@@ -46,11 +106,11 @@ class UserList(generics.ListAPIView):
         description="List all users (filtering, pagination).",
     )
     def get(self, request):
+        _require_any_permission(request, "sql.menu_system", "sql.view_users")
         users = self.filter_queryset(self.queryset)
         page_user = self.paginate_queryset(queryset=users)
         serializer_obj = self.get_serializer(page_user, many=True)
-        data = {"data": serializer_obj.data}
-        return self.get_paginated_response(data)
+        return self.get_paginated_response(serializer_obj.data)
 
     @extend_schema(
         summary="Create User",
@@ -59,10 +119,13 @@ class UserList(generics.ListAPIView):
         description="Create a user.",
     )
     def post(self, request):
+        _require_any_permission(request, "sql.menu_system", "sql.add_users")
         serializer = UserSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return success_response(
+                data=serializer.data, status_code=status.HTTP_201_CREATED
+            )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -86,18 +149,20 @@ class UserDetail(views.APIView):
         description="Update a user.",
     )
     def put(self, request, pk):
+        _require_any_permission(request, "sql.menu_system", "sql.change_users")
         user = self.get_object(pk)
         serializer = UserDetailSerializer(user, data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data)
+            return success_response(data=serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @extend_schema(summary="Delete User", description="Delete a user.")
     def delete(self, request, pk):
+        _require_any_permission(request, "sql.menu_system", "sql.delete_users")
         user = self.get_object(pk)
         user.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return success_response()
 
 
 class GroupList(generics.ListAPIView):
@@ -116,11 +181,11 @@ class GroupList(generics.ListAPIView):
         description="List all groups (filtering, pagination).",
     )
     def get(self, request):
+        _require_any_permission(request, "sql.menu_system", "auth.view_group")
         groups = self.filter_queryset(self.queryset)
         page_groups = self.paginate_queryset(queryset=groups)
         serializer_obj = self.get_serializer(page_groups, many=True)
-        data = {"data": serializer_obj.data}
-        return self.get_paginated_response(data)
+        return self.get_paginated_response(serializer_obj.data)
 
     @extend_schema(
         summary="Create Group",
@@ -129,10 +194,13 @@ class GroupList(generics.ListAPIView):
         description="Create a group.",
     )
     def post(self, request):
+        _require_any_permission(request, "sql.menu_system", "auth.add_group")
         serializer = GroupSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return success_response(
+                data=serializer.data, status_code=status.HTTP_201_CREATED
+            )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -156,18 +224,20 @@ class GroupDetail(views.APIView):
         description="Update a group.",
     )
     def put(self, request, pk):
+        _require_any_permission(request, "sql.menu_system", "auth.change_group")
         group = self.get_object(pk)
         serializer = GroupSerializer(group, data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data)
+            return success_response(data=serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @extend_schema(summary="Delete Group", description="Delete a group.")
     def delete(self, request, pk):
+        _require_any_permission(request, "sql.menu_system", "auth.delete_group")
         group = self.get_object(pk)
         group.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return success_response()
 
 
 class ResourceGroupList(generics.ListAPIView):
@@ -186,11 +256,11 @@ class ResourceGroupList(generics.ListAPIView):
         description="List all resource groups (filtering, pagination).",
     )
     def get(self, request):
+        _require_any_permission(request, "sql.menu_system", "sql.view_resourcegroup")
         groups = self.filter_queryset(self.queryset)
         page_groups = self.paginate_queryset(queryset=groups)
         serializer_obj = self.get_serializer(page_groups, many=True)
-        data = {"data": serializer_obj.data}
-        return self.get_paginated_response(data)
+        return self.get_paginated_response(serializer_obj.data)
 
     @extend_schema(
         summary="Create Resource Group",
@@ -199,10 +269,13 @@ class ResourceGroupList(generics.ListAPIView):
         description="Create a resource group.",
     )
     def post(self, request):
+        _require_any_permission(request, "sql.menu_system", "sql.add_resourcegroup")
         serializer = ResourceGroupSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return success_response(
+                data=serializer.data, status_code=status.HTTP_201_CREATED
+            )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -226,20 +299,22 @@ class ResourceGroupDetail(views.APIView):
         description="Update a resource group.",
     )
     def put(self, request, pk):
+        _require_any_permission(request, "sql.menu_system", "sql.change_resourcegroup")
         group = self.get_object(pk)
         serializer = ResourceGroupSerializer(group, data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data)
+            return success_response(data=serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @extend_schema(
         summary="Delete Resource Group", description="Delete a resource group."
     )
     def delete(self, request, pk):
+        _require_any_permission(request, "sql.menu_system", "sql.delete_resourcegroup")
         group = self.get_object(pk)
         group.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return success_response()
 
 
 class UserAuth(views.APIView):
@@ -247,7 +322,7 @@ class UserAuth(views.APIView):
     User authentication check.
     """
 
-    permission_classes = [IsOwner]
+    permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(
         summary="User Authentication Check",
@@ -260,15 +335,17 @@ class UserAuth(views.APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        result = {"status": 0, "msg": "Authentication successful."}
-        engineer = request.data["engineer"]
-        password = request.data["password"]
+        password = serializer.validated_data["password"]
+        user = request.user
 
-        user = authenticate(username=engineer, password=password)
+        user = authenticate(username=user.username, password=password)
         if not user:
-            result = {"status": 1, "msg": "Incorrect username or password."}
+            return Response(
+                {"errors": "Incorrect username or password."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        return Response(result)
+        return success_response(detail="Authentication successful.")
 
 
 class TwoFA(views.APIView):
@@ -276,7 +353,7 @@ class TwoFA(views.APIView):
     Configure 2FA.
     """
 
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(
         summary="Configure 2FA", request=TwoFASerializer, description="Configure 2FA."
@@ -287,25 +364,9 @@ class TwoFA(views.APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        engineer = request.data["engineer"]
-        enable = request.data["enable"]
-        auth_type = request.data["auth_type"]
-        user = Users.objects.get(username=engineer)
-        request_user = request.session.get("user")
-
-        if not request.user.is_authenticated:
-            if request_user:
-                if request_user != engineer:
-                    return Response(
-                        {
-                            "status": 1,
-                            "msg": "Logged-in user does not match the user being validated.",
-                        }
-                    )
-            else:
-                return Response(
-                    {"status": 1, "msg": "User password must be verified first."}
-                )
+        enable = serializer.validated_data["enable"]
+        auth_type = serializer.validated_data["auth_type"]
+        user = request.user
 
         authenticator = get_authenticator(user=user, auth_type=auth_type)
         if enable == "true":
@@ -314,7 +375,7 @@ class TwoFA(views.APIView):
                 result = authenticator.generate_key()
             elif auth_type == "sms":
                 # Enable 2FA - send SMS verification code first
-                phone = request.data["phone"]
+                phone = serializer.validated_data["phone"]
                 otp = "{:06d}".format(random.randint(0, 999999))
                 result = authenticator.get_captcha(phone=phone, otp=otp)
                 if result["status"] == 0:
@@ -327,7 +388,7 @@ class TwoFA(views.APIView):
         else:
             result = authenticator.disable(auth_type)
 
-        return Response(result)
+        return _response_from_authenticator(result, "Failed to update 2FA settings.")
 
 
 class TwoFAState(views.APIView):
@@ -335,31 +396,20 @@ class TwoFAState(views.APIView):
     Query user 2FA configuration status.
     """
 
-    permission_classes = [IsOwner]
+    permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(
         summary="Query 2FA Configuration",
-        request=TwoFAStateSerializer,
         description="Query 2FA configuration status.",
     )
-    def post(self, request):
-        # Parameter validation
-        serializer = TwoFAStateSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        result = {"status": 0, "msg": "ok", "data": {}}
-        engineer = request.data["engineer"]
-        user = Users.objects.get(username=engineer)
+    def get(self, request):
+        data = {}
+        user = request.user
         configs = TwoFactorAuthConfig.objects.filter(user=user)
-        result["data"]["totp"] = (
-            "enabled" if configs.filter(auth_type="totp") else "disabled"
-        )
-        result["data"]["sms"] = (
-            "enabled" if configs.filter(auth_type="sms") else "disabled"
-        )
+        data["totp"] = "enabled" if configs.filter(auth_type="totp") else "disabled"
+        data["sms"] = "enabled" if configs.filter(auth_type="sms") else "disabled"
 
-        return Response(result)
+        return success_response(data=data)
 
 
 class TwoFASave(views.APIView):
@@ -367,7 +417,7 @@ class TwoFASave(views.APIView):
     Save 2FA configuration (TOTP).
     """
 
-    permission_classes = [IsOwner]
+    permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(
         summary="Save 2FA Configuration",
@@ -380,11 +430,10 @@ class TwoFASave(views.APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        engineer = request.data["engineer"]
-        auth_type = request.data["auth_type"]
-        key = request.data["key"] if "key" in request.data.keys() else None
-        phone = request.data["phone"] if "phone" in request.data.keys() else None
-        user = Users.objects.get(username=engineer)
+        auth_type = serializer.validated_data["auth_type"]
+        key = serializer.validated_data.get("key")
+        phone = serializer.validated_data.get("phone")
+        user = request.user
 
         authenticator = get_authenticator(user=user, auth_type=auth_type)
         if auth_type == "sms":
@@ -392,7 +441,7 @@ class TwoFASave(views.APIView):
         else:
             result = authenticator.save(key)
 
-        return Response(result)
+        return _response_from_authenticator(result, "Failed to save 2FA settings.")
 
 
 class TwoFAVerify(views.APIView):
@@ -400,7 +449,7 @@ class TwoFAVerify(views.APIView):
     Verify 2FA code.
     """
 
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(
         summary="Verify 2FA Code",
@@ -413,48 +462,22 @@ class TwoFAVerify(views.APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        engineer = request.data["engineer"]
-        otp = request.data["otp"]
-        key = request.data["key"] if "key" in request.data.keys() else None
-        phone = request.data["phone"] if "phone" in request.data.keys() else None
-        user = Users.objects.get(username=engineer)
-        request_user = request.session.get("user")
+        otp = serializer.validated_data["otp"]
+        key = serializer.validated_data.get("key")
+        phone = serializer.validated_data.get("phone")
+        user = request.user
+        twofa_config = TwoFactorAuthConfig.objects.filter(user=user)
+        if not twofa_config and not key:
+            return Response(
+                {"errors": "User has not configured 2FA."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        if not request.user.is_authenticated:
-            if request_user:
-                if request_user != engineer:
-                    return Response(
-                        {
-                            "status": 1,
-                            "msg": "Logged-in user does not match the user being validated.",
-                        }
-                    )
-            else:
-                return Response(
-                    {"status": 1, "msg": "User password must be verified first."}
-                )
-
-            twofa_config = TwoFactorAuthConfig.objects.filter(user=user)
-            if not twofa_config:
-                if not key:
-                    return Response(
-                        {"status": 1, "msg": "User has not configured 2FA."}
-                    )
-
-        auth_type = request.data["auth_type"]
+        auth_type = serializer.validated_data["auth_type"]
         authenticator = get_authenticator(user=user, auth_type=auth_type)
         if auth_type == "sms":
             result = authenticator.verify(otp, phone)
         else:
             result = authenticator.verify(otp, key)
 
-        # Auto-login after successful verification and refresh expire_date
-        if result["status"] == 0 and not request.user.is_authenticated:
-            login(request, user, backend="django.contrib.auth.backends.ModelBackend")
-            request.session.set_expiry(settings.SESSION_COOKIE_AGE)
-
-            # Update user's ding_user_id
-            if SysConfig().get("ding_to_person") is True and "admin" not in engineer:
-                get_ding_user_id(engineer)
-
-        return Response(result)
+        return _response_from_authenticator(result, "2FA verification failed.")

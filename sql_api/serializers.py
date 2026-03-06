@@ -11,6 +11,8 @@ from sql.models import (
     WorkflowAudit,
     WorkflowLog,
     QueryPrivilegesApply,
+    QueryPrivileges,
+    QueryLog,
     ArchiveConfig,
 )
 from django.contrib.auth.models import Group
@@ -97,12 +99,34 @@ class ResourceGroupSerializer(serializers.ModelSerializer):
 
 
 class UserAuthSerializer(serializers.Serializer):
-    engineer = serializers.CharField(label="Username")
     password = serializers.CharField(label="Password")
 
 
+class CurrentUserGroupSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+
+
+class CurrentUserResourceGroupSerializer(serializers.Serializer):
+    group_id = serializers.IntegerField()
+    group_name = serializers.CharField()
+
+
+class CurrentUserSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    username = serializers.CharField()
+    display = serializers.CharField(allow_blank=True)
+    email = serializers.CharField(allow_blank=True)
+    is_superuser = serializers.BooleanField()
+    is_staff = serializers.BooleanField()
+    is_active = serializers.BooleanField()
+    groups = CurrentUserGroupSerializer(many=True)
+    resource_groups = CurrentUserResourceGroupSerializer(many=True)
+    permissions = serializers.ListField(child=serializers.CharField())
+    two_factor_auth_types = serializers.ListField(child=serializers.CharField())
+
+
 class TwoFASerializer(serializers.Serializer):
-    engineer = serializers.CharField(label="Username")
     enable = serializers.ChoiceField(
         choices=["true", "false"], label="Enable or disable"
     )
@@ -114,13 +138,7 @@ class TwoFASerializer(serializers.Serializer):
 
     def validate(self, attrs):
         auth_type = attrs.get("auth_type")
-        engineer = attrs.get("engineer")
         enable = attrs.get("enable")
-
-        try:
-            Users.objects.get(username=engineer)
-        except Users.DoesNotExist:
-            raise serializers.ValidationError({"errors": "User does not exist."})
 
         if auth_type == "sms" and enable == "true":
             if not attrs.get("phone"):
@@ -130,21 +148,10 @@ class TwoFASerializer(serializers.Serializer):
 
 
 class TwoFAStateSerializer(serializers.Serializer):
-    engineer = serializers.CharField(label="Username")
-
-    def validate(self, attrs):
-        engineer = attrs.get("engineer")
-
-        try:
-            Users.objects.get(username=engineer)
-        except Users.DoesNotExist:
-            raise serializers.ValidationError({"errors": "User does not exist."})
-
-        return attrs
+    pass
 
 
 class TwoFASaveSerializer(serializers.Serializer):
-    engineer = serializers.CharField(label="Username")
     key = serializers.CharField(required=False, label="Secret key")
     phone = serializers.CharField(required=False, label="Phone number")
     auth_type = serializers.ChoiceField(
@@ -153,7 +160,6 @@ class TwoFASaveSerializer(serializers.Serializer):
     )
 
     def validate(self, attrs):
-        engineer = attrs.get("engineer")
         auth_type = attrs.get("auth_type")
         key = attrs.get("key")
         phone = attrs.get("phone")
@@ -166,33 +172,21 @@ class TwoFASaveSerializer(serializers.Serializer):
             if not key:
                 raise serializers.ValidationError({"errors": "Missing key."})
 
-        try:
-            Users.objects.get(username=engineer)
-        except Users.DoesNotExist:
-            raise serializers.ValidationError({"errors": "User does not exist."})
-
         return attrs
 
 
 class TwoFAVerifySerializer(serializers.Serializer):
-    engineer = serializers.CharField(label="Username")
     otp = serializers.IntegerField(label="One-time password / code")
     key = serializers.CharField(required=False, label="Secret key")
     phone = serializers.CharField(required=False, label="Phone number")
     auth_type = serializers.CharField(label="Verification method")
 
     def validate(self, attrs):
-        engineer = attrs.get("engineer")
         auth_type = attrs.get("auth_type")
 
         if auth_type == "sms":
             if not attrs.get("phone"):
                 raise serializers.ValidationError({"errors": "Missing phone."})
-
-        try:
-            Users.objects.get(username=engineer)
-        except Users.DoesNotExist:
-            raise serializers.ValidationError({"errors": "User does not exist."})
 
         return attrs
 
@@ -256,6 +250,154 @@ class QueryPrivilegesApplySerializer(serializers.ModelSerializer):
     class Meta:
         model = QueryPrivilegesApply
         fields = "__all__"
+
+
+class QueryExecuteSerializer(serializers.Serializer):
+    instance_name = serializers.CharField(label="Instance name")
+    sql_content = serializers.CharField(label="SQL content")
+    db_name = serializers.CharField(label="Database name")
+    tb_name = serializers.CharField(
+        required=False, allow_blank=True, label="Table name"
+    )
+    schema_name = serializers.CharField(
+        required=False, allow_blank=True, label="Schema name"
+    )
+    limit_num = serializers.IntegerField(required=False, min_value=0, default=0)
+
+
+class QueryExecuteResponseSerializer(serializers.Serializer):
+    detail = serializers.CharField()
+    data = serializers.JSONField()
+
+
+class QueryLogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = QueryLog
+        fields = [
+            "id",
+            "instance_name",
+            "db_name",
+            "sqllog",
+            "effect_row",
+            "cost_time",
+            "user_display",
+            "favorite",
+            "alias",
+            "create_time",
+        ]
+
+
+class QueryFavoriteSerializer(serializers.Serializer):
+    query_log_id = serializers.IntegerField(label="Query log ID")
+    star = serializers.BooleanField(label="Favorite status")
+    alias = serializers.CharField(
+        required=False, allow_blank=True, label="Query alias", default=""
+    )
+
+
+class QueryPrivilegesApplyListSerializer(serializers.ModelSerializer):
+    instance_name = serializers.CharField(
+        source="instance.instance_name", read_only=True
+    )
+
+    class Meta:
+        model = QueryPrivilegesApply
+        fields = [
+            "apply_id",
+            "title",
+            "instance_name",
+            "db_list",
+            "priv_type",
+            "table_list",
+            "limit_num",
+            "valid_date",
+            "user_display",
+            "status",
+            "create_time",
+            "group_name",
+        ]
+
+
+class QueryPrivilegesApplyCreateSerializer(serializers.Serializer):
+    title = serializers.CharField(label="Request title")
+    instance_name = serializers.CharField(label="Instance name")
+    group_name = serializers.CharField(label="Resource group name")
+    priv_type = serializers.ChoiceField(choices=[1, 2], label="Privilege type")
+    db_name = serializers.CharField(
+        required=False, allow_blank=True, label="Database name"
+    )
+    db_list = serializers.ListField(
+        child=serializers.CharField(), required=False, label="Database list"
+    )
+    table_list = serializers.ListField(
+        child=serializers.CharField(), required=False, label="Table list"
+    )
+    valid_date = serializers.DateField(label="Privilege valid date")
+    limit_num = serializers.IntegerField(min_value=1, label="Limit rows")
+
+    def validate(self, attrs):
+        priv_type = attrs["priv_type"]
+        db_list = attrs.get("db_list") or []
+        db_name = attrs.get("db_name") or ""
+        table_list = attrs.get("table_list") or []
+
+        if priv_type == 1 and not db_list:
+            raise serializers.ValidationError(
+                {"errors": "db_list is required for database privileges."}
+            )
+        if priv_type == 2:
+            if not db_name:
+                raise serializers.ValidationError(
+                    {"errors": "db_name is required for table privileges."}
+                )
+            if not table_list:
+                raise serializers.ValidationError(
+                    {"errors": "table_list is required for table privileges."}
+                )
+        return attrs
+
+
+class QueryPrivilegesListSerializer(serializers.ModelSerializer):
+    instance_name = serializers.CharField(
+        source="instance.instance_name", read_only=True
+    )
+
+    class Meta:
+        model = QueryPrivileges
+        fields = [
+            "privilege_id",
+            "user_display",
+            "instance_name",
+            "db_name",
+            "priv_type",
+            "table_name",
+            "limit_num",
+            "valid_date",
+        ]
+
+
+class QueryPrivilegesModifySerializer(serializers.Serializer):
+    privilege_id = serializers.IntegerField(label="Privilege ID")
+    type = serializers.ChoiceField(choices=[1, 2], label="1-delete, 2-update")
+    valid_date = serializers.DateField(required=False)
+    limit_num = serializers.IntegerField(required=False, min_value=1)
+
+    def validate(self, attrs):
+        if attrs["type"] == 2 and (
+            "valid_date" not in attrs or "limit_num" not in attrs
+        ):
+            raise serializers.ValidationError(
+                {"errors": "valid_date and limit_num are required when type is 2."}
+            )
+        return attrs
+
+
+class QueryPrivilegesAuditSerializer(serializers.Serializer):
+    apply_id = serializers.IntegerField(label="Application ID")
+    audit_status = serializers.IntegerField(label="Audit action")
+    audit_remark = serializers.CharField(
+        required=False, allow_blank=True, label="Audit remark", default=""
+    )
 
 
 class ArchiveConfigSerializer(serializers.ModelSerializer):
@@ -465,7 +607,6 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
 
 
 class AuditWorkflowSerializer(serializers.Serializer):
-    engineer = serializers.CharField(label="Operator")
     workflow_id = serializers.IntegerField(label="Workflow ID")
     audit_remark = serializers.CharField(label="Approval remark")
     workflow_type = serializers.ChoiceField(
@@ -475,16 +616,8 @@ class AuditWorkflowSerializer(serializers.Serializer):
     audit_type = serializers.ChoiceField(choices=["pass", "cancel"], label="Audit type")
 
     def validate(self, attrs):
-        engineer = attrs.get("engineer")
         workflow_id = attrs.get("workflow_id")
         workflow_type = attrs.get("workflow_type")
-
-        try:
-            Users.objects.get(username=engineer)
-        except Users.DoesNotExist:
-            raise serializers.ValidationError(
-                {"errors": f"User does not exist: {engineer}"}
-            )
 
         try:
             WorkflowAudit.objects.get(
@@ -494,19 +627,6 @@ class AuditWorkflowSerializer(serializers.Serializer):
             raise serializers.ValidationError({"errors": "Workflow does not exist."})
 
         return attrs
-
-
-class WorkflowAuditSerializer(serializers.Serializer):
-    engineer = serializers.CharField(label="Operator")
-
-    def validate_engineer(self, engineer):
-        try:
-            Users.objects.get(username=engineer)
-        except Users.DoesNotExist:
-            raise serializers.ValidationError(
-                {"errors": f"User does not exist: {engineer}"}
-            )
-        return engineer
 
 
 class WorkflowAuditListSerializer(serializers.ModelSerializer):
@@ -522,27 +642,6 @@ class WorkflowAuditListSerializer(serializers.ModelSerializer):
         ]
 
 
-class WorkflowLogSerializer(serializers.Serializer):
-    workflow_id = serializers.IntegerField(label="Workflow ID")
-    workflow_type = serializers.ChoiceField(
-        choices=[1, 2, 3],
-        label="Workflow type: 1-query privilege apply, 2-SQL release apply, 3-data archive apply",
-    )
-
-    def validate(self, attrs):
-        workflow_id = attrs.get("workflow_id")
-        workflow_type = attrs.get("workflow_type")
-
-        try:
-            WorkflowAudit.objects.get(
-                workflow_id=workflow_id, workflow_type=workflow_type
-            )
-        except WorkflowAudit.DoesNotExist:
-            raise serializers.ValidationError({"errors": "Workflow does not exist."})
-
-        return attrs
-
-
 class WorkflowLogListSerializer(serializers.ModelSerializer):
     class Meta:
         model = WorkflowLog
@@ -555,7 +654,6 @@ class WorkflowLogListSerializer(serializers.ModelSerializer):
 
 
 class ExecuteWorkflowSerializer(serializers.Serializer):
-    engineer = serializers.CharField(required=False, label="Operator")
     workflow_id = serializers.IntegerField(label="Workflow ID")
     workflow_type = serializers.ChoiceField(
         choices=[2, 3],
@@ -568,24 +666,14 @@ class ExecuteWorkflowSerializer(serializers.Serializer):
     )
 
     def validate(self, attrs):
-        engineer = attrs.get("engineer")
         workflow_id = attrs.get("workflow_id")
         workflow_type = attrs.get("workflow_type")
         mode = attrs.get("mode")
 
-        # mode and engineer are required for SQL release workflows
+        # mode is required for SQL release workflows
         if workflow_type == 2:
             if not mode:
                 raise serializers.ValidationError({"errors": "Missing mode."})
-            if not engineer:
-                raise serializers.ValidationError({"errors": "Missing engineer."})
-
-            try:
-                Users.objects.get(username=engineer)
-            except Users.DoesNotExist:
-                raise serializers.ValidationError(
-                    {"errors": f"User does not exist: {engineer}"}
-                )
 
         try:
             WorkflowAudit.objects.get(
