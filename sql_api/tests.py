@@ -117,9 +117,7 @@ class TestUser(APITestCase):
 
     def test_update_current_user_profile(self):
         """Authenticated users can update their own display name."""
-        r = self.client.patch(
-            "/api/v1/me/", {"display": "Updated Self"}, format="json"
-        )
+        r = self.client.patch("/api/v1/me/", {"display": "Updated Self"}, format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.user.refresh_from_db()
         self.assertEqual(self.user.display, "Updated Self")
