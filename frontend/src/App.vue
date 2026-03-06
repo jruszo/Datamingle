@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import {
   ChartNoAxesCombined,
@@ -10,6 +10,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
+  User,
 } from 'lucide-vue-next'
 
 import { Button } from '@/components/ui/button'
@@ -27,6 +28,7 @@ const navigation = [
   { to: '/workflows', label: 'Workflows', icon: FileText },
   { to: '/queries', label: 'Queries', icon: Database },
   { to: '/reports', label: 'Reports', icon: ChartNoAxesCombined },
+  { to: '/profile', label: 'Profile', icon: User },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
 
@@ -40,6 +42,38 @@ const pageTitle = computed(() => {
   return matched?.label || 'Dashboard'
 })
 
+const currentUserName = computed(() => {
+  return authStore.currentUser?.display || authStore.currentUser?.username || 'User'
+})
+
+const currentUserSubtitle = computed(() => {
+  return authStore.currentUser?.email || authStore.currentUser?.username || 'Profile'
+})
+
+const currentUserInitials = computed(() => {
+  const source = authStore.currentUser?.display || authStore.currentUser?.username || 'U'
+  const initials = source
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((segment) => segment[0]?.toUpperCase() ?? '')
+    .join('')
+
+  return initials || 'U'
+})
+
+async function loadCurrentUser(force = false) {
+  if (!authStore.isAuthenticated) {
+    return
+  }
+
+  try {
+    await authStore.loadCurrentUser(force)
+  } catch {
+    // Leave route state intact and let page-level requests surface their own errors.
+  }
+}
+
 function toggleSidebar() {
   isSidebarCollapsed.value = !isSidebarCollapsed.value
 }
@@ -48,6 +82,19 @@ async function logout() {
   authStore.clearTokens()
   await router.push('/login')
 }
+
+onMounted(() => {
+  void loadCurrentUser()
+})
+
+watch(
+  () => authStore.accessToken,
+  (token, previousToken) => {
+    if (token && token !== previousToken) {
+      void loadCurrentUser(true)
+    }
+  },
+)
 </script>
 
 <template>
@@ -65,10 +112,10 @@ async function logout() {
           <div
             class="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 text-sm font-bold text-white"
           >
-            A
+            D
           </div>
           <div v-if="!isSidebarCollapsed">
-            <p class="text-sm font-semibold tracking-wide">Archery</p>
+            <p class="text-sm font-semibold tracking-wide">Datamingle</p>
             <p class="text-xs text-slate-500">SQL Platform</p>
           </div>
         </div>
@@ -102,15 +149,17 @@ async function logout() {
           </div>
 
           <div class="flex items-center gap-3">
-            <div class="hidden text-right sm:block">
-              <p class="text-sm font-semibold">Admin</p>
-              <p class="text-xs text-slate-500">Profile</p>
-            </div>
-            <div
-              class="flex h-9 w-9 items-center justify-center rounded-full bg-slate-900 text-xs font-semibold text-white"
-            >
-              AD
-            </div>
+            <RouterLink to="/profile" class="flex items-center gap-3 rounded-full transition hover:opacity-90">
+              <div class="hidden text-right sm:block">
+                <p class="text-sm font-semibold">{{ currentUserName }}</p>
+                <p class="text-xs text-slate-500">{{ currentUserSubtitle }}</p>
+              </div>
+              <div
+                class="flex h-9 w-9 items-center justify-center rounded-full bg-slate-900 text-xs font-semibold text-white"
+              >
+                {{ currentUserInitials }}
+              </div>
+            </RouterLink>
             <Button variant="ghost" size="icon" title="Logout" @click="logout">
               <LogOut class="h-4 w-4" />
             </Button>

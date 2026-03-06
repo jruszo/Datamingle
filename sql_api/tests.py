@@ -115,6 +115,53 @@ class TestUser(APITestCase):
         self.assertIn("groups", r_data)
         self.assertIn("resource_groups", r_data)
 
+    def test_update_current_user_profile(self):
+        """Authenticated users can update their own display name."""
+        r = self.client.patch("/api/v1/me/", {"display": "Updated Self"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.display, "Updated Self")
+        self.assertEqual(assert_success_envelope(self, r)["display"], "Updated Self")
+
+    def test_change_current_user_password(self):
+        """Authenticated users can change their own password."""
+        new_password = "StrongerPass123!"
+        r = self.client.post(
+            "/api/v1/me/password/",
+            {
+                "current_password": "test_password",
+                "new_password": new_password,
+                "new_password_confirm": new_password,
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password(new_password))
+
+        self.client.credentials()
+        login_response = self.client.post(
+            "/api/auth/token/",
+            {"username": self.user.username, "password": new_password},
+            format="json",
+        )
+        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+        self.assertIn("access", response_data(login_response))
+
+    def test_change_current_user_password_rejects_wrong_current_password(self):
+        """Password change requires the existing password."""
+        r = self.client.post(
+            "/api/v1/me/password/",
+            {
+                "current_password": "wrong-password",
+                "new_password": "StrongerPass123!",
+                "new_password_confirm": "StrongerPass123!",
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("current_password", r.json())
+
     def test_success_envelope_shape_for_paginated_and_detail_endpoints(self):
         """Success responses should use unified envelope for list and detail."""
         r1 = self.client.get("/api/v1/user/", format="json")

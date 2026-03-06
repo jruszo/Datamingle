@@ -1,7 +1,40 @@
+import { AuthSessionExpiredError, getUsableAccessToken, notifyUnauthorized, refreshAccessToken } from '@/lib/auth'
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
 
 function buildUrl(path: string): string {
   return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function flattenErrorMessage(value: unknown): string {
+  if (typeof value === 'string') {
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(flattenErrorMessage).filter(Boolean).join(', ')
+  }
+
+  if (isRecord(value)) {
+    if (typeof value.errors === 'string') {
+      return value.errors
+    }
+
+    if (typeof value.detail === 'string') {
+      return value.detail
+    }
+
+    return Object.entries(value)
+      .map(([field, fieldValue]) => `${field}: ${flattenErrorMessage(fieldValue)}`)
+      .filter(Boolean)
+      .join(' ')
+  }
+
+  return ''
 }
 
 type RequestOptions = {
@@ -9,19 +42,39 @@ type RequestOptions = {
   body?: unknown
 }
 
+type InternalRequestOptions = RequestOptions & {
+  skipAuthRetry?: boolean
+}
+
 async function request<T>(
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
-  options: RequestOptions = {},
+  options: InternalRequestOptions = {},
 ): Promise<T> {
+  const requiresAuth = options.token !== undefined
   const headers: Record<string, string> = {
     Accept: 'application/json',
   }
+  let authorizationToken = ''
+
+  if (requiresAuth) {
+    try {
+      authorizationToken = await getUsableAccessToken(options.token)
+    } catch (error) {
+      if (error instanceof AuthSessionExpiredError) {
+        notifyUnauthorized(error.message)
+        throw new Error(`${method} ${path} failed (401): ${error.message}`)
+      }
+
+      throw error
+    }
+  }
+
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json'
   }
-  if (options.token) {
-    headers.Authorization = `Bearer ${options.token}`
+  if (authorizationToken) {
+    headers.Authorization = `Bearer ${authorizationToken}`
   }
 
   const requestInit: RequestInit = {
@@ -42,7 +95,37 @@ async function request<T>(
 
   if (!response.ok) {
     const body = await response.text()
-    throw new Error(`${method} ${path} failed (${response.status}): ${body}`)
+    let message = body
+
+    try {
+      message = flattenErrorMessage(JSON.parse(body)) || body
+    } catch {
+      message = body
+    }
+
+    if (response.status === 401 && requiresAuth && !options.skipAuthRetry) {
+      try {
+        const refreshedAccessToken = await refreshAccessToken()
+        return request<T>(method, path, {
+          ...options,
+          token: refreshedAccessToken,
+          skipAuthRetry: true,
+        })
+      } catch (error) {
+        if (error instanceof AuthSessionExpiredError) {
+          notifyUnauthorized(error.message)
+          throw new Error(`${method} ${path} failed (401): ${error.message}`)
+        }
+
+        throw error
+      }
+    }
+
+    if (response.status === 401 && requiresAuth) {
+      notifyUnauthorized(message)
+    }
+
+    throw new Error(`${method} ${path} failed (${response.status}): ${message}`)
   }
 
   return response.json() as Promise<T>
@@ -54,6 +137,10 @@ export function apiGet<T>(path: string, options: RequestOptions = {}) {
 
 export function apiPost<T>(path: string, body: unknown, options: RequestOptions = {}) {
   return request<T>('POST', path, { ...options, body })
+}
+
+export function apiPatch<T>(path: string, body: unknown, options: RequestOptions = {}) {
+  return request<T>('PATCH', path, { ...options, body })
 }
 
 export type ApiEnvelope<T> = {
@@ -128,15 +215,19 @@ export type DashboardPayload = {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
 function extractData<T>(payload: unknown): T {
   if (isRecord(payload) && 'data' in payload) {
     return payload.data as T
   }
   return payload as T
+}
+
+function extractDetail(payload: unknown, fallback: string): string {
+  if (isRecord(payload) && typeof payload.detail === 'string') {
+    return payload.detail
+  }
+
+  return fallback
 }
 
 function isTokenPair(value: unknown): value is TokenPair {
@@ -176,6 +267,29 @@ export function fetchCurrentUserContext(token: string) {
   return apiGet<unknown>('/v1/me/', { token }).then((payload) =>
     extractData<CurrentUserContext>(payload),
   )
+}
+
+export function updateCurrentUserDisplay(display: string, token: string) {
+  return apiPatch<unknown>('/v1/me/', { display }, { token }).then((payload) =>
+    extractData<CurrentUserContext>(payload),
+  )
+}
+
+export function changeCurrentUserPassword(
+  currentPassword: string,
+  newPassword: string,
+  newPasswordConfirm: string,
+  token: string,
+) {
+  return apiPost<unknown>(
+    '/v1/me/password/',
+    {
+      current_password: currentPassword,
+      new_password: newPassword,
+      new_password_confirm: newPasswordConfirm,
+    },
+    { token },
+  ).then((payload) => extractDetail(payload, 'Password updated successfully.'))
 }
 
 export function fetchDashboard(startDate: string, endDate: string, token: string) {

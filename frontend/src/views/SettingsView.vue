@@ -19,7 +19,7 @@ const settings = [
       <CardHeader>
         <CardTitle>Environment</CardTitle>
         <CardDescription>
-          Local frontend settings used to connect to Archery in Docker.
+          Local frontend settings used to connect to Datamingle in Docker.
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-3">
