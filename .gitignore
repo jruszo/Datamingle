@@ -8,7 +8,6 @@
 archery/settings.py.github
 archery/settings.py.dev
 archery/settings_dev.py
-sql/migrations/
 venv
 env
 conda311

@@ -314,6 +314,12 @@ class QueryExecuteResponseSerializer(serializers.Serializer):
     data = serializers.JSONField()
 
 
+class QueryInstanceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Instance
+        fields = ["id", "instance_name", "db_type", "type"]
+
+
 class QueryLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = QueryLog
@@ -331,12 +337,39 @@ class QueryLogSerializer(serializers.ModelSerializer):
         ]
 
 
+class QueryFavoriteListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = QueryLog
+        fields = [
+            "id",
+            "alias",
+            "instance_name",
+            "db_name",
+            "sqllog",
+            "create_time",
+        ]
+
+
 class QueryFavoriteSerializer(serializers.Serializer):
     query_log_id = serializers.IntegerField(label="Query log ID")
     star = serializers.BooleanField(label="Favorite status")
     alias = serializers.CharField(
         required=False, allow_blank=True, label="Query alias", default=""
     )
+
+
+class QueryDescribeSerializer(serializers.Serializer):
+    instance_id = serializers.IntegerField(label="Instance ID")
+    db_name = serializers.CharField(label="Database name")
+    schema_name = serializers.CharField(
+        required=False, allow_blank=True, label="Schema name"
+    )
+    tb_name = serializers.CharField(label="Table name")
+
+
+class QueryDescribeResponseSerializer(serializers.Serializer):
+    detail = serializers.CharField()
+    data = serializers.JSONField()
 
 
 class QueryPrivilegesApplyListSerializer(serializers.ModelSerializer):

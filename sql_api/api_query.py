@@ -39,9 +39,13 @@ from sql.utils.workflow_audit import AuditException, get_auditor
 from .pagination import CustomizedPagination
 from .response import success_response
 from .serializers import (
+    QueryDescribeResponseSerializer,
+    QueryDescribeSerializer,
     QueryExecuteResponseSerializer,
     QueryExecuteSerializer,
+    QueryFavoriteListSerializer,
     QueryFavoriteSerializer,
+    QueryInstanceSerializer,
     QueryLogSerializer,
     QueryPrivilegesApplyCreateSerializer,
     QueryPrivilegesApplyListSerializer,
@@ -57,6 +61,33 @@ def _require_permission(request, permission):
     if request.user.is_superuser or request.user.has_perm(permission):
         return
     raise PermissionDenied(f"Missing required permission: {permission}")
+
+
+def _require_any_permission(request, *perm_list):
+    if request.user.is_superuser:
+        return
+    if any(request.user.has_perm(perm) for perm in perm_list):
+        return
+    raise PermissionDenied(
+        f"Missing required permission. Need one of: {', '.join(perm_list)}"
+    )
+
+
+def _require_query_page_access(request):
+    _require_any_permission(
+        request, "sql.menu_query", "sql.menu_sqlquery", "sql.query_submit"
+    )
+
+
+def _normalize_result_set(result_set):
+    result = result_set.__dict__.copy()
+    result["rows"] = result_set.to_dict()
+    return result
+
+
+def _is_describe_ddl(result_data):
+    column_list = [str(value).lower() for value in result_data.get("column_list", [])]
+    return len(column_list) == 2 and "create table" in column_list[1]
 
 
 class QueryExecute(views.APIView):
@@ -239,6 +270,95 @@ class QueryExecute(views.APIView):
         return success_response(data=result_data)
 
 
+class QueryInstanceList(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary="Queryable Instances",
+        responses={200: QueryInstanceSerializer(many=True)},
+        parameters=[
+            OpenApiParameter(
+                name="type",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description="Optional instance type filter.",
+            ),
+            OpenApiParameter(
+                name="db_type",
+                type={"type": "array", "items": {"type": "string"}},
+                location=OpenApiParameter.QUERY,
+                description="Optional database-type filter.",
+            ),
+        ],
+        description="List instances the current user can query, filtered to can_read resources.",
+    )
+    def get(self, request):
+        _require_query_page_access(request)
+
+        instance_type = request.query_params.get("type")
+        db_type = request.query_params.getlist("db_type")
+        if not db_type:
+            db_type = request.query_params.getlist("db_type[]")
+
+        queryset = user_instances(
+            request.user,
+            type=instance_type,
+            db_type=db_type or None,
+            tag_codes=["can_read"],
+        ).order_by("instance_name")
+        serializer = QueryInstanceSerializer(queryset, many=True)
+        return success_response(data=serializer.data)
+
+
+class QueryDescribe(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary="Describe Table",
+        request=QueryDescribeSerializer,
+        responses={200: QueryDescribeResponseSerializer},
+        description="Get normalized table-structure data for the selected instance and table.",
+    )
+    def post(self, request):
+        _require_query_page_access(request)
+
+        serializer = QueryDescribeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        try:
+            instance = user_instances(request.user, tag_codes=["can_read"]).get(
+                pk=data["instance_id"]
+            )
+        except Instance.DoesNotExist:
+            raise serializers.ValidationError(
+                {"errors": "The instance is not associated with your group."}
+            )
+
+        query_engine = get_engine(instance=instance)
+        db_name = query_engine.escape_string(data["db_name"])
+        schema_name = query_engine.escape_string(data.get("schema_name", ""))
+        tb_name = query_engine.escape_string(data["tb_name"])
+
+        try:
+            query_result = query_engine.describe_table(
+                db_name=db_name,
+                tb_name=tb_name,
+                schema_name=schema_name,
+            )
+        except Exception as exc:
+            raise serializers.ValidationError({"errors": str(exc)})
+
+        if query_result.error:
+            raise serializers.ValidationError({"errors": query_result.error})
+
+        result_data = _normalize_result_set(query_result)
+        result_data["display_mode"] = (
+            "ddl" if _is_describe_ddl(result_data) else "table"
+        )
+        return success_response(data=result_data)
+
+
 class QueryLogBase(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = CustomizedPagination
@@ -259,11 +379,13 @@ class QueryLogBase(generics.ListAPIView):
         search = self.request.query_params.get("search", "")
         start_date = self.request.query_params.get("start_date", "")
         end_date = self.request.query_params.get("end_date", "")
-        star = self.request.query_params.get("star") == "true"
+        star = self.request.query_params.get("star")
 
         queryset = self.queryset
-        if star:
+        if star == "true":
             queryset = queryset.filter(favorite=True)
+        elif star == "false":
+            queryset = queryset.filter(favorite=False)
         if query_log_id:
             queryset = queryset.filter(id=query_log_id)
         if not (user.is_superuser or user.has_perm("sql.audit_user")):
@@ -283,6 +405,8 @@ class QueryLogBase(generics.ListAPIView):
                 Q(sqllog__icontains=search)
                 | Q(user_display__icontains=search)
                 | Q(alias__icontains=search)
+                | Q(db_name__icontains=search)
+                | Q(instance_name__icontains=search)
             )
         return queryset
 
@@ -351,6 +475,19 @@ class QueryLogAuditList(QueryLogBase):
 
 class QueryFavorite(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary="Favorite Query Logs",
+        responses={200: QueryFavoriteListSerializer(many=True)},
+        description="List the current user's favorite query logs for common-query selection.",
+    )
+    @method_decorator(permission_required("sql.menu_sqlquery", raise_exception=True))
+    def get(self, request):
+        queryset = QueryLog.objects.filter(
+            username=request.user.username, favorite=True
+        ).order_by("-id")
+        serializer = QueryFavoriteListSerializer(queryset, many=True)
+        return success_response(data=serializer.data)
 
     @extend_schema(
         summary="Favorite Query Log",
