@@ -72,6 +72,8 @@ urlpatterns = [
         api_workflow.WorkflowExecutionCreate.as_view(),
     ),
     path("v1/workflow/log/", api_workflow.WorkflowLogList.as_view()),
+    path("v1/query/instance/", api_query.QueryInstanceList.as_view()),
+    path("v1/query/describe/", api_query.QueryDescribe.as_view()),
     path("v1/query/", api_query.QueryExecute.as_view()),
     path("v1/query/log/", api_query.QueryLogList.as_view()),
     path("v1/query/log/audit/", api_query.QueryLogAuditList.as_view()),

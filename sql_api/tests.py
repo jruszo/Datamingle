@@ -594,6 +594,80 @@ class TestQueryAPI(APITestCase):
         self.assertEqual(r.json()["data"]["rows"][0]["v"], 1)
         self.assertEqual(QueryLog.objects.count(), 1)
 
+    def test_query_instance_list_returns_can_read_instances(self):
+        other_tag = InstanceTag.objects.create(
+            tag_code="can_write", tag_name="Can Write", active=1
+        )
+        hidden_instance = Instance.objects.create(
+            instance_name="hidden_instance",
+            type="master",
+            db_type="pgsql",
+            host="127.0.0.1",
+            port=5432,
+            user="postgres",
+            password="pwd",
+        )
+        hidden_instance.resource_group.add(self.res_group)
+        hidden_instance.instance_tag.add(other_tag)
+
+        r = self.client.get("/api/v1/query/instance/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        data = assert_success_envelope(self, r)
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["instance_name"], self.ins.instance_name)
+
+    @patch("sql_api.api_query.get_engine")
+    def test_query_describe_success(self, mock_get_engine):
+        mock_engine = Mock()
+        mock_engine.escape_string.side_effect = lambda value: value
+        mock_result = ResultSet(
+            full_sql="show create table `users`;",
+            rows=[("users", "CREATE TABLE `users` (`id` bigint);")],
+            column_list=["Table", "Create Table"],
+        )
+        mock_result.error = None
+        mock_engine.describe_table.return_value = mock_result
+        mock_get_engine.return_value = mock_engine
+
+        r = self.client.post(
+            "/api/v1/query/describe/",
+            {
+                "instance_id": self.ins.id,
+                "db_name": "archery",
+                "tb_name": "users",
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        data = assert_success_envelope(self, r)
+        self.assertEqual(data["display_mode"], "ddl")
+        self.assertEqual(data["rows"][0]["Table"], "users")
+
+    def test_query_describe_rejects_unrelated_instance(self):
+        other_group = ResourceGroup.objects.create(group_name="other_rg")
+        other_instance = Instance.objects.create(
+            instance_name="other_instance",
+            type="master",
+            db_type="mysql",
+            host="127.0.0.1",
+            port=3306,
+            user="root",
+            password="pwd",
+        )
+        other_instance.resource_group.add(other_group)
+        other_instance.instance_tag.add(self.read_tag)
+
+        r = self.client.post(
+            "/api/v1/query/describe/",
+            {
+                "instance_id": other_instance.id,
+                "db_name": "archery",
+                "tb_name": "users",
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
     def test_query_log_and_favorite(self):
         QueryLog.objects.create(
             username=self.user.username,
@@ -629,6 +703,41 @@ class TestQueryAPI(APITestCase):
         log_obj = QueryLog.objects.get(id=query_log_id)
         self.assertEqual(log_obj.favorite, True)
         self.assertEqual(log_obj.alias, "fav1")
+
+        r3 = self.client.get("/api/v1/query/favorite/", format="json")
+        self.assertEqual(r3.status_code, status.HTTP_200_OK)
+        favorite_data = assert_success_envelope(self, r3)
+        self.assertEqual(len(favorite_data), 1)
+        self.assertEqual(favorite_data[0]["alias"], "fav1")
+
+    def test_query_log_filters_unstarred(self):
+        QueryLog.objects.create(
+            username=self.user.username,
+            user_display=self.user.display,
+            db_name="db1",
+            instance_name=self.ins.instance_name,
+            sqllog="select 1",
+            effect_row=1,
+            cost_time="0.1",
+            favorite=True,
+            alias="fav1",
+        )
+        QueryLog.objects.create(
+            username=self.user.username,
+            user_display=self.user.display,
+            db_name="db2",
+            instance_name=self.ins.instance_name,
+            sqllog="select 2",
+            effect_row=1,
+            cost_time="0.2",
+            favorite=False,
+        )
+
+        r = self.client.get("/api/v1/query/log/", {"star": "false"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        data = assert_success_envelope(self, r)
+        self.assertEqual(data["count"], 1)
+        self.assertEqual(data["results"][0]["db_name"], "db2")
 
     def test_query_log_audit_requires_audit_permission(self):
         r = self.client.get("/api/v1/query/log/audit/", format="json")

@@ -301,3 +301,194 @@ export function fetchDashboard(startDate: string, endDate: string, token: string
     extractData<DashboardPayload>(payload),
   )
 }
+
+export type PaginatedResponse<T> = {
+  count: number
+  next: string | null
+  previous: string | null
+  results: T[]
+}
+
+export type QueryableInstance = {
+  id: number
+  instance_name: string
+  db_type: string
+  type: string
+}
+
+export type InstanceResourceType = 'database' | 'schema' | 'table' | 'column'
+
+export type InstanceResourceList = {
+  count: number
+  result: string[]
+}
+
+export type QueryResultPayload = {
+  full_sql: string
+  is_execute: boolean
+  checked: string | null
+  is_masked: boolean
+  query_time: string | number
+  mask_rule_hit: boolean
+  mask_time: string | number
+  warning: string | null
+  error: string | null
+  is_critical: boolean
+  rows: Array<Record<string, unknown>>
+  column_list: string[]
+  column_type: string[]
+  status: number | null
+  affected_rows: number
+  seconds_behind_master?: string | number | null
+}
+
+export type QueryDescribePayload = {
+  display_mode: 'ddl' | 'table'
+  full_sql: string
+  rows: Array<Record<string, unknown>>
+  column_list: string[]
+  column_type?: string[]
+  affected_rows: number
+  error: string | null
+}
+
+export type QueryLogRecord = {
+  id: number
+  instance_name: string
+  db_name: string
+  sqllog: string
+  effect_row: number
+  cost_time: string
+  user_display: string
+  favorite: boolean
+  alias: string
+  create_time: string
+}
+
+export type FavoriteQuery = {
+  id: number
+  alias: string
+  instance_name: string
+  db_name: string
+  sqllog: string
+  create_time: string
+}
+
+export type QueryExecuteRequest = {
+  instance_name: string
+  sql_content: string
+  db_name: string
+  schema_name?: string
+  tb_name?: string
+  limit_num: number
+}
+
+export type QueryDescribeRequest = {
+  instance_id: number
+  db_name: string
+  schema_name?: string
+  tb_name: string
+}
+
+export type QueryLogFilters = {
+  page?: number
+  size?: number
+  search?: string
+  star?: 'true' | 'false'
+  query_log_id?: number
+}
+
+export function fetchQueryInstances(token: string) {
+  return apiGet<unknown>('/v1/query/instance/', { token }).then((payload) =>
+    extractData<QueryableInstance[]>(payload),
+  )
+}
+
+export function fetchInstanceResources(
+  instanceId: number,
+  resourceType: InstanceResourceType,
+  token: string,
+  options: {
+    db_name?: string
+    schema_name?: string
+    tb_name?: string
+  } = {},
+) {
+  const params = new URLSearchParams({
+    instance_id: `${instanceId}`,
+    resource_type: resourceType,
+  })
+
+  if (options.db_name) {
+    params.set('db_name', options.db_name)
+  }
+  if (options.schema_name) {
+    params.set('schema_name', options.schema_name)
+  }
+  if (options.tb_name) {
+    params.set('tb_name', options.tb_name)
+  }
+
+  return apiGet<unknown>(`/v1/instance/resource/?${params.toString()}`, { token }).then((payload) =>
+    extractData<InstanceResourceList>(payload),
+  )
+}
+
+export function executeQuery(request: QueryExecuteRequest, token: string) {
+  return apiPost<unknown>('/v1/query/', request, { token }).then((payload) =>
+    extractData<QueryResultPayload>(payload),
+  )
+}
+
+export function describeQueryTable(request: QueryDescribeRequest, token: string) {
+  return apiPost<unknown>('/v1/query/describe/', request, { token }).then((payload) =>
+    extractData<QueryDescribePayload>(payload),
+  )
+}
+
+export function fetchFavoriteQueries(token: string) {
+  return apiGet<unknown>('/v1/query/favorite/', { token }).then((payload) =>
+    extractData<FavoriteQuery[]>(payload),
+  )
+}
+
+export function updateFavoriteQuery(
+  queryLogId: number,
+  star: boolean,
+  alias: string,
+  token: string,
+) {
+  return apiPost<unknown>(
+    '/v1/query/favorite/',
+    {
+      query_log_id: queryLogId,
+      star,
+      alias,
+    },
+    { token },
+  ).then((payload) => extractDetail(payload, 'Favorite updated.'))
+}
+
+export function fetchQueryLogs(filters: QueryLogFilters, token: string) {
+  const params = new URLSearchParams()
+
+  if (filters.page) {
+    params.set('page', `${filters.page}`)
+  }
+  if (filters.size) {
+    params.set('size', `${filters.size}`)
+  }
+  if (filters.search) {
+    params.set('search', filters.search)
+  }
+  if (filters.star) {
+    params.set('star', filters.star)
+  }
+  if (filters.query_log_id) {
+    params.set('query_log_id', `${filters.query_log_id}`)
+  }
+
+  return apiGet<unknown>(`/v1/query/log/?${params.toString()}`, { token }).then((payload) =>
+    extractData<PaginatedResponse<QueryLogRecord>>(payload),
+  )
+}
