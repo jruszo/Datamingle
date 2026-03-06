@@ -353,7 +353,9 @@ class QueryDescribe(views.APIView):
             raise serializers.ValidationError({"errors": query_result.error})
 
         result_data = _normalize_result_set(query_result)
-        result_data["display_mode"] = "ddl" if _is_describe_ddl(result_data) else "table"
+        result_data["display_mode"] = (
+            "ddl" if _is_describe_ddl(result_data) else "table"
+        )
         return success_response(data=result_data)
 
 
