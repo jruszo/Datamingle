@@ -203,7 +203,7 @@ onMounted(() => {
                   {{ currentUser?.display || currentUser?.username || 'User profile' }}
                 </h2>
                 <p class="mt-1 text-sm text-slate-600">
-                  Manage the account details shown across Archery and rotate your password without leaving the SPA.
+                  Manage the account details shown across Datamingle and rotate your password without leaving the SPA.
                 </p>
               </div>
             </div>

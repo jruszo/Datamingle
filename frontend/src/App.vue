@@ -112,10 +112,10 @@ watch(
           <div
             class="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-500 text-sm font-bold text-white"
           >
-            A
+            D
           </div>
           <div v-if="!isSidebarCollapsed">
-            <p class="text-sm font-semibold tracking-wide">Archery</p>
+            <p class="text-sm font-semibold tracking-wide">Datamingle</p>
             <p class="text-xs text-slate-500">SQL Platform</p>
           </div>
         </div>

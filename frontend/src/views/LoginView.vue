@@ -44,7 +44,7 @@ async function submit() {
     <Card>
       <CardHeader>
         <CardTitle>Sign In</CardTitle>
-        <CardDescription>Sign in to access the platform.</CardDescription>
+        <CardDescription>Sign in to access Datamingle.</CardDescription>
       </CardHeader>
       <form @submit.prevent="submit">
         <CardContent class="space-y-3">
