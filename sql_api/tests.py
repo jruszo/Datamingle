@@ -254,7 +254,9 @@ class TestUser(APITestCase):
         r = self.client.post("/api/v1/user/group/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response_data(r)["name"], "RD")
-        self.assertEqual(response_data(r)["permissions"], [self.menu_system_permission.id])
+        self.assertEqual(
+            response_data(r)["permissions"], [self.menu_system_permission.id]
+        )
 
     def test_get_user_group_detail(self):
         """Test getting a single user group with permissions."""
@@ -262,7 +264,9 @@ class TestUser(APITestCase):
         r = self.client.get(f"/api/v1/user/group/{self.group.id}/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(response_data(r)["id"], self.group.id)
-        self.assertEqual(response_data(r)["permissions"], [self.menu_system_permission.id])
+        self.assertEqual(
+            response_data(r)["permissions"], [self.menu_system_permission.id]
+        )
 
     def test_update_user_group(self):
         """Test updating user group."""
