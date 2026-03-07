@@ -2,12 +2,16 @@ from rest_framework import views, generics, status, permissions
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
 from drf_spectacular.utils import extend_schema
+from django.db.models import Count, Q
 from .serializers import (
     UserSerializer,
     UserDetailSerializer,
     GroupSerializer,
     PermissionSerializer,
-    ResourceGroupSerializer,
+    ResourceGroupListSerializer,
+    ResourceGroupDetailSerializer,
+    ResourceGroupUserLookupSerializer,
+    ResourceGroupInstanceLookupSerializer,
     CurrentUserSerializer,
     CurrentUserProfileUpdateSerializer,
     CurrentUserPasswordChangeSerializer,
@@ -23,7 +27,7 @@ from django_redis import get_redis_connection
 from django.contrib.auth.models import Group, Permission
 from django.contrib.auth import authenticate
 from django.http import Http404
-from sql.models import Users, ResourceGroup, TwoFactorAuthConfig
+from sql.models import Users, ResourceGroup, TwoFactorAuthConfig, Instance
 from common.twofa import get_authenticator
 import random
 import json
@@ -352,31 +356,69 @@ class ResourceGroupList(generics.ListAPIView):
     """
 
     pagination_class = CustomizedPagination
-    serializer_class = ResourceGroupSerializer
-    queryset = ResourceGroup.objects.all().order_by("group_id")
+    serializer_class = ResourceGroupListSerializer
+    queryset = ResourceGroup.objects.filter(is_deleted=0).order_by("group_id")
+
+    def get_queryset(self):
+        queryset = (
+            super()
+            .get_queryset()
+            .annotate(
+                user_count=Count("users", distinct=True),
+                instance_count=Count("instance", distinct=True),
+            )
+        )
+        search = self.request.query_params.get("search", "").strip()
+        ordering = self.request.query_params.get("ordering", "").strip()
+
+        if search:
+            search_filter = Q(group_name__icontains=search)
+            if search.isdigit():
+                search_filter |= Q(group_id=int(search))
+            queryset = queryset.filter(search_filter)
+
+        if ordering in {
+            "group_id",
+            "-group_id",
+            "group_name",
+            "-group_name",
+            "user_count",
+            "-user_count",
+            "instance_count",
+            "-instance_count",
+        }:
+            queryset = queryset.order_by(ordering, "group_id")
+
+        return queryset
 
     @extend_schema(
         summary="Resource Group List",
-        request=ResourceGroupSerializer,
-        responses={200: ResourceGroupSerializer},
+        request=ResourceGroupDetailSerializer,
+        responses={200: ResourceGroupListSerializer},
         description="List all resource groups (filtering, pagination).",
     )
     def get(self, request):
-        _require_any_permission(request, "sql.menu_system", "sql.view_resourcegroup")
-        groups = self.filter_queryset(self.queryset)
+        _require_any_permission(
+            request,
+            "sql.menu_system",
+            "sql.view_resourcegroup",
+            "sql.add_resourcegroup",
+            "sql.change_resourcegroup",
+        )
+        groups = self.filter_queryset(self.get_queryset())
         page_groups = self.paginate_queryset(queryset=groups)
         serializer_obj = self.get_serializer(page_groups, many=True)
         return self.get_paginated_response(serializer_obj.data)
 
     @extend_schema(
         summary="Create Resource Group",
-        request=ResourceGroupSerializer,
-        responses={201: ResourceGroupSerializer},
+        request=ResourceGroupDetailSerializer,
+        responses={201: ResourceGroupDetailSerializer},
         description="Create a resource group.",
     )
     def post(self, request):
         _require_any_permission(request, "sql.menu_system", "sql.add_resourcegroup")
-        serializer = ResourceGroupSerializer(data=request.data)
+        serializer = ResourceGroupDetailSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
             return success_response(
@@ -390,24 +432,41 @@ class ResourceGroupDetail(views.APIView):
     Resource group operations.
     """
 
-    serializer_class = ResourceGroupSerializer
+    serializer_class = ResourceGroupDetailSerializer
 
     def get_object(self, pk):
         try:
-            return ResourceGroup.objects.get(pk=pk)
+            return ResourceGroup.objects.get(pk=pk, is_deleted=0)
         except ResourceGroup.DoesNotExist:
             raise Http404
 
     @extend_schema(
+        summary="Resource Group Detail",
+        responses={200: ResourceGroupDetailSerializer},
+        description="Get a resource group with its assigned users and instances.",
+    )
+    def get(self, request, pk):
+        _require_any_permission(
+            request,
+            "sql.menu_system",
+            "sql.view_resourcegroup",
+            "sql.change_resourcegroup",
+            "sql.delete_resourcegroup",
+        )
+        group = self.get_object(pk)
+        serializer = self.serializer_class(group)
+        return success_response(data=serializer.data)
+
+    @extend_schema(
         summary="Update Resource Group",
-        request=ResourceGroupSerializer,
-        responses={200: ResourceGroupSerializer},
+        request=ResourceGroupDetailSerializer,
+        responses={200: ResourceGroupDetailSerializer},
         description="Update a resource group.",
     )
     def put(self, request, pk):
         _require_any_permission(request, "sql.menu_system", "sql.change_resourcegroup")
         group = self.get_object(pk)
-        serializer = ResourceGroupSerializer(group, data=request.data)
+        serializer = self.serializer_class(group, data=request.data)
         if serializer.is_valid():
             serializer.save()
             return success_response(data=serializer.data)
@@ -421,6 +480,64 @@ class ResourceGroupDetail(views.APIView):
         group = self.get_object(pk)
         group.delete()
         return success_response()
+
+
+class ResourceGroupUserLookup(views.APIView):
+    """List assignable users for resource-group membership."""
+
+    serializer_class = ResourceGroupUserLookupSerializer
+
+    @extend_schema(
+        summary="Resource Group User Lookup",
+        responses={200: ResourceGroupUserLookupSerializer(many=True)},
+        description="List lightweight user records for resource-group membership selection.",
+    )
+    def get(self, request):
+        _require_any_permission(
+            request,
+            "sql.menu_system",
+            "sql.view_resourcegroup",
+            "sql.add_resourcegroup",
+            "sql.change_resourcegroup",
+        )
+        search = request.query_params.get("search", "").strip()
+        users = Users.objects.all().order_by("display", "username", "id")
+        if search:
+            users = users.filter(
+                Q(display__icontains=search) | Q(username__icontains=search)
+            )
+        serializer = self.serializer_class(users, many=True)
+        return success_response(data=serializer.data)
+
+
+class ResourceGroupInstanceLookup(views.APIView):
+    """List assignable instances for resource-group membership."""
+
+    serializer_class = ResourceGroupInstanceLookupSerializer
+
+    @extend_schema(
+        summary="Resource Group Instance Lookup",
+        responses={200: ResourceGroupInstanceLookupSerializer(many=True)},
+        description="List lightweight instance records for resource-group membership selection.",
+    )
+    def get(self, request):
+        _require_any_permission(
+            request,
+            "sql.menu_system",
+            "sql.view_resourcegroup",
+            "sql.add_resourcegroup",
+            "sql.change_resourcegroup",
+        )
+        search = request.query_params.get("search", "").strip()
+        instances = Instance.objects.all().order_by("instance_name", "id")
+        if search:
+            instances = instances.filter(
+                Q(instance_name__icontains=search)
+                | Q(db_type__icontains=search)
+                | Q(host__icontains=search)
+            )
+        serializer = self.serializer_class(instances, many=True)
+        return success_response(data=serializer.data)
 
 
 class UserAuth(views.APIView):

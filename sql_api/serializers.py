@@ -101,10 +101,100 @@ class PermissionSerializer(serializers.ModelSerializer):
         fields = ("id", "name", "codename", "app_label", "model")
 
 
-class ResourceGroupSerializer(serializers.ModelSerializer):
+class ResourceGroupListSerializer(serializers.ModelSerializer):
+    user_count = serializers.SerializerMethodField()
+    instance_count = serializers.SerializerMethodField()
+
+    def get_user_count(self, obj):
+        return obj.users_set.count()
+
+    def get_instance_count(self, obj):
+        return obj.instance_set.count()
+
     class Meta:
         model = ResourceGroup
-        fields = "__all__"
+        fields = ("group_id", "group_name", "user_count", "instance_count")
+
+
+class ResourceGroupDetailSerializer(serializers.ModelSerializer):
+    user_ids = serializers.PrimaryKeyRelatedField(
+        source="users_set", queryset=Users.objects.all(), many=True, required=False
+    )
+    instance_ids = serializers.PrimaryKeyRelatedField(
+        source="instance_set",
+        queryset=Instance.objects.all(),
+        many=True,
+        required=False,
+    )
+    user_count = serializers.SerializerMethodField()
+    instance_count = serializers.SerializerMethodField()
+
+    def validate_group_name(self, value):
+        group_name = value.strip()
+        if not group_name:
+            raise serializers.ValidationError("Group name cannot be blank.")
+        return group_name
+
+    def get_user_count(self, obj):
+        return obj.users_set.count()
+
+    def get_instance_count(self, obj):
+        return obj.instance_set.count()
+
+    def create(self, validated_data):
+        users = validated_data.pop("users_set", [])
+        instances = validated_data.pop("instance_set", [])
+        with transaction.atomic():
+            group = ResourceGroup.objects.create(**validated_data)
+            group.users_set.set(users)
+            group.instance_set.set(instances)
+        return group
+
+    def update(self, instance, validated_data):
+        users = validated_data.pop("users_set", None)
+        instances = validated_data.pop("instance_set", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        with transaction.atomic():
+            instance.save()
+            if users is not None:
+                instance.users_set.set(users)
+            if instances is not None:
+                instance.instance_set.set(instances)
+        return instance
+
+    class Meta:
+        model = ResourceGroup
+        fields = (
+            "group_id",
+            "group_name",
+            "user_ids",
+            "instance_ids",
+            "user_count",
+            "instance_count",
+        )
+
+
+class ResourceGroupUserLookupSerializer(serializers.ModelSerializer):
+    label = serializers.SerializerMethodField()
+
+    def get_label(self, obj):
+        return obj.display or obj.username
+
+    class Meta:
+        model = Users
+        fields = ("id", "username", "display", "label")
+
+
+class ResourceGroupInstanceLookupSerializer(serializers.ModelSerializer):
+    label = serializers.SerializerMethodField()
+
+    def get_label(self, obj):
+        return f"{obj.instance_name} | {obj.db_type} | {obj.host}"
+
+    class Meta:
+        model = Instance
+        fields = ("id", "instance_name", "db_type", "host", "label")
 
 
 class UserAuthSerializer(serializers.Serializer):

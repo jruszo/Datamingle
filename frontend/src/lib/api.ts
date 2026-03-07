@@ -185,6 +185,33 @@ export type GroupRecord = {
   permissions: number[]
 }
 
+export type ResourceGroupRecord = {
+  group_id: number
+  group_name: string
+  user_count: number
+  instance_count: number
+}
+
+export type ResourceGroupDetailRecord = ResourceGroupRecord & {
+  user_ids: number[]
+  instance_ids: number[]
+}
+
+export type ResourceGroupUserLookupRecord = {
+  id: number
+  username: string
+  display: string
+  label: string
+}
+
+export type ResourceGroupInstanceLookupRecord = {
+  id: number
+  instance_name: string
+  db_type: string
+  host: string
+  label: string
+}
+
 export type PermissionRecord = {
   id: number
   name: string
@@ -374,6 +401,78 @@ export function deleteGroup(groupId: number, token: string) {
 export function fetchPermissions(token: string) {
   return apiGet<unknown>('/v1/user/permission/', { token }).then((payload) =>
     extractData<PermissionRecord[]>(payload),
+  )
+}
+
+export function fetchResourceGroups(
+  token: string,
+  options: {
+    page?: number
+    size?: number
+    search?: string
+    ordering?: string
+  } = {},
+) {
+  const params = new URLSearchParams()
+  if (options.page) {
+    params.set('page', `${options.page}`)
+  }
+  if (options.size) {
+    params.set('size', `${options.size}`)
+  }
+  if (options.search?.trim()) {
+    params.set('search', options.search.trim())
+  }
+  if (options.ordering?.trim()) {
+    params.set('ordering', options.ordering.trim())
+  }
+  const queryString = params.toString()
+  const path = queryString ? `/v1/user/resourcegroup/?${queryString}` : '/v1/user/resourcegroup/'
+  return apiGet<unknown>(path, { token }).then((payload) =>
+    extractData<PaginatedResponse<ResourceGroupRecord>>(payload),
+  )
+}
+
+export function fetchResourceGroup(resourceGroupId: number, token: string) {
+  return apiGet<unknown>(`/v1/user/resourcegroup/${resourceGroupId}/`, { token }).then((payload) =>
+    extractData<ResourceGroupDetailRecord>(payload),
+  )
+}
+
+export function createResourceGroup(
+  payload: { group_name: string; user_ids: number[]; instance_ids: number[] },
+  token: string,
+) {
+  return apiPost<unknown>('/v1/user/resourcegroup/', payload, { token }).then((responsePayload) =>
+    extractData<ResourceGroupDetailRecord>(responsePayload),
+  )
+}
+
+export function updateResourceGroup(
+  resourceGroupId: number,
+  payload: { group_name: string; user_ids: number[]; instance_ids: number[] },
+  token: string,
+) {
+  return apiPut<unknown>(`/v1/user/resourcegroup/${resourceGroupId}/`, payload, { token }).then(
+    (responsePayload) => extractData<ResourceGroupDetailRecord>(responsePayload),
+  )
+}
+
+export function deleteResourceGroup(resourceGroupId: number, token: string) {
+  return apiDelete<unknown>(`/v1/user/resourcegroup/${resourceGroupId}/`, { token }).then((payload) =>
+    extractDetail(payload, 'Resource group deleted successfully.'),
+  )
+}
+
+export function fetchResourceGroupUsers(token: string) {
+  return apiGet<unknown>('/v1/user/resourcegroup/users/lookup/', { token }).then((payload) =>
+    extractData<ResourceGroupUserLookupRecord[]>(payload),
+  )
+}
+
+export function fetchResourceGroupInstances(token: string) {
+  return apiGet<unknown>('/v1/user/resourcegroup/instances/lookup/', { token }).then((payload) =>
+    extractData<ResourceGroupInstanceLookupRecord[]>(payload),
   )
 }
 
