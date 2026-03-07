@@ -143,6 +143,14 @@ export function apiPatch<T>(path: string, body: unknown, options: RequestOptions
   return request<T>('PATCH', path, { ...options, body })
 }
 
+export function apiPut<T>(path: string, body: unknown, options: RequestOptions = {}) {
+  return request<T>('PUT', path, { ...options, body })
+}
+
+export function apiDelete<T>(path: string, options: RequestOptions = {}) {
+  return request<T>('DELETE', path, options)
+}
+
 export type ApiEnvelope<T> = {
   detail: string
   data: T
@@ -169,6 +177,20 @@ export type CurrentUserContext = {
   resource_groups: Array<{ group_id: number; group_name: string }>
   permissions: string[]
   two_factor_auth_types: string[]
+}
+
+export type GroupRecord = {
+  id: number
+  name: string
+  permissions: number[]
+}
+
+export type PermissionRecord = {
+  id: number
+  name: string
+  codename: string
+  app_label: string
+  model: string
 }
 
 type DashboardNamedSeries = {
@@ -290,6 +312,69 @@ export function changeCurrentUserPassword(
     },
     { token },
   ).then((payload) => extractDetail(payload, 'Password updated successfully.'))
+}
+
+export function fetchGroups(
+  token: string,
+  options: {
+    page?: number
+    size?: number
+    search?: string
+    ordering?: string
+  } = {},
+) {
+  const params = new URLSearchParams()
+  if (options.page) {
+    params.set('page', `${options.page}`)
+  }
+  if (options.size) {
+    params.set('size', `${options.size}`)
+  }
+  if (options.search?.trim()) {
+    params.set('search', options.search.trim())
+  }
+  if (options.ordering?.trim()) {
+    params.set('ordering', options.ordering.trim())
+  }
+  const queryString = params.toString()
+  const path = queryString ? `/v1/user/group/?${queryString}` : '/v1/user/group/'
+  return apiGet<unknown>(path, { token }).then((payload) =>
+    extractData<PaginatedResponse<GroupRecord>>(payload),
+  )
+}
+
+export function fetchGroup(groupId: number, token: string) {
+  return apiGet<unknown>(`/v1/user/group/${groupId}/`, { token }).then((payload) =>
+    extractData<GroupRecord>(payload),
+  )
+}
+
+export function createGroup(payload: { name: string; permissions: number[] }, token: string) {
+  return apiPost<unknown>('/v1/user/group/', payload, { token }).then((responsePayload) =>
+    extractData<GroupRecord>(responsePayload),
+  )
+}
+
+export function updateGroup(
+  groupId: number,
+  payload: { name: string; permissions: number[] },
+  token: string,
+) {
+  return apiPut<unknown>(`/v1/user/group/${groupId}/`, payload, { token }).then((responsePayload) =>
+    extractData<GroupRecord>(responsePayload),
+  )
+}
+
+export function deleteGroup(groupId: number, token: string) {
+  return apiDelete<unknown>(`/v1/user/group/${groupId}/`, { token }).then((payload) =>
+    extractDetail(payload, 'Group deleted successfully.'),
+  )
+}
+
+export function fetchPermissions(token: string) {
+  return apiGet<unknown>('/v1/user/permission/', { token }).then((payload) =>
+    extractData<PermissionRecord[]>(payload),
+  )
 }
 
 export function fetchDashboard(startDate: string, endDate: string, token: string) {

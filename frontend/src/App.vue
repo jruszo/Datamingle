@@ -3,6 +3,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import {
   ChartNoAxesCombined,
+  ChevronDown,
+  ChevronRight,
   Database,
   FileText,
   LayoutGrid,
@@ -22,24 +24,44 @@ const route = useRoute()
 
 const showAppShell = computed(() => authStore.isAuthenticated)
 const isSidebarCollapsed = ref(false)
+const isSettingsMenuOpen = ref(route.path.startsWith('/settings'))
 
-const navigation = [
+const primaryNavigation = [
   { to: '/', label: 'Dashboard', icon: LayoutGrid },
   { to: '/workflows', label: 'Workflows', icon: FileText },
   { to: '/queries', label: 'Queries', icon: Database },
   { to: '/reports', label: 'Reports', icon: ChartNoAxesCombined },
   { to: '/profile', label: 'Profile', icon: User },
-  { to: '/settings', label: 'Settings', icon: Settings },
 ]
 
+const settingsNavigation = [
+  { to: '/settings/groups', label: 'Permission Groups' },
+]
+
+const isSettingsRouteActive = computed(() => route.path.startsWith('/settings'))
+
+function hasPermission(permission: string) {
+  if (authStore.currentUser?.is_superuser) {
+    return true
+  }
+  return authStore.currentUser?.permissions.includes(permission) ?? false
+}
+
+const canSeeSettingsMenu = computed(() => hasPermission('sql.menu_system'))
+const canSeeGroupManagement = computed(() => canSeeSettingsMenu.value && hasPermission('auth.view_group'))
+
 const pageTitle = computed(() => {
-  const matched = navigation.find((item) => {
+  if (typeof route.meta.title === 'string') {
+    return route.meta.title
+  }
+
+  const matched = primaryNavigation.find((item) => {
     if (item.to === '/') {
       return route.path === '/'
     }
     return route.path.startsWith(item.to)
   })
-  return matched?.label || 'Dashboard'
+  return matched?.label || 'Datamingle'
 })
 
 const currentUserName = computed(() => {
@@ -78,6 +100,16 @@ function toggleSidebar() {
   isSidebarCollapsed.value = !isSidebarCollapsed.value
 }
 
+function toggleSettingsMenu() {
+  if (isSidebarCollapsed.value) {
+    isSidebarCollapsed.value = false
+    isSettingsMenuOpen.value = true
+    return
+  }
+
+  isSettingsMenuOpen.value = !isSettingsMenuOpen.value
+}
+
 async function logout() {
   authStore.clearTokens()
   await router.push('/login')
@@ -92,6 +124,15 @@ watch(
   (token, previousToken) => {
     if (token && token !== previousToken) {
       void loadCurrentUser(true)
+    }
+  },
+)
+
+watch(
+  () => route.path,
+  (path) => {
+    if (path.startsWith('/settings')) {
+      isSettingsMenuOpen.value = true
     }
   },
 )
@@ -122,7 +163,7 @@ watch(
 
         <nav class="flex-1 space-y-1 p-3">
           <RouterLink
-            v-for="item in navigation"
+            v-for="item in primaryNavigation"
             :key="item.to"
             :to="item.to"
             :title="isSidebarCollapsed ? item.label : undefined"
@@ -132,6 +173,40 @@ watch(
             <component :is="item.icon" class="h-4 w-4 shrink-0" />
             <span v-if="!isSidebarCollapsed">{{ item.label }}</span>
           </RouterLink>
+
+          <div v-if="canSeeSettingsMenu" class="space-y-1">
+            <button
+              :class="
+                isSettingsRouteActive
+                  ? 'bg-slate-100 text-slate-900'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              "
+              :title="isSidebarCollapsed ? 'Settings' : undefined"
+              class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition"
+              type="button"
+              @click="toggleSettingsMenu"
+            >
+              <Settings class="h-4 w-4 shrink-0" />
+              <template v-if="!isSidebarCollapsed">
+                <span class="flex-1 text-left">Settings</span>
+                <ChevronDown v-if="isSettingsMenuOpen" class="h-4 w-4" />
+                <ChevronRight v-else class="h-4 w-4" />
+              </template>
+            </button>
+
+            <div v-if="!isSidebarCollapsed && isSettingsMenuOpen" class="space-y-1 pl-10">
+              <RouterLink
+                v-for="item in settingsNavigation"
+                :key="item.to"
+                v-show="canSeeGroupManagement"
+                :to="item.to"
+                class="flex rounded-md px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                active-class="bg-slate-100 font-medium text-slate-900"
+              >
+                {{ item.label }}
+              </RouterLink>
+            </div>
+          </div>
         </nav>
       </aside>
 

@@ -15,7 +15,7 @@ from sql.models import (
     QueryLog,
     ArchiveConfig,
 )
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import Group, Permission
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -90,6 +90,15 @@ class GroupSerializer(serializers.ModelSerializer):
     class Meta:
         model = Group
         fields = "__all__"
+
+
+class PermissionSerializer(serializers.ModelSerializer):
+    app_label = serializers.CharField(source="content_type.app_label", read_only=True)
+    model = serializers.CharField(source="content_type.model", read_only=True)
+
+    class Meta:
+        model = Permission
+        fields = ("id", "name", "codename", "app_label", "model")
 
 
 class ResourceGroupSerializer(serializers.ModelSerializer):
