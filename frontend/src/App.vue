@@ -35,7 +35,8 @@ const primaryNavigation = [
 ]
 
 const settingsNavigation = [
-  { to: '/settings/groups', label: 'Permission Groups' },
+  { to: '/settings/groups', label: 'Permission Groups', isVisible: () => canSeeGroupManagement.value },
+  { to: '/settings/resource-groups', label: 'Resource Groups', isVisible: () => canSeeResourceGroupManagement.value },
 ]
 
 const isSettingsRouteActive = computed(() => route.path.startsWith('/settings'))
@@ -49,6 +50,12 @@ function hasPermission(permission: string) {
 
 const canSeeSettingsMenu = computed(() => hasPermission('sql.menu_system'))
 const canSeeGroupManagement = computed(() => canSeeSettingsMenu.value && hasPermission('auth.view_group'))
+const canSeeResourceGroupManagement = computed(
+  () => canSeeSettingsMenu.value && hasPermission('sql.view_resourcegroup'),
+)
+const visibleSettingsNavigation = computed(() =>
+  settingsNavigation.filter((item) => item.isVisible()),
+)
 
 const pageTitle = computed(() => {
   if (typeof route.meta.title === 'string') {
@@ -196,9 +203,8 @@ watch(
 
             <div v-if="!isSidebarCollapsed && isSettingsMenuOpen" class="space-y-1 pl-10">
               <RouterLink
-                v-for="item in settingsNavigation"
+                v-for="item in visibleSettingsNavigation"
                 :key="item.to"
-                v-show="canSeeGroupManagement"
                 :to="item.to"
                 class="flex rounded-md px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
                 active-class="bg-slate-100 font-medium text-slate-900"

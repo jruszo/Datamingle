@@ -49,6 +49,14 @@ urlpatterns = [
     path("v1/user/group/", api_user.GroupList.as_view()),
     path("v1/user/group/<int:pk>/", api_user.GroupDetail.as_view()),
     path("v1/user/permission/", api_user.PermissionList.as_view()),
+    path(
+        "v1/user/resourcegroup/users/lookup/",
+        api_user.ResourceGroupUserLookup.as_view(),
+    ),
+    path(
+        "v1/user/resourcegroup/instances/lookup/",
+        api_user.ResourceGroupInstanceLookup.as_view(),
+    ),
     path("v1/user/resourcegroup/", api_user.ResourceGroupList.as_view()),
     path("v1/user/resourcegroup/<int:pk>/", api_user.ResourceGroupDetail.as_view()),
     path("v1/user/auth/", api_user.UserAuth.as_view()),

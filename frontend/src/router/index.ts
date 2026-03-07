@@ -15,6 +15,8 @@ import QueriesView from '@/views/QueriesView.vue'
 import ReportsView from '@/views/ReportsView.vue'
 import SettingsGroupsView from '@/views/SettingsGroupsView.vue'
 import SettingsGroupDetailView from '@/views/SettingsGroupDetailView.vue'
+import SettingsResourceGroupsView from '@/views/SettingsResourceGroupsView.vue'
+import SettingsResourceGroupDetailView from '@/views/SettingsResourceGroupDetailView.vue'
 import WorkflowsView from '@/views/WorkflowsView.vue'
 
 const router = createRouter({
@@ -30,6 +32,9 @@ const router = createRouter({
     { path: '/settings/groups', name: 'settings-groups', component: SettingsGroupsView, meta: { title: 'Permission Groups' } },
     { path: '/settings/groups/new', name: 'settings-groups-new', component: SettingsGroupDetailView, meta: { title: 'Permission Groups' } },
     { path: '/settings/groups/:groupId', name: 'settings-groups-detail', component: SettingsGroupDetailView, meta: { title: 'Permission Groups' } },
+    { path: '/settings/resource-groups', name: 'settings-resource-groups', component: SettingsResourceGroupsView, meta: { title: 'Resource Groups' } },
+    { path: '/settings/resource-groups/new', name: 'settings-resource-groups-new', component: SettingsResourceGroupDetailView, meta: { title: 'Resource Groups' } },
+    { path: '/settings/resource-groups/:groupId', name: 'settings-resource-groups-detail', component: SettingsResourceGroupDetailView, meta: { title: 'Resource Groups' } },
     { path: '/groups/management', redirect: { name: 'settings-groups' } },
     { path: '/groups/management/new', redirect: { name: 'settings-groups-new' } },
     { path: '/groups/management/:groupId', redirect: (to) => ({ name: 'settings-groups-detail', params: { groupId: to.params.groupId } }) },

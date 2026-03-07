@@ -77,8 +77,20 @@ class TestUser(APITestCase):
         )
         self.user.set_password("test_password")
         self.user.save()
+        self.member_user = User.objects.create(
+            username="group_member", display="Group Member", is_active=True
+        )
         self.group = Group.objects.create(id=1, name="DBA")
         self.res_group = ResourceGroup.objects.create(group_id=1, group_name="test")
+        self.instance = Instance.objects.create(
+            instance_name="test_instance",
+            type="master",
+            db_type="mysql",
+            host="127.0.0.1",
+            port=3306,
+            user="root",
+            password="pwd",
+        )
         self.view_group_permission = Permission.objects.get(codename="view_group")
         self.menu_system_permission = Permission.objects.get(codename="menu_system")
         r = self.client.post(
@@ -90,9 +102,10 @@ class TestUser(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION="Bearer " + self.token)
 
     def tearDown(self):
-        self.user.delete()
-        self.group.delete()
-        self.res_group.delete()
+        Instance.objects.all().delete()
+        ResourceGroup.objects.all().delete()
+        Group.objects.all().delete()
+        User.objects.filter(id__in=[self.user.id, self.member_user.id]).delete()
         SysConfig().purge()
 
     def test_user_list_not_gated_by_whitelist(self):
@@ -105,7 +118,7 @@ class TestUser(APITestCase):
         """Test getting user list."""
         r = self.client.get("/api/v1/user/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(response_data(r)["count"], 1)
+        self.assertEqual(response_data(r)["count"], 2)
 
     def test_get_current_user_context(self):
         """Test SPA bootstrap current-user endpoint."""
@@ -308,23 +321,84 @@ class TestUser(APITestCase):
 
     def test_get_resource_group_list(self):
         """Test getting resource group list."""
+        self.res_group.users_set.add(self.member_user)
+        self.res_group.instance_set.add(self.instance)
         r = self.client.get("/api/v1/user/resourcegroup/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(response_data(r)["count"], 1)
+        payload = response_data(r)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["group_name"], "test")
+        self.assertEqual(payload["results"][0]["user_count"], 1)
+        self.assertEqual(payload["results"][0]["instance_count"], 1)
+
+    def test_get_resource_group_list_with_search_and_deleted_filter(self):
+        """Search should match name or ID and skip deleted groups."""
+        deleted_group = ResourceGroup.objects.create(group_name="hidden", is_deleted=1)
+        visible_group = ResourceGroup.objects.create(group_name="analytics")
+        r = self.client.get(
+            f"/api/v1/user/resourcegroup/?search={visible_group.group_id}",
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["group_name"], "analytics")
+        self.assertEqual(
+            ResourceGroup.objects.filter(group_id=deleted_group.group_id).count(), 1
+        )
+
+    def test_get_resource_group_list_with_ordering(self):
+        """Ordering supports membership counts."""
+        busy_group = ResourceGroup.objects.create(group_name="busy")
+        busy_group.users_set.add(self.user, self.member_user)
+        idle_group = ResourceGroup.objects.create(group_name="idle")
+        idle_group.instance_set.add(self.instance)
+
+        r = self.client.get(
+            "/api/v1/user/resourcegroup/?ordering=-user_count",
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["results"][0]["group_name"], "busy")
+
+    def test_get_resource_group_detail(self):
+        """Test getting a single resource group with memberships."""
+        self.res_group.users_set.add(self.member_user)
+        self.res_group.instance_set.add(self.instance)
+
+        r = self.client.get(
+            f"/api/v1/user/resourcegroup/{self.res_group.group_id}/", format="json"
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["group_id"], self.res_group.group_id)
+        self.assertEqual(payload["user_ids"], [self.member_user.id])
+        self.assertEqual(payload["instance_ids"], [self.instance.id])
+        self.assertEqual(payload["user_count"], 1)
+        self.assertEqual(payload["instance_count"], 1)
 
     def test_create_resource_group(self):
         """Test creating resource group."""
         json_data = {
             "group_name": "prod",
-            "ding_webhook": "https://oapi.dingtalk.com/robot/send?access_token=123",
+            "user_ids": [self.member_user.id],
+            "instance_ids": [self.instance.id],
         }
         r = self.client.post("/api/v1/user/resourcegroup/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response_data(r)["group_name"], "prod")
+        payload = response_data(r)
+        self.assertEqual(payload["group_name"], "prod")
+        self.assertEqual(payload["user_ids"], [self.member_user.id])
+        self.assertEqual(payload["instance_ids"], [self.instance.id])
 
     def test_update_resource_group(self):
         """Test updating resource group."""
-        json_data = {"group_name": "Updated Resource Group Name"}
+        json_data = {
+            "group_name": "Updated Resource Group Name",
+            "user_ids": [self.member_user.id],
+            "instance_ids": [self.instance.id],
+        }
         r = self.client.put(
             f"/api/v1/user/resourcegroup/{self.res_group.group_id}/",
             json_data,
@@ -333,6 +407,12 @@ class TestUser(APITestCase):
         group = ResourceGroup.objects.get(pk=self.res_group.group_id)
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(group.group_name, "Updated Resource Group Name")
+        self.assertEqual(
+            list(group.users_set.values_list("id", flat=True)), [self.member_user.id]
+        )
+        self.assertEqual(
+            list(group.instance_set.values_list("id", flat=True)), [self.instance.id]
+        )
 
     def test_delete_resource_group(self):
         """Test deleting resource group."""
@@ -340,7 +420,33 @@ class TestUser(APITestCase):
             f"/api/v1/user/resourcegroup/{self.res_group.group_id}/", format="json"
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(Group.objects.filter(name="test").count(), 0)
+        self.assertEqual(
+            ResourceGroup.objects.filter(group_id=self.res_group.group_id).count(), 0
+        )
+
+    def test_resource_group_user_lookup(self):
+        """Lookup returns lightweight user records."""
+        r = self.client.get(
+            "/api/v1/user/resourcegroup/users/lookup/?search=group",
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["id"], self.member_user.id)
+        self.assertEqual(payload[0]["label"], "Group Member")
+
+    def test_resource_group_instance_lookup(self):
+        """Lookup returns lightweight instance records."""
+        r = self.client.get(
+            "/api/v1/user/resourcegroup/instances/lookup/?search=test_instance",
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["id"], self.instance.id)
+        self.assertIn("test_instance", payload[0]["label"])
 
     def test_user_auth(self):
         """Test user authentication check."""
