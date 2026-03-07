@@ -79,6 +79,8 @@ class TestUser(APITestCase):
         self.user.save()
         self.group = Group.objects.create(id=1, name="DBA")
         self.res_group = ResourceGroup.objects.create(group_id=1, group_name="test")
+        self.view_group_permission = Permission.objects.get(codename="view_group")
+        self.menu_system_permission = Permission.objects.get(codename="menu_system")
         r = self.client.post(
             "/api/auth/token/",
             {"username": "test_user", "password": "test_password"},
@@ -229,28 +231,80 @@ class TestUser(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(response_data(r)["count"], 1)
 
+    def test_get_user_group_list_with_search(self):
+        """Test searching user groups by name."""
+        Group.objects.create(name="RD")
+        r = self.client.get("/api/v1/user/group/?search=rd", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["name"], "RD")
+
+    def test_get_user_group_list_with_ordering(self):
+        """Test ordering user groups by name descending."""
+        Group.objects.create(name="AAA")
+        r = self.client.get("/api/v1/user/group/?ordering=-name", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["results"][0]["name"], "DBA")
+
     def test_create_user_group(self):
         """Test creating user group."""
-        json_data = {"name": "RD"}
+        json_data = {"name": "RD", "permissions": [self.menu_system_permission.id]}
         r = self.client.post("/api/v1/user/group/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response_data(r)["name"], "RD")
+        self.assertEqual(
+            response_data(r)["permissions"], [self.menu_system_permission.id]
+        )
+
+    def test_get_user_group_detail(self):
+        """Test getting a single user group with permissions."""
+        self.group.permissions.add(self.menu_system_permission)
+        r = self.client.get(f"/api/v1/user/group/{self.group.id}/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(response_data(r)["id"], self.group.id)
+        self.assertEqual(
+            response_data(r)["permissions"], [self.menu_system_permission.id]
+        )
 
     def test_update_user_group(self):
         """Test updating user group."""
-        json_data = {"name": "Updated Group Name"}
+        json_data = {
+            "name": "Updated Group Name",
+            "permissions": [self.menu_system_permission.id],
+        }
         r = self.client.put(
             f"/api/v1/user/group/{self.group.id}/", json_data, format="json"
         )
         group = Group.objects.get(pk=self.group.id)
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(group.name, "Updated Group Name")
+        self.assertEqual(
+            list(group.permissions.values_list("id", flat=True)),
+            [self.menu_system_permission.id],
+        )
 
     def test_delete_user_group(self):
         """Test deleting user group."""
         r = self.client.delete(f"/api/v1/user/group/{self.group.id}/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(Group.objects.filter(name="DBA").count(), 0)
+
+    def test_get_permission_catalog(self):
+        """Test getting assignable permission catalog."""
+        r = self.client.get("/api/v1/user/permission/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        permissions = response_data(r)
+        self.assertGreater(len(permissions), 0)
+        matching_permission = next(
+            permission
+            for permission in permissions
+            if permission["id"] == self.view_group_permission.id
+        )
+        self.assertEqual(matching_permission["codename"], "view_group")
+        self.assertEqual(matching_permission["app_label"], "auth")
+        self.assertEqual(matching_permission["model"], "group")
 
     def test_get_resource_group_list(self):
         """Test getting resource group list."""

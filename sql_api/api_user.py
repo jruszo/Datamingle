@@ -6,6 +6,7 @@ from .serializers import (
     UserSerializer,
     UserDetailSerializer,
     GroupSerializer,
+    PermissionSerializer,
     ResourceGroupSerializer,
     CurrentUserSerializer,
     CurrentUserProfileUpdateSerializer,
@@ -19,7 +20,7 @@ from .pagination import CustomizedPagination
 from .filters import UserFilter
 from .response import success_response
 from django_redis import get_redis_connection
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import Group, Permission
 from django.contrib.auth import authenticate
 from django.http import Http404
 from sql.models import Users, ResourceGroup, TwoFactorAuthConfig
@@ -219,6 +220,16 @@ class GroupList(generics.ListAPIView):
     serializer_class = GroupSerializer
     queryset = Group.objects.all().order_by("id")
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        search = self.request.query_params.get("search", "").strip()
+        ordering = self.request.query_params.get("ordering", "").strip()
+        if search:
+            queryset = queryset.filter(name__icontains=search)
+        if ordering in {"id", "-id", "name", "-name"}:
+            queryset = queryset.order_by(ordering)
+        return queryset
+
     @extend_schema(
         summary="Group List",
         request=GroupSerializer,
@@ -226,8 +237,14 @@ class GroupList(generics.ListAPIView):
         description="List all groups (filtering, pagination).",
     )
     def get(self, request):
-        _require_any_permission(request, "sql.menu_system", "auth.view_group")
-        groups = self.filter_queryset(self.queryset)
+        _require_any_permission(
+            request,
+            "sql.menu_system",
+            "auth.view_group",
+            "auth.add_group",
+            "auth.change_group",
+        )
+        groups = self.filter_queryset(self.get_queryset())
         page_groups = self.paginate_queryset(queryset=groups)
         serializer_obj = self.get_serializer(page_groups, many=True)
         return self.get_paginated_response(serializer_obj.data)
@@ -263,6 +280,23 @@ class GroupDetail(views.APIView):
             raise Http404
 
     @extend_schema(
+        summary="Group Detail",
+        responses={200: GroupSerializer},
+        description="Get a group and its assigned permissions.",
+    )
+    def get(self, request, pk):
+        _require_any_permission(
+            request,
+            "sql.menu_system",
+            "auth.view_group",
+            "auth.change_group",
+            "auth.delete_group",
+        )
+        group = self.get_object(pk)
+        serializer = GroupSerializer(group)
+        return success_response(data=serializer.data)
+
+    @extend_schema(
         summary="Update Group",
         request=GroupSerializer,
         responses={200: GroupSerializer},
@@ -283,6 +317,33 @@ class GroupDetail(views.APIView):
         group = self.get_object(pk)
         group.delete()
         return success_response()
+
+
+class PermissionList(views.APIView):
+    """
+    List assignable Django permissions.
+    """
+
+    serializer_class = PermissionSerializer
+
+    @extend_schema(
+        summary="Permission List",
+        responses={200: PermissionSerializer(many=True)},
+        description="List all assignable Django permissions.",
+    )
+    def get(self, request):
+        _require_any_permission(
+            request,
+            "sql.menu_system",
+            "auth.view_group",
+            "auth.add_group",
+            "auth.change_group",
+        )
+        permissions = Permission.objects.select_related("content_type").order_by(
+            "content_type__app_label", "content_type__model", "name"
+        )
+        serializer = PermissionSerializer(permissions, many=True)
+        return success_response(data=serializer.data)
 
 
 class ResourceGroupList(generics.ListAPIView):

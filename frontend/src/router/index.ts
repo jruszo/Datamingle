@@ -13,19 +13,26 @@ import LoginView from '@/views/LoginView.vue'
 import ProfileView from '@/views/ProfileView.vue'
 import QueriesView from '@/views/QueriesView.vue'
 import ReportsView from '@/views/ReportsView.vue'
-import SettingsView from '@/views/SettingsView.vue'
+import SettingsGroupsView from '@/views/SettingsGroupsView.vue'
+import SettingsGroupDetailView from '@/views/SettingsGroupDetailView.vue'
 import WorkflowsView from '@/views/WorkflowsView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    { path: '/', name: 'home', component: HomeView },
-    { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
-    { path: '/workflows', name: 'workflows', component: WorkflowsView },
-    { path: '/queries', name: 'queries', component: QueriesView },
-    { path: '/reports', name: 'reports', component: ReportsView },
-    { path: '/profile', name: 'profile', component: ProfileView },
-    { path: '/settings', name: 'settings', component: SettingsView },
+    { path: '/', name: 'home', component: HomeView, meta: { title: 'Dashboard' } },
+    { path: '/login', name: 'login', component: LoginView, meta: { public: true, title: 'Login' } },
+    { path: '/workflows', name: 'workflows', component: WorkflowsView, meta: { title: 'Workflows' } },
+    { path: '/queries', name: 'queries', component: QueriesView, meta: { title: 'Queries' } },
+    { path: '/reports', name: 'reports', component: ReportsView, meta: { title: 'Reports' } },
+    { path: '/profile', name: 'profile', component: ProfileView, meta: { title: 'Profile' } },
+    { path: '/settings', redirect: { name: 'settings-groups' } },
+    { path: '/settings/groups', name: 'settings-groups', component: SettingsGroupsView, meta: { title: 'Permission Groups' } },
+    { path: '/settings/groups/new', name: 'settings-groups-new', component: SettingsGroupDetailView, meta: { title: 'Permission Groups' } },
+    { path: '/settings/groups/:groupId', name: 'settings-groups-detail', component: SettingsGroupDetailView, meta: { title: 'Permission Groups' } },
+    { path: '/groups/management', redirect: { name: 'settings-groups' } },
+    { path: '/groups/management/new', redirect: { name: 'settings-groups-new' } },
+    { path: '/groups/management/:groupId', redirect: (to) => ({ name: 'settings-groups-detail', params: { groupId: to.params.groupId } }) },
   ],
 })
 
