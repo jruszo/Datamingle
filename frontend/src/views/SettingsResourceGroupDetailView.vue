@@ -42,6 +42,7 @@ const selectedInstanceSelection = ref<number[]>([])
 const isLoading = ref(false)
 const isSaving = ref(false)
 const isDeleting = ref(false)
+const pageNotice = ref('')
 const pageError = ref('')
 const formError = ref('')
 const formSuccess = ref('')
@@ -291,6 +292,7 @@ function updateSelection(
 
 async function loadPage() {
   isLoading.value = true
+  pageNotice.value = ''
   pageError.value = ''
   formError.value = ''
   formSuccess.value = ''
@@ -304,6 +306,10 @@ async function loadPage() {
 
   try {
     await authStore.loadCurrentUser()
+
+    if (isCreateMode.value && route.query.reason === 'inventory-requires-resource-group') {
+      pageNotice.value = 'A resource group is required before you can add an instance. Create one here first.'
+    }
 
     if (!canViewResourceGroups.value && !canCreateResourceGroups.value && !canEditResourceGroups.value) {
       pageError.value = 'You do not have permission to access Datamingle resource group management.'
@@ -460,6 +466,12 @@ watch(
 
         <p v-if="pageError" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {{ pageError }}
+        </p>
+        <p
+          v-else-if="pageNotice"
+          class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+        >
+          {{ pageNotice }}
         </p>
         <p v-else-if="formError" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {{ formError }}

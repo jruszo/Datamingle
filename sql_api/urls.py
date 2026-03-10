@@ -65,6 +65,15 @@ urlpatterns = [
     path("v1/user/2fa/save/", api_user.TwoFASave.as_view()),
     path("v1/user/2fa/verify/", api_user.TwoFAVerify.as_view()),
     path("v1/instance/", api_instance.InstanceList.as_view()),
+    path("v1/instance/metadata/", api_instance.InstanceMetadata.as_view()),
+    path(
+        "v1/instance/test-connection/",
+        api_instance.InstanceDraftConnectionTest.as_view(),
+    ),
+    path(
+        "v1/instance/<int:pk>/test-connection/",
+        api_instance.InstanceConnectionTest.as_view(),
+    ),
     path("v1/instance/<int:pk>/", api_instance.InstanceDetail.as_view()),
     path("v1/instance/resource/", api_instance.InstanceResource.as_view()),
     path("v1/instance/tunnel/", api_instance.TunnelList.as_view()),

@@ -1171,6 +1171,8 @@ class TestInstance(APITestCase):
     def tearDown(self):
         self.user.delete()
         Instance.objects.all().delete()
+        ResourceGroup.objects.all().delete()
+        InstanceTag.objects.all().delete()
         AliyunRdsConfig.objects.all().delete()
         CloudAccessKey.objects.all().delete()
         Tunnel.objects.all().delete()
@@ -1181,6 +1183,80 @@ class TestInstance(APITestCase):
         r = self.client.get("/api/v1/instance/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(response_data(r)["count"], 1)
+
+    def test_get_instance_list_with_search_and_filters(self):
+        """Search and filters should match legacy inventory behavior."""
+        read_tag = InstanceTag.objects.create(
+            tag_code="read_only", tag_name="Read Only", active=True
+        )
+        prod_tag = InstanceTag.objects.create(
+            tag_code="prod", tag_name="Production", active=True
+        )
+        self.ins.instance_tag.add(read_tag, prod_tag)
+        other_instance = Instance.objects.create(
+            instance_name="analytics",
+            type="master",
+            db_type="pgsql",
+            host="analytics-db",
+            port=5432,
+            user="reader",
+            password="secret",
+        )
+        other_instance.instance_tag.add(read_tag)
+
+        r = self.client.get(
+            "/api/v1/instance/",
+            {
+                "search": "some",
+                "type": "slave",
+                "db_type": "mysql",
+                "tags": [str(read_tag.id), str(prod_tag.id)],
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["instance_name"], "some_ins")
+
+    def test_get_instance_list_with_ordering(self):
+        """Ordering should support the SPA table headers."""
+        Instance.objects.create(
+            instance_name="aaa_ins",
+            type="master",
+            db_type="mysql",
+            host="db-a",
+            port=3307,
+            user="z_user",
+            password="secret",
+        )
+
+        r = self.client.get("/api/v1/instance/?ordering=instance_name", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["results"][0]["instance_name"], "aaa_ins")
+
+    def test_get_instance_metadata(self):
+        """Metadata should return list and create-form dependencies."""
+        active_tag = InstanceTag.objects.create(
+            tag_code="ops", tag_name="Operations", active=True
+        )
+        InstanceTag.objects.create(tag_code="hidden", tag_name="Hidden", active=False)
+        visible_group = ResourceGroup.objects.create(group_name="Visible Group")
+        ResourceGroup.objects.create(group_name="Deleted Group", is_deleted=1)
+
+        r = self.client.get("/api/v1/instance/metadata/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertTrue(
+            any(item["value"] == "master" for item in payload["instance_types"])
+        )
+        self.assertTrue(any(item["value"] == "mysql" for item in payload["db_types"]))
+        self.assertEqual(payload["tags"][0]["id"], active_tag.id)
+        self.assertEqual(payload["tunnels"][0]["id"], self.tunnel.id)
+        self.assertEqual(
+            payload["resource_groups"][0]["group_id"], visible_group.group_id
+        )
 
     def test_create_instance(self):
         """Test creating instance."""
@@ -1194,6 +1270,157 @@ class TestInstance(APITestCase):
         r = self.client.post("/api/v1/instance/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response_data(r)["instance_name"], "test_ins")
+
+    def test_get_instance_detail(self):
+        """Detail should expose the fields needed by the SPA edit form."""
+        tag = InstanceTag.objects.create(
+            tag_code="detail", tag_name="Detail", active=True
+        )
+        resource_group = ResourceGroup.objects.create(group_name="Detail Group")
+        self.ins.instance_tag.add(tag)
+        self.ins.resource_group.add(resource_group)
+        self.ins.show_db_name_regex = "^detail_.*$"
+        self.ins.denied_db_name_regex = "^mysql$"
+        self.ins.charset = "utf8mb4"
+        self.ins.tunnel = self.tunnel
+        self.ins.save(
+            update_fields=[
+                "show_db_name_regex",
+                "denied_db_name_regex",
+                "charset",
+                "tunnel",
+            ]
+        )
+
+        r = self.client.get(f"/api/v1/instance/{self.ins.id}/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+        payload = response_data(r)
+        self.assertEqual(payload["id"], self.ins.id)
+        self.assertEqual(payload["instance_name"], "some_ins")
+        self.assertEqual(payload["show_db_name_regex"], "^detail_.*$")
+        self.assertEqual(payload["denied_db_name_regex"], "^mysql$")
+        self.assertEqual(payload["charset"], "utf8mb4")
+        self.assertEqual(payload["tunnel_id"], self.tunnel.id)
+        self.assertEqual(payload["resource_group_ids"], [resource_group.group_id])
+        self.assertEqual(payload["instance_tag_ids"], [tag.id])
+
+    def test_create_instance_with_relationships(self):
+        """Create should accept SPA relationship IDs and optional fields."""
+        tag = InstanceTag.objects.create(
+            tag_code="inventory", tag_name="Inventory", active=True
+        )
+        resource_group = ResourceGroup.objects.create(group_name="Inventory Group")
+        json_data = {
+            "instance_name": "inventory_ins",
+            "type": "master",
+            "db_type": "mysql",
+            "host": "inventory-host",
+            "port": 3306,
+            "user": "inventory_user",
+            "password": "secret",
+            "is_ssl": True,
+            "verify_ssl": False,
+            "db_name": "inventory_db",
+            "charset": "utf8mb4",
+            "show_db_name_regex": "^inventory_.*$",
+            "denied_db_name_regex": "^mysql$",
+            "tunnel_id": self.tunnel.id,
+            "resource_group_ids": [resource_group.group_id],
+            "instance_tag_ids": [tag.id],
+        }
+        r = self.client.post("/api/v1/instance/", json_data, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+
+        payload = response_data(r)
+        self.assertEqual(payload["instance_name"], "inventory_ins")
+        self.assertEqual(payload["tunnel_id"], self.tunnel.id)
+        self.assertEqual(payload["resource_group_ids"], [resource_group.group_id])
+        self.assertEqual(payload["instance_tag_ids"], [tag.id])
+
+        instance = Instance.objects.get(instance_name="inventory_ins")
+        self.assertEqual(instance.tunnel_id, self.tunnel.id)
+        self.assertEqual(
+            list(instance.resource_group.values_list("group_id", flat=True)),
+            [resource_group.group_id],
+        )
+        self.assertEqual(
+            list(instance.instance_tag.values_list("id", flat=True)),
+            [tag.id],
+        )
+
+    @patch("sql_api.api_instance.get_engine")
+    def test_test_draft_instance_connection(self, mock_get_engine):
+        """Draft connection testing should validate unsaved form data."""
+        mock_engine = Mock()
+        mock_result = Mock(error="")
+        mock_engine.test_connection.return_value = mock_result
+        mock_get_engine.return_value = mock_engine
+
+        payload = {
+            "instance_name": "draft_mysql",
+            "type": "master",
+            "db_type": "mysql",
+            "host": "draft-host",
+            "port": 3306,
+            "user": "draft_user",
+            "password": "draft_password",
+            "is_ssl": True,
+            "verify_ssl": False,
+            "db_name": "draft_db",
+            "charset": "utf8mb4",
+            "show_db_name_regex": "^draft_.*$",
+            "denied_db_name_regex": "^mysql$",
+            "tunnel_id": self.tunnel.id,
+        }
+        r = self.client.post(
+            "/api/v1/instance/test-connection/",
+            payload,
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            Instance.objects.filter(instance_name="draft_mysql").count(), 0
+        )
+
+        payload = response_data(r)
+        self.assertEqual(payload["success"], True)
+        self.assertEqual(payload["message"], "Connection successful.")
+
+        instance = mock_get_engine.call_args.kwargs["instance"]
+        self.assertEqual(instance.instance_name, "draft_mysql")
+        self.assertEqual(instance.host, "draft-host")
+        self.assertEqual(instance.port, 3306)
+        self.assertEqual(instance.tunnel_id, self.tunnel.id)
+
+    @patch("sql_api.api_instance.get_engine")
+    def test_test_draft_instance_connection_returns_validation_error(
+        self, mock_get_engine
+    ):
+        """Draft connection testing should surface engine failures without saving."""
+        mock_engine = Mock()
+        mock_result = Mock(error="access denied")
+        mock_engine.test_connection.return_value = mock_result
+        mock_get_engine.return_value = mock_engine
+
+        r = self.client.post(
+            "/api/v1/instance/test-connection/",
+            {
+                "instance_name": "draft_mysql",
+                "type": "master",
+                "db_type": "mysql",
+                "host": "draft-host",
+                "port": 3306,
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn(
+            "Unable to connect to instance. access denied", r.json()["errors"]
+        )
+        self.assertEqual(
+            Instance.objects.filter(instance_name="draft_mysql").count(), 0
+        )
 
     def test_update_instance(self):
         """Test updating instance."""
@@ -1253,6 +1480,34 @@ class TestInstance(APITestCase):
         r = self.client.post("/api/v1/instance/tunnel/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response_data(r)["tunnel_name"], "tunnel_test")
+
+    def test_test_instance_connection_requires_superuser(self):
+        """Connection testing stays restricted to superusers."""
+        r = self.client.post(
+            f"/api/v1/instance/{self.ins.id}/test-connection/",
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    @patch("sql_api.api_instance.get_engine")
+    def test_test_instance_connection(self, mock_get_engine):
+        """Superusers can run the SPA connection test action."""
+        self.user.is_superuser = True
+        self.user.save(update_fields=["is_superuser"])
+
+        mock_engine = Mock()
+        mock_result = Mock(error="")
+        mock_engine.test_connection.return_value = mock_result
+        mock_get_engine.return_value = mock_engine
+
+        r = self.client.post(
+            f"/api/v1/instance/{self.ins.id}/test-connection/",
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["success"], True)
+        self.assertEqual(payload["message"], "Connection successful.")
 
     @patch("sql_api.api_instance.get_engine")
     def test_get_instance_resource(self, mock_get_engine):

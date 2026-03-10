@@ -212,6 +212,93 @@ export type ResourceGroupInstanceLookupRecord = {
   label: string
 }
 
+export type InstanceInventoryRecord = {
+  id: number
+  instance_name: string
+  type: string
+  db_type: string
+  host: string
+  port: number
+  user: string
+  is_ssl: boolean
+  verify_ssl: boolean
+  db_name: string
+  charset: string
+  service_name: string | null
+  sid: string | null
+  tunnel_id: number | null
+  resource_group_ids: number[]
+  instance_tag_ids: number[]
+}
+
+export type InstanceOptionRecord = {
+  value: string
+  label: string
+}
+
+export type InstanceTagOptionRecord = {
+  id: number
+  tag_name: string
+  label: string
+}
+
+export type TunnelOptionRecord = {
+  id: number
+  tunnel_name: string
+  host: string
+  port: number
+  label: string
+}
+
+export type ResourceGroupOptionRecord = {
+  group_id: number
+  group_name: string
+  label: string
+}
+
+export type InstanceInventoryMetadata = {
+  instance_types: InstanceOptionRecord[]
+  db_types: InstanceOptionRecord[]
+  tags: InstanceTagOptionRecord[]
+  tunnels: TunnelOptionRecord[]
+  resource_groups: ResourceGroupOptionRecord[]
+}
+
+export type InstanceInventoryFilters = {
+  page?: number
+  size?: number
+  search?: string
+  type?: string
+  db_type?: string
+  tag_ids?: number[]
+  ordering?: string
+}
+
+export type InstanceCreatePayload = {
+  instance_name: string
+  type: string
+  db_type: string
+  host: string
+  port: number
+  user: string
+  password: string
+  is_ssl: boolean
+  verify_ssl: boolean
+  db_name: string
+  show_db_name_regex: string
+  denied_db_name_regex: string
+  charset: string
+  service_name: string
+  sid: string
+  tunnel_id: number | null
+  resource_group_ids: number[]
+  instance_tag_ids: number[]
+}
+
+export type InstanceEditorRecord = InstanceCreatePayload & {
+  id: number
+}
+
 export type PermissionRecord = {
   id: number
   name: string
@@ -473,6 +560,78 @@ export function fetchResourceGroupUsers(token: string) {
 export function fetchResourceGroupInstances(token: string) {
   return apiGet<unknown>('/v1/user/resourcegroup/instances/lookup/', { token }).then((payload) =>
     extractData<ResourceGroupInstanceLookupRecord[]>(payload),
+  )
+}
+
+export function fetchInstanceInventory(
+  token: string,
+  options: InstanceInventoryFilters = {},
+) {
+  const params = new URLSearchParams()
+  if (options.page) {
+    params.set('page', `${options.page}`)
+  }
+  if (options.size) {
+    params.set('size', `${options.size}`)
+  }
+  if (options.search?.trim()) {
+    params.set('search', options.search.trim())
+  }
+  if (options.type?.trim()) {
+    params.set('type', options.type.trim())
+  }
+  if (options.db_type?.trim()) {
+    params.set('db_type', options.db_type.trim())
+  }
+  if (options.ordering?.trim()) {
+    params.set('ordering', options.ordering.trim())
+  }
+  if (options.tag_ids?.length) {
+    for (const tagId of options.tag_ids) {
+      params.append('tags', `${tagId}`)
+    }
+  }
+
+  const queryString = params.toString()
+  const path = queryString ? `/v1/instance/?${queryString}` : '/v1/instance/'
+  return apiGet<unknown>(path, { token }).then((payload) =>
+    extractData<PaginatedResponse<InstanceInventoryRecord>>(payload),
+  )
+}
+
+export function fetchInstanceInventoryMetadata(token: string) {
+  return apiGet<unknown>('/v1/instance/metadata/', { token }).then((payload) =>
+    extractData<InstanceInventoryMetadata>(payload),
+  )
+}
+
+export function createInstance(payload: InstanceCreatePayload, token: string) {
+  return apiPost<unknown>('/v1/instance/', payload, { token }).then((responsePayload) =>
+    extractData<InstanceInventoryRecord>(responsePayload),
+  )
+}
+
+export function fetchInstance(instanceId: number, token: string) {
+  return apiGet<unknown>(`/v1/instance/${instanceId}/`, { token }).then((payload) =>
+    extractData<InstanceEditorRecord>(payload),
+  )
+}
+
+export function updateInstance(instanceId: number, payload: InstanceCreatePayload, token: string) {
+  return apiPut<unknown>(`/v1/instance/${instanceId}/`, payload, { token }).then((responsePayload) =>
+    extractData<InstanceEditorRecord>(responsePayload),
+  )
+}
+
+export function testDraftInstanceConnection(payload: InstanceCreatePayload, token: string) {
+  return apiPost<unknown>('/v1/instance/test-connection/', payload, { token }).then((responsePayload) =>
+    extractDetail(responsePayload, 'Connection successful.'),
+  )
+}
+
+export function testInstanceConnection(instanceId: number, token: string) {
+  return apiPost<unknown>(`/v1/instance/${instanceId}/test-connection/`, {}, { token }).then((payload) =>
+    extractDetail(payload, 'Connection successful.'),
   )
 }
 
