@@ -11,6 +11,7 @@ import {
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
+  Server,
   Settings,
   User,
 } from 'lucide-vue-next'
@@ -27,11 +28,12 @@ const isSidebarCollapsed = ref(false)
 const isSettingsMenuOpen = ref(route.path.startsWith('/settings'))
 
 const primaryNavigation = [
-  { to: '/', label: 'Dashboard', icon: LayoutGrid },
-  { to: '/workflows', label: 'Workflows', icon: FileText },
-  { to: '/queries', label: 'Queries', icon: Database },
-  { to: '/reports', label: 'Reports', icon: ChartNoAxesCombined },
-  { to: '/profile', label: 'Profile', icon: User },
+  { to: '/', label: 'Dashboard', icon: LayoutGrid, isVisible: () => true },
+  { to: '/inventory', label: 'Inventory', icon: Server, isVisible: () => canSeeInventory.value },
+  { to: '/workflows', label: 'Workflows', icon: FileText, isVisible: () => true },
+  { to: '/queries', label: 'Queries', icon: Database, isVisible: () => true },
+  { to: '/reports', label: 'Reports', icon: ChartNoAxesCombined, isVisible: () => true },
+  { to: '/profile', label: 'Profile', icon: User, isVisible: () => true },
 ]
 
 const settingsNavigation = [
@@ -49,9 +51,13 @@ function hasPermission(permission: string) {
 }
 
 const canSeeSettingsMenu = computed(() => hasPermission('sql.menu_system'))
+const canSeeInventory = computed(() => hasPermission('sql.menu_instance'))
 const canSeeGroupManagement = computed(() => canSeeSettingsMenu.value && hasPermission('auth.view_group'))
 const canSeeResourceGroupManagement = computed(
   () => canSeeSettingsMenu.value && hasPermission('sql.view_resourcegroup'),
+)
+const visiblePrimaryNavigation = computed(() =>
+  primaryNavigation.filter((item) => item.isVisible()),
 )
 const visibleSettingsNavigation = computed(() =>
   settingsNavigation.filter((item) => item.isVisible()),
@@ -170,7 +176,7 @@ watch(
 
         <nav class="flex-1 space-y-1 p-3">
           <RouterLink
-            v-for="item in primaryNavigation"
+            v-for="item in visiblePrimaryNavigation"
             :key="item.to"
             :to="item.to"
             :title="isSidebarCollapsed ? item.label : undefined"

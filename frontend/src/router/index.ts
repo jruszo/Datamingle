@@ -9,6 +9,8 @@ import {
 } from '@/lib/auth'
 import { useAuthStore } from '@/stores/auth'
 import HomeView from '@/views/HomeView.vue'
+import InventoryCreateView from '@/views/InventoryCreateView.vue'
+import InventoryView from '@/views/InventoryView.vue'
 import LoginView from '@/views/LoginView.vue'
 import ProfileView from '@/views/ProfileView.vue'
 import QueriesView from '@/views/QueriesView.vue'
@@ -24,6 +26,9 @@ const router = createRouter({
   routes: [
     { path: '/', name: 'home', component: HomeView, meta: { title: 'Dashboard' } },
     { path: '/login', name: 'login', component: LoginView, meta: { public: true, title: 'Login' } },
+    { path: '/inventory', name: 'inventory', component: InventoryView, meta: { title: 'Inventory' } },
+    { path: '/inventory/new', name: 'inventory-new', component: InventoryCreateView, meta: { title: 'Add Instance' } },
+    { path: '/inventory/:instanceId', name: 'inventory-detail', component: InventoryCreateView, meta: { title: 'Edit Instance' } },
     { path: '/workflows', name: 'workflows', component: WorkflowsView, meta: { title: 'Workflows' } },
     { path: '/queries', name: 'queries', component: QueriesView, meta: { title: 'Queries' } },
     { path: '/reports', name: 'reports', component: ReportsView, meta: { title: 'Reports' } },

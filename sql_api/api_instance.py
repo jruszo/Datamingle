@@ -1,24 +1,47 @@
-from rest_framework import views, generics, status, serializers
-from rest_framework.response import Response
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
+from django.conf import settings
 from django.contrib.auth.decorators import permission_required
-from django.utils.decorators import method_decorator
-from sql.utils.sql_utils import filter_db_list
-from sql.utils.resource_group import user_instances
-from .serializers import (
-    InstanceSerializer,
-    InstanceDetailSerializer,
-    TunnelSerializer,
-    AliyunRdsSerializer,
-    InstanceResourceSerializer,
-    InstanceResourceListSerializer,
-)
-from .pagination import CustomizedPagination
-from .filters import InstanceFilter
-from .response import success_response
-from sql.models import Instance, Tunnel, AliyunRdsConfig
-from sql.engines import get_engine
+from django.db.models import Q
 from django.http import Http404
+from django.utils.decorators import method_decorator
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
+from rest_framework import generics, serializers, status, views
+from rest_framework.exceptions import PermissionDenied
+from rest_framework.response import Response
+
+from sql.engines import engine_map, get_engine
+from sql.models import AliyunRdsConfig, Instance, InstanceTag, ResourceGroup, Tunnel
+from sql.utils.resource_group import user_instances
+from sql.utils.sql_utils import filter_db_list
+
+from .pagination import CustomizedPagination
+from .response import success_response
+from .serializers import (
+    AliyunRdsSerializer,
+    ChoiceOptionSerializer,
+    InstanceConnectionTestResultSerializer,
+    InstanceConnectionTestRequestSerializer,
+    InstanceCreateSerializer,
+    InstanceDetailSerializer,
+    InstanceEditorSerializer,
+    InstanceListSerializer,
+    InstanceMetadataSerializer,
+    InstanceResourceListSerializer,
+    InstanceResourceSerializer,
+    InstanceTagLookupSerializer,
+    ResourceGroupLookupSerializer,
+    TunnelLookupSerializer,
+    TunnelSerializer,
+)
+
+
+def _require_any_permission(request, *perm_list):
+    if request.user.is_superuser:
+        return
+    if any(request.user.has_perm(perm) for perm in perm_list):
+        return
+    raise PermissionDenied(
+        f"Missing required permission. Need one of: {', '.join(perm_list)}"
+    )
 
 
 class InstanceList(generics.ListAPIView):
@@ -26,39 +49,131 @@ class InstanceList(generics.ListAPIView):
     List all instances or create a new instance configuration.
     """
 
-    filterset_class = InstanceFilter
     pagination_class = CustomizedPagination
-    serializer_class = InstanceSerializer
-    queryset = Instance.objects.all().order_by("id")
+    serializer_class = InstanceListSerializer
+    queryset = Instance.objects.all().select_related("tunnel").order_by("id")
+
+    def get_queryset(self):
+        queryset = (
+            super()
+            .get_queryset()
+            .prefetch_related("instance_tag", "resource_group")
+        )
+        search = self.request.query_params.get("search", "").strip()
+        instance_type = self.request.query_params.get("type", "").strip()
+        db_type = self.request.query_params.get("db_type", "").strip()
+        ordering = self.request.query_params.get("ordering", "").strip()
+
+        raw_tags = self.request.query_params.getlist("tags")
+        if not raw_tags:
+            raw_tags = self.request.query_params.getlist("tags[]")
+        if not raw_tags:
+            raw_tags = self.request.query_params.get("tags", "").split(",")
+        tag_ids = [tag.strip() for tag in raw_tags if str(tag).strip()]
+
+        if search:
+            search_filter = (
+                Q(instance_name__icontains=search)
+                | Q(host__icontains=search)
+                | Q(user__icontains=search)
+            )
+            if search.isdigit():
+                search_filter |= Q(id=int(search))
+            queryset = queryset.filter(search_filter)
+
+        if instance_type:
+            queryset = queryset.filter(type=instance_type)
+
+        if db_type:
+            queryset = queryset.filter(db_type=db_type)
+
+        for tag_id in tag_ids:
+            queryset = queryset.filter(instance_tag=tag_id, instance_tag__active=True)
+
+        queryset = queryset.distinct()
+
+        allowed_ordering = {
+            "id",
+            "-id",
+            "instance_name",
+            "-instance_name",
+            "db_type",
+            "-db_type",
+            "host",
+            "-host",
+            "port",
+            "-port",
+            "user",
+            "-user",
+            "type",
+            "-type",
+        }
+        if ordering in allowed_ordering:
+            queryset = queryset.order_by(ordering, "id")
+
+        return queryset
 
     @extend_schema(
         summary="Instance List",
-        request=InstanceSerializer,
-        responses={200: InstanceSerializer},
-        description="List all instances (filtering, pagination).",
+        responses={200: InstanceListSerializer},
+        parameters=[
+            OpenApiParameter(
+                name="search",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description="Match instance ID, name, host, or user.",
+            ),
+            OpenApiParameter(
+                name="type",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description="Instance type: master or slave.",
+            ),
+            OpenApiParameter(
+                name="db_type",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description="Database engine type.",
+            ),
+            OpenApiParameter(
+                name="tags",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description="Filter by active instance-tag IDs. Repeat the parameter to apply AND semantics.",
+            ),
+            OpenApiParameter(
+                name="ordering",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description="Ordering key, e.g. instance_name or -host.",
+            ),
+        ],
+        description="List all instances with pagination, search, and legacy inventory filters.",
     )
     @method_decorator(
         permission_required("sql.menu_instance_list", raise_exception=True)
     )
     def get(self, request):
-        instances = self.filter_queryset(self.queryset)
+        instances = self.filter_queryset(self.get_queryset())
         page_ins = self.paginate_queryset(queryset=instances)
         serializer_obj = self.get_serializer(page_ins, many=True)
         return self.get_paginated_response(serializer_obj.data)
 
     @extend_schema(
         summary="Create Instance",
-        request=InstanceSerializer,
-        responses={201: InstanceSerializer},
-        description="Create an instance configuration.",
+        request=InstanceCreateSerializer,
+        responses={201: InstanceListSerializer},
+        description="Create an instance configuration for the SPA inventory flow.",
     )
     @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
     def post(self, request):
-        serializer = InstanceSerializer(data=request.data)
+        serializer = InstanceCreateSerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save()
+            instance = serializer.save()
             return success_response(
-                data=serializer.data, status_code=status.HTTP_201_CREATED
+                data=InstanceListSerializer(instance).data,
+                detail="Instance created successfully.",
+                status_code=status.HTTP_201_CREATED,
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -68,18 +183,30 @@ class InstanceDetail(views.APIView):
     Instance operations.
     """
 
-    serializer_class = InstanceDetailSerializer
+    serializer_class = InstanceEditorSerializer
 
     def get_object(self, pk):
         try:
-            return Instance.objects.get(pk=pk)
+            return Instance.objects.prefetch_related(
+                "resource_group", "instance_tag"
+            ).get(pk=pk)
         except Instance.DoesNotExist:
             raise Http404
 
     @extend_schema(
+        summary="Instance Detail",
+        responses={200: InstanceEditorSerializer},
+        description="Get a single instance configuration for editing.",
+    )
+    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
+    def get(self, request, pk):
+        instance = self.get_object(pk)
+        return success_response(data=InstanceEditorSerializer(instance).data)
+
+    @extend_schema(
         summary="Update Instance",
         request=InstanceDetailSerializer,
-        responses={200: InstanceDetailSerializer},
+        responses={200: InstanceEditorSerializer},
         description="Update an instance configuration.",
     )
     @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
@@ -88,7 +215,7 @@ class InstanceDetail(views.APIView):
         serializer = InstanceDetailSerializer(instance, data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return success_response(data=serializer.data)
+            return success_response(data=InstanceEditorSerializer(instance).data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @extend_schema(
@@ -99,6 +226,111 @@ class InstanceDetail(views.APIView):
         instance = self.get_object(pk)
         instance.delete()
         return success_response()
+
+
+class InstanceMetadata(views.APIView):
+    """Lookup data used by the SPA inventory list and create form."""
+
+    @extend_schema(
+        summary="Instance Inventory Metadata",
+        responses={200: InstanceMetadataSerializer},
+        description="List available instance types, enabled database types, active tags, tunnels, and resource groups.",
+    )
+    def get(self, request):
+        _require_any_permission(request, "sql.menu_instance", "sql.menu_instance_list")
+
+        instance_types = [
+            {"value": "master", "label": "MASTER"},
+            {"value": "slave", "label": "SLAVE"},
+        ]
+        db_types = []
+        for db_type in settings.ENABLED_ENGINES:
+            engine = engine_map.get(db_type)
+            if not engine:
+                continue
+            db_types.append({"value": db_type, "label": engine.name})
+
+        payload = {
+            "instance_types": instance_types,
+            "db_types": db_types,
+            "tags": InstanceTag.objects.filter(active=True).order_by("tag_name", "id"),
+            "tunnels": Tunnel.objects.all().order_by("tunnel_name", "id"),
+            "resource_groups": ResourceGroup.objects.filter(is_deleted=0).order_by(
+                "group_name", "group_id"
+            ),
+        }
+        serializer = InstanceMetadataSerializer(payload)
+        return success_response(data=serializer.data)
+
+
+class InstanceConnectionTest(views.APIView):
+    """Check whether a configured instance is reachable."""
+
+    @extend_schema(
+        summary="Test Instance Connection",
+        responses={200: InstanceConnectionTestResultSerializer},
+        description="Run a connection test for an instance. Restricted to superusers to match legacy frontend behavior.",
+    )
+    def post(self, request, pk):
+        if not request.user.is_superuser:
+            raise PermissionDenied("Only superusers can test instance connections.")
+
+        try:
+            instance = Instance.objects.get(pk=pk)
+        except Instance.DoesNotExist:
+            raise Http404
+
+        try:
+            query_engine = get_engine(instance=instance)
+            test_result = query_engine.test_connection()
+        except Exception as exc:
+            raise serializers.ValidationError(
+                {"errors": f"Unable to connect to instance. {str(exc)}"}
+            )
+
+        if test_result.error:
+            raise serializers.ValidationError(
+                {"errors": f"Unable to connect to instance. {test_result.error}"}
+            )
+
+        payload = InstanceConnectionTestResultSerializer(
+            {"success": True, "message": "Connection successful."}
+        ).data
+        return success_response(data=payload, detail="Connection successful.")
+
+
+class InstanceDraftConnectionTest(views.APIView):
+    """Check whether an unsaved instance configuration is reachable."""
+
+    @extend_schema(
+        summary="Test Draft Instance Connection",
+        request=InstanceConnectionTestRequestSerializer,
+        responses={200: InstanceConnectionTestResultSerializer},
+        description="Validate draft instance connection settings without creating an instance record.",
+    )
+    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
+    def post(self, request):
+        serializer = InstanceConnectionTestRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        instance = serializer.build_instance()
+
+        try:
+            query_engine = get_engine(instance=instance)
+            test_result = query_engine.test_connection()
+        except Exception as exc:
+            raise serializers.ValidationError(
+                {"errors": f"Unable to connect to instance. {str(exc)}"}
+            )
+
+        if test_result.error:
+            raise serializers.ValidationError(
+                {"errors": f"Unable to connect to instance. {test_result.error}"}
+            )
+
+        payload = InstanceConnectionTestResultSerializer(
+            {"success": True, "message": "Connection successful."}
+        ).data
+        return success_response(data=payload, detail="Connection successful.")
 
 
 class TunnelList(generics.ListAPIView):
@@ -224,7 +456,6 @@ class InstanceResource(views.APIView):
         description="Get resource information inside an instance.",
     )
     def get(self, request):
-        # Parameter validation
         serializer = InstanceResourceSerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
 
@@ -276,7 +507,6 @@ class InstanceResource(views.APIView):
         else:
             if resource.error:
                 raise serializers.ValidationError({"errors": resource.error})
-            else:
-                resource = {"count": len(resource.rows), "result": resource.rows}
-                serializer_obj = InstanceResourceListSerializer(resource)
-                return success_response(data=serializer_obj.data)
+            resource = {"count": len(resource.rows), "result": resource.rows}
+            serializer_obj = InstanceResourceListSerializer(resource)
+            return success_response(data=serializer_obj.data)
