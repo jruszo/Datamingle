@@ -9,84 +9,237 @@ import sql.models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('sql', '0001_initial'),
+        ("sql", "0001_initial"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='PermissionRequest',
+            name="PermissionRequest",
             fields=[
-                ('request_id', models.AutoField(primary_key=True, serialize=False)),
-                ('target_type', models.CharField(choices=[('resource_group', 'Resource Group'), ('instance', 'Instance')], max_length=32, verbose_name='Target Type')),
-                ('access_level', models.CharField(blank=True, choices=[('query', 'Query'), ('query_dml', 'Query + DML'), ('query_dml_ddl', 'Query + DML + DDL')], default='', max_length=32, verbose_name='Instance Access Level')),
-                ('title', models.CharField(max_length=50, verbose_name='Request Title')),
-                ('reason', models.CharField(blank=True, default='', max_length=255, verbose_name='Request Reason')),
-                ('user_name', models.CharField(max_length=30, verbose_name='Requester')),
-                ('user_display', models.CharField(default='', max_length=50, verbose_name='Requester Display Name')),
-                ('valid_date', models.DateField(verbose_name='Valid Until')),
-                ('status', models.IntegerField(choices=[(0, 'Pending review'), (1, 'Approved'), (2, 'Rejected'), (3, 'Canceled')], verbose_name='Audit Status')),
-                ('audit_auth_groups', models.CharField(max_length=255, verbose_name='Audit Authorization Groups')),
-                ('create_time', models.DateTimeField(auto_now_add=True)),
-                ('sys_time', models.DateTimeField(auto_now=True)),
-                ('instance', models.ForeignKey(blank=True, default=None, null=True, on_delete=django.db.models.deletion.CASCADE, to='sql.instance')),
-                ('resource_group', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='sql.resourcegroup')),
+                ("request_id", models.AutoField(primary_key=True, serialize=False)),
+                (
+                    "target_type",
+                    models.CharField(
+                        choices=[
+                            ("resource_group", "Resource Group"),
+                            ("instance", "Instance"),
+                        ],
+                        max_length=32,
+                        verbose_name="Target Type",
+                    ),
+                ),
+                (
+                    "access_level",
+                    models.CharField(
+                        blank=True,
+                        choices=[
+                            ("query", "Query"),
+                            ("query_dml", "Query + DML"),
+                            ("query_dml_ddl", "Query + DML + DDL"),
+                        ],
+                        default="",
+                        max_length=32,
+                        verbose_name="Instance Access Level",
+                    ),
+                ),
+                (
+                    "title",
+                    models.CharField(max_length=50, verbose_name="Request Title"),
+                ),
+                (
+                    "reason",
+                    models.CharField(
+                        blank=True,
+                        default="",
+                        max_length=255,
+                        verbose_name="Request Reason",
+                    ),
+                ),
+                (
+                    "user_name",
+                    models.CharField(max_length=30, verbose_name="Requester"),
+                ),
+                (
+                    "user_display",
+                    models.CharField(
+                        default="", max_length=50, verbose_name="Requester Display Name"
+                    ),
+                ),
+                ("valid_date", models.DateField(verbose_name="Valid Until")),
+                (
+                    "status",
+                    models.IntegerField(
+                        choices=[
+                            (0, "Pending review"),
+                            (1, "Approved"),
+                            (2, "Rejected"),
+                            (3, "Canceled"),
+                        ],
+                        verbose_name="Audit Status",
+                    ),
+                ),
+                (
+                    "audit_auth_groups",
+                    models.CharField(
+                        max_length=255, verbose_name="Audit Authorization Groups"
+                    ),
+                ),
+                ("create_time", models.DateTimeField(auto_now_add=True)),
+                ("sys_time", models.DateTimeField(auto_now=True)),
+                (
+                    "instance",
+                    models.ForeignKey(
+                        blank=True,
+                        default=None,
+                        null=True,
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="sql.instance",
+                    ),
+                ),
+                (
+                    "resource_group",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="sql.resourcegroup",
+                    ),
+                ),
             ],
             options={
-                'verbose_name': 'Permission Request',
-                'verbose_name_plural': 'Permission Requests',
-                'db_table': 'permission_request',
-                'managed': True,
+                "verbose_name": "Permission Request",
+                "verbose_name_plural": "Permission Requests",
+                "db_table": "permission_request",
+                "managed": True,
             },
             bases=(models.Model, sql.models.WorkflowAuditMixin),
         ),
         migrations.AlterField(
-            model_name='workflowaudit',
-            name='workflow_type',
-            field=models.IntegerField(choices=[(1, 'Query privilege request'), (2, 'DDL/DML request'), (3, 'Data Archival request'), (4, 'Permission request')], verbose_name='Request Type'),
+            model_name="workflowaudit",
+            name="workflow_type",
+            field=models.IntegerField(
+                choices=[
+                    (1, "Query privilege request"),
+                    (2, "DDL/DML request"),
+                    (3, "Data Archival request"),
+                    (4, "Permission request"),
+                ],
+                verbose_name="Request Type",
+            ),
         ),
         migrations.AlterField(
-            model_name='workflowauditsetting',
-            name='workflow_type',
-            field=models.IntegerField(choices=[(1, 'Query privilege request'), (2, 'DDL/DML request'), (3, 'Data Archival request'), (4, 'Permission request')], verbose_name='Audit Type'),
+            model_name="workflowauditsetting",
+            name="workflow_type",
+            field=models.IntegerField(
+                choices=[
+                    (1, "Query privilege request"),
+                    (2, "DDL/DML request"),
+                    (3, "Data Archival request"),
+                    (4, "Permission request"),
+                ],
+                verbose_name="Audit Type",
+            ),
         ),
         migrations.CreateModel(
-            name='TemporaryResourceGroupGrant',
+            name="TemporaryResourceGroupGrant",
             fields=[
-                ('grant_id', models.AutoField(primary_key=True, serialize=False)),
-                ('valid_date', models.DateField(verbose_name='Valid Until')),
-                ('is_revoked', models.BooleanField(default=False, verbose_name='Revoked')),
-                ('create_time', models.DateTimeField(auto_now_add=True)),
-                ('sys_time', models.DateTimeField(auto_now=True)),
-                ('resource_group', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='sql.resourcegroup')),
-                ('source_request', models.ForeignKey(blank=True, default=None, null=True, on_delete=django.db.models.deletion.SET_NULL, to='sql.permissionrequest')),
-                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to=settings.AUTH_USER_MODEL)),
+                ("grant_id", models.AutoField(primary_key=True, serialize=False)),
+                ("valid_date", models.DateField(verbose_name="Valid Until")),
+                (
+                    "is_revoked",
+                    models.BooleanField(default=False, verbose_name="Revoked"),
+                ),
+                ("create_time", models.DateTimeField(auto_now_add=True)),
+                ("sys_time", models.DateTimeField(auto_now=True)),
+                (
+                    "resource_group",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="sql.resourcegroup",
+                    ),
+                ),
+                (
+                    "source_request",
+                    models.ForeignKey(
+                        blank=True,
+                        default=None,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        to="sql.permissionrequest",
+                    ),
+                ),
+                (
+                    "user",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
             ],
             options={
-                'verbose_name': 'Temporary Resource Group Grant',
-                'verbose_name_plural': 'Temporary Resource Group Grants',
-                'db_table': 'temporary_resource_group_grant',
-                'managed': True,
+                "verbose_name": "Temporary Resource Group Grant",
+                "verbose_name_plural": "Temporary Resource Group Grants",
+                "db_table": "temporary_resource_group_grant",
+                "managed": True,
             },
         ),
         migrations.CreateModel(
-            name='TemporaryInstanceGrant',
+            name="TemporaryInstanceGrant",
             fields=[
-                ('grant_id', models.AutoField(primary_key=True, serialize=False)),
-                ('access_level', models.CharField(choices=[('query', 'Query'), ('query_dml', 'Query + DML'), ('query_dml_ddl', 'Query + DML + DDL')], max_length=32, verbose_name='Instance Access Level')),
-                ('valid_date', models.DateField(verbose_name='Valid Until')),
-                ('is_revoked', models.BooleanField(default=False, verbose_name='Revoked')),
-                ('create_time', models.DateTimeField(auto_now_add=True)),
-                ('sys_time', models.DateTimeField(auto_now=True)),
-                ('instance', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='sql.instance')),
-                ('resource_group', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='sql.resourcegroup')),
-                ('source_request', models.ForeignKey(blank=True, default=None, null=True, on_delete=django.db.models.deletion.SET_NULL, to='sql.permissionrequest')),
-                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to=settings.AUTH_USER_MODEL)),
+                ("grant_id", models.AutoField(primary_key=True, serialize=False)),
+                (
+                    "access_level",
+                    models.CharField(
+                        choices=[
+                            ("query", "Query"),
+                            ("query_dml", "Query + DML"),
+                            ("query_dml_ddl", "Query + DML + DDL"),
+                        ],
+                        max_length=32,
+                        verbose_name="Instance Access Level",
+                    ),
+                ),
+                ("valid_date", models.DateField(verbose_name="Valid Until")),
+                (
+                    "is_revoked",
+                    models.BooleanField(default=False, verbose_name="Revoked"),
+                ),
+                ("create_time", models.DateTimeField(auto_now_add=True)),
+                ("sys_time", models.DateTimeField(auto_now=True)),
+                (
+                    "instance",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE, to="sql.instance"
+                    ),
+                ),
+                (
+                    "resource_group",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to="sql.resourcegroup",
+                    ),
+                ),
+                (
+                    "source_request",
+                    models.ForeignKey(
+                        blank=True,
+                        default=None,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        to="sql.permissionrequest",
+                    ),
+                ),
+                (
+                    "user",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
             ],
             options={
-                'verbose_name': 'Temporary Instance Grant',
-                'verbose_name_plural': 'Temporary Instance Grants',
-                'db_table': 'temporary_instance_grant',
-                'managed': True,
+                "verbose_name": "Temporary Instance Grant",
+                "verbose_name_plural": "Temporary Instance Grants",
+                "db_table": "temporary_instance_grant",
+                "managed": True,
             },
         ),
     ]
