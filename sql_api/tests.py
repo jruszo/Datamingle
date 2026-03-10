@@ -108,7 +108,7 @@ class TestUser(APITestCase):
         Instance.objects.all().delete()
         ResourceGroup.objects.all().delete()
         Group.objects.all().delete()
-        User.objects.filter(id__in=[self.user.id, self.member_user.id]).delete()
+        User.objects.all().delete()
         SysConfig().purge()
 
     def test_user_list_not_gated_by_whitelist(self):
@@ -121,7 +121,42 @@ class TestUser(APITestCase):
         """Test getting user list."""
         r = self.client.get("/api/v1/user/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(response_data(r)["count"], 2)
+        payload = response_data(r)
+        self.assertEqual(payload["count"], 2)
+        self.assertEqual(
+            set(payload["results"][0].keys()),
+            {
+                "id",
+                "username",
+                "display",
+                "email",
+                "is_active",
+                "is_superuser",
+                "is_staff",
+                "groups",
+                "group_ids",
+            },
+        )
+
+    def test_get_user_list_with_search(self):
+        """User list search matches username, display, email, and id."""
+        self.member_user.email = "group.member@datamingle.test"
+        self.member_user.save(update_fields=["email"])
+
+        r = self.client.get("/api/v1/user/?search=member", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["username"], self.member_user.username)
+
+    def test_get_user_list_with_ordering(self):
+        """User list ordering supports username sorting."""
+        User.objects.create(username="aaa_user", display="AAA User", is_active=True)
+
+        r = self.client.get("/api/v1/user/?ordering=username", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["results"][0]["username"], "aaa_user")
 
     def test_get_current_user_context(self):
         """Test SPA bootstrap current-user endpoint."""
@@ -194,8 +229,8 @@ class TestUser(APITestCase):
         me_data = assert_success_envelope(self, r2)
         self.assertEqual(me_data["username"], self.user.username)
 
-    def test_get_user_list_with_delegated_permission(self):
-        """Non-superuser can access with explicit delegated permission."""
+    def test_user_management_requires_superuser(self):
+        """Delegated permissions do not grant access to user management."""
         User.objects.filter(id=self.user.id).update(is_superuser=0)
         self.user = User.objects.get(id=self.user.id)
         self.user.user_permissions.clear()
@@ -206,7 +241,17 @@ class TestUser(APITestCase):
         delegated_permission = Permission.objects.get(codename="view_users")
         self.user.user_permissions.add(delegated_permission)
         r2 = self.client.get("/api/v1/user/", format="json")
-        self.assertEqual(r2.status_code, status.HTTP_200_OK)
+        self.assertEqual(r2.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_get_user_detail(self):
+        """Test getting a single managed user."""
+        self.member_user.groups.add(self.group)
+        r = self.client.get(f"/api/v1/user/{self.member_user.id}/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["id"], self.member_user.id)
+        self.assertEqual(payload["group_ids"], [self.group.id])
+        self.assertEqual(payload["groups"][0]["name"], self.group.name)
 
     def test_create_user(self):
         """Test creating user."""
@@ -214,18 +259,61 @@ class TestUser(APITestCase):
             "username": "test_user2",
             "password": "test_password2",
             "display": "Test User 2",
+            "email": "test_user2@datamingle.test",
+            "group_ids": [self.group.id],
         }
         r = self.client.post("/api/v1/user/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response_data(r)["username"], "test_user2")
+        payload = response_data(r)
+        self.assertEqual(payload["username"], "test_user2")
+        self.assertEqual(payload["email"], "test_user2@datamingle.test")
+        self.assertEqual(payload["group_ids"], [self.group.id])
+        created_user = User.objects.get(username="test_user2")
+        self.assertTrue(created_user.is_active)
+        self.assertFalse(created_user.is_staff)
+        self.assertFalse(created_user.is_superuser)
 
     def test_update_user(self):
         """Test updating user."""
-        json_data = {"display": "Updated Display Name"}
-        r = self.client.put(f"/api/v1/user/{self.user.id}/", json_data, format="json")
-        user = User.objects.get(pk=self.user.id)
+        self.member_user.set_password("member_password")
+        self.member_user.save(update_fields=["password"])
+        json_data = {
+            "display": "Updated Display Name",
+            "email": "updated@datamingle.test",
+            "group_ids": [self.group.id],
+            "password": "",
+        }
+        r = self.client.put(
+            f"/api/v1/user/{self.member_user.id}/", json_data, format="json"
+        )
+        user = User.objects.get(pk=self.member_user.id)
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(user.display, "Updated Display Name")
+        self.assertEqual(user.email, "updated@datamingle.test")
+        self.assertTrue(user.check_password("member_password"))
+        self.assertEqual(
+            list(user.groups.values_list("id", flat=True)), [self.group.id]
+        )
+
+    def test_deactivate_and_reactivate_user(self):
+        """Managed users can be deactivated and reactivated."""
+        deactivate_response = self.client.put(
+            f"/api/v1/user/{self.member_user.id}/",
+            {"is_active": False},
+            format="json",
+        )
+        self.assertEqual(deactivate_response.status_code, status.HTTP_200_OK)
+        self.member_user.refresh_from_db()
+        self.assertFalse(self.member_user.is_active)
+
+        reactivate_response = self.client.put(
+            f"/api/v1/user/{self.member_user.id}/",
+            {"is_active": True},
+            format="json",
+        )
+        self.assertEqual(reactivate_response.status_code, status.HTTP_200_OK)
+        self.member_user.refresh_from_db()
+        self.assertTrue(self.member_user.is_active)
 
     def test_delete_user(self):
         """Test deleting user."""
@@ -240,6 +328,22 @@ class TestUser(APITestCase):
         )
         self.assertEqual(r2.status_code, status.HTTP_200_OK)
         self.assertEqual(User.objects.filter(username="test_user2").count(), 0)
+
+    def test_delete_self_is_blocked(self):
+        """Superusers cannot delete themselves."""
+        r = self.client.delete(f"/api/v1/user/{self.user.id}/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("cannot delete your own account", json.dumps(r.json()).lower())
+
+    def test_deactivate_self_is_blocked(self):
+        """Superusers cannot deactivate themselves."""
+        r = self.client.put(
+            f"/api/v1/user/{self.user.id}/", {"is_active": False}, format="json"
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn(
+            "cannot deactivate your own account", json.dumps(r.json()).lower()
+        )
 
     def test_get_user_group_list(self):
         """Test getting user group list."""

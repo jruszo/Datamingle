@@ -20,6 +20,8 @@ import SettingsGroupsView from '@/views/SettingsGroupsView.vue'
 import SettingsGroupDetailView from '@/views/SettingsGroupDetailView.vue'
 import SettingsResourceGroupsView from '@/views/SettingsResourceGroupsView.vue'
 import SettingsResourceGroupDetailView from '@/views/SettingsResourceGroupDetailView.vue'
+import SettingsUserDetailView from '@/views/SettingsUserDetailView.vue'
+import SettingsUsersView from '@/views/SettingsUsersView.vue'
 import WorkflowsView from '@/views/WorkflowsView.vue'
 
 const router = createRouter({
@@ -36,6 +38,9 @@ const router = createRouter({
     { path: '/reports', name: 'reports', component: ReportsView, meta: { title: 'Reports' } },
     { path: '/profile', name: 'profile', component: ProfileView, meta: { title: 'Profile' } },
     { path: '/settings', redirect: { name: 'settings-groups' } },
+    { path: '/settings/users', name: 'settings-users', component: SettingsUsersView, meta: { title: 'User Management', requiresSuperuser: true } },
+    { path: '/settings/users/new', name: 'settings-users-new', component: SettingsUserDetailView, meta: { title: 'User Management', requiresSuperuser: true } },
+    { path: '/settings/users/:userId', name: 'settings-users-detail', component: SettingsUserDetailView, meta: { title: 'User Management', requiresSuperuser: true } },
     { path: '/settings/groups', name: 'settings-groups', component: SettingsGroupsView, meta: { title: 'Permission Groups' } },
     { path: '/settings/groups/new', name: 'settings-groups-new', component: SettingsGroupDetailView, meta: { title: 'Permission Groups' } },
     { path: '/settings/groups/:groupId', name: 'settings-groups-detail', component: SettingsGroupDetailView, meta: { title: 'Permission Groups' } },
@@ -78,6 +83,19 @@ router.beforeEach(async (to) => {
 
   if (to.name === 'login') {
     return { name: 'home' }
+  }
+
+  if (to.meta.requiresSuperuser === true) {
+    try {
+      const currentUser = await authStore.loadCurrentUser()
+      if (!currentUser?.is_superuser) {
+        return { name: 'home' }
+      }
+    } catch {
+      clearStoredTokens()
+      authStore.clearTokens()
+      return { name: 'login', query: { reason: 'expired' } }
+    }
   }
 
   return true
