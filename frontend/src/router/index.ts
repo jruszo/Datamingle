@@ -12,6 +12,7 @@ import HomeView from '@/views/HomeView.vue'
 import InventoryCreateView from '@/views/InventoryCreateView.vue'
 import InventoryView from '@/views/InventoryView.vue'
 import LoginView from '@/views/LoginView.vue'
+import PermissionManagementView from '@/views/PermissionManagementView.vue'
 import ProfileView from '@/views/ProfileView.vue'
 import QueriesView from '@/views/QueriesView.vue'
 import ReportsView from '@/views/ReportsView.vue'
@@ -31,6 +32,7 @@ const router = createRouter({
     { path: '/inventory/:instanceId', name: 'inventory-detail', component: InventoryCreateView, meta: { title: 'Edit Instance' } },
     { path: '/workflows', name: 'workflows', component: WorkflowsView, meta: { title: 'Workflows' } },
     { path: '/queries', name: 'queries', component: QueriesView, meta: { title: 'Queries' } },
+    { path: '/permission-management', name: 'permission-management', component: PermissionManagementView, meta: { title: 'Permission Management' } },
     { path: '/reports', name: 'reports', component: ReportsView, meta: { title: 'Reports' } },
     { path: '/profile', name: 'profile', component: ProfileView, meta: { title: 'Profile' } },
     { path: '/settings', redirect: { name: 'settings-groups' } },

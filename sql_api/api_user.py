@@ -28,6 +28,7 @@ from django.contrib.auth.models import Group, Permission
 from django.contrib.auth import authenticate
 from django.http import Http404
 from sql.models import Users, ResourceGroup, TwoFactorAuthConfig, Instance
+from sql.utils.resource_group import user_groups, active_instance_grants
 from common.twofa import get_authenticator
 import random
 import json
@@ -64,6 +65,17 @@ class CurrentUser(views.APIView):
 
     @staticmethod
     def _serialize_user(user):
+        permissions = set(user.get_all_permissions())
+        active_instance_access = active_instance_grants(user)
+        if active_instance_access.exists():
+            permissions.update(
+                {"sql.menu_query", "sql.menu_sqlquery", "sql.query_submit"}
+            )
+        if active_instance_access.filter(
+            access_level__in=["query_dml", "query_dml_ddl"]
+        ).exists():
+            permissions.add("sql.sql_submit")
+
         payload = {
             "id": user.id,
             "username": user.username,
@@ -74,11 +86,13 @@ class CurrentUser(views.APIView):
             "is_active": user.is_active,
             "groups": list(user.groups.values("id", "name").order_by("id")),
             "resource_groups": list(
-                user.resource_group.values("group_id", "group_name").order_by(
-                    "group_id"
+                ResourceGroup.objects.filter(
+                    group_id__in=[group.group_id for group in user_groups(user)]
                 )
+                .values("group_id", "group_name")
+                .order_by("group_id")
             ),
-            "permissions": sorted(user.get_all_permissions()),
+            "permissions": sorted(permissions),
             "two_factor_auth_types": sorted(
                 set(
                     TwoFactorAuthConfig.objects.filter(user=user).values_list(

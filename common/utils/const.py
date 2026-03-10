@@ -14,6 +14,7 @@ class WorkflowType(models.IntegerChoices):
     QUERY = 1, "Query privilege request"
     SQL_REVIEW = 2, "DDL/DML request"
     ARCHIVE = 3, "Data Archival request"
+    ACCESS_REQUEST = 4, "Permission request"
 
 
 class WorkflowStatus(models.IntegerChoices):

@@ -15,7 +15,7 @@ from sql.engines import get_engine, engine_map
 from common.utils.permission import superuser_required
 from common.utils.convert import Convert
 from sql.utils.tasks import task_info
-from sql.utils.resource_group import user_groups
+from sql.utils.resource_group import user_groups, user_member_groups
 
 from .models import (
     Users,
@@ -292,7 +292,7 @@ def detail(request, workflow_id):
             continue
         for user in node.group.user_set.filter(is_active=1):
             # Ensure group_name and group.name use the same type.
-            group_names = [group.group_name for group in user_groups(user)]
+            group_names = [group.group_name for group in user_member_groups(user)]
             if workflow_detail.group_name in group_names:
                 current_reviewers.append(user)
 
@@ -436,7 +436,7 @@ def queryapplydetail(request, apply_id):
             continue
         for user in node.group.user_set.filter(is_active=1):
             # Ensure group_name and group.name use the same type.
-            group_names = [group.group_name for group in user_groups(user)]
+            group_names = [group.group_name for group in user_member_groups(user)]
             if workflow_detail.group_name in group_names:
                 current_reviewers.append(user)
 
@@ -573,7 +573,7 @@ def archive_detail(request, id):
             continue
         for user in node.group.user_set.filter(is_active=1):
             # Ensure group_name and group.name use the same type.
-            group_names = [group.group_name for group in user_groups(user)]
+            group_names = [group.group_name for group in user_member_groups(user)]
             if archive_config.resource_group.group_name in group_names:
                 current_reviewers.append(user)
 

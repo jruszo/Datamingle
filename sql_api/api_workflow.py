@@ -1,9 +1,7 @@
 import datetime
 import logging
 
-from django.contrib.auth.decorators import permission_required
 from django.contrib.auth.models import Group
-from django.utils.decorators import method_decorator
 from django_q.tasks import async_task
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 from rest_framework import views, generics, status, serializers, permissions
@@ -21,7 +19,12 @@ from sql.models import (
 )
 from sql.notify import notify_for_audit, notify_for_execute
 from sql.query_privileges import _query_apply_audit_call_back
-from sql.utils.resource_group import user_groups
+from sql.utils.resource_group import (
+    user_groups,
+    user_member_groups,
+    user_has_group_instance_access,
+    user_has_instance_workflow_access,
+)
 from sql.utils.sql_review import can_execute, on_correct_time_period
 from sql.utils.tasks import del_schedule
 from sql.utils.workflow_audit import Audit, get_auditor, AuditException
@@ -50,7 +53,6 @@ class ExecuteCheck(views.APIView):
         responses={200: ExecuteCheckResultSerializer},
         description="Perform syntax checks for the provided SQL using request body.",
     )
-    @method_decorator(permission_required("sql.sql_submit", raise_exception=True))
     def post(self, request):
         # Parameter validation
         serializer = ExecuteCheckSerializer(data=request.data)
@@ -65,6 +67,22 @@ class ExecuteCheck(views.APIView):
             check_result = check_engine.execute_check(db_name=db_name, sql=full_sql)
         except Exception as e:
             raise serializers.ValidationError({"errors": f"{e}"})
+        has_group_write_access = user_has_group_instance_access(
+            request.user, instance, tag_codes=["can_write"]
+        )
+        has_temporary_write_access = user_has_instance_workflow_access(
+            request.user, instance, check_result.syntax_type
+        )
+        if not (
+            request.user.is_superuser
+            or (has_group_write_access and request.user.has_perm("sql.sql_submit"))
+            or (has_temporary_write_access and not has_group_write_access)
+        ):
+            raise serializers.ValidationError(
+                {
+                    "errors": "You do not have permission to submit SQL for this instance."
+                }
+            )
         check_result.rows = check_result.to_dict()
         serializer_obj = ExecuteCheckResultSerializer(check_result)
         return success_response(data=serializer_obj.data)
@@ -131,7 +149,6 @@ class WorkflowList(generics.ListAPIView):
         responses={201: WorkflowContentSerializer},
         description="Submit an SQL release workflow.",
     )
-    @method_decorator(permission_required("sql.sql_submit", raise_exception=True))
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -206,7 +223,7 @@ class WorkflowAuditList(generics.ListAPIView):
     )
     def get(self, request):
         user = request.user
-        group_list = user_groups(user)
+        group_list = user_member_groups(user)
         group_ids = [group.group_id for group in group_list]
 
         if user.is_superuser:

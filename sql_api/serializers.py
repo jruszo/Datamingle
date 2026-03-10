@@ -22,7 +22,10 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from sql.engines import get_engine
 from sql.utils.workflow_audit import Audit, get_auditor
-from sql.utils.resource_group import user_instances
+from sql.utils.resource_group import (
+    user_has_group_instance_access,
+    user_has_instance_workflow_access,
+)
 from common.utils.const import WorkflowType, WorkflowStatus
 from common.config import SysConfig
 import traceback
@@ -963,6 +966,7 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """Create workflow using the original submit flow."""
+        actor = self.context["request"].user
         workflow_data = validated_data.pop("workflow")
         instance = workflow_data["instance"]
         sql_content = validated_data["sql_content"].strip()
@@ -970,7 +974,7 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
         engineer = workflow_data.get("engineer")
 
         # Admins can specify submitter info
-        if self.context["request"].user.is_superuser and engineer:
+        if actor.is_superuser and engineer:
             try:
                 user = Users.objects.get(username=engineer)
             except Users.DoesNotExist:
@@ -980,17 +984,6 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
         # Submitter can only be self for non-admins
         else:
             user = self.context["request"].user
-
-        # Validate group permissions of submitting user
-        try:
-            user_instances(user, tag_codes=["can_write"]).get(id=instance.id)
-        except instance.DoesNotExist:
-            if workflow_data["is_offline_export"]:
-                pass
-            else:
-                raise serializers.ValidationError(
-                    {"errors": "The instance is not associated with your group."}
-                )
 
         # Run engine check again to prevent bypass
         try:
@@ -1006,6 +999,35 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                 )
         except Exception as e:
             raise serializers.ValidationError({"errors": str(e)})
+
+        has_group_write_access = user_has_group_instance_access(
+            actor, instance, tag_codes=["can_write"]
+        )
+        has_temporary_write_access = user_has_instance_workflow_access(
+            actor, instance, check_result.syntax_type
+        )
+        if workflow_data["is_offline_export"]:
+            if not (
+                actor.is_superuser
+                or (has_group_write_access and actor.has_perm("sql.sql_submit"))
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "errors": (
+                            "You do not have permission to submit offline export for this instance."
+                        )
+                    }
+                )
+        elif not (
+            actor.is_superuser
+            or (has_group_write_access and actor.has_perm("sql.sql_submit"))
+            or (has_temporary_write_access and not has_group_write_access)
+        ):
+            raise serializers.ValidationError(
+                {
+                    "errors": "You do not have permission to submit SQL for this instance."
+                }
+            )
 
         # If backup switch is off but engine supports backup, force backup on
         is_backup = (

@@ -275,6 +275,17 @@ class Instance(models.Model, PasswordMixin):
         verbose_name_plural = "Instance Configuration"
 
 
+class PermissionRequestTarget(models.TextChoices):
+    RESOURCE_GROUP = "resource_group", "Resource Group"
+    INSTANCE = "instance", "Instance"
+
+
+class InstanceAccessLevel(models.TextChoices):
+    QUERY = "query", "Query"
+    QUERY_DML = "query_dml", "Query + DML"
+    QUERY_DML_DDL = "query_dml_ddl", "Query + DML + DDL"
+
+
 SQL_WORKFLOW_CHOICES = (
     ("workflow_finish", _("workflow_finish")),
     ("workflow_abort", _("workflow_abort")),
@@ -297,6 +308,8 @@ class WorkflowAuditMixin:
             return WorkflowType.ARCHIVE
         elif isinstance(self, QueryPrivilegesApply):
             return WorkflowType.QUERY
+        elif isinstance(self, PermissionRequest):
+            return WorkflowType.ACCESS_REQUEST
 
     @property
     def workflow_pk_field(self):
@@ -306,6 +319,8 @@ class WorkflowAuditMixin:
             return "id"
         elif isinstance(self, QueryPrivilegesApply):
             return "apply_id"
+        elif isinstance(self, PermissionRequest):
+            return "request_id"
 
     def get_audit(self) -> Optional["WorkflowAudit"]:
         try:
@@ -451,6 +466,8 @@ class WorkflowAudit(models.Model):
             return SqlWorkflow.objects.get(id=self.workflow_id)
         elif self.workflow_type == WorkflowType.ARCHIVE:
             return ArchiveConfig.objects.get(id=self.workflow_id)
+        elif self.workflow_type == WorkflowType.ACCESS_REQUEST:
+            return PermissionRequest.objects.get(request_id=self.workflow_id)
         raise ValueError("Unable to resolve related workflow")
 
     def __int__(self):
@@ -616,6 +633,108 @@ class QueryPrivileges(models.Model):
         index_together = ["user_name", "instance", "db_name", "valid_date"]
         verbose_name = "Query Privilege Record"
         verbose_name_plural = "Query Privilege Record"
+
+
+class PermissionRequest(models.Model, WorkflowAuditMixin):
+    request_id = models.AutoField(primary_key=True)
+    resource_group = models.ForeignKey(ResourceGroup, on_delete=models.CASCADE)
+    target_type = models.CharField(
+        "Target Type",
+        max_length=32,
+        choices=PermissionRequestTarget.choices,
+    )
+    instance = models.ForeignKey(
+        Instance,
+        on_delete=models.CASCADE,
+        blank=True,
+        null=True,
+        default=None,
+    )
+    access_level = models.CharField(
+        "Instance Access Level",
+        max_length=32,
+        choices=InstanceAccessLevel.choices,
+        blank=True,
+        default="",
+    )
+    title = models.CharField("Request Title", max_length=50)
+    reason = models.CharField("Request Reason", max_length=255, blank=True, default="")
+    user_name = models.CharField("Requester", max_length=30)
+    user_display = models.CharField("Requester Display Name", max_length=50, default="")
+    valid_date = models.DateField("Valid Until")
+    status = models.IntegerField("Audit Status", choices=WorkflowStatus.choices)
+    audit_auth_groups = models.CharField("Audit Authorization Groups", max_length=255)
+    create_time = models.DateTimeField(auto_now_add=True)
+    sys_time = models.DateTimeField(auto_now=True)
+
+    @property
+    def group_id(self):
+        return self.resource_group_id
+
+    @property
+    def group_name(self):
+        return self.resource_group.group_name
+
+    def __int__(self):
+        return self.request_id
+
+    class Meta:
+        managed = True
+        db_table = "permission_request"
+        verbose_name = "Permission Request"
+        verbose_name_plural = "Permission Requests"
+
+
+class TemporaryResourceGroupGrant(models.Model):
+    grant_id = models.AutoField(primary_key=True)
+    user = models.ForeignKey(Users, on_delete=models.CASCADE)
+    resource_group = models.ForeignKey(ResourceGroup, on_delete=models.CASCADE)
+    source_request = models.ForeignKey(
+        PermissionRequest,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        default=None,
+    )
+    valid_date = models.DateField("Valid Until")
+    is_revoked = models.BooleanField("Revoked", default=False)
+    create_time = models.DateTimeField(auto_now_add=True)
+    sys_time = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        managed = True
+        db_table = "temporary_resource_group_grant"
+        verbose_name = "Temporary Resource Group Grant"
+        verbose_name_plural = "Temporary Resource Group Grants"
+
+
+class TemporaryInstanceGrant(models.Model):
+    grant_id = models.AutoField(primary_key=True)
+    user = models.ForeignKey(Users, on_delete=models.CASCADE)
+    resource_group = models.ForeignKey(ResourceGroup, on_delete=models.CASCADE)
+    instance = models.ForeignKey(Instance, on_delete=models.CASCADE)
+    access_level = models.CharField(
+        "Instance Access Level",
+        max_length=32,
+        choices=InstanceAccessLevel.choices,
+    )
+    source_request = models.ForeignKey(
+        PermissionRequest,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        default=None,
+    )
+    valid_date = models.DateField("Valid Until")
+    is_revoked = models.BooleanField("Revoked", default=False)
+    create_time = models.DateTimeField(auto_now_add=True)
+    sys_time = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        managed = True
+        db_table = "temporary_instance_grant"
+        verbose_name = "Temporary Instance Grant"
+        verbose_name_plural = "Temporary Instance Grants"
 
 
 class QueryLog(models.Model):
