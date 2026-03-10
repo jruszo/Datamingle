@@ -835,3 +835,185 @@ export function fetchQueryLogs(filters: QueryLogFilters, token: string) {
     extractData<PaginatedResponse<QueryLogRecord>>(payload),
   )
 }
+
+export type PermissionRequestTarget = 'resource_group' | 'instance'
+export type PermissionRequestStatus = 0 | 1 | 2 | 3
+export type PermissionInstanceAccessLevel = 'query' | 'query_dml' | 'query_dml_ddl'
+export type PermissionGrantType = 'resource_group' | 'instance'
+
+export type PermissionResourceGroupLookupRecord = {
+  group_id: number
+  group_name: string
+  label: string
+}
+
+export type PermissionInstanceLookupRecord = {
+  id: number
+  instance_name: string
+  db_type: string
+  type: string
+  host: string
+  label: string
+  resource_groups: PermissionResourceGroupLookupRecord[]
+}
+
+export type PermissionRequestRecord = {
+  request_id: number
+  title: string
+  reason: string
+  target_type: PermissionRequestTarget
+  resource_group_id: number
+  resource_group_name: string
+  instance_id: number | null
+  instance_name: string
+  access_level: PermissionInstanceAccessLevel | ''
+  valid_date: string
+  user_name: string
+  user_display: string
+  status: PermissionRequestStatus
+  create_time: string
+}
+
+export type PermissionRequestReviewNode = {
+  group_name: string
+  is_current_node: boolean
+  is_passed_node: boolean
+}
+
+export type PermissionRequestLogRecord = {
+  operation_type_desc: string
+  operation_info: string
+  operator_display: string
+  operation_time: string
+}
+
+export type PermissionRequestDetailRecord = PermissionRequestRecord & {
+  review_info: PermissionRequestReviewNode[]
+  is_can_review: boolean
+  logs: PermissionRequestLogRecord[]
+}
+
+export type PermissionGrantRecord = {
+  grant_type: PermissionGrantType
+  grant_id: number
+  user_name: string
+  user_display: string
+  resource_group_id: number
+  resource_group_name: string
+  instance_id: number | null
+  instance_name: string
+  access_level: PermissionInstanceAccessLevel | ''
+  valid_date: string
+  source_request_id: number | null
+  create_time: string
+}
+
+export type PermissionRequestListFilters = {
+  page?: number
+  size?: number
+  search?: string
+}
+
+export type PermissionGrantListFilters = {
+  page?: number
+  size?: number
+  search?: string
+}
+
+export type PermissionRequestCreatePayload = {
+  title: string
+  reason?: string
+  target_type: PermissionRequestTarget
+  resource_group_id: number
+  instance_id?: number
+  access_level?: PermissionInstanceAccessLevel
+  valid_date: string
+}
+
+export type PermissionRequestCreateResult = {
+  request_id: number
+}
+
+export type PermissionRequestReviewPayload = {
+  audit_status: 1 | 2
+  audit_remark?: string
+}
+
+function buildListQueryString(filters: { page?: number; size?: number; search?: string }) {
+  const params = new URLSearchParams()
+
+  if (filters.page) {
+    params.set('page', `${filters.page}`)
+  }
+  if (filters.size) {
+    params.set('size', `${filters.size}`)
+  }
+  if (filters.search?.trim()) {
+    params.set('search', filters.search.trim())
+  }
+
+  return params.toString()
+}
+
+export function fetchPermissionResourceGroupsLookup(token: string) {
+  return apiGet<unknown>('/v1/access/resource-groups/lookup/', { token }).then((payload) =>
+    extractData<PermissionResourceGroupLookupRecord[]>(payload),
+  )
+}
+
+export function fetchPermissionInstancesLookup(token: string) {
+  return apiGet<unknown>('/v1/access/instances/lookup/', { token }).then((payload) =>
+    extractData<PermissionInstanceLookupRecord[]>(payload),
+  )
+}
+
+export function fetchPermissionRequests(
+  token: string,
+  filters: PermissionRequestListFilters = {},
+) {
+  const queryString = buildListQueryString(filters)
+  const path = queryString ? `/v1/access/request/?${queryString}` : '/v1/access/request/'
+  return apiGet<unknown>(path, { token }).then((payload) =>
+    extractData<PaginatedResponse<PermissionRequestRecord>>(payload),
+  )
+}
+
+export function createPermissionRequest(payload: PermissionRequestCreatePayload, token: string) {
+  return apiPost<unknown>('/v1/access/request/', payload, { token }).then((responsePayload) =>
+    extractData<PermissionRequestCreateResult>(responsePayload),
+  )
+}
+
+export function fetchPermissionRequestDetail(requestId: number, token: string) {
+  return apiGet<unknown>(`/v1/access/request/${requestId}/`, { token }).then((payload) =>
+    extractData<PermissionRequestDetailRecord>(payload),
+  )
+}
+
+export function reviewPermissionRequest(
+  requestId: number,
+  payload: PermissionRequestReviewPayload,
+  token: string,
+) {
+  return apiPost<unknown>(`/v1/access/request/${requestId}/reviews/`, payload, { token }).then(
+    (responsePayload) => extractDetail(responsePayload, 'Request reviewed successfully.'),
+  )
+}
+
+export function fetchPermissionGrants(token: string, filters: PermissionGrantListFilters = {}) {
+  const queryString = buildListQueryString(filters)
+  const path = queryString ? `/v1/access/grant/?${queryString}` : '/v1/access/grant/'
+  return apiGet<unknown>(path, { token }).then((payload) =>
+    extractData<PaginatedResponse<PermissionGrantRecord>>(payload),
+  )
+}
+
+export function revokePermissionGrant(
+  grantType: PermissionGrantType,
+  grantId: number,
+  token: string,
+) {
+  return apiDelete<unknown>(`/v1/access/grant/${grantType}/${grantId}/`, { token }).then((payload) =>
+    extractDetail(payload, 'Grant revoked successfully.'),
+  )
+}

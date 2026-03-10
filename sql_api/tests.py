@@ -26,8 +26,11 @@ from sql.models import (
     QueryLog,
     QueryPrivileges,
     QueryPrivilegesApply,
+    PermissionRequest,
+    TemporaryInstanceGrant,
+    TemporaryResourceGroupGrant,
 )
-from common.utils.const import WorkflowAction, WorkflowStatus
+from common.utils.const import WorkflowAction, WorkflowStatus, WorkflowType
 import json
 import pyotp
 
@@ -1444,6 +1447,233 @@ class TestInstance(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(response_data(r)["count"], 1)
 
+
+class TestPermissionRequestAPI(APITestCase):
+    def setUp(self):
+        self.review_group = Group.objects.create(name="Permission Approvers")
+        self.resource_group = ResourceGroup.objects.create(group_name="permission-rg")
+        self.instance = Instance.objects.create(
+            instance_name="permission-instance",
+            type="master",
+            db_type="mysql",
+            host="127.0.0.1",
+            port=3306,
+            user="root",
+            password="pwd",
+        )
+        self.instance.resource_group.add(self.resource_group)
+
+        self.requester = User(
+            username="permission_requester",
+            display="Permission Requester",
+            is_active=True,
+        )
+        self.requester.set_password("test_password")
+        self.requester.save()
+        self.requester.user_permissions.add(
+            Permission.objects.get(codename="query_applypriv"),
+            Permission.objects.get(codename="menu_queryapplylist"),
+        )
+
+        self.reviewer = User(
+            username="permission_reviewer",
+            display="Permission Reviewer",
+            is_active=True,
+        )
+        self.reviewer.set_password("test_password")
+        self.reviewer.save()
+        self.reviewer.user_permissions.add(
+            Permission.objects.get(codename="query_review"),
+            Permission.objects.get(codename="query_mgtpriv"),
+            Permission.objects.get(codename="menu_queryapplylist"),
+        )
+        self.reviewer.groups.add(self.review_group)
+        self.reviewer.resource_group.add(self.resource_group)
+
+        self.query_user = User(
+            username="permission_query_user",
+            display="Permission Query User",
+            is_active=True,
+        )
+        self.query_user.set_password("test_password")
+        self.query_user.save()
+        self.query_user.user_permissions.add(
+            Permission.objects.get(codename="menu_queryapplylist"),
+        )
+
+        WorkflowAuditSetting.objects.create(
+            group_id=self.resource_group.group_id,
+            group_name=self.resource_group.group_name,
+            workflow_type=WorkflowType.ACCESS_REQUEST,
+            audit_auth_groups=str(self.review_group.id),
+        )
+
+    def tearDown(self):
+        TemporaryInstanceGrant.objects.all().delete()
+        TemporaryResourceGroupGrant.objects.all().delete()
+        PermissionRequest.objects.all().delete()
+        WorkflowAudit.objects.filter(workflow_type=WorkflowType.ACCESS_REQUEST).delete()
+        WorkflowLog.objects.all().delete()
+        WorkflowAuditSetting.objects.filter(
+            workflow_type=WorkflowType.ACCESS_REQUEST
+        ).delete()
+        Instance.objects.filter(id=self.instance.id).delete()
+        ResourceGroup.objects.filter(group_id=self.resource_group.group_id).delete()
+        Group.objects.filter(id=self.review_group.id).delete()
+        User.objects.filter(
+            id__in=[self.requester.id, self.reviewer.id, self.query_user.id]
+        ).delete()
+
+    def _login(self, user):
+        r = self.client.post(
+            "/api/auth/token/",
+            {"username": user.username, "password": "test_password"},
+            format="json",
+        )
+        token = response_data(r)["access"]
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
+
+    @patch("sql_api.api_permission.async_task")
+    def test_create_instance_request(self, _async_task):
+        self._login(self.requester)
+
+        r = self.client.post(
+            "/api/v1/access/request/",
+            {
+                "title": "Need DML on one instance",
+                "reason": "Investigation",
+                "target_type": "instance",
+                "resource_group_id": self.resource_group.group_id,
+                "instance_id": self.instance.id,
+                "access_level": "query_dml",
+                "valid_date": "2099-12-31",
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        request_obj = PermissionRequest.objects.get(
+            request_id=response_data(r)["request_id"]
+        )
+        self.assertEqual(request_obj.target_type, "instance")
+        self.assertEqual(request_obj.access_level, "query_dml")
+        self.assertEqual(request_obj.resource_group_id, self.resource_group.group_id)
+        self.assertEqual(request_obj.instance_id, self.instance.id)
+
+    @patch("sql_api.api_permission.async_task")
+    def test_reviewer_sees_pending_request(self, _async_task):
+        self._login(self.requester)
+        create_response = self.client.post(
+            "/api/v1/access/request/",
+            {
+                "title": "Need query access",
+                "target_type": "instance",
+                "resource_group_id": self.resource_group.group_id,
+                "instance_id": self.instance.id,
+                "access_level": "query",
+                "valid_date": "2099-12-31",
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+
+        self._login(self.reviewer)
+        list_response = self.client.get("/api/v1/access/request/", format="json")
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response_data(list_response)["count"], 1)
+
+    @patch("sql_api.api_permission.async_task")
+    def test_approving_instance_request_creates_instance_grant(self, _async_task):
+        self._login(self.requester)
+        create_response = self.client.post(
+            "/api/v1/access/request/",
+            {
+                "title": "Need query access",
+                "target_type": "instance",
+                "resource_group_id": self.resource_group.group_id,
+                "instance_id": self.instance.id,
+                "access_level": "query",
+                "valid_date": "2099-12-31",
+            },
+            format="json",
+        )
+        request_id = response_data(create_response)["request_id"]
+
+        self._login(self.reviewer)
+        review_response = self.client.post(
+            f"/api/v1/access/request/{request_id}/reviews/",
+            {"audit_status": WorkflowAction.PASS, "audit_remark": "approved"},
+            format="json",
+        )
+        self.assertEqual(review_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(
+            TemporaryInstanceGrant.objects.filter(source_request_id=request_id).exists()
+        )
+
+    @patch("sql_api.api_permission.async_task")
+    def test_approving_group_request_creates_group_grant(self, _async_task):
+        self._login(self.requester)
+        create_response = self.client.post(
+            "/api/v1/access/request/",
+            {
+                "title": "Need group access",
+                "target_type": "resource_group",
+                "resource_group_id": self.resource_group.group_id,
+                "valid_date": "2099-12-31",
+            },
+            format="json",
+        )
+        request_id = response_data(create_response)["request_id"]
+
+        self._login(self.reviewer)
+        review_response = self.client.post(
+            f"/api/v1/access/request/{request_id}/reviews/",
+            {"audit_status": WorkflowAction.PASS, "audit_remark": "approved"},
+            format="json",
+        )
+        self.assertEqual(review_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(
+            TemporaryResourceGroupGrant.objects.filter(
+                source_request_id=request_id
+            ).exists()
+        )
+
+    def test_active_grant_list_and_revoke(self):
+        grant = TemporaryInstanceGrant.objects.create(
+            user=self.requester,
+            resource_group=self.resource_group,
+            instance=self.instance,
+            access_level="query",
+            valid_date=datetime.now().date() + timedelta(days=30),
+        )
+
+        self._login(self.reviewer)
+        list_response = self.client.get("/api/v1/access/grant/", format="json")
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response_data(list_response)["count"], 1)
+
+        delete_response = self.client.delete(
+            f"/api/v1/access/grant/instance/{grant.grant_id}/", format="json"
+        )
+        self.assertEqual(delete_response.status_code, status.HTTP_200_OK)
+        grant.refresh_from_db()
+        self.assertEqual(grant.is_revoked, True)
+
+    def test_query_instance_list_includes_temporary_instance_grant(self):
+        TemporaryInstanceGrant.objects.create(
+            user=self.query_user,
+            resource_group=self.resource_group,
+            instance=self.instance,
+            access_level="query",
+            valid_date=datetime.now().date() + timedelta(days=30),
+        )
+        self._login(self.query_user)
+
+        r = self.client.get("/api/v1/query/instance/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["instance_name"], self.instance.instance_name)
+
     def test_create_aliyunrds(self):
         """Test creating Aliyun RDS config."""
         ins = Instance.objects.create(
@@ -2037,6 +2267,303 @@ class TestWorkflow(APITestCase):
                 audit_id=self.audit1.audit_id, operation_type=6
             ).exists()
         )
+
+
+class TestPermissionRequestAPI(APITestCase):
+    def setUp(self):
+        self.user = User(
+            username="permission_user", display="Permission User", is_active=True
+        )
+        self.user.set_password("test_password")
+        self.user.save()
+
+        self.reviewer = User(
+            username="permission_reviewer",
+            display="Permission Reviewer",
+            is_active=True,
+        )
+        self.reviewer.set_password("test_password")
+        self.reviewer.save()
+
+        permissions = Permission.objects.filter(
+            codename__in=[
+                "menu_queryapplylist",
+                "query_applypriv",
+                "query_review",
+                "query_mgtpriv",
+            ]
+        )
+        self.user.user_permissions.add(*permissions)
+        self.reviewer.user_permissions.add(*permissions)
+
+        self.review_group = Group.objects.create(name="Permission Reviewers")
+        self.reviewer.groups.add(self.review_group)
+
+        self.res_group = ResourceGroup.objects.create(group_name="permission_rg")
+        self.reviewer.resource_group.add(self.res_group)
+
+        self.instance = Instance.objects.create(
+            instance_name="permission_instance",
+            type="master",
+            db_type="mysql",
+            host="127.0.0.1",
+            port=3306,
+            user="root",
+            password="pwd",
+        )
+        self.instance.resource_group.add(self.res_group)
+
+        login = self.client.post(
+            "/api/auth/token/",
+            {"username": "permission_user", "password": "test_password"},
+            format="json",
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
+        )
+
+    def _login_as(self, username, password="test_password"):
+        login = self.client.post(
+            "/api/auth/token/",
+            {"username": username, "password": password},
+            format="json",
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
+        )
+
+    def tearDown(self):
+        TemporaryInstanceGrant.objects.all().delete()
+        TemporaryResourceGroupGrant.objects.all().delete()
+        PermissionRequest.objects.all().delete()
+        WorkflowLog.objects.all().delete()
+        WorkflowAudit.objects.all().delete()
+        Instance.objects.all().delete()
+        ResourceGroup.objects.all().delete()
+        Group.objects.all().delete()
+        User.objects.filter(
+            username__in=[
+                "permission_user",
+                "permission_reviewer",
+                "other_requester",
+                "temporary_permission_reviewer",
+            ]
+        ).delete()
+
+    @patch("sql_api.api_permission.async_task")
+    @patch("sql_api.api_permission._permission_request_audit_callback")
+    @patch("sql_api.api_permission.get_auditor")
+    def test_create_instance_permission_request(
+        self, mock_get_auditor, mock_callback, mock_async_task
+    ):
+        mock_handler = Mock()
+        mock_handler.workflow.request_id = 123
+        mock_handler.audit.current_status = WorkflowStatus.WAITING
+        mock_get_auditor.return_value = mock_handler
+
+        response = self.client.post(
+            "/api/v1/access/request/",
+            {
+                "title": "Need DML access",
+                "target_type": "instance",
+                "resource_group_id": self.res_group.group_id,
+                "instance_id": self.instance.id,
+                "access_level": "query_dml",
+                "valid_date": "2099-12-31",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response_data(response)["request_id"], 123)
+        mock_callback.assert_called_once()
+        mock_async_task.assert_called_once()
+
+    def test_request_list_only_shows_own_requests(self):
+        PermissionRequest.objects.create(
+            resource_group=self.res_group,
+            target_type="resource_group",
+            title="My request",
+            user_name=self.user.username,
+            user_display=self.user.display,
+            valid_date=datetime.now().date() + timedelta(days=1),
+            status=WorkflowStatus.WAITING,
+            audit_auth_groups="",
+        )
+        other_user = User.objects.create(
+            username="other_requester", display="Other Requester", is_active=True
+        )
+        PermissionRequest.objects.create(
+            resource_group=self.res_group,
+            target_type="resource_group",
+            title="Other request",
+            user_name=other_user.username,
+            user_display=other_user.display,
+            valid_date=datetime.now().date() + timedelta(days=1),
+            status=WorkflowStatus.WAITING,
+            audit_auth_groups="",
+        )
+
+        response = self.client.get("/api/v1/access/request/", format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response_data(response)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["title"], "My request")
+
+    def test_request_detail_returns_logs(self):
+        permission_request = PermissionRequest.objects.create(
+            resource_group=self.res_group,
+            target_type="resource_group",
+            title="Detail request",
+            user_name=self.user.username,
+            user_display=self.user.display,
+            valid_date=datetime.now().date() + timedelta(days=1),
+            status=WorkflowStatus.WAITING,
+            audit_auth_groups=str(self.review_group.id),
+        )
+        audit = WorkflowAudit.objects.create(
+            group_id=self.res_group.group_id,
+            group_name=self.res_group.group_name,
+            workflow_id=permission_request.request_id,
+            workflow_type=WorkflowType.ACCESS_REQUEST,
+            workflow_title=permission_request.title,
+            audit_auth_groups=str(self.review_group.id),
+            current_audit=str(self.review_group.id),
+            next_audit="-1",
+            current_status=WorkflowStatus.WAITING,
+            create_user=self.user.username,
+            create_user_display=self.user.display,
+        )
+        WorkflowLog.objects.create(
+            audit_id=audit.audit_id,
+            operation_type=WorkflowAction.SUBMIT,
+            operation_type_desc="Submit",
+            operation_info="Waiting for approval",
+            operator=self.user.username,
+            operator_display=self.user.display,
+        )
+
+        response = self.client.get(
+            f"/api/v1/access/request/{permission_request.request_id}/",
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response_data(response)
+        self.assertEqual(payload["title"], "Detail request")
+        self.assertEqual(len(payload["logs"]), 1)
+
+    def test_reviewer_can_see_pending_request_for_direct_member_group(self):
+        permission_request = PermissionRequest.objects.create(
+            resource_group=self.res_group,
+            target_type="resource_group",
+            title="Needs approval",
+            user_name=self.user.username,
+            user_display=self.user.display,
+            valid_date=datetime.now().date() + timedelta(days=1),
+            status=WorkflowStatus.WAITING,
+            audit_auth_groups=str(self.review_group.id),
+        )
+        WorkflowAudit.objects.create(
+            group_id=self.res_group.group_id,
+            group_name=self.res_group.group_name,
+            workflow_id=permission_request.request_id,
+            workflow_type=WorkflowType.ACCESS_REQUEST,
+            workflow_title=permission_request.title,
+            audit_auth_groups=str(self.review_group.id),
+            current_audit=str(self.review_group.id),
+            next_audit="-1",
+            current_status=WorkflowStatus.WAITING,
+            create_user=self.user.username,
+            create_user_display=self.user.display,
+        )
+
+        self._login_as(self.reviewer.username)
+        response = self.client.get("/api/v1/access/request/", format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response_data(response)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(
+            payload["results"][0]["request_id"], permission_request.request_id
+        )
+
+    def test_temporary_group_access_does_not_expose_pending_approvals(self):
+        temporary_reviewer = User.objects.create(
+            username="temporary_permission_reviewer",
+            display="Temporary Permission Reviewer",
+            is_active=True,
+        )
+        temporary_reviewer.set_password("test_password")
+        temporary_reviewer.save()
+        temporary_reviewer.user_permissions.add(
+            *Permission.objects.filter(
+                codename__in=["menu_queryapplylist", "query_review"]
+            )
+        )
+        temporary_reviewer.groups.add(self.review_group)
+
+        permission_request = PermissionRequest.objects.create(
+            resource_group=self.res_group,
+            target_type="resource_group",
+            title="Restricted approval",
+            user_name=self.user.username,
+            user_display=self.user.display,
+            valid_date=datetime.now().date() + timedelta(days=1),
+            status=WorkflowStatus.WAITING,
+            audit_auth_groups=str(self.review_group.id),
+        )
+        WorkflowAudit.objects.create(
+            group_id=self.res_group.group_id,
+            group_name=self.res_group.group_name,
+            workflow_id=permission_request.request_id,
+            workflow_type=WorkflowType.ACCESS_REQUEST,
+            workflow_title=permission_request.title,
+            audit_auth_groups=str(self.review_group.id),
+            current_audit=str(self.review_group.id),
+            next_audit="-1",
+            current_status=WorkflowStatus.WAITING,
+            create_user=self.user.username,
+            create_user_display=self.user.display,
+        )
+        TemporaryResourceGroupGrant.objects.create(
+            user=temporary_reviewer,
+            resource_group=self.res_group,
+            valid_date=datetime.now().date() + timedelta(days=1),
+        )
+
+        self._login_as(temporary_reviewer.username)
+        response = self.client.get("/api/v1/access/request/", format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response_data(response)
+        self.assertEqual(payload["count"], 0)
+
+    def test_active_grant_list_and_revoke(self):
+        TemporaryResourceGroupGrant.objects.create(
+            user=self.user,
+            resource_group=self.res_group,
+            valid_date=datetime.now().date() + timedelta(days=1),
+        )
+        instance_grant = TemporaryInstanceGrant.objects.create(
+            user=self.user,
+            resource_group=self.res_group,
+            instance=self.instance,
+            access_level="query_dml",
+            valid_date=datetime.now().date() + timedelta(days=1),
+        )
+
+        response = self.client.get("/api/v1/access/grant/", format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response_data(response)
+        self.assertEqual(payload["count"], 2)
+
+        revoke = self.client.delete(
+            f"/api/v1/access/grant/instance/{instance_grant.grant_id}/",
+            format="json",
+        )
+        self.assertEqual(revoke.status_code, status.HTTP_200_OK)
+        instance_grant.refresh_from_db()
+        self.assertEqual(instance_grant.is_revoked, True)
 
 
 class TestDashboardAPI(APITestCase):

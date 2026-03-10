@@ -32,7 +32,12 @@ from sql.query_privileges import (
     _tb_priv,
     query_priv_check,
 )
-from sql.utils.resource_group import user_groups, user_instances
+from sql.utils.resource_group import user_groups, user_instances, user_member_groups
+from sql.utils.resource_group import (
+    has_any_active_instance_grant,
+    temp_instance_access_level,
+    READ_ACCESS_LEVELS,
+)
 from sql.utils.tasks import add_kill_conn_schedule, del_schedule
 from sql.utils.workflow_audit import AuditException, get_auditor
 
@@ -74,6 +79,8 @@ def _require_any_permission(request, *perm_list):
 
 
 def _require_query_page_access(request):
+    if has_any_active_instance_grant(request.user):
+        return
     _require_any_permission(
         request, "sql.menu_query", "sql.menu_sqlquery", "sql.query_submit"
     )
@@ -99,7 +106,6 @@ class QueryExecute(views.APIView):
         responses={200: QueryExecuteResponseSerializer},
         description="Execute SQL query on an instance and return result rows.",
     )
-    @method_decorator(permission_required("sql.query_submit", raise_exception=True))
     def post(self, request):
         serializer = QueryExecuteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -119,6 +125,13 @@ class QueryExecute(views.APIView):
             raise serializers.ValidationError(
                 {"errors": "Your group is not associated with this instance."}
             )
+
+        if not (
+            user.is_superuser
+            or user.has_perm("sql.query_submit")
+            or temp_instance_access_level(user, instance) in READ_ACCESS_LEVELS
+        ):
+            raise PermissionDenied("You do not have permission to query this instance.")
 
         config = SysConfig()
         query_result = None
@@ -560,7 +573,7 @@ class QueryPrivilegesApplyListCreate(views.APIView):
         if user.is_superuser:
             pass
         elif user.has_perm("sql.query_review"):
-            group_ids = [group.group_id for group in user_groups(user)]
+            group_ids = [group.group_id for group in user_member_groups(user)]
             queryset = queryset.filter(group_id__in=group_ids)
         else:
             queryset = queryset.filter(user_name=user.username)
@@ -735,7 +748,7 @@ class QueryPrivilegesList(generics.ListAPIView):
         if user.is_superuser:
             pass
         elif user.has_perm("sql.query_mgtpriv"):
-            group_ids = [group.group_id for group in user_groups(user)]
+            group_ids = [group.group_id for group in user_member_groups(user)]
             queryset = queryset.filter(
                 instance__queryprivilegesapply__group_id__in=group_ids
             )

@@ -6,7 +6,15 @@ from drf_spectacular.views import (
     SpectacularRedocView,
     SpectacularSwaggerView,
 )
-from . import api_user, api_instance, api_workflow, api_auth, api_query, api_dashboard
+from . import (
+    api_user,
+    api_instance,
+    api_workflow,
+    api_auth,
+    api_query,
+    api_dashboard,
+    api_permission,
+)
 
 router = routers.DefaultRouter()
 
@@ -108,6 +116,28 @@ urlpatterns = [
     path(
         "v1/query/privilege/apply/<int:apply_id>/reviews/",
         api_query.QueryPrivilegeApplicationReviewCreate.as_view(),
+    ),
+    path(
+        "v1/access/resource-groups/lookup/",
+        api_permission.PermissionResourceGroupLookup.as_view(),
+    ),
+    path(
+        "v1/access/instances/lookup/",
+        api_permission.PermissionInstanceLookup.as_view(),
+    ),
+    path("v1/access/request/", api_permission.PermissionRequestListCreate.as_view()),
+    path(
+        "v1/access/request/<int:request_id>/",
+        api_permission.PermissionRequestDetail.as_view(),
+    ),
+    path(
+        "v1/access/request/<int:request_id>/reviews/",
+        api_permission.PermissionRequestReviewCreate.as_view(),
+    ),
+    path("v1/access/grant/", api_permission.ActiveGrantList.as_view()),
+    path(
+        "v1/access/grant/<str:grant_type>/<int:grant_id>/",
+        api_permission.ActiveGrantDetail.as_view(),
     ),
     path("info", views.info),
     path("debug", views.debug),

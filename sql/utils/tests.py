@@ -27,6 +27,8 @@ from sql.models import (
     DataMaskingRules,
     DataMaskingColumns,
     InstanceTag,
+    TemporaryResourceGroupGrant,
+    TemporaryInstanceGrant,
 )
 from sql.utils.resource_group import user_groups, user_instances, auth_group_users
 from sql.utils.sql_review import (
@@ -92,6 +94,73 @@ class TestSQLReview(TestCase):
         self.master.delete()
         self.sys_config.replace(json.dumps({}))
 
+
+class TestTemporaryAccessHelpers(TestCase):
+    def setUp(self):
+        self.user = User.objects.create(username="temp_access_user")
+        self.group = ResourceGroup.objects.create(group_name="temp_access_group")
+        self.read_tag = InstanceTag.objects.create(
+            tag_code="can_read", tag_name="Can Read", active=True
+        )
+        self.write_tag = InstanceTag.objects.create(
+            tag_code="can_write", tag_name="Can Write", active=True
+        )
+        self.instance = Instance.objects.create(
+            instance_name="temp_access_instance",
+            type="master",
+            db_type="mysql",
+            host="127.0.0.1",
+            port=3306,
+            user="root",
+            password="pwd",
+        )
+        self.instance.resource_group.add(self.group)
+        self.instance.instance_tag.add(self.read_tag, self.write_tag)
+
+    def tearDown(self):
+        TemporaryInstanceGrant.objects.all().delete()
+        TemporaryResourceGroupGrant.objects.all().delete()
+        Instance.objects.all().delete()
+        ResourceGroup.objects.all().delete()
+        InstanceTag.objects.all().delete()
+        User.objects.filter(username="temp_access_user").delete()
+
+    def test_user_groups_include_temporary_group_grant(self):
+        TemporaryResourceGroupGrant.objects.create(
+            user=self.user,
+            resource_group=self.group,
+            valid_date=datetime.date.today() + datetime.timedelta(days=1),
+        )
+
+        self.assertEqual(
+            [group.group_name for group in user_groups(self.user)],
+            [self.group.group_name],
+        )
+
+    def test_user_instances_include_temporary_instance_grant(self):
+        TemporaryInstanceGrant.objects.create(
+            user=self.user,
+            resource_group=self.group,
+            instance=self.instance,
+            access_level="query_dml",
+            valid_date=datetime.date.today() + datetime.timedelta(days=1),
+        )
+
+        read_instances = list(
+            user_instances(self.user, tag_codes=["can_read"]).values_list(
+                "instance_name", flat=True
+            )
+        )
+        write_instances = list(
+            user_instances(self.user, tag_codes=["can_write"]).values_list(
+                "instance_name", flat=True
+            )
+        )
+        self.assertEqual(read_instances, [self.instance.instance_name])
+        self.assertEqual(write_instances, [self.instance.instance_name])
+
+
+class TestSQLReviewAccess(TestSQLReview):
     def test_can_execute_for_resource_group(
         self,
     ):

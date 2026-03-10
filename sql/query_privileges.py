@@ -26,7 +26,7 @@ from common.utils.extend_json_encoder import ExtendJSONEncoder
 from sql.engines.goinception import GoInceptionEngine
 from sql.models import QueryPrivilegesApply, QueryPrivileges, Instance, ResourceGroup
 from sql.notify import notify_for_audit
-from sql.utils.resource_group import user_groups, user_instances
+from sql.utils.resource_group import user_groups, user_instances, user_member_groups
 from sql.utils.workflow_audit import Audit, AuditException, get_auditor
 from sql.utils.sql_utils import extract_tables
 
@@ -162,8 +162,8 @@ def query_priv_apply_list(request):
         query_privs = query_privs
     # Users with review permission can view all workflows in their groups.
     elif user.has_perm("sql.query_review"):
-        # Get user's resource groups first.
-        group_list = user_groups(user)
+        # Get user's directly assigned resource groups first.
+        group_list = user_member_groups(user)
         group_ids = [group.group_id for group in group_list]
         query_privs = query_privs.filter(group_id__in=group_ids)
     # Others can only view workflows they submitted.
@@ -354,8 +354,8 @@ def user_query_priv(request):
         user_query_privs = user_query_privs
     # Users with management permission can view workflows in their groups.
     elif user.has_perm("sql.query_mgtpriv"):
-        # Get user's resource groups first.
-        group_list = user_groups(user)
+        # Get user's directly assigned resource groups first.
+        group_list = user_member_groups(user)
         group_ids = [group.group_id for group in group_list]
         user_query_privs = user_query_privs.filter(
             instance__queryprivilegesapply__group_id__in=group_ids

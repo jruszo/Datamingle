@@ -13,7 +13,7 @@ from django.utils import timezone
 from django.conf import settings
 
 from sql.engines.models import ReviewResult
-from sql.utils.resource_group import user_groups, auth_group_users
+from sql.utils.resource_group import user_groups, user_member_groups, auth_group_users
 from common.utils.const import WorkflowStatus, WorkflowType, WorkflowAction
 from sql.models import (
     WorkflowAudit,
@@ -23,6 +23,7 @@ from sql.models import (
     ResourceGroup,
     SqlWorkflow,
     QueryPrivilegesApply,
+    PermissionRequest,
     Users,
     ArchiveConfig,
 )
@@ -130,7 +131,9 @@ SUPPORTED_OPERATION_GRID = {
 @dataclass
 class AuditV2:
     # The workflow object may not have been created in DB yet.
-    workflow: Union[SqlWorkflow, ArchiveConfig, QueryPrivilegesApply] = None
+    workflow: Union[
+        SqlWorkflow, ArchiveConfig, QueryPrivilegesApply, PermissionRequest
+    ] = None
     sys_config: SysConfig = field(default_factory=SysConfig)
     audit: WorkflowAudit = None
     workflow_type: WorkflowType = WorkflowType.SQL_REVIEW
@@ -156,6 +159,9 @@ class AuditV2:
                     f"Invalid parameter: resource group {self.resource_group} not found"
                 )
         elif isinstance(self.workflow, QueryPrivilegesApply):
+            self.resource_group = self.workflow.group_name
+            self.resource_group_id = self.workflow.group_id
+        elif isinstance(self.workflow, PermissionRequest):
             self.resource_group = self.workflow.group_name
             self.resource_group_id = self.workflow.group_id
         # This may fail to get an approval flow for new workflows; do not raise.
@@ -272,7 +278,11 @@ class AuditV2:
         return True
 
     def generate_audit_setting(self) -> AuditSetting:
-        if self.workflow_type in [WorkflowType.SQL_REVIEW, WorkflowType.QUERY]:
+        if self.workflow_type in [
+            WorkflowType.SQL_REVIEW,
+            WorkflowType.QUERY,
+            WorkflowType.ACCESS_REQUEST,
+        ]:
             group_id = self.workflow.group_id
         else:
             # ArchiveConfig
@@ -305,6 +315,13 @@ class AuditV2:
         audit_setting = self.generate_audit_setting()
 
         if self.workflow_type == WorkflowType.QUERY:
+            workflow_title = self.workflow.title
+            group_id = self.workflow.group_id
+            group_name = self.workflow.group_name
+            create_user = self.workflow.user_name
+            create_user_display = self.workflow.user_display
+            self.workflow.audit_auth_groups = audit_setting.audit_auth_group_in_db
+        elif self.workflow_type == WorkflowType.ACCESS_REQUEST:
             workflow_title = self.workflow.title
             group_id = self.workflow.group_id
             group_name = self.workflow.group_name
@@ -412,6 +429,8 @@ class AuditV2:
                 f"{','.join(x.label for x in allowed_actions)}"
             )
         if self.workflow_type == WorkflowType.QUERY:
+            need_user_permission = "sql.query_review"
+        elif self.workflow_type == WorkflowType.ACCESS_REQUEST:
             need_user_permission = "sql.query_review"
         elif self.workflow_type == WorkflowType.SQL_REVIEW:
             need_user_permission = "sql.sql_review"
@@ -683,7 +702,7 @@ class Audit(object):
     @staticmethod
     def todo(user):
         # Get resource groups for the user.
-        group_list = user_groups(user)
+        group_list = user_member_groups(user)
         group_ids = [group.group_id for group in group_list]
         # Get permission groups for the user.
         if user.is_superuser:
@@ -757,6 +776,9 @@ class Audit(object):
             if workflow_type == 1:
                 workflow = QueryPrivilegesApply.objects.get(apply_id=workflow_id)
                 user = workflow.user_name
+            elif workflow_type == WorkflowType.ACCESS_REQUEST:
+                workflow = PermissionRequest.objects.get(request_id=workflow_id)
+                user = workflow.user_name
             elif workflow_type == 2:
                 workflow = SqlWorkflow.objects.get(id=workflow_id)
                 user = workflow.engineer
@@ -791,6 +813,9 @@ class Audit(object):
                 .exists()
             ):
                 if workflow_type == 1:
+                    if user.has_perm("sql.query_review"):
+                        result = True
+                elif workflow_type == WorkflowType.ACCESS_REQUEST:
                     if user.has_perm("sql.query_review"):
                         result = True
                 elif workflow_type == 2:
@@ -830,7 +855,9 @@ class Audit(object):
 
 def get_auditor(
     # The workflow object may not have been created in DB yet.
-    workflow: Union[SqlWorkflow, ArchiveConfig, QueryPrivilegesApply] = None,
+    workflow: Union[
+        SqlWorkflow, ArchiveConfig, QueryPrivilegesApply, PermissionRequest
+    ] = None,
     sys_config: SysConfig = None,
     audit: WorkflowAudit = None,
     workflow_type: WorkflowType = WorkflowType.SQL_REVIEW,

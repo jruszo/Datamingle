@@ -8,6 +8,7 @@ import {
   Database,
   FileText,
   LayoutGrid,
+  ShieldCheck,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
@@ -32,6 +33,7 @@ const primaryNavigation = [
   { to: '/inventory', label: 'Inventory', icon: Server, isVisible: () => canSeeInventory.value },
   { to: '/workflows', label: 'Workflows', icon: FileText, isVisible: () => true },
   { to: '/queries', label: 'Queries', icon: Database, isVisible: () => true },
+  { to: '/permission-management', label: 'Permission Management', icon: ShieldCheck, isVisible: () => canSeePermissionManagement.value },
   { to: '/reports', label: 'Reports', icon: ChartNoAxesCombined, isVisible: () => true },
   { to: '/profile', label: 'Profile', icon: User, isVisible: () => true },
 ]
@@ -52,6 +54,7 @@ function hasPermission(permission: string) {
 
 const canSeeSettingsMenu = computed(() => hasPermission('sql.menu_system'))
 const canSeeInventory = computed(() => hasPermission('sql.menu_instance'))
+const canSeePermissionManagement = computed(() => hasPermission('sql.menu_queryapplylist'))
 const canSeeGroupManagement = computed(() => canSeeSettingsMenu.value && hasPermission('auth.view_group'))
 const canSeeResourceGroupManagement = computed(
   () => canSeeSettingsMenu.value && hasPermission('sql.view_resourcegroup'),
