@@ -966,6 +966,7 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """Create workflow using the original submit flow."""
+        actor = self.context["request"].user
         workflow_data = validated_data.pop("workflow")
         instance = workflow_data["instance"]
         sql_content = validated_data["sql_content"].strip()
@@ -973,7 +974,7 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
         engineer = workflow_data.get("engineer")
 
         # Admins can specify submitter info
-        if self.context["request"].user.is_superuser and engineer:
+        if actor.is_superuser and engineer:
             try:
                 user = Users.objects.get(username=engineer)
             except Users.DoesNotExist:
@@ -1000,13 +1001,16 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"errors": str(e)})
 
         has_group_write_access = user_has_group_instance_access(
-            user, instance, tag_codes=["can_write"]
+            actor, instance, tag_codes=["can_write"]
         )
         has_temporary_write_access = user_has_instance_workflow_access(
-            user, instance, check_result.syntax_type
+            actor, instance, check_result.syntax_type
         )
         if workflow_data["is_offline_export"]:
-            if not (has_group_write_access and user.has_perm("sql.sql_submit")):
+            if not (
+                actor.is_superuser
+                or (has_group_write_access and actor.has_perm("sql.sql_submit"))
+            ):
                 raise serializers.ValidationError(
                     {
                         "errors": (
@@ -1015,8 +1019,8 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                     }
                 )
         elif not (
-            user.is_superuser
-            or (has_group_write_access and user.has_perm("sql.sql_submit"))
+            actor.is_superuser
+            or (has_group_write_access and actor.has_perm("sql.sql_submit"))
             or (has_temporary_write_access and not has_group_write_access)
         ):
             raise serializers.ValidationError(

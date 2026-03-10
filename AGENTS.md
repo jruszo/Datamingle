@@ -34,6 +34,8 @@
 - For frontend verification, run:
   - `npm run build` from `frontend/`
 - For backend verification, prefer targeted Django tests in the container over host execution.
+- Always run relevant tests for your changes before finishing. Do not rely on static inspection alone.
+- It is acceptable to rebuild or recreate the Archery app container anytime if that is the fastest reliable path to verify changes.
 
 ## Frontend Preferences
 
