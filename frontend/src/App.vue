@@ -39,6 +39,7 @@ const primaryNavigation = [
 ]
 
 const settingsNavigation = [
+  { to: '/settings/users', label: 'User Management', isVisible: () => canSeeUserManagement.value },
   { to: '/settings/groups', label: 'Permission Groups', isVisible: () => canSeeGroupManagement.value },
   { to: '/settings/resource-groups', label: 'Resource Groups', isVisible: () => canSeeResourceGroupManagement.value },
 ]
@@ -55,6 +56,7 @@ function hasPermission(permission: string) {
 const canSeeSettingsMenu = computed(() => hasPermission('sql.menu_system'))
 const canSeeInventory = computed(() => hasPermission('sql.menu_instance'))
 const canSeePermissionManagement = computed(() => hasPermission('sql.menu_queryapplylist'))
+const canSeeUserManagement = computed(() => authStore.currentUser?.is_superuser ?? false)
 const canSeeGroupManagement = computed(() => canSeeSettingsMenu.value && hasPermission('auth.view_group'))
 const canSeeResourceGroupManagement = computed(
   () => canSeeSettingsMenu.value && hasPermission('sql.view_resourcegroup'),

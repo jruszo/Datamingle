@@ -1,11 +1,12 @@
 from rest_framework import views, generics, status, permissions
 from rest_framework.response import Response
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from drf_spectacular.utils import extend_schema
 from django.db.models import Count, Q
 from .serializers import (
-    UserSerializer,
-    UserDetailSerializer,
+    UserManagementReadSerializer,
+    UserManagementCreateSerializer,
+    UserManagementUpdateSerializer,
     GroupSerializer,
     PermissionSerializer,
     ResourceGroupListSerializer,
@@ -43,6 +44,29 @@ def _require_any_permission(request, *perm_list):
     raise PermissionDenied(
         f"Missing required permission. Need one of: {', '.join(perm_list)}"
     )
+
+
+def _require_superuser(request):
+    if request.user.is_superuser:
+        return
+    raise PermissionDenied("Only superusers can access user management.")
+
+
+def _validate_user_management_lifecycle(request_user, target_user, action):
+    if request_user.pk == target_user.pk:
+        if action == "delete":
+            raise ValidationError("You cannot delete your own account.")
+        raise ValidationError("You cannot deactivate your own account.")
+
+    if (
+        target_user.is_superuser
+        and not Users.objects.filter(is_superuser=True, is_active=True)
+        .exclude(pk=target_user.pk)
+        .exists()
+    ):
+        if action == "delete":
+            raise ValidationError("You cannot delete the last active superuser.")
+        raise ValidationError("You cannot deactivate the last active superuser.")
 
 
 def _response_from_authenticator(result, default_error_message):
@@ -160,35 +184,68 @@ class UserList(generics.ListAPIView):
 
     filterset_class = UserFilter
     pagination_class = CustomizedPagination
-    serializer_class = UserSerializer
-    queryset = Users.objects.all().order_by("id")
+    serializer_class = UserManagementReadSerializer
+    queryset = Users.objects.prefetch_related("groups").all().order_by("id")
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        search = self.request.query_params.get("search", "").strip()
+        ordering = self.request.query_params.get("ordering", "").strip()
+
+        if search:
+            search_filter = (
+                Q(username__icontains=search)
+                | Q(display__icontains=search)
+                | Q(email__icontains=search)
+            )
+            if search.isdigit():
+                search_filter |= Q(id=int(search))
+            queryset = queryset.filter(search_filter)
+
+        if ordering in {
+            "id",
+            "-id",
+            "username",
+            "-username",
+            "display",
+            "-display",
+            "email",
+            "-email",
+            "is_active",
+            "-is_active",
+        }:
+            queryset = queryset.order_by(ordering, "id")
+
+        return queryset
 
     @extend_schema(
         summary="User List",
-        request=UserSerializer,
-        responses={200: UserSerializer},
+        request=UserManagementCreateSerializer,
+        responses={200: UserManagementReadSerializer},
         description="List all users (filtering, pagination).",
     )
     def get(self, request):
-        _require_any_permission(request, "sql.menu_system", "sql.view_users")
-        users = self.filter_queryset(self.queryset)
+        _require_superuser(request)
+        users = self.filter_queryset(self.get_queryset())
         page_user = self.paginate_queryset(queryset=users)
         serializer_obj = self.get_serializer(page_user, many=True)
         return self.get_paginated_response(serializer_obj.data)
 
     @extend_schema(
         summary="Create User",
-        request=UserSerializer,
-        responses={201: UserSerializer},
+        request=UserManagementCreateSerializer,
+        responses={201: UserManagementReadSerializer},
         description="Create a user.",
     )
     def post(self, request):
-        _require_any_permission(request, "sql.menu_system", "sql.add_users")
-        serializer = UserSerializer(data=request.data)
+        _require_superuser(request)
+        serializer = UserManagementCreateSerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save()
+            user = serializer.save()
             return success_response(
-                data=serializer.data, status_code=status.HTTP_201_CREATED
+                data=UserManagementReadSerializer(user).data,
+                detail="User created successfully.",
+                status_code=status.HTTP_201_CREATED,
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -198,35 +255,53 @@ class UserDetail(views.APIView):
     User operations.
     """
 
-    serializer_class = UserDetailSerializer
+    serializer_class = UserManagementReadSerializer
 
     def get_object(self, pk):
         try:
-            return Users.objects.get(pk=pk)
+            return Users.objects.prefetch_related("groups").get(pk=pk)
         except Users.DoesNotExist:
             raise Http404
 
     @extend_schema(
+        summary="User Detail",
+        responses={200: UserManagementReadSerializer},
+        description="Get a single user.",
+    )
+    def get(self, request, pk):
+        _require_superuser(request)
+        user = self.get_object(pk)
+        return success_response(data=UserManagementReadSerializer(user).data)
+
+    @extend_schema(
         summary="Update User",
-        request=UserDetailSerializer,
-        responses={200: UserDetailSerializer},
+        request=UserManagementUpdateSerializer,
+        responses={200: UserManagementReadSerializer},
         description="Update a user.",
     )
     def put(self, request, pk):
-        _require_any_permission(request, "sql.menu_system", "sql.change_users")
+        _require_superuser(request)
         user = self.get_object(pk)
-        serializer = UserDetailSerializer(user, data=request.data)
+        serializer = UserManagementUpdateSerializer(
+            user, data=request.data, partial=True
+        )
         if serializer.is_valid():
+            if serializer.validated_data.get("is_active") is False:
+                _validate_user_management_lifecycle(request.user, user, "deactivate")
             serializer.save()
-            return success_response(data=serializer.data)
+            return success_response(
+                data=UserManagementReadSerializer(user).data,
+                detail="User updated successfully.",
+            )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @extend_schema(summary="Delete User", description="Delete a user.")
     def delete(self, request, pk):
-        _require_any_permission(request, "sql.menu_system", "sql.delete_users")
+        _require_superuser(request)
         user = self.get_object(pk)
+        _validate_user_management_lifecycle(request.user, user, "delete")
         user.delete()
-        return success_response()
+        return success_response(detail="User deleted successfully.")
 
 
 class GroupList(generics.ListAPIView):

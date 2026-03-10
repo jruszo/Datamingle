@@ -185,6 +185,49 @@ export type GroupRecord = {
   permissions: number[]
 }
 
+export type UserManagementGroupRecord = {
+  id: number
+  name: string
+}
+
+export type UserManagementRecord = {
+  id: number
+  username: string
+  display: string
+  email: string
+  is_active: boolean
+  is_superuser: boolean
+  is_staff: boolean
+  groups: UserManagementGroupRecord[]
+}
+
+export type UserManagementDetailRecord = UserManagementRecord & {
+  group_ids: number[]
+}
+
+export type UserManagementListOptions = {
+  page?: number
+  size?: number
+  search?: string
+  ordering?: string
+}
+
+export type CreateUserPayload = {
+  username: string
+  display: string
+  email: string
+  password: string
+  group_ids: number[]
+}
+
+export type UpdateUserPayload = {
+  display: string
+  email: string
+  password?: string
+  group_ids: number[]
+  is_active: boolean
+}
+
 export type ResourceGroupRecord = {
   group_id: number
   group_name: string
@@ -402,6 +445,52 @@ export function login(
 export function fetchCurrentUserContext(token: string) {
   return apiGet<unknown>('/v1/me/', { token }).then((payload) =>
     extractData<CurrentUserContext>(payload),
+  )
+}
+
+export function fetchUsers(token: string, options: UserManagementListOptions = {}) {
+  const params = new URLSearchParams()
+  if (options.page) {
+    params.set('page', `${options.page}`)
+  }
+  if (options.size) {
+    params.set('size', `${options.size}`)
+  }
+  if (options.search?.trim()) {
+    params.set('search', options.search.trim())
+  }
+  if (options.ordering?.trim()) {
+    params.set('ordering', options.ordering.trim())
+  }
+
+  const queryString = params.toString()
+  const path = queryString ? `/v1/user/?${queryString}` : '/v1/user/'
+  return apiGet<unknown>(path, { token }).then((payload) =>
+    extractData<PaginatedResponse<UserManagementRecord>>(payload),
+  )
+}
+
+export function fetchUser(userId: number, token: string) {
+  return apiGet<unknown>(`/v1/user/${userId}/`, { token }).then((payload) =>
+    extractData<UserManagementDetailRecord>(payload),
+  )
+}
+
+export function createUser(payload: CreateUserPayload, token: string) {
+  return apiPost<unknown>('/v1/user/', payload, { token }).then((responsePayload) =>
+    extractData<UserManagementDetailRecord>(responsePayload),
+  )
+}
+
+export function updateUser(userId: number, payload: UpdateUserPayload, token: string) {
+  return apiPut<unknown>(`/v1/user/${userId}/`, payload, { token }).then((responsePayload) =>
+    extractData<UserManagementDetailRecord>(responsePayload),
+  )
+}
+
+export function deleteUser(userId: number, token: string) {
+  return apiDelete<unknown>(`/v1/user/${userId}/`, { token }).then((payload) =>
+    extractDetail(payload, 'User deleted successfully.'),
   )
 }
 

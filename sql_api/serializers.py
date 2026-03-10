@@ -35,59 +35,133 @@ from sql.offlinedownload import OffLineDownLoad
 logger = logging.getLogger("default")
 
 
-class UserSerializer(serializers.ModelSerializer):
-    def create(self, validated_data):
-        with transaction.atomic():
-            extra_data = dict()
-            for field in ("groups", "user_permissions", "resource_group"):
-                if field in validated_data.keys():
-                    extra_data[field] = validated_data.pop(field)
-            user = Users(**validated_data)
-            user.set_password(validated_data["password"])
-            user.save()
-            for field in extra_data.keys():
-                getattr(user, field).set(extra_data[field])
-            return user
+class UserManagementGroupSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Group
+        fields = ("id", "name")
+
+
+class UserManagementReadSerializer(serializers.ModelSerializer):
+    groups = serializers.SerializerMethodField()
+    group_ids = serializers.SerializerMethodField()
+
+    def get_groups(self, obj):
+        groups = obj.groups.order_by("id")
+        return UserManagementGroupSerializer(groups, many=True).data
+
+    def get_group_ids(self, obj):
+        return list(obj.groups.order_by("id").values_list("id", flat=True))
+
+    class Meta:
+        model = Users
+        fields = (
+            "id",
+            "username",
+            "display",
+            "email",
+            "is_active",
+            "is_superuser",
+            "is_staff",
+            "groups",
+            "group_ids",
+        )
+
+
+class UserManagementCreateSerializer(serializers.ModelSerializer):
+    group_ids = serializers.PrimaryKeyRelatedField(
+        source="groups", queryset=Group.objects.all(), many=True, required=False
+    )
+    email = serializers.EmailField(required=False, allow_blank=True)
+
+    def validate_display(self, value):
+        display = value.strip()
+        if not display:
+            raise serializers.ValidationError("Display name cannot be blank.")
+        return display
+
+    def validate_email(self, value):
+        return value.strip()
 
     def validate_password(self, password):
         try:
             validate_password(password)
         except ValidationError as msg:
-            raise serializers.ValidationError(msg)
+            raise serializers.ValidationError(msg.messages)
         return password
+
+    def create(self, validated_data):
+        groups = validated_data.pop("groups", [])
+        password = validated_data.pop("password")
+        with transaction.atomic():
+            user = Users(
+                is_active=True,
+                is_staff=False,
+                is_superuser=False,
+                **validated_data,
+            )
+            user.set_password(password)
+            user.save()
+            user.groups.set(groups)
+        return user
 
     class Meta:
         model = Users
-        fields = "__all__"
-        extra_kwargs = {"password": {"write_only": True}, "display": {"required": True}}
+        fields = ("username", "display", "email", "password", "group_ids")
+        extra_kwargs = {"password": {"write_only": True}}
 
 
-class UserDetailSerializer(serializers.ModelSerializer):
+class UserManagementUpdateSerializer(serializers.ModelSerializer):
+    group_ids = serializers.PrimaryKeyRelatedField(
+        source="groups", queryset=Group.objects.all(), many=True, required=False
+    )
+    password = serializers.CharField(
+        write_only=True, required=False, allow_blank=True, trim_whitespace=False
+    )
+    email = serializers.EmailField(required=False, allow_blank=True)
+
+    def validate_display(self, value):
+        display = value.strip()
+        if not display:
+            raise serializers.ValidationError("Display name cannot be blank.")
+        return display
+
+    def validate_email(self, value):
+        return value.strip()
+
+    def validate(self, attrs):
+        password = attrs.get("password")
+        if password == "":
+            attrs.pop("password")
+            return attrs
+
+        if password is not None:
+            try:
+                validate_password(password, user=self.instance)
+            except ValidationError as msg:
+                raise serializers.ValidationError({"password": msg.messages})
+
+        return attrs
+
     def update(self, instance, validated_data):
+        groups = validated_data.pop("groups", None)
+        password = validated_data.pop("password", None)
+
         for attr, value in validated_data.items():
-            if attr == "password":
-                instance.set_password(value)
-            elif attr in ("groups", "user_permissions", "resource_group"):
-                getattr(instance, attr).set(value)
-            else:
-                setattr(instance, attr, value)
-        instance.save()
+            setattr(instance, attr, value)
+
+        if password:
+            instance.set_password(password)
+
+        with transaction.atomic():
+            instance.save()
+            if groups is not None:
+                instance.groups.set(groups)
+
         return instance
 
-    def validate_password(self, password):
-        try:
-            validate_password(password)
-        except ValidationError as msg:
-            raise serializers.ValidationError(msg)
-        return password
-
     class Meta:
         model = Users
-        fields = "__all__"
-        extra_kwargs = {
-            "password": {"write_only": True, "required": False},
-            "username": {"required": False},
-        }
+        fields = ("display", "email", "password", "group_ids", "is_active")
 
 
 class GroupSerializer(serializers.ModelSerializer):
