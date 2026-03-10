@@ -1254,7 +1254,9 @@ class TestInstance(APITestCase):
         self.assertTrue(any(item["value"] == "mysql" for item in payload["db_types"]))
         self.assertEqual(payload["tags"][0]["id"], active_tag.id)
         self.assertEqual(payload["tunnels"][0]["id"], self.tunnel.id)
-        self.assertEqual(payload["resource_groups"][0]["group_id"], visible_group.group_id)
+        self.assertEqual(
+            payload["resource_groups"][0]["group_id"], visible_group.group_id
+        )
 
     def test_create_instance(self):
         """Test creating instance."""
@@ -1377,7 +1379,9 @@ class TestInstance(APITestCase):
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(Instance.objects.filter(instance_name="draft_mysql").count(), 0)
+        self.assertEqual(
+            Instance.objects.filter(instance_name="draft_mysql").count(), 0
+        )
 
         payload = response_data(r)
         self.assertEqual(payload["success"], True)
@@ -1390,7 +1394,9 @@ class TestInstance(APITestCase):
         self.assertEqual(instance.tunnel_id, self.tunnel.id)
 
     @patch("sql_api.api_instance.get_engine")
-    def test_test_draft_instance_connection_returns_validation_error(self, mock_get_engine):
+    def test_test_draft_instance_connection_returns_validation_error(
+        self, mock_get_engine
+    ):
         """Draft connection testing should surface engine failures without saving."""
         mock_engine = Mock()
         mock_result = Mock(error="access denied")
@@ -1409,8 +1415,12 @@ class TestInstance(APITestCase):
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("Unable to connect to instance. access denied", r.json()["errors"])
-        self.assertEqual(Instance.objects.filter(instance_name="draft_mysql").count(), 0)
+        self.assertIn(
+            "Unable to connect to instance. access denied", r.json()["errors"]
+        )
+        self.assertEqual(
+            Instance.objects.filter(instance_name="draft_mysql").count(), 0
+        )
 
     def test_update_instance(self):
         """Test updating instance."""

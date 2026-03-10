@@ -341,7 +341,9 @@ class InstanceListSerializer(serializers.ModelSerializer):
     instance_tag_ids = serializers.SerializerMethodField()
 
     def get_resource_group_ids(self, obj):
-        return list(obj.resource_group.values_list("group_id", flat=True).order_by("group_id"))
+        return list(
+            obj.resource_group.values_list("group_id", flat=True).order_by("group_id")
+        )
 
     def get_instance_tag_ids(self, obj):
         return list(obj.instance_tag.values_list("id", flat=True).order_by("id"))
@@ -466,13 +468,17 @@ class InstanceCreateSerializer(serializers.ModelSerializer):
 
 
 class InstanceConnectionTestRequestSerializer(serializers.Serializer):
-    instance_name = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    instance_name = serializers.CharField(
+        max_length=50, required=False, allow_blank=True
+    )
     type = serializers.ChoiceField(
         choices=Instance._meta.get_field("type").choices,
         required=False,
         default="master",
     )
-    db_type = serializers.ChoiceField(choices=Instance._meta.get_field("db_type").choices)
+    db_type = serializers.ChoiceField(
+        choices=Instance._meta.get_field("db_type").choices
+    )
     host = serializers.CharField(max_length=200)
     port = serializers.IntegerField(min_value=1)
     user = serializers.CharField(max_length=200, required=False, allow_blank=True)

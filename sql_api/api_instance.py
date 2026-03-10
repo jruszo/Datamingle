@@ -55,9 +55,7 @@ class InstanceList(generics.ListAPIView):
 
     def get_queryset(self):
         queryset = (
-            super()
-            .get_queryset()
-            .prefetch_related("instance_tag", "resource_group")
+            super().get_queryset().prefetch_related("instance_tag", "resource_group")
         )
         search = self.request.query_params.get("search", "").strip()
         instance_type = self.request.query_params.get("type", "").strip()
