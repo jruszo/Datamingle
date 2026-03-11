@@ -227,9 +227,15 @@ def querylog_audit(request):
 
 def _querylog(request):
     """
-    Get SQL query logs.
-    :param request:
-    :return:
+    Retrieve the current user's SQL query history using GET parameters for filtering and pagination.
+    
+    Reads pagination (limit, offset) and filters from request.GET: star (favorites only), query_log_id, search, start_date, and end_date. Returns a JSON HttpResponse with the total matching count and a list of rows; each row includes: id, instance_name, db_name, sqllog, effect_row, cost_time, user_display, favorite, alias, and create_time.
+    
+    Parameters:
+        request: Django HttpRequest providing GET parameters used to filter and paginate the query logs.
+    
+    Returns:
+        HttpResponse: JSON object with keys `total` (int) and `rows` (list of dicts described above).
     """
     # Get user.
     user = request.user
@@ -253,9 +259,8 @@ def _querylog(request):
     if query_log_id:
         filter_dict["id"] = query_log_id
 
-    # Admins/auditors can view all; regular users see only their own records.
-    if not (user.is_superuser or user.has_perm("sql.audit_user")):
-        filter_dict["username"] = user.username
+    # The normal query-history screen is always scoped to the current user.
+    filter_dict["username"] = user.username
 
     if start_date and end_date:
         end_date = datetime.datetime.strptime(
@@ -299,16 +304,33 @@ def _querylog(request):
 @permission_required("sql.menu_sqlquery", raise_exception=True)
 def favorite(request):
     """
-    Favorite query log and set alias.
-    :param request:
-    :return:
+    Mark a user's query log as favorite and optionally set its alias.
+    
+    Expects a Django HttpRequest with POST fields:
+    - `query_log_id`: ID of the QueryLog to update.
+    - `star`: "true" to mark favorite, anything else to unset.
+    - `alias`: optional display name to assign to the query log.
+    
+    Returns:
+    A Django HttpResponse containing JSON:
+    - On success: {"status": 0, "msg": "ok"}.
+    - If the specified log does not belong to the current user or does not exist: HTTP 400 with {"status": 1, "msg": "Query log does not exist."}.
     """
     query_log_id = request.POST.get("query_log_id")
     star = True if request.POST.get("star") == "true" else False
     alias = request.POST.get("alias")
-    QueryLog(id=query_log_id, favorite=star, alias=alias).save(
-        update_fields=["favorite", "alias"]
-    )
+    query_log = QueryLog.objects.filter(
+        id=query_log_id, username=request.user.username
+    ).first()
+    if not query_log:
+        return HttpResponse(
+            json.dumps({"status": 1, "msg": "Query log does not exist."}),
+            content_type="application/json",
+            status=400,
+        )
+    query_log.favorite = star
+    query_log.alias = alias
+    query_log.save(update_fields=["favorite", "alias"])
     # Return query result.
     return HttpResponse(
         json.dumps({"status": 0, "msg": "ok"}), content_type="application/json"

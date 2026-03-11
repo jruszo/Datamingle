@@ -387,6 +387,22 @@ class QueryLogBase(generics.ListAPIView):
             _require_permission(request, "sql.menu_sqlquery")
 
     def get_queryset(self):
+        """
+        Builds the QueryLog queryset filtered according to request query parameters and audit scoping rules.
+        
+        Filters supported:
+        - query_log_id: exact id match.
+        - search: case-insensitive containment across `sqllog`, `user_display`, `alias`, `db_name`, and `instance_name`.
+        - start_date and end_date (format YYYY-MM-DD): filters `create_time` within [start_date, end_date] inclusive; `end_date` is parsed and one day is added to include the full end day. Invalid `end_date` format raises a `serializers.ValidationError`.
+        - star: "true" to include only favorites, "false" to exclude favorites.
+        
+        Audit and ownership scoping:
+        - If `self.audit_only` is False, results are restricted to the current user's logs.
+        - If `self.audit_only` is True and the user is neither a superuser nor has the `sql.audit_user` permission, results are restricted to the current user's logs.
+        
+        Returns:
+            queryset: The filtered QueryLog queryset.
+        """
         user = self.request.user
         query_log_id = self.request.query_params.get("query_log_id")
         search = self.request.query_params.get("search", "")
@@ -395,13 +411,17 @@ class QueryLogBase(generics.ListAPIView):
         star = self.request.query_params.get("star")
 
         queryset = self.queryset
+        if not self.audit_only:
+            queryset = queryset.filter(username=user.username)
         if star == "true":
             queryset = queryset.filter(favorite=True)
         elif star == "false":
             queryset = queryset.filter(favorite=False)
         if query_log_id:
             queryset = queryset.filter(id=query_log_id)
-        if not (user.is_superuser or user.has_perm("sql.audit_user")):
+        if self.audit_only and not (
+            user.is_superuser or user.has_perm("sql.audit_user")
+        ):
             queryset = queryset.filter(username=user.username)
         if start_date and end_date:
             try:
@@ -509,22 +529,27 @@ class QueryFavorite(views.APIView):
     )
     @method_decorator(permission_required("sql.menu_sqlquery", raise_exception=True))
     def post(self, request):
+        """
+        Update the current user's favorite flag and alias for a specified query log.
+        
+        Validates input with QueryFavoriteSerializer, looks up the QueryLog by id scoped to the requesting user's username, updates the `favorite` and `alias` fields, and returns a success response.
+        
+        Raises:
+            serializers.ValidationError: If the input is invalid or the query log does not exist for the current user.
+        
+        Returns:
+            A success response indicating the update completed.
+        """
         serializer = QueryFavoriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
         try:
-            query_log = QueryLog.objects.get(id=data["query_log_id"])
+            query_log = QueryLog.objects.get(
+                id=data["query_log_id"], username=request.user.username
+            )
         except QueryLog.DoesNotExist:
             raise serializers.ValidationError({"errors": "Query log does not exist."})
-
-        user = request.user
-        if (
-            query_log.username != user.username
-            and not user.is_superuser
-            and not user.has_perm("sql.audit_user")
-        ):
-            raise PermissionDenied("You can only modify your own query logs.")
 
         query_log.favorite = data["star"]
         query_log.alias = data["alias"]
