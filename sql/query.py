@@ -253,9 +253,8 @@ def _querylog(request):
     if query_log_id:
         filter_dict["id"] = query_log_id
 
-    # Admins/auditors can view all; regular users see only their own records.
-    if not (user.is_superuser or user.has_perm("sql.audit_user")):
-        filter_dict["username"] = user.username
+    # The normal query-history screen is always scoped to the current user.
+    filter_dict["username"] = user.username
 
     if start_date and end_date:
         end_date = datetime.datetime.strptime(
@@ -306,9 +305,18 @@ def favorite(request):
     query_log_id = request.POST.get("query_log_id")
     star = True if request.POST.get("star") == "true" else False
     alias = request.POST.get("alias")
-    QueryLog(id=query_log_id, favorite=star, alias=alias).save(
-        update_fields=["favorite", "alias"]
-    )
+    query_log = QueryLog.objects.filter(
+        id=query_log_id, username=request.user.username
+    ).first()
+    if not query_log:
+        return HttpResponse(
+            json.dumps({"status": 1, "msg": "Query log does not exist."}),
+            content_type="application/json",
+            status=400,
+        )
+    query_log.favorite = star
+    query_log.alias = alias
+    query_log.save(update_fields=["favorite", "alias"])
     # Return query result.
     return HttpResponse(
         json.dumps({"status": 0, "msg": "ok"}), content_type="application/json"

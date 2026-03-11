@@ -992,6 +992,54 @@ class TestQueryAPI(CacheIsolatedAPITestCase):
         self.assertEqual(len(favorite_data), 1)
         self.assertEqual(favorite_data[0]["alias"], "fav1")
 
+    def test_query_log_list_is_owner_scoped_for_superuser(self):
+        self.user.is_superuser = True
+        self.user.save(update_fields=["is_superuser"])
+
+        QueryLog.objects.create(
+            username=self.user.username,
+            user_display=self.user.display,
+            db_name="db1",
+            instance_name=self.ins.instance_name,
+            sqllog="select 1",
+            effect_row=1,
+            cost_time="0.1",
+        )
+        QueryLog.objects.create(
+            username="other",
+            user_display="Other",
+            db_name="db2",
+            instance_name=self.ins.instance_name,
+            sqllog="select 2",
+            effect_row=1,
+            cost_time="0.2",
+        )
+
+        response = self.client.get("/api/v1/query/log/", format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = assert_success_envelope(self, response)
+        self.assertEqual(data["count"], 1)
+        self.assertEqual(data["results"][0]["sqllog"], "select 1")
+
+    def test_query_favorite_rejects_other_users_log(self):
+        foreign_log = QueryLog.objects.create(
+            username="other",
+            user_display="Other",
+            db_name="db1",
+            instance_name=self.ins.instance_name,
+            sqllog="select 2",
+            effect_row=1,
+            cost_time="0.1",
+        )
+
+        response = self.client.post(
+            "/api/v1/query/favorite/",
+            {"query_log_id": foreign_log.id, "star": True, "alias": "fav-other"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.json()["errors"], "Query log does not exist.")
+
     def test_query_log_filters_unstarred(self):
         QueryLog.objects.create(
             username=self.user.username,
