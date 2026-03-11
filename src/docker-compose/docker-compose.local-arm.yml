@@ -65,6 +65,8 @@ services:
       - "../../sql/migrations:/opt/archery/sql/migrations"
       - "./archery/logs:/opt/archery/logs"
       - "./archery/keys:/opt/archery/keys"
+    environment:
+      RUN_MIGRATIONS_ON_START: "1"
     entrypoint: "bash /opt/archery/src/docker/startup.sh"
     env_file:
       - .env.local-arm

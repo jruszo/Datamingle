@@ -13,6 +13,14 @@ else
     sed -i "s/nginx_port/$NGINX_PORT/g" /etc/nginx/nginx.conf
 fi
 
+if [[ "${RUN_MIGRATIONS_ON_START:-0}" == "1" ]]; then
+    echo Generate Django migrations
+    python3 manage.py makemigrations
+
+    echo Apply Django migrations
+    python3 manage.py migrate --noinput
+fi
+
 echo Start nginx
 /usr/sbin/nginx
 
@@ -24,7 +32,6 @@ supervisord -c /etc/supervisord.conf
 
 echo Start services
 gunicorn -w 4 -b 127.0.0.1:8888 --timeout 600 archery.wsgi:application
-
 
 
 

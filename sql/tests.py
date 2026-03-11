@@ -601,6 +601,7 @@ class TestQuery(TransactionTestCase):
             "filtered_sql": sql_without_limit,
             "has_star": False,
         }
+        _get_engine.return_value.seconds_behind_master = 100
         _get_engine.return_value.filter_sql.return_value = sql_with_limit
         _get_engine.return_value.query.return_value = q_result
         _priv_check.return_value = {
@@ -1945,6 +1946,9 @@ class TestDataDictionary(TestCase):
         Test table info retrieval.
         :return:
         """
+        _get_engine.return_value.get_table_meta_data.return_value = []
+        _get_engine.return_value.get_table_desc_data.return_value = []
+        _get_engine.return_value.get_table_index_data.return_value = []
         _get_engine.return_value.query.return_value = ResultSet(
             rows=(("test1", "Test table 1"), ("test2", "Test table 2"))
         )
