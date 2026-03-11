@@ -564,7 +564,22 @@ watch(form, () => {
             </div>
 
             <div class="grid min-w-0 gap-2">
-              <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Instance Tags</span>
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Instance Tags</span>
+                <Button as-child size="sm" variant="outline">
+                  <RouterLink
+                    :to="{
+                      name: 'settings-instance-tags-new',
+                      query: {
+                        reason: 'inventory-tag-shortcut',
+                        returnTo: route.fullPath,
+                      },
+                    }"
+                  >
+                    Add tag
+                  </RouterLink>
+                </Button>
+              </div>
               <select :class="multiSelectClass" multiple @change="updateNumericSelections($event, 'instance_tag_ids')">
                 <option
                   v-for="item in metadata?.tags ?? []"
@@ -575,7 +590,7 @@ watch(form, () => {
                   {{ item.tag_name }}
                 </option>
               </select>
-              <span class="text-xs text-slate-500">Assign the tags used by the legacy inventory filters.</span>
+              <span class="text-xs text-slate-500">Assign the tags used by the legacy inventory filters and query access rules.</span>
             </div>
           </div>
         </div>

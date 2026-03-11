@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
-import { Database, KeyRound, Settings2 } from 'lucide-vue-next'
+import { Database, KeyRound, Settings2, Tags } from 'lucide-vue-next'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -35,6 +35,14 @@ const canManageResourceGroups = computed(() => {
   }
   const permissions = authStore.currentUser?.permissions ?? []
   return permissions.includes('sql.menu_system') && permissions.includes('sql.view_resourcegroup')
+})
+
+const canManageInstanceTags = computed(() => {
+  if (authStore.currentUser?.is_superuser) {
+    return true
+  }
+  const permissions = authStore.currentUser?.permissions ?? []
+  return permissions.includes('sql.menu_instance')
 })
 </script>
 
@@ -124,6 +132,51 @@ const canManageResourceGroups = computed(() => {
                 as-child
               >
                 <RouterLink to="/settings/resource-groups">Open resource groups</RouterLink>
+              </Button>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+
+    <Card class="overflow-hidden border-slate-200">
+      <CardContent class="p-0">
+        <div class="grid gap-0 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+          <div class="bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.14),_transparent_48%),linear-gradient(135deg,#f8fafc_0%,#eef2ff_48%,#fffaf0_100%)] p-6 lg:p-8">
+            <Badge variant="outline" class="border-slate-300 bg-white/80 text-slate-700">Instance Metadata</Badge>
+            <h2 class="mt-5 text-2xl font-semibold text-slate-900">Tags used by inventory and query access</h2>
+            <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+              Create and maintain instance tags such as <code>can_read</code> so inventory assignment and query visibility can be managed in the SPA.
+            </p>
+          </div>
+          <div class="flex flex-col justify-between gap-4 border-t border-slate-200 bg-white p-6 lg:border-l lg:border-t-0 lg:p-8">
+            <div>
+              <div class="flex items-center gap-3">
+                <div class="rounded-2xl bg-slate-900 p-3 text-white">
+                  <Tags class="h-5 w-5" />
+                </div>
+                <div>
+                  <p class="text-sm font-semibold text-slate-900">Instance Tags</p>
+                  <p class="text-sm text-slate-500">Inventory-admin access to tag creation and status changes.</p>
+                </div>
+              </div>
+              <p class="mt-4 text-sm leading-6 text-slate-600">
+                Keep tag codes stable, activate the tags you want selectable in inventory, and create query-related tags without leaving the app.
+              </p>
+            </div>
+            <div class="flex items-center justify-between gap-3">
+              <Badge
+                :variant="canManageInstanceTags ? 'secondary' : 'outline'"
+                :class="canManageInstanceTags ? 'bg-emerald-100 text-emerald-800' : 'text-slate-500'"
+              >
+                <Settings2 class="h-3.5 w-3.5" />
+                {{ canManageInstanceTags ? 'Access available' : 'No access' }}
+              </Badge>
+              <Button
+                v-if="canManageInstanceTags"
+                as-child
+              >
+                <RouterLink to="/settings/instance-tags">Open instance tags</RouterLink>
               </Button>
             </div>
           </div>

@@ -2,9 +2,10 @@ from datetime import datetime, timedelta
 from unittest.mock import patch, Mock
 
 from django.test import TestCase
+from django.core.cache import cache
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
-from rest_framework.test import APITestCase
+from rest_framework.test import APITestCase, APIClient
 from rest_framework import status
 from common.config import SysConfig
 from sql.utils.workflow_audit import AuditSetting
@@ -49,6 +50,20 @@ def assert_success_envelope(testcase, response):
     return payload["data"]
 
 
+class CacheIsolatedAPITestCase(APITestCase):
+    """Reset shared cache state so API throttles do not leak across tests."""
+
+    def _pre_setup(self):
+        cache.clear()
+        super()._pre_setup()
+
+    def _post_teardown(self):
+        try:
+            cache.clear()
+        finally:
+            super()._post_teardown()
+
+
 class InfoTest(TestCase):
     def setUp(self) -> None:
         self.superuser = User.objects.create(username="super", is_superuser=True)
@@ -68,7 +83,7 @@ class InfoTest(TestCase):
         self.assertIsInstance(r_json["archery"]["version"], str)
 
 
-class TestUser(APITestCase):
+class TestUser(CacheIsolatedAPITestCase):
     """Test user-related APIs."""
 
     def setUp(self):
@@ -599,7 +614,7 @@ class TestUser(APITestCase):
         self.assertEqual(r.json()["errors"], "Invalid verification code.")
 
 
-class TestTokenAuth2FA(APITestCase):
+class TestTokenAuth2FA(CacheIsolatedAPITestCase):
     """Test token auth with stateless 2FA checks."""
 
     def setUp(self):
@@ -761,7 +776,7 @@ class TestTokenAuth2FA(APITestCase):
         mock_redis.set.assert_called_once()
 
 
-class TestQueryAPI(APITestCase):
+class TestQueryAPI(CacheIsolatedAPITestCase):
     """Test query/query-privilege API endpoints."""
 
     def setUp(self):
@@ -1239,7 +1254,7 @@ class TestQueryAPI(APITestCase):
         mock_async_task.assert_called_once()
 
 
-class TestInstance(APITestCase):
+class TestInstance(CacheIsolatedAPITestCase):
     """Test instance-related APIs."""
 
     def setUp(self):
@@ -1276,7 +1291,7 @@ class TestInstance(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION="Bearer " + self.token)
 
     def tearDown(self):
-        self.user.delete()
+        User.objects.all().delete()
         Instance.objects.all().delete()
         ResourceGroup.objects.all().delete()
         InstanceTag.objects.all().delete()
@@ -1364,6 +1379,235 @@ class TestInstance(APITestCase):
         self.assertEqual(
             payload["resource_groups"][0]["group_id"], visible_group.group_id
         )
+
+    def test_get_instance_tag_list(self):
+        """Instance tags should support list search and ordering."""
+        active_tag = InstanceTag.objects.create(
+            tag_code="ops", tag_name="Operations", active=True
+        )
+        InstanceTag.objects.create(tag_code="hidden", tag_name="Hidden", active=False)
+
+        r = self.client.get(
+            "/api/v1/instance/tag/?search=ops&ordering=tag_name", format="json"
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["id"], active_tag.id)
+        self.assertEqual(payload["results"][0]["usage_count"], 0)
+
+    def test_create_instance_tag(self):
+        """Inventory admins can create instance tags."""
+        r = self.client.post(
+            "/api/v1/instance/tag/",
+            {"tag_code": "can_read", "tag_name": "Can Read", "active": True},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        payload = response_data(r)
+        self.assertEqual(payload["tag_code"], "can_read")
+        self.assertEqual(payload["tag_name"], "Can Read")
+        self.assertTrue(payload["active"])
+
+    def test_get_instance_tag_detail(self):
+        """Tag detail should expose the management payload."""
+        tag = InstanceTag.objects.create(
+            tag_code="can_read", tag_name="Can Read", active=True
+        )
+
+        r = self.client.get(f"/api/v1/instance/tag/{tag.id}/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["id"], tag.id)
+        self.assertEqual(payload["tag_code"], "can_read")
+        self.assertEqual(payload["tag_name"], "Can Read")
+        self.assertTrue(payload["active"])
+
+    def test_update_instance_tag(self):
+        """Inventory admins can rename and deactivate unused tags."""
+        tag = InstanceTag.objects.create(
+            tag_code="can_read", tag_name="Can Read", active=True
+        )
+
+        r = self.client.put(
+            f"/api/v1/instance/tag/{tag.id}/",
+            {"tag_name": "Read Access", "active": False},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        tag.refresh_from_db()
+        self.assertEqual(tag.tag_code, "can_read")
+        self.assertEqual(tag.tag_name, "Read Access")
+        self.assertFalse(tag.active)
+
+    def test_update_instance_tag_rejects_deactivation_when_assigned(self):
+        """Assigned tags must be removed from instances before deactivation."""
+        tag = InstanceTag.objects.create(
+            tag_code="can_read", tag_name="Can Read", active=True
+        )
+        self.ins.instance_tag.add(tag)
+
+        r = self.client.put(
+            f"/api/v1/instance/tag/{tag.id}/",
+            {"tag_name": "Can Read", "active": False},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("active", r.json())
+
+    def test_create_instance_tag_rejects_duplicate_code(self):
+        """Tag codes stay unique."""
+        InstanceTag.objects.create(
+            tag_code="can_read", tag_name="Can Read", active=True
+        )
+
+        r = self.client.post(
+            "/api/v1/instance/tag/",
+            {"tag_code": "can_read", "tag_name": "Duplicate", "active": True},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("tag_code", r.json())
+
+    def test_instance_tag_management_requires_inventory_permission(self):
+        """Tag management should follow inventory admin access."""
+        other_user = User.objects.create(
+            username="tagless_user", display="Tagless User", is_active=True
+        )
+        other_user.set_password("test_password")
+        other_user.save()
+        other_client = APIClient()
+        login_response = other_client.post(
+            "/api/auth/token/",
+            {"username": "tagless_user", "password": "test_password"},
+            format="json",
+        )
+        other_client.credentials(
+            HTTP_AUTHORIZATION="Bearer " + response_data(login_response)["access"]
+        )
+
+        r = other_client.get("/api/v1/instance/tag/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_get_instance_tag_list(self):
+        """Tag management list should expose instance tags."""
+        tag = InstanceTag.objects.create(
+            tag_code="can_read", tag_name="Can Read", active=True
+        )
+
+        r = self.client.get("/api/v1/instance/tag/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["id"], tag.id)
+        self.assertEqual(payload["results"][0]["tag_code"], "can_read")
+
+    def test_get_instance_tag_list_with_search_and_ordering(self):
+        """Tag list should support the SPA search and sort controls."""
+        InstanceTag.objects.create(
+            tag_code="can_write", tag_name="Can Write", active=True
+        )
+        InstanceTag.objects.create(tag_code="ops", tag_name="Ops", active=False)
+
+        r = self.client.get(
+            "/api/v1/instance/tag/?search=write&ordering=tag_code", format="json"
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["tag_code"], "can_write")
+
+    def test_create_instance_tag(self):
+        """Inventory admins can create instance tags."""
+        r = self.client.post(
+            "/api/v1/instance/tag/",
+            {"tag_code": "can_read", "tag_name": "Can Read", "active": True},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        payload = response_data(r)
+        self.assertEqual(payload["tag_code"], "can_read")
+        self.assertEqual(payload["tag_name"], "Can Read")
+        self.assertTrue(payload["active"])
+
+    def test_create_instance_tag_rejects_duplicate_code(self):
+        """Tag codes must stay unique."""
+        InstanceTag.objects.create(
+            tag_code="can_read", tag_name="Can Read", active=True
+        )
+
+        r = self.client.post(
+            "/api/v1/instance/tag/",
+            {"tag_code": "can_read", "tag_name": "Duplicate", "active": True},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("tag_code", r.json())
+
+    def test_get_instance_tag_detail(self):
+        """Detail should expose the fields needed by the SPA edit form."""
+        tag = InstanceTag.objects.create(
+            tag_code="can_read", tag_name="Can Read", active=True
+        )
+
+        r = self.client.get(f"/api/v1/instance/tag/{tag.id}/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["tag_code"], "can_read")
+        self.assertEqual(payload["tag_name"], "Can Read")
+        self.assertTrue(payload["active"])
+
+    def test_update_instance_tag(self):
+        """Tag update should allow renaming and status changes."""
+        tag = InstanceTag.objects.create(
+            tag_code="can_read", tag_name="Can Read", active=True
+        )
+
+        r = self.client.put(
+            f"/api/v1/instance/tag/{tag.id}/",
+            {"tag_name": "Readable", "active": True},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["tag_code"], "can_read")
+        self.assertEqual(payload["tag_name"], "Readable")
+
+    def test_update_instance_tag_rejects_blank_name(self):
+        """Tag names cannot be blank."""
+        tag = InstanceTag.objects.create(
+            tag_code="can_read", tag_name="Can Read", active=True
+        )
+
+        r = self.client.put(
+            f"/api/v1/instance/tag/{tag.id}/",
+            {"tag_name": "   ", "active": True},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("tag_name", r.json())
+
+    def test_update_instance_tag_blocks_deactivation_while_assigned(self):
+        """Assigned tags cannot be deactivated."""
+        tag = InstanceTag.objects.create(
+            tag_code="can_read", tag_name="Can Read", active=True
+        )
+        self.ins.instance_tag.add(tag)
+
+        r = self.client.put(
+            f"/api/v1/instance/tag/{tag.id}/",
+            {"tag_name": "Can Read", "active": False},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("active", r.json())
+
+    def test_instance_tag_management_requires_inventory_access(self):
+        """Tag management follows inventory-admin permissions."""
+        self.user.user_permissions.clear()
+
+        r = self.client.get("/api/v1/instance/tag/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_create_instance(self):
         """Test creating instance."""
@@ -1539,6 +1783,54 @@ class TestInstance(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(ins.instance_name, "Updated Instance Name")
 
+    def test_update_instance_with_relationships(self):
+        """Update should persist SPA relationship IDs for groups and tags."""
+        tag = InstanceTag.objects.create(
+            tag_code="can_read", tag_name="Can Read", active=True
+        )
+        resource_group = ResourceGroup.objects.create(group_name="Updated Group")
+        json_data = {
+            "instance_name": "Updated Instance Name",
+            "type": "master",
+            "db_type": "mysql",
+            "host": "updated-host",
+            "port": 3307,
+            "user": "updated-user",
+            "password": "",
+            "is_ssl": True,
+            "verify_ssl": False,
+            "db_name": "updated_db",
+            "show_db_name_regex": "^updated_.*$",
+            "denied_db_name_regex": "^mysql$",
+            "charset": "utf8mb4",
+            "service_name": "",
+            "sid": "",
+            "tunnel_id": self.tunnel.id,
+            "resource_group_ids": [resource_group.group_id],
+            "instance_tag_ids": [tag.id],
+        }
+        r = self.client.put(
+            f"/api/v1/instance/{self.ins.id}/", json_data, format="json"
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+        self.ins.refresh_from_db()
+        payload = response_data(r)
+        self.assertEqual(self.ins.instance_name, "Updated Instance Name")
+        self.assertEqual(self.ins.host, "updated-host")
+        self.assertEqual(self.ins.port, 3307)
+        self.assertEqual(self.ins.tunnel_id, self.tunnel.id)
+        self.assertEqual(
+            list(self.ins.resource_group.values_list("group_id", flat=True)),
+            [resource_group.group_id],
+        )
+        self.assertEqual(
+            list(self.ins.instance_tag.values_list("id", flat=True)),
+            [tag.id],
+        )
+        self.assertEqual(payload["resource_group_ids"], [resource_group.group_id])
+        self.assertEqual(payload["instance_tag_ids"], [tag.id])
+
     def test_delete_instance(self):
         """Test deleting instance."""
         r = self.client.delete(f"/api/v1/instance/{self.ins.id}/", format="json")
@@ -1552,7 +1844,7 @@ class TestInstance(APITestCase):
         self.assertEqual(response_data(r)["count"], 1)
 
 
-class TestPermissionRequestAPI(APITestCase):
+class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
     def setUp(self):
         self.review_group = Group.objects.create(name="Permission Approvers")
         self.resource_group = ResourceGroup.objects.create(group_name="permission-rg")
@@ -1868,7 +2160,7 @@ class TestPermissionRequestAPI(APITestCase):
         self.assertEqual(response_data(r)["count"], 1)
 
 
-class TestWorkflow(APITestCase):
+class TestWorkflow(CacheIsolatedAPITestCase):
     """Test workflow-related APIs."""
 
     def setUp(self):
@@ -2373,7 +2665,7 @@ class TestWorkflow(APITestCase):
         )
 
 
-class TestPermissionRequestAPI(APITestCase):
+class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
     def setUp(self):
         self.user = User(
             username="permission_user", display="Permission User", is_active=True
@@ -2670,7 +2962,7 @@ class TestPermissionRequestAPI(APITestCase):
         self.assertEqual(instance_grant.is_revoked, True)
 
 
-class TestDashboardAPI(APITestCase):
+class TestDashboardAPI(CacheIsolatedAPITestCase):
     def setUp(self):
         self.user = User(
             username="dashboard_user",

@@ -39,6 +39,7 @@ const primaryNavigation = [
 ]
 
 const settingsNavigation = [
+  { to: '/settings/instance-tags', label: 'Instance Tags', isVisible: () => canSeeInstanceTagManagement.value },
   { to: '/settings/users', label: 'User Management', isVisible: () => canSeeUserManagement.value },
   { to: '/settings/groups', label: 'Permission Groups', isVisible: () => canSeeGroupManagement.value },
   { to: '/settings/resource-groups', label: 'Resource Groups', isVisible: () => canSeeResourceGroupManagement.value },
@@ -53,13 +54,17 @@ function hasPermission(permission: string) {
   return authStore.currentUser?.permissions.includes(permission) ?? false
 }
 
-const canSeeSettingsMenu = computed(() => hasPermission('sql.menu_system'))
+const canSeeSystemSettings = computed(() => hasPermission('sql.menu_system'))
 const canSeeInventory = computed(() => hasPermission('sql.menu_instance'))
 const canSeePermissionManagement = computed(() => hasPermission('sql.menu_queryapplylist'))
+const canSeeInstanceTagManagement = computed(() => hasPermission('sql.menu_instance'))
 const canSeeUserManagement = computed(() => authStore.currentUser?.is_superuser ?? false)
-const canSeeGroupManagement = computed(() => canSeeSettingsMenu.value && hasPermission('auth.view_group'))
+const canSeeSettingsMenu = computed(
+  () => canSeeSystemSettings.value || canSeeInstanceTagManagement.value || canSeeUserManagement.value,
+)
+const canSeeGroupManagement = computed(() => canSeeSystemSettings.value && hasPermission('auth.view_group'))
 const canSeeResourceGroupManagement = computed(
-  () => canSeeSettingsMenu.value && hasPermission('sql.view_resourcegroup'),
+  () => canSeeSystemSettings.value && hasPermission('sql.view_resourcegroup'),
 )
 const visiblePrimaryNavigation = computed(() =>
   primaryNavigation.filter((item) => item.isVisible()),

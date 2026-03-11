@@ -649,15 +649,122 @@ class InstanceSerializer(serializers.ModelSerializer):
 
 
 class InstanceDetailSerializer(serializers.ModelSerializer):
+    tunnel_id = serializers.PrimaryKeyRelatedField(
+        source="tunnel",
+        queryset=Tunnel.objects.all(),
+        allow_null=True,
+        required=False,
+    )
+    resource_group_ids = serializers.PrimaryKeyRelatedField(
+        source="resource_group",
+        queryset=ResourceGroup.objects.filter(is_deleted=0),
+        many=True,
+        required=False,
+    )
+    instance_tag_ids = serializers.PrimaryKeyRelatedField(
+        source="instance_tag",
+        queryset=InstanceTag.objects.filter(active=True),
+        many=True,
+        required=False,
+    )
+
+    def validate_instance_name(self, value):
+        instance_name = value.strip()
+        if not instance_name:
+            raise serializers.ValidationError("Instance name cannot be blank.")
+        return instance_name
+
+    def validate_host(self, value):
+        host = value.strip()
+        if not host:
+            raise serializers.ValidationError("Host cannot be blank.")
+        return host
+
+    def validate_user(self, value):
+        return value.strip()
+
+    def validate_db_name(self, value):
+        return value.strip()
+
+    def validate_show_db_name_regex(self, value):
+        return value.strip()
+
+    def validate_denied_db_name_regex(self, value):
+        return value.strip()
+
+    def validate_charset(self, value):
+        return value.strip()
+
+    def validate_service_name(self, value):
+        if value is None:
+            return value
+        return value.strip()
+
+    def validate_sid(self, value):
+        if value is None:
+            return value
+        return value.strip()
+
+    def update(self, instance, validated_data):
+        resource_groups = validated_data.pop("resource_group", None)
+        instance_tags = validated_data.pop("instance_tag", None)
+        password = validated_data.pop("password", None)
+
+        with transaction.atomic():
+            for field, value in validated_data.items():
+                setattr(instance, field, value)
+
+            if password not in (None, ""):
+                instance.password = password
+
+            instance.save()
+
+            if resource_groups is not None:
+                instance.resource_group.set(resource_groups)
+
+            if instance_tags is not None:
+                instance.instance_tag.set(instance_tags)
+
+        return instance
+
     class Meta:
         model = Instance
-        fields = "__all__"
+        fields = (
+            "instance_name",
+            "type",
+            "db_type",
+            "host",
+            "port",
+            "user",
+            "password",
+            "is_ssl",
+            "verify_ssl",
+            "db_name",
+            "show_db_name_regex",
+            "denied_db_name_regex",
+            "charset",
+            "service_name",
+            "sid",
+            "tunnel_id",
+            "resource_group_ids",
+            "instance_tag_ids",
+        )
         extra_kwargs = {
             "password": {"write_only": True},
             "instance_name": {"required": False},
             "type": {"required": False},
             "db_type": {"required": False},
             "host": {"required": False},
+            "port": {"required": False},
+            "user": {"required": False},
+            "is_ssl": {"required": False},
+            "verify_ssl": {"required": False},
+            "db_name": {"required": False},
+            "show_db_name_regex": {"required": False},
+            "denied_db_name_regex": {"required": False},
+            "charset": {"required": False},
+            "service_name": {"required": False},
+            "sid": {"required": False},
         }
 
 
@@ -740,6 +847,83 @@ class InstanceTagLookupSerializer(serializers.ModelSerializer):
     class Meta:
         model = InstanceTag
         fields = ("id", "tag_name", "label")
+
+
+class InstanceTagManagementSerializer(serializers.ModelSerializer):
+    usage_count = serializers.SerializerMethodField()
+
+    def get_usage_count(self, obj):
+        return obj.instance_set.count()
+
+    class Meta:
+        model = InstanceTag
+        fields = ("id", "tag_code", "tag_name", "active", "usage_count")
+
+
+class InstanceTagCreateSerializer(serializers.ModelSerializer):
+    def validate_tag_code(self, value):
+        tag_code = value.strip()
+        if not tag_code:
+            raise serializers.ValidationError("Tag code cannot be blank.")
+        return tag_code
+
+    def validate_tag_name(self, value):
+        tag_name = value.strip()
+        if not tag_name:
+            raise serializers.ValidationError("Tag name cannot be blank.")
+        return tag_name
+
+    class Meta:
+        model = InstanceTag
+        fields = ("tag_code", "tag_name", "active")
+
+
+class InstanceTagUpdateSerializer(serializers.ModelSerializer):
+    def validate_tag_name(self, value):
+        tag_name = value.strip()
+        if not tag_name:
+            raise serializers.ValidationError("Tag name cannot be blank.")
+        return tag_name
+
+    class Meta:
+        model = InstanceTag
+        fields = ("tag_name", "active")
+
+
+class InstanceTagManagementSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InstanceTag
+        fields = ("id", "tag_code", "tag_name", "active")
+
+
+class InstanceTagCreateSerializer(serializers.ModelSerializer):
+    def validate_tag_code(self, value):
+        tag_code = value.strip()
+        if not tag_code:
+            raise serializers.ValidationError("Tag code cannot be blank.")
+        return tag_code
+
+    def validate_tag_name(self, value):
+        tag_name = value.strip()
+        if not tag_name:
+            raise serializers.ValidationError("Tag name cannot be blank.")
+        return tag_name
+
+    class Meta:
+        model = InstanceTag
+        fields = ("tag_code", "tag_name", "active")
+
+
+class InstanceTagUpdateSerializer(serializers.ModelSerializer):
+    def validate_tag_name(self, value):
+        tag_name = value.strip()
+        if not tag_name:
+            raise serializers.ValidationError("Tag name cannot be blank.")
+        return tag_name
+
+    class Meta:
+        model = InstanceTag
+        fields = ("tag_name", "active")
 
 
 class TunnelLookupSerializer(serializers.ModelSerializer):

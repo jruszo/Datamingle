@@ -7,6 +7,7 @@ import {
   clearStoredTokens,
   getUsableAccessToken,
 } from '@/lib/auth'
+import type { CurrentUserContext } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth'
 import HomeView from '@/views/HomeView.vue'
 import InventoryCreateView from '@/views/InventoryCreateView.vue'
@@ -18,8 +19,11 @@ import QueriesView from '@/views/QueriesView.vue'
 import ReportsView from '@/views/ReportsView.vue'
 import SettingsGroupsView from '@/views/SettingsGroupsView.vue'
 import SettingsGroupDetailView from '@/views/SettingsGroupDetailView.vue'
+import SettingsView from '@/views/SettingsView.vue'
 import SettingsResourceGroupsView from '@/views/SettingsResourceGroupsView.vue'
 import SettingsResourceGroupDetailView from '@/views/SettingsResourceGroupDetailView.vue'
+import SettingsInstanceTagDetailView from '@/views/SettingsInstanceTagDetailView.vue'
+import SettingsInstanceTagsView from '@/views/SettingsInstanceTagsView.vue'
 import SettingsUserDetailView from '@/views/SettingsUserDetailView.vue'
 import SettingsUsersView from '@/views/SettingsUsersView.vue'
 import WorkflowsView from '@/views/WorkflowsView.vue'
@@ -37,7 +41,10 @@ const router = createRouter({
     { path: '/permission-management', name: 'permission-management', component: PermissionManagementView, meta: { title: 'Permission Management' } },
     { path: '/reports', name: 'reports', component: ReportsView, meta: { title: 'Reports' } },
     { path: '/profile', name: 'profile', component: ProfileView, meta: { title: 'Profile' } },
-    { path: '/settings', redirect: { name: 'settings-groups' } },
+    { path: '/settings', name: 'settings', component: SettingsView, meta: { title: 'Settings' } },
+    { path: '/settings/instance-tags', name: 'settings-instance-tags', component: SettingsInstanceTagsView, meta: { title: 'Instance Tags', requiresInventoryAdmin: true } },
+    { path: '/settings/instance-tags/new', name: 'settings-instance-tags-new', component: SettingsInstanceTagDetailView, meta: { title: 'Instance Tags', requiresInventoryAdmin: true } },
+    { path: '/settings/instance-tags/:tagId', name: 'settings-instance-tags-detail', component: SettingsInstanceTagDetailView, meta: { title: 'Instance Tags', requiresInventoryAdmin: true } },
     { path: '/settings/users', name: 'settings-users', component: SettingsUsersView, meta: { title: 'User Management', requiresSuperuser: true } },
     { path: '/settings/users/new', name: 'settings-users-new', component: SettingsUserDetailView, meta: { title: 'User Management', requiresSuperuser: true } },
     { path: '/settings/users/:userId', name: 'settings-users-detail', component: SettingsUserDetailView, meta: { title: 'User Management', requiresSuperuser: true } },
@@ -52,6 +59,16 @@ const router = createRouter({
     { path: '/groups/management/:groupId', redirect: (to) => ({ name: 'settings-groups-detail', params: { groupId: to.params.groupId } }) },
   ],
 })
+
+function hasCurrentUserPermission(
+  currentUser: CurrentUserContext | null,
+  permission: string,
+) {
+  if (currentUser?.is_superuser) {
+    return true
+  }
+  return currentUser?.permissions.includes(permission) ?? false
+}
 
 router.beforeEach(async (to) => {
   const authStore = useAuthStore()
@@ -85,10 +102,43 @@ router.beforeEach(async (to) => {
     return { name: 'home' }
   }
 
-  if (to.meta.requiresSuperuser === true) {
+  let currentUser: CurrentUserContext | null = null
+
+  async function ensureCurrentUser() {
+    if (currentUser) {
+      return currentUser
+    }
+    currentUser = await authStore.loadCurrentUser()
+    return currentUser
+  }
+
+  if (to.name === 'settings') {
     try {
-      const currentUser = await authStore.loadCurrentUser()
-      if (!currentUser?.is_superuser) {
+      const resolvedUser = await ensureCurrentUser()
+      if (hasCurrentUserPermission(resolvedUser, 'sql.menu_system')) {
+        return { name: 'settings-groups' }
+      }
+      if (hasCurrentUserPermission(resolvedUser, 'sql.menu_instance')) {
+        return { name: 'settings-instance-tags' }
+      }
+      return { name: 'home' }
+    } catch {
+      clearStoredTokens()
+      authStore.clearTokens()
+      return { name: 'login', query: { reason: 'expired' } }
+    }
+  }
+
+  if (to.meta.requiresSuperuser === true || to.meta.requiresInventoryAdmin === true) {
+    try {
+      const resolvedUser = await ensureCurrentUser()
+      if (to.meta.requiresSuperuser === true && !resolvedUser?.is_superuser) {
+        return { name: 'home' }
+      }
+      if (
+        to.meta.requiresInventoryAdmin === true &&
+        !hasCurrentUserPermission(resolvedUser, 'sql.menu_instance')
+      ) {
         return { name: 'home' }
       }
     } catch {
