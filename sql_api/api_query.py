@@ -403,7 +403,9 @@ class QueryLogBase(generics.ListAPIView):
             queryset = queryset.filter(favorite=False)
         if query_log_id:
             queryset = queryset.filter(id=query_log_id)
-        if self.audit_only and not (user.is_superuser or user.has_perm("sql.audit_user")):
+        if self.audit_only and not (
+            user.is_superuser or user.has_perm("sql.audit_user")
+        ):
             queryset = queryset.filter(username=user.username)
         if start_date and end_date:
             try:
