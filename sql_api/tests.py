@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from unittest.mock import patch, Mock
 
 from django.test import TestCase
+from django.core.cache import cache
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
 from rest_framework.test import APITestCase, APIClient
@@ -49,6 +50,20 @@ def assert_success_envelope(testcase, response):
     return payload["data"]
 
 
+class CacheIsolatedAPITestCase(APITestCase):
+    """Reset shared cache state so API throttles do not leak across tests."""
+
+    def _pre_setup(self):
+        cache.clear()
+        super()._pre_setup()
+
+    def _post_teardown(self):
+        try:
+            cache.clear()
+        finally:
+            super()._post_teardown()
+
+
 class InfoTest(TestCase):
     def setUp(self) -> None:
         self.superuser = User.objects.create(username="super", is_superuser=True)
@@ -68,7 +83,7 @@ class InfoTest(TestCase):
         self.assertIsInstance(r_json["archery"]["version"], str)
 
 
-class TestUser(APITestCase):
+class TestUser(CacheIsolatedAPITestCase):
     """Test user-related APIs."""
 
     def setUp(self):
@@ -599,7 +614,7 @@ class TestUser(APITestCase):
         self.assertEqual(r.json()["errors"], "Invalid verification code.")
 
 
-class TestTokenAuth2FA(APITestCase):
+class TestTokenAuth2FA(CacheIsolatedAPITestCase):
     """Test token auth with stateless 2FA checks."""
 
     def setUp(self):
@@ -761,7 +776,7 @@ class TestTokenAuth2FA(APITestCase):
         mock_redis.set.assert_called_once()
 
 
-class TestQueryAPI(APITestCase):
+class TestQueryAPI(CacheIsolatedAPITestCase):
     """Test query/query-privilege API endpoints."""
 
     def setUp(self):
@@ -1239,7 +1254,7 @@ class TestQueryAPI(APITestCase):
         mock_async_task.assert_called_once()
 
 
-class TestInstance(APITestCase):
+class TestInstance(CacheIsolatedAPITestCase):
     """Test instance-related APIs."""
 
     def setUp(self):
@@ -1829,7 +1844,7 @@ class TestInstance(APITestCase):
         self.assertEqual(response_data(r)["count"], 1)
 
 
-class TestPermissionRequestAPI(APITestCase):
+class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
     def setUp(self):
         self.review_group = Group.objects.create(name="Permission Approvers")
         self.resource_group = ResourceGroup.objects.create(group_name="permission-rg")
@@ -2145,7 +2160,7 @@ class TestPermissionRequestAPI(APITestCase):
         self.assertEqual(response_data(r)["count"], 1)
 
 
-class TestWorkflow(APITestCase):
+class TestWorkflow(CacheIsolatedAPITestCase):
     """Test workflow-related APIs."""
 
     def setUp(self):
@@ -2650,7 +2665,7 @@ class TestWorkflow(APITestCase):
         )
 
 
-class TestPermissionRequestAPI(APITestCase):
+class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
     def setUp(self):
         self.user = User(
             username="permission_user", display="Permission User", is_active=True
@@ -2947,7 +2962,7 @@ class TestPermissionRequestAPI(APITestCase):
         self.assertEqual(instance_grant.is_revoked, True)
 
 
-class TestDashboardAPI(APITestCase):
+class TestDashboardAPI(CacheIsolatedAPITestCase):
     def setUp(self):
         self.user = User(
             username="dashboard_user",
