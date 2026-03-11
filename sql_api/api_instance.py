@@ -27,7 +27,10 @@ from .serializers import (
     InstanceMetadataSerializer,
     InstanceResourceListSerializer,
     InstanceResourceSerializer,
+    InstanceTagCreateSerializer,
+    InstanceTagManagementSerializer,
     InstanceTagLookupSerializer,
+    InstanceTagUpdateSerializer,
     ResourceGroupLookupSerializer,
     TunnelLookupSerializer,
     TunnelSerializer,
@@ -259,6 +262,273 @@ class InstanceMetadata(views.APIView):
         }
         serializer = InstanceMetadataSerializer(payload)
         return success_response(data=serializer.data)
+
+
+class InstanceTagList(generics.ListAPIView):
+    """List and create instance tags for inventory management."""
+
+    pagination_class = CustomizedPagination
+    serializer_class = InstanceTagManagementSerializer
+    queryset = InstanceTag.objects.all().order_by("id")
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        search = self.request.query_params.get("search", "").strip()
+        ordering = self.request.query_params.get("ordering", "").strip()
+
+        if search:
+            search_filter = Q(tag_code__icontains=search) | Q(
+                tag_name__icontains=search
+            )
+            if search.isdigit():
+                search_filter |= Q(id=int(search))
+            queryset = queryset.filter(search_filter)
+
+        if ordering in {
+            "id",
+            "-id",
+            "tag_code",
+            "-tag_code",
+            "tag_name",
+            "-tag_name",
+            "active",
+            "-active",
+        }:
+            queryset = queryset.order_by(ordering, "id")
+
+        return queryset
+
+    @extend_schema(
+        summary="Instance Tag List",
+        responses={200: InstanceTagManagementSerializer},
+        parameters=[
+            OpenApiParameter(
+                name="search",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description="Match tag ID, code, or name.",
+            ),
+            OpenApiParameter(
+                name="ordering",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description="Ordering key, e.g. tag_name or -active.",
+            ),
+        ],
+        description="List instance tags available to inventory administrators.",
+    )
+    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
+    def get(self, request):
+        tags = self.filter_queryset(self.get_queryset())
+        page_tags = self.paginate_queryset(queryset=tags)
+        serializer_obj = self.get_serializer(page_tags, many=True)
+        return self.get_paginated_response(serializer_obj.data)
+
+    @extend_schema(
+        summary="Create Instance Tag",
+        request=InstanceTagCreateSerializer,
+        responses={201: InstanceTagManagementSerializer},
+        description="Create a new instance tag.",
+    )
+    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
+    def post(self, request):
+        serializer = InstanceTagCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            tag = serializer.save()
+            return success_response(
+                data=InstanceTagManagementSerializer(tag).data,
+                detail="Instance tag created successfully.",
+                status_code=status.HTTP_201_CREATED,
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class InstanceTagDetail(views.APIView):
+    """Get and update a single instance tag."""
+
+    serializer_class = InstanceTagManagementSerializer
+
+    def get_object(self, pk):
+        try:
+            return InstanceTag.objects.get(pk=pk)
+        except InstanceTag.DoesNotExist:
+            raise Http404
+
+    @staticmethod
+    def _validate_deactivation(tag, next_active):
+        if next_active or tag.active is False:
+            return
+        if tag.instance_set.exists():
+            raise serializers.ValidationError(
+                {
+                    "active": (
+                        "This tag is assigned to one or more instances. "
+                        "Remove it from those instances before deactivating it."
+                    )
+                }
+            )
+
+    @extend_schema(
+        summary="Instance Tag Detail",
+        responses={200: InstanceTagManagementSerializer},
+        description="Get a single instance tag for editing.",
+    )
+    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
+    def get(self, request, pk):
+        tag = self.get_object(pk)
+        return success_response(data=InstanceTagManagementSerializer(tag).data)
+
+    @extend_schema(
+        summary="Update Instance Tag",
+        request=InstanceTagUpdateSerializer,
+        responses={200: InstanceTagManagementSerializer},
+        description="Update an instance tag. Tag code remains immutable.",
+    )
+    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
+    def put(self, request, pk):
+        tag = self.get_object(pk)
+        serializer = InstanceTagUpdateSerializer(tag, data=request.data)
+        if serializer.is_valid():
+            self._validate_deactivation(
+                tag, serializer.validated_data.get("active", True)
+            )
+            serializer.save()
+            return success_response(
+                data=InstanceTagManagementSerializer(tag).data,
+                detail="Instance tag updated successfully.",
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class InstanceTagList(generics.ListAPIView):
+    """List or create instance tags for inventory management."""
+
+    pagination_class = CustomizedPagination
+    serializer_class = InstanceTagManagementSerializer
+    queryset = InstanceTag.objects.all().order_by("tag_name", "id")
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        search = self.request.query_params.get("search", "").strip()
+        ordering = self.request.query_params.get("ordering", "").strip()
+
+        if search:
+            search_filter = Q(tag_code__icontains=search) | Q(
+                tag_name__icontains=search
+            )
+            if search.isdigit():
+                search_filter |= Q(id=int(search))
+            queryset = queryset.filter(search_filter)
+
+        if ordering in {
+            "id",
+            "-id",
+            "tag_code",
+            "-tag_code",
+            "tag_name",
+            "-tag_name",
+            "active",
+            "-active",
+        }:
+            queryset = queryset.order_by(ordering, "id")
+
+        return queryset
+
+    @extend_schema(
+        summary="Instance Tag List",
+        responses={200: InstanceTagManagementSerializer},
+        parameters=[
+            OpenApiParameter(
+                name="search",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description="Match tag ID, code, or name.",
+            ),
+            OpenApiParameter(
+                name="ordering",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description="Ordering key, e.g. tag_name or -active.",
+            ),
+        ],
+        description="List instance tags for SPA management.",
+    )
+    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
+    def get(self, request):
+        tags = self.filter_queryset(self.get_queryset())
+        page_tags = self.paginate_queryset(queryset=tags)
+        serializer_obj = self.get_serializer(page_tags, many=True)
+        return self.get_paginated_response(serializer_obj.data)
+
+    @extend_schema(
+        summary="Create Instance Tag",
+        request=InstanceTagCreateSerializer,
+        responses={201: InstanceTagManagementSerializer},
+        description="Create an instance tag for inventory and query access flows.",
+    )
+    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
+    def post(self, request):
+        serializer = InstanceTagCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            tag = serializer.save()
+            return success_response(
+                data=InstanceTagManagementSerializer(tag).data,
+                detail="Instance tag created successfully.",
+                status_code=status.HTTP_201_CREATED,
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class InstanceTagDetail(views.APIView):
+    """Get or update an instance tag."""
+
+    serializer_class = InstanceTagManagementSerializer
+
+    def get_object(self, pk):
+        try:
+            return InstanceTag.objects.get(pk=pk)
+        except InstanceTag.DoesNotExist:
+            raise Http404
+
+    @extend_schema(
+        summary="Instance Tag Detail",
+        responses={200: InstanceTagManagementSerializer},
+        description="Get a single instance tag for SPA editing.",
+    )
+    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
+    def get(self, request, pk):
+        tag = self.get_object(pk)
+        return success_response(data=InstanceTagManagementSerializer(tag).data)
+
+    @extend_schema(
+        summary="Update Instance Tag",
+        request=InstanceTagUpdateSerializer,
+        responses={200: InstanceTagManagementSerializer},
+        description="Update an instance tag.",
+    )
+    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
+    def put(self, request, pk):
+        tag = self.get_object(pk)
+        serializer = InstanceTagUpdateSerializer(tag, data=request.data)
+        if serializer.is_valid():
+            if (
+                serializer.validated_data.get("active") is False
+                and tag.instance_set.exists()
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "active": (
+                            "Assigned tags cannot be deactivated. Remove the tag "
+                            "from all instances first."
+                        )
+                    }
+                )
+            serializer.save()
+            return success_response(
+                data=InstanceTagManagementSerializer(tag).data,
+                detail="Instance tag updated successfully.",
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class InstanceConnectionTest(views.APIView):

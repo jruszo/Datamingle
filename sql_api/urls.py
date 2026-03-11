@@ -73,7 +73,11 @@ urlpatterns = [
     path("v1/user/2fa/save/", api_user.TwoFASave.as_view()),
     path("v1/user/2fa/verify/", api_user.TwoFAVerify.as_view()),
     path("v1/instance/", api_instance.InstanceList.as_view()),
+    path("v1/instance/tag/", api_instance.InstanceTagList.as_view()),
+    path("v1/instance/tag/<int:pk>/", api_instance.InstanceTagDetail.as_view()),
     path("v1/instance/metadata/", api_instance.InstanceMetadata.as_view()),
+    path("v1/instance/tag/", api_instance.InstanceTagList.as_view()),
+    path("v1/instance/tag/<int:pk>/", api_instance.InstanceTagDetail.as_view()),
     path(
         "v1/instance/test-connection/",
         api_instance.InstanceDraftConnectionTest.as_view(),

@@ -228,6 +228,32 @@ export type UpdateUserPayload = {
   is_active: boolean
 }
 
+export type InstanceTagRecord = {
+  id: number
+  tag_code: string
+  tag_name: string
+  active: boolean
+  usage_count?: number
+}
+
+export type InstanceTagListOptions = {
+  page?: number
+  size?: number
+  search?: string
+  ordering?: string
+}
+
+export type CreateInstanceTagPayload = {
+  tag_code: string
+  tag_name: string
+  active: boolean
+}
+
+export type UpdateInstanceTagPayload = {
+  tag_name: string
+  active: boolean
+}
+
 export type ResourceGroupRecord = {
   group_id: number
   group_name: string
@@ -281,6 +307,7 @@ export type InstanceOptionRecord = {
 
 export type InstanceTagOptionRecord = {
   id: number
+  tag_code?: string
   tag_name: string
   label: string
 }
@@ -491,6 +518,46 @@ export function updateUser(userId: number, payload: UpdateUserPayload, token: st
 export function deleteUser(userId: number, token: string) {
   return apiDelete<unknown>(`/v1/user/${userId}/`, { token }).then((payload) =>
     extractDetail(payload, 'User deleted successfully.'),
+  )
+}
+
+export function fetchInstanceTags(token: string, options: InstanceTagListOptions = {}) {
+  const params = new URLSearchParams()
+  if (options.page) {
+    params.set('page', `${options.page}`)
+  }
+  if (options.size) {
+    params.set('size', `${options.size}`)
+  }
+  if (options.search?.trim()) {
+    params.set('search', options.search.trim())
+  }
+  if (options.ordering?.trim()) {
+    params.set('ordering', options.ordering.trim())
+  }
+
+  const queryString = params.toString()
+  const path = queryString ? `/v1/instance/tag/?${queryString}` : '/v1/instance/tag/'
+  return apiGet<unknown>(path, { token }).then((payload) =>
+    extractData<PaginatedResponse<InstanceTagRecord>>(payload),
+  )
+}
+
+export function fetchInstanceTag(tagId: number, token: string) {
+  return apiGet<unknown>(`/v1/instance/tag/${tagId}/`, { token }).then((payload) =>
+    extractData<InstanceTagRecord>(payload),
+  )
+}
+
+export function createInstanceTag(payload: CreateInstanceTagPayload, token: string) {
+  return apiPost<unknown>('/v1/instance/tag/', payload, { token }).then((responsePayload) =>
+    extractData<InstanceTagRecord>(responsePayload),
+  )
+}
+
+export function updateInstanceTag(tagId: number, payload: UpdateInstanceTagPayload, token: string) {
+  return apiPut<unknown>(`/v1/instance/tag/${tagId}/`, payload, { token }).then((responsePayload) =>
+    extractData<InstanceTagRecord>(responsePayload),
   )
 }
 
