@@ -888,6 +888,10 @@ async function selectExplorerNode(nodeId: string) {
     return
   }
 
+  if (node.kind === 'database') {
+    ensureEditorTab()
+  }
+
   selectedExplorerNodeId.value = node.id
   form.dbName = node.dbName
   form.schemaName = node.kind === 'schema' || node.kind === 'table' ? node.schemaName : ''
