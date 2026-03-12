@@ -4,6 +4,7 @@ import { format as formatSqlText } from 'sql-formatter'
 import {
   Database,
   Minus,
+  Pencil,
   Play,
   RefreshCcw,
   Search,
@@ -14,10 +15,15 @@ import {
   X,
 } from 'lucide-vue-next'
 
+import QueryMetadataExplorer from '@/components/queries/QueryMetadataExplorer.vue'
 import SqlCodeEditor from '@/components/queries/SqlCodeEditor.vue'
-import { Badge } from '@/components/ui/badge'
+import type {
+  QueryMetadataNode,
+  QueryMetadataTableColumn,
+  QueryMetadataTableIndex,
+  QueryMetadataTableDetailsMap,
+} from '@/components/queries/query-metadata-explorer'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import {
   describeQueryTable,
@@ -44,6 +50,7 @@ type QueryTab = {
   error: string
   instanceName: string
   dbName: string
+  schemaName: string
   dbType: string
   sqlCache: string
   tableName: string
@@ -53,25 +60,13 @@ type QueryEditorHandle = {
   getSelectedText: () => string
   setValue: (value: string) => void
   focus: () => void
+  insertText: (value: string) => void
 }
 
 type QueryToast = {
   id: number
   message: string
   tone: 'success' | 'error' | 'info'
-}
-
-const ENGINE_LABELS: Record<string, string> = {
-  mysql: 'MySQL',
-  pgsql: 'PgSQL',
-  oracle: 'Oracle',
-  mssql: 'MsSQL',
-  mongo: 'Mongo',
-  redis: 'Redis',
-  clickhouse: 'ClickHouse',
-  doris: 'Doris',
-  cassandra: 'Cassandra',
-  phoenix: 'Phoenix',
 }
 
 const EXPLAIN_DISABLED = new Set(['redis', 'phoenix', 'cassandra'])
@@ -91,23 +86,26 @@ const workspaceLoading = ref(false)
 const instancesLoading = ref(false)
 const favoritesLoading = ref(false)
 const historyLoading = ref(false)
-const resourceLoading = ref(false)
+const explorerLoading = ref(false)
 const queryRunning = ref(false)
 
 const pageError = ref('')
+const explorerError = ref('')
 const sqlText = ref('')
 const commonQueryId = ref('')
 const activeTab = ref('history')
+const selectedExplorerNodeId = ref('')
+const tableStructureByNode = ref<Record<string, QueryDescribePayload>>({})
 const toasts = ref<QueryToast[]>([])
 const toastCounter = ref(0)
+const editorPaneHeight = ref(220)
 
 const instances = ref<QueryableInstance[]>([])
-const databases = ref<string[]>([])
-const schemas = ref<string[]>([])
-const tables = ref<string[]>([])
+const explorerNodes = ref<QueryMetadataNode[]>([])
 const favorites = ref<FavoriteQuery[]>([])
 const queryTabs = ref<QueryTab[]>([])
 const resultTabCounter = ref(0)
+const explorerGeneration = ref(0)
 const historyPage = ref<PaginatedResponse<QueryLogRecord>>({
   count: 0,
   next: null,
@@ -116,6 +114,7 @@ const historyPage = ref<PaginatedResponse<QueryLogRecord>>({
 })
 
 const toastTimers = new Map<number, ReturnType<typeof window.setTimeout>>()
+let removeResizeListeners: (() => void) | null = null
 
 const form = reactive({
   instanceId: 0,
@@ -159,10 +158,6 @@ function hasPermission(permission: string) {
     return true
   }
   return authStore.currentUser?.permissions.includes(permission) ?? false
-}
-
-function engineLabel(dbType: string) {
-  return ENGINE_LABELS[dbType] || dbType
 }
 
 function selectedQueryText() {
@@ -242,19 +237,60 @@ function pushToast(message: string, tone: QueryToast['tone']) {
   toastTimers.set(id, timer)
 }
 
+function clampEditorPaneHeight(height: number) {
+  const viewportLimit = typeof window === 'undefined' ? 560 : Math.max(window.innerHeight - 320, 320)
+  return Math.min(Math.max(height, 160), viewportLimit)
+}
+
+function stopEditorResize() {
+  if (removeResizeListeners) {
+    removeResizeListeners()
+    removeResizeListeners = null
+  }
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+}
+
+function startEditorResize(event: MouseEvent) {
+  const startY = event.clientY
+  const startHeight = editorPaneHeight.value
+
+  document.body.style.cursor = 'row-resize'
+  document.body.style.userSelect = 'none'
+
+  const handlePointerMove = (moveEvent: MouseEvent) => {
+    const delta = moveEvent.clientY - startY
+    editorPaneHeight.value = clampEditorPaneHeight(startHeight + delta)
+  }
+
+  const handlePointerUp = () => {
+    stopEditorResize()
+  }
+
+  window.addEventListener('mousemove', handlePointerMove)
+  window.addEventListener('mouseup', handlePointerUp, { once: true })
+
+  removeResizeListeners = () => {
+    window.removeEventListener('mousemove', handlePointerMove)
+    window.removeEventListener('mouseup', handlePointerUp)
+  }
+}
+
 function selectClass(disabled: boolean) {
   return disabled
     ? 'rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-400 shadow-none transition-colors cursor-not-allowed'
     : 'rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-sky-100'
 }
 
-function resetResourceLists() {
-  databases.value = []
-  schemas.value = []
-  tables.value = []
+function clearQueryContext() {
+  form.dbName = ''
+  form.schemaName = ''
+  form.tableName = ''
+  selectedExplorerNodeId.value = ''
+  tableStructureByNode.value = {}
 }
 
-function createResultTab(title?: string) {
+function createResultTab(title?: string, sqlCache = '') {
   resultTabCounter.value += 1
   const tab: QueryTab = {
     id: `result-${resultTabCounter.value}`,
@@ -264,69 +300,101 @@ function createResultTab(title?: string) {
     error: '',
     instanceName: '',
     dbName: '',
+    schemaName: '',
     dbType: '',
-    sqlCache: '',
+    sqlCache,
     tableName: '',
   }
   queryTabs.value.push(tab)
   activeTab.value = tab.id
+  applyEditorValue(sqlCache)
   return tab
 }
 
-function upsertResultTab(
-  payload: QueryResultPayload,
-  sqlCache: string,
-  error = '',
-) {
+async function activateWorkspaceTab(tabId: string) {
+  activeTab.value = tabId
+
+  const tab = queryTabs.value.find((item) => item.id === tabId)
+  if (tab) {
+    const instance = instances.value.find((item) => item.instance_name === tab.instanceName)
+    if (instance && form.instanceId !== instance.id) {
+      await selectInstance(instance.id)
+    } else if (instance) {
+      form.instanceId = instance.id
+    }
+
+    form.dbName = tab.dbName
+    form.schemaName = tab.schemaName
+    form.tableName = tab.tableName
+    applyEditorValue(tab.sqlCache)
+  }
+}
+
+function renameWorkspaceTab(tabId: string) {
+  const tab = queryTabs.value.find((item) => item.id === tabId && item.kind === 'result')
+  if (!tab) {
+    return
+  }
+
+  const nextTitle = window.prompt('Rename runtime tab', tab.title)
+  if (nextTitle === null) {
+    return
+  }
+
+  const trimmedTitle = nextTitle.trim()
+  if (!trimmedTitle) {
+    return
+  }
+
+  tab.title = trimmedTitle
+}
+
+function ensureEditorTab() {
+  if (activeTab.value === 'history' || activeTab.value === 'redis-help' || !currentTab.value) {
+    createResultTab()
+  }
+}
+
+async function openQueryInNewTab(instanceName: string, dbName: string, statement: string, title?: string) {
+  const instance = instances.value.find((item) => item.instance_name === instanceName)
+  if (!instance) {
+    throw new Error(`Instance "${instanceName}" is not available to this user.`)
+  }
+
+  await selectInstance(instance.id)
+  form.dbName = dbName
+  const dbNode = findNodeById(explorerNodes.value, createNodeId('database', dbName, dbName))
+  selectedExplorerNodeId.value = dbNode?.id || ''
+
+  const tab = createResultTab(title, statement)
+  tab.instanceName = instance.instance_name
+  tab.dbName = dbName
+  tab.schemaName = ''
+  tab.dbType = instance.db_type
+}
+
+function upsertResultTab(payload: QueryResultPayload, sqlCache: string, error = '') {
   const activeResultTab = queryTabs.value.find((tab) => tab.id === activeTab.value && tab.kind === 'result')
-  const tab = activeResultTab || createResultTab()
+  const tab = activeResultTab || createResultTab(undefined, sqlCache)
   tab.payload = payload
   tab.error = error
   tab.instanceName = selectedInstance.value?.instance_name || ''
   tab.dbName = form.dbName
+  tab.schemaName = form.schemaName
   tab.dbType = selectedDbType.value
   tab.sqlCache = sqlCache
   tab.tableName = form.tableName
   activeTab.value = tab.id
 }
 
-function upsertDescribeTab(payload: QueryDescribePayload) {
-  const key = `${selectedInstance.value?.instance_name || ''}:${form.dbName}:${form.tableName}`
-  const existing = queryTabs.value.find((tab) => tab.kind === 'describe' && tab.tableName === key)
-  const tab =
-    existing ||
-    (() => {
-      const describeTab: QueryTab = {
-        id: `describe-${key}`,
-        title: form.tableName,
-        kind: 'describe',
-        payload: null,
-        error: '',
-        instanceName: selectedInstance.value?.instance_name || '',
-        dbName: form.dbName,
-        dbType: selectedDbType.value,
-        sqlCache: '',
-        tableName: key,
-      }
-      queryTabs.value.push(describeTab)
-      return describeTab
-    })()
-
-  tab.payload = payload
-  tab.error = ''
-  tab.instanceName = selectedInstance.value?.instance_name || ''
-  tab.dbName = form.dbName
-  tab.dbType = selectedDbType.value
-  activeTab.value = tab.id
-}
-
 function setResultError(message: string, sqlCache: string) {
   const activeResultTab = queryTabs.value.find((tab) => tab.id === activeTab.value && tab.kind === 'result')
-  const tab = activeResultTab || createResultTab()
+  const tab = activeResultTab || createResultTab(undefined, sqlCache)
   tab.error = message
   tab.payload = null
   tab.instanceName = selectedInstance.value?.instance_name || ''
   tab.dbName = form.dbName
+  tab.schemaName = form.schemaName
   tab.dbType = selectedDbType.value
   tab.sqlCache = sqlCache
   tab.tableName = form.tableName
@@ -344,7 +412,7 @@ function removeActiveTab() {
   }
 
   queryTabs.value.splice(tabIndex, 1)
-  activeTab.value = queryTabs.value[queryTabs.value.length - 1]?.id || 'history'
+  void activateWorkspaceTab(queryTabs.value[queryTabs.value.length - 1]?.id || 'history')
 }
 
 function resultColumns(payload: QueryResultPayload | QueryDescribePayload | null) {
@@ -363,7 +431,7 @@ function tableRows(payload: QueryResultPayload | QueryDescribePayload | null) {
   return payload?.rows || []
 }
 
-function ddlContent(payload: QueryDescribePayload | null, dbType: string) {
+function structureDdl(payload: QueryDescribePayload | null) {
   if (!payload || payload.display_mode !== 'ddl') {
     return ''
   }
@@ -373,28 +441,265 @@ function ddlContent(payload: QueryDescribePayload | null, dbType: string) {
     return ''
   }
 
-  const columnList = payload.column_list
-  const ddlColumn = columnList[1] || Object.keys(firstRow)[1]
+  const ddlColumn = payload.column_list[1] || Object.keys(firstRow)[1]
   if (!ddlColumn) {
     return ''
   }
 
   const ddl = firstRow[ddlColumn] || Object.values(firstRow)[1]
-  if (typeof ddl !== 'string') {
-    return stringifyValue(ddl)
+  return typeof ddl === 'string' ? ddl : ''
+}
+
+function extractColumnType(definition: string) {
+  const trimmed = definition.trim()
+  const stopKeywords = new Set([
+    'NOT',
+    'NULL',
+    'DEFAULT',
+    'COMMENT',
+    'AUTO_INCREMENT',
+    'PRIMARY',
+    'KEY',
+    'UNIQUE',
+    'REFERENCES',
+    'CHECK',
+    'COLLATE',
+    'CHARACTER',
+    'GENERATED',
+    'VIRTUAL',
+    'STORED',
+    'ON',
+    'UPDATE',
+  ])
+
+  const tokens = trimmed.split(/\s+/)
+  const collected: string[] = []
+
+  for (const token of tokens) {
+    if (collected.length > 0 && stopKeywords.has(token.toUpperCase())) {
+      break
+    }
+    collected.push(token)
   }
 
-  try {
-    return formatSqlText(ddl, { language: formatterLanguage(dbType) })
-  } catch {
-    return ddl
+  return collected.join(' ')
+}
+
+function parseStructureFromDdl(payload: QueryDescribePayload | null) {
+  const ddl = structureDdl(payload)
+  const columns: QueryMetadataTableColumn[] = []
+  const indexes: QueryMetadataTableIndex[] = []
+
+  if (!ddl) {
+    return { columns, indexes }
   }
+
+  for (const rawLine of ddl.split('\n')) {
+    const line = rawLine.trim().replace(/,$/, '')
+    if (!line) {
+      continue
+    }
+
+    if (line.startsWith('`')) {
+      const columnMatch = line.match(/^`([^`]+)`\s+(.+)$/)
+      if (!columnMatch) {
+        continue
+      }
+
+      const name = columnMatch[1] || ''
+      const definition = columnMatch[2] || ''
+      columns.push({
+        name,
+        type: extractColumnType(definition),
+        details: definition,
+      })
+      continue
+    }
+
+    const upperLine = line.toUpperCase()
+    if (
+      upperLine.startsWith('PRIMARY KEY')
+      || upperLine.startsWith('UNIQUE KEY')
+      || upperLine.startsWith('KEY ')
+      || upperLine.startsWith('FULLTEXT KEY')
+      || upperLine.startsWith('SPATIAL KEY')
+    ) {
+      const keyMatch = line.match(/^(PRIMARY KEY|UNIQUE KEY|FULLTEXT KEY|SPATIAL KEY|KEY)\s*(?:`([^`]+)`)?\s*\((.+)\)/i)
+      if (!keyMatch) {
+        continue
+      }
+
+      const keyType = keyMatch[1] || 'KEY'
+      const keyName = keyMatch[2] || ''
+      const keyColumns = keyMatch[3] || ''
+      indexes.push({
+        name: keyName || 'PRIMARY',
+        type: keyType.toUpperCase(),
+        columns: keyColumns.replace(/`/g, ''),
+      })
+    }
+  }
+
+  return { columns, indexes }
+}
+
+function parseStructureFromRows(payload: QueryDescribePayload | null) {
+  const columns: QueryMetadataTableColumn[] = []
+  const indexes: QueryMetadataTableIndex[] = []
+
+  if (!payload || payload.display_mode !== 'table') {
+    return { columns, indexes }
+  }
+
+  const rows = payload.rows || []
+  const hasFieldLikeShape = rows.some((row) =>
+    'Field' in row
+    || 'field' in row
+    || 'COLUMN_NAME' in row
+    || 'column_name' in row,
+  )
+
+  if (hasFieldLikeShape) {
+    for (const row of rows) {
+      const name = String(
+        row.Field
+        ?? row.field
+        ?? row.COLUMN_NAME
+        ?? row.column_name
+        ?? row.column
+        ?? '',
+      )
+      if (!name) {
+        continue
+      }
+
+      const type = String(
+        row.Type
+        ?? row.type
+        ?? row.DATA_TYPE
+        ?? row.data_type
+        ?? row.column_type
+        ?? '',
+      )
+
+      const detailParts = Object.entries(row)
+        .filter(([key, value]) => value !== null && value !== '' && !['Field', 'field', 'COLUMN_NAME', 'column_name', 'Type', 'type', 'DATA_TYPE', 'data_type', 'column_type'].includes(key))
+        .map(([key, value]) => `${key}: ${String(value)}`)
+
+      columns.push({
+        name,
+        type,
+        details: detailParts.join(' • '),
+      })
+    }
+    return { columns, indexes }
+  }
+
+  for (const row of rows) {
+    const keyName = String(row.Key_name ?? row.key_name ?? row.index_name ?? row.INDEX_NAME ?? '')
+    const seq = row.Seq_in_index ?? row.seq_in_index ?? row.COLUMN_POSITION ?? row.ordinal_position
+    if (!keyName && seq === undefined) {
+      continue
+    }
+
+    indexes.push({
+      name: keyName || 'INDEX',
+      type: String(row.Non_unique === 0 || row.non_unique === 0 ? 'UNIQUE' : row.Index_type ?? row.index_type ?? 'INDEX'),
+      columns: String(row.Column_name ?? row.column_name ?? row.COLUMN_NAME ?? ''),
+    })
+  }
+
+  return { columns, indexes }
 }
 
 function applyEditorValue(value: string) {
   sqlText.value = value
   editorRef.value?.setValue(value)
   editorRef.value?.focus()
+}
+
+function createNodeId(kind: QueryMetadataNode['kind'], dbName: string, name: string, schemaName = '') {
+  return [kind, dbName, schemaName, name].join('::')
+}
+
+function buildDatabaseNodes(items: string[]) {
+  return items.map<QueryMetadataNode>((dbName) => ({
+    id: createNodeId('database', dbName, dbName),
+    kind: 'database',
+    name: dbName,
+    dbName,
+    schemaName: '',
+    children: [],
+    isExpanded: false,
+    isLoading: false,
+    isLoaded: false,
+  }))
+}
+
+function buildSchemaNodes(dbName: string, items: string[]) {
+  return items.map<QueryMetadataNode>((schemaName) => ({
+    id: createNodeId('schema', dbName, schemaName, schemaName),
+    kind: 'schema',
+    name: schemaName,
+    dbName,
+    schemaName,
+    children: [],
+    isExpanded: false,
+    isLoading: false,
+    isLoaded: false,
+  }))
+}
+
+function buildTableNodes(dbName: string, items: string[], schemaName = '') {
+  return items.map<QueryMetadataNode>((tableName) => ({
+    id: createNodeId('table', dbName, tableName, schemaName),
+    kind: 'table',
+    name: tableName,
+    dbName,
+    schemaName,
+    children: [],
+    isExpanded: false,
+    isLoading: false,
+    isLoaded: true,
+  }))
+}
+
+function findNodeById(nodes: QueryMetadataNode[], nodeId: string): QueryMetadataNode | null {
+  for (const node of nodes) {
+    if (node.id === nodeId) {
+      return node
+    }
+
+    const child = findNodeById(node.children, nodeId)
+    if (child) {
+      return child
+    }
+  }
+
+  return null
+}
+
+function quoteIdentifier(identifier: string) {
+  switch (selectedDbType.value) {
+    case 'mysql':
+    case 'clickhouse':
+    case 'doris':
+      return `\`${identifier}\``
+    case 'pgsql':
+    case 'oracle':
+    case 'mssql':
+      return `"${identifier}"`
+    default:
+      return identifier
+  }
+}
+
+function buildTableReference(node: QueryMetadataNode) {
+  if (needsSchemaSelection.value && node.schemaName) {
+    return [node.schemaName, node.name].map(quoteIdentifier).join('.')
+  }
+
+  return [node.dbName, node.name].map(quoteIdentifier).join('.')
 }
 
 async function loadInstances() {
@@ -448,8 +753,7 @@ async function loadHistory() {
         size: historyFilters.size,
         search: historyFilters.search.trim() || undefined,
         star: starFilter,
-        query_log_id:
-          historyFilters.aliasId === 'all' ? undefined : Number(historyFilters.aliasId),
+        query_log_id: historyFilters.aliasId === 'all' ? undefined : Number(historyFilters.aliasId),
       },
       requireToken(),
     )
@@ -458,104 +762,157 @@ async function loadHistory() {
   }
 }
 
-async function loadDatabases() {
+async function loadExplorerRoots() {
   if (!form.instanceId) {
-    resetResourceLists()
+    explorerNodes.value = []
     return
   }
 
-  resourceLoading.value = true
+  const generation = explorerGeneration.value
+  explorerLoading.value = true
+  explorerError.value = ''
+
   try {
     const payload = await fetchInstanceResources(form.instanceId, 'database', requireToken())
-    databases.value = payload.result
+    if (generation !== explorerGeneration.value) {
+      return
+    }
+    explorerNodes.value = buildDatabaseNodes(payload.result)
+  } catch (error) {
+    if (generation !== explorerGeneration.value) {
+      return
+    }
+    explorerError.value = toUserFacingMessage(error, 'Failed to load instance metadata.')
+    explorerNodes.value = []
   } finally {
-    resourceLoading.value = false
+    if (generation === explorerGeneration.value) {
+      explorerLoading.value = false
+    }
   }
 }
 
-async function loadSchemas() {
-  if (!form.instanceId || !form.dbName) {
-    schemas.value = []
+async function selectInstance(instanceId: number) {
+  form.instanceId = instanceId
+  clearQueryContext()
+  explorerNodes.value = []
+  explorerError.value = ''
+  explorerGeneration.value += 1
+
+  if (!instanceId) {
     return
   }
 
-  resourceLoading.value = true
+  await loadExplorerRoots()
+}
+
+async function loadNodeChildren(node: QueryMetadataNode) {
+  if (!form.instanceId || node.kind === 'table') {
+    return
+  }
+
+  const generation = explorerGeneration.value
+  node.isLoading = true
+  explorerError.value = ''
+
   try {
-    const payload = await fetchInstanceResources(form.instanceId, 'schema', requireToken(), {
-      db_name: form.dbName,
-    })
-    schemas.value = payload.result
+    if (node.kind === 'database') {
+      if (needsSchemaSelection.value) {
+        const payload = await fetchInstanceResources(form.instanceId, 'schema', requireToken(), {
+          db_name: node.dbName,
+        })
+        if (generation !== explorerGeneration.value) {
+          return
+        }
+        node.children = buildSchemaNodes(node.dbName, payload.result)
+      } else {
+        const payload = await fetchInstanceResources(form.instanceId, 'table', requireToken(), {
+          db_name: node.dbName,
+        })
+        if (generation !== explorerGeneration.value) {
+          return
+        }
+        node.children = buildTableNodes(node.dbName, payload.result)
+      }
+    } else {
+      const payload = await fetchInstanceResources(form.instanceId, 'table', requireToken(), {
+        db_name: node.dbName,
+        schema_name: node.schemaName,
+      })
+      if (generation !== explorerGeneration.value) {
+        return
+      }
+      node.children = buildTableNodes(node.dbName, payload.result, node.schemaName)
+    }
+    node.isLoaded = true
+  } catch (error) {
+    if (generation !== explorerGeneration.value) {
+      return
+    }
+    explorerError.value = toUserFacingMessage(error, 'Failed to load metadata children.')
   } finally {
-    resourceLoading.value = false
+    if (generation === explorerGeneration.value) {
+      node.isLoading = false
+    }
   }
 }
 
-async function loadTables() {
-  if (!form.instanceId || !form.dbName) {
-    tables.value = []
+async function toggleExplorerNode(nodeId: string) {
+  const node = findNodeById(explorerNodes.value, nodeId)
+  if (!node) {
     return
   }
 
-  resourceLoading.value = true
-  try {
-    const payload = await fetchInstanceResources(form.instanceId, 'table', requireToken(), {
-      db_name: form.dbName,
-      schema_name: needsSchemaSelection.value ? form.schemaName : undefined,
-    })
-    tables.value = payload.result
-  } finally {
-    resourceLoading.value = false
+  if (node.kind === 'table') {
+    node.isExpanded = !node.isExpanded
+
+    if (node.isExpanded) {
+      selectedExplorerNodeId.value = node.id
+      form.dbName = node.dbName
+      form.schemaName = node.schemaName
+      form.tableName = node.name
+      await showTableStructure(node)
+    }
+
+    return
+  }
+
+  node.isExpanded = !node.isExpanded
+  if (node.isExpanded && !node.isLoaded) {
+    await loadNodeChildren(node)
   }
 }
 
-async function handleInstanceChange() {
-  form.dbName = ''
-  form.schemaName = ''
-  form.tableName = ''
-  resetResourceLists()
-
-  if (!form.instanceId) {
+async function selectExplorerNode(nodeId: string) {
+  const node = findNodeById(explorerNodes.value, nodeId)
+  if (!node) {
     return
   }
 
-  await loadDatabases()
+  if (node.kind === 'database') {
+    ensureEditorTab()
+  }
+
+  selectedExplorerNodeId.value = node.id
+  form.dbName = node.dbName
+  form.schemaName = node.kind === 'schema' || node.kind === 'table' ? node.schemaName : ''
+  form.tableName = node.kind === 'table' ? node.name : ''
+
+  if (node.kind === 'table') {
+    node.isExpanded = true
+    await showTableStructure(node)
+  }
 }
 
-async function handleDatabaseChange() {
-  form.schemaName = ''
-  form.tableName = ''
-  schemas.value = []
-  tables.value = []
-
-  if (!form.dbName) {
+async function insertExplorerNode(nodeId: string) {
+  const node = findNodeById(explorerNodes.value, nodeId)
+  if (!node || node.kind !== 'table') {
     return
   }
 
-  if (needsSchemaSelection.value) {
-    await loadSchemas()
-    return
-  }
-
-  await loadTables()
-}
-
-async function handleSchemaChange() {
-  form.tableName = ''
-  tables.value = []
-
-  if (!form.schemaName) {
-    return
-  }
-
-  await loadTables()
-}
-
-async function handleTableChange() {
-  if (!form.tableName) {
-    return
-  }
-
-  await showTableStructure()
+  ensureEditorTab()
+  await selectExplorerNode(nodeId)
+  editorRef.value?.insertText(buildTableReference(node))
+  pushToast(`Inserted ${node.name} into the editor.`, 'success')
 }
 
 async function restoreQueryContext(instanceName: string, dbName: string, statement: string) {
@@ -564,14 +921,10 @@ async function restoreQueryContext(instanceName: string, dbName: string, stateme
     throw new Error(`Instance "${instanceName}" is not available to this user.`)
   }
 
-  form.instanceId = instance.id
-  await loadDatabases()
+  await selectInstance(instance.id)
   form.dbName = dbName
-  if (needsSchemaSelection.value) {
-    await loadSchemas()
-  } else {
-    await loadTables()
-  }
+  const dbNode = findNodeById(explorerNodes.value, createNodeId('database', dbName, dbName))
+  selectedExplorerNodeId.value = dbNode?.id || ''
   applyEditorValue(statement)
 }
 
@@ -595,8 +948,13 @@ async function selectCommonQuery() {
 
 async function rerunHistoryItem(item: QueryLogRecord) {
   try {
-    await restoreQueryContext(item.instance_name, item.db_name, item.sqllog)
-    pushToast(`Loaded query log #${item.id} into the editor.`, 'success')
+    await openQueryInNewTab(
+      item.instance_name,
+      item.db_name,
+      item.sqllog,
+      item.alias?.trim() || `Query Log #${item.id}`,
+    )
+    pushToast(`Opened query log #${item.id} in a new runtime tab.`, 'success')
   } catch (error) {
     pushToast(toUserFacingMessage(error, 'Failed to restore the selected query log.'), 'error')
   }
@@ -607,10 +965,7 @@ async function toggleFavorite(item: QueryLogRecord) {
   let alias = item.alias
 
   if (nextStar) {
-    const promptValue = window.prompt(
-      'Favorite alias',
-      item.alias || item.sqllog.slice(0, 48),
-    )
+    const promptValue = window.prompt('Favorite alias', item.alias || item.sqllog.slice(0, 48))
     if (promptValue === null) {
       return
     }
@@ -629,8 +984,8 @@ async function toggleFavorite(item: QueryLogRecord) {
   }
 }
 
-async function showTableStructure() {
-  if (!selectedInstance.value || !form.dbName || !form.tableName) {
+async function showTableStructure(node: QueryMetadataNode) {
+  if (!selectedInstance.value || node.kind !== 'table') {
     return
   }
 
@@ -638,13 +993,16 @@ async function showTableStructure() {
     const payload = await describeQueryTable(
       {
         instance_id: selectedInstance.value.id,
-        db_name: form.dbName,
-        schema_name: needsSchemaSelection.value ? form.schemaName : undefined,
-        tb_name: form.tableName,
+        db_name: node.dbName,
+        schema_name: needsSchemaSelection.value ? node.schemaName : undefined,
+        tb_name: node.name,
       },
       requireToken(),
     )
-    upsertDescribeTab(payload)
+    tableStructureByNode.value = {
+      ...tableStructureByNode.value,
+      [node.id]: payload,
+    }
   } catch (error) {
     pushToast(toUserFacingMessage(error, 'Failed to load the table structure.'), 'error')
   }
@@ -671,6 +1029,13 @@ async function runQuery(mode: 'query' | 'plan') {
   const selectedSql = selectedQueryText()
   const instance = selectedInstance.value
 
+  if (!canRunQueries.value) {
+    pushToast('Your account cannot run queries.', 'error')
+    return
+  }
+  if (queryRunning.value) {
+    return
+  }
   if (!instance) {
     pushToast('Please select an instance.', 'error')
     return
@@ -727,12 +1092,10 @@ async function loadWorkspace() {
   try {
     await authStore.loadCurrentUser(true)
 
-    if (!canSeeWorkspace.value) {
-      return
+    if (canSeeWorkspace.value) {
+      await loadInstances()
+      await Promise.all([loadFavorites(), loadHistory()])
     }
-
-    await loadInstances()
-    await Promise.all([loadFavorites(), loadHistory()])
   } catch (error) {
     pageError.value = toUserFacingMessage(error, 'Failed to load the query workspace.')
   } finally {
@@ -769,19 +1132,6 @@ const selectedDbType = computed(() => {
   return selectedInstance.value?.db_type || ''
 })
 
-const groupedInstances = computed(() => {
-  const groups = new Map<string, QueryableInstance[]>()
-
-  for (const instance of instances.value) {
-    const label = engineLabel(instance.db_type)
-    const group = groups.get(label) || []
-    group.push(instance)
-    groups.set(label, group)
-  }
-
-  return Array.from(groups.entries()).map(([label, items]) => ({ label, items }))
-})
-
 const canSeeWorkspace = computed(() => {
   return hasPermission('sql.menu_query') || hasPermission('sql.menu_sqlquery') || hasPermission('sql.query_submit')
 })
@@ -794,60 +1144,6 @@ const canFormat = computed(() => !FORMAT_DISABLED.has(selectedDbType.value))
 const showRedisHelp = computed(() => selectedDbType.value === 'redis')
 const currentTab = computed(() => queryTabs.value.find((tab) => tab.id === activeTab.value) || null)
 const commonQueryDisabled = computed(() => !canManageHistory.value || favoritesLoading.value || favorites.value.length === 0)
-const instanceSelectDisabled = computed(() => instancesLoading.value || workspaceLoading.value)
-const databaseSelectDisabled = computed(() => resourceLoading.value || !form.instanceId)
-const schemaSelectDisabled = computed(() => resourceLoading.value || !form.dbName)
-const tableSelectDisabled = computed(() => {
-  return resourceLoading.value || !form.dbName || (needsSchemaSelection.value && !form.schemaName)
-})
-const commonQueryPlaceholder = computed(() => {
-  if (!canManageHistory.value) {
-    return 'History access required'
-  }
-  if (favoritesLoading.value) {
-    return 'Loading common queries...'
-  }
-  if (favorites.value.length === 0) {
-    return 'No saved queries'
-  }
-  return 'Select a saved query'
-})
-const instancePlaceholder = computed(() => {
-  if (instancesLoading.value) {
-    return 'Loading instances...'
-  }
-  return 'Select instance'
-})
-const databasePlaceholder = computed(() => {
-  if (!form.instanceId) {
-    return 'Select instance first'
-  }
-  if (resourceLoading.value) {
-    return 'Loading databases...'
-  }
-  return 'Select database'
-})
-const schemaPlaceholder = computed(() => {
-  if (!form.dbName) {
-    return 'Select database first'
-  }
-  if (resourceLoading.value) {
-    return 'Loading schemas...'
-  }
-  return 'Select schema'
-})
-const tablePlaceholder = computed(() => {
-  if (!form.dbName) {
-    return 'Select database first'
-  }
-  if (needsSchemaSelection.value && !form.schemaName) {
-    return 'Select schema first'
-  }
-  if (resourceLoading.value) {
-    return selectedDbType.value === 'mongo' ? 'Loading collections...' : 'Loading tables...'
-  }
-  return selectedDbType.value === 'mongo' ? 'View collection fields' : 'Show table structure'
-})
 const historyStart = computed(() => {
   if (historyPage.value.count === 0) {
     return 0
@@ -857,10 +1153,36 @@ const historyStart = computed(() => {
 const historyEnd = computed(() => {
   return Math.min(historyFilters.page * historyFilters.size, historyPage.value.count)
 })
+const explorerTableDetails = computed<QueryMetadataTableDetailsMap>(() => {
+  return Object.fromEntries(
+    Object.entries(tableStructureByNode.value).map(([nodeId, payload]) => {
+      const fromRows = parseStructureFromRows(payload)
+      const fromDdl = payload?.display_mode === 'ddl'
+        ? parseStructureFromDdl(payload)
+        : { columns: [], indexes: [] }
+
+      return [
+        nodeId,
+        {
+          nodeId,
+          columns: fromRows.columns.length > 0 ? fromRows.columns : fromDdl.columns,
+          indexes: fromRows.indexes.length > 0 ? fromRows.indexes : fromDdl.indexes,
+        },
+      ]
+    }),
+  )
+})
 
 watch(showRedisHelp, (enabled) => {
   if (!enabled && activeTab.value === 'redis-help') {
     activeTab.value = 'history'
+  }
+})
+
+watch(sqlText, (value) => {
+  const tab = queryTabs.value.find((item) => item.id === activeTab.value)
+  if (tab) {
+    tab.sqlCache = value
   }
 })
 
@@ -869,6 +1191,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  stopEditorResize()
   for (const timer of toastTimers.values()) {
     window.clearTimeout(timer)
   }
@@ -878,199 +1201,73 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="grid gap-6">
-    <Card class="overflow-hidden border-sky-100 shadow-lg shadow-sky-100/40">
-      <CardHeader
-        class="border-b border-sky-100 bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.18),_transparent_42%),linear-gradient(135deg,#eff6ff_0%,#f8fafc_48%,#fff7ed_100%)]"
-      >
-        <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <CardTitle class="flex items-center gap-2 text-2xl">
-              <Database class="h-5 w-5 text-sky-600" />
-              SQL Query Center
-            </CardTitle>
-            <CardDescription class="mt-2 max-w-2xl text-slate-600">
-              Run read-only SQL queries, inspect table structure, review common queries, and track execution history.
-            </CardDescription>
-          </div>
-          <div class="flex flex-wrap gap-2">
-            <Badge variant="secondary" class="bg-white/80 text-slate-800">
-              {{ selectedInstance ? engineLabel(selectedInstance.db_type) : 'No instance selected' }}
-            </Badge>
-          </div>
-        </div>
-      </CardHeader>
+    <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+      <div class="space-y-1">
+        <p class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Queries</p>
+        <h1 class="flex items-center gap-2 text-2xl font-semibold text-slate-900">
+          <Database class="h-5 w-5 text-slate-500" />
+          SQL Query Center
+        </h1>
+        <p class="max-w-3xl text-sm text-slate-500">
+          Browse instance objects on the left, write SQL in the editor, and inspect table structure without leaving the workspace.
+        </p>
+      </div>
+    </div>
 
-      <CardContent class="grid gap-6 p-6">
+    <div v-if="pageError" class="rounded-3xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
+      {{ pageError }}
+    </div>
+
+    <div class="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+      <QueryMetadataExplorer
+        :instances="instances"
+        :selected-instance-id="form.instanceId"
+        :selected-node-id="selectedExplorerNodeId"
+        :nodes="explorerNodes"
+        :loading="instancesLoading || workspaceLoading"
+        :tree-loading="explorerLoading"
+        :table-details="explorerTableDetails"
+        :error="explorerError"
+        @select-instance="void selectInstance($event)"
+        @toggle-node="void toggleExplorerNode($event)"
+        @select-node="void selectExplorerNode($event)"
+        @insert-node="void insertExplorerNode($event)"
+      />
+
+      <div class="grid gap-6">
         <div
           v-if="!canSeeWorkspace"
           class="rounded-3xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800"
         >
-          Your account does not have access to the SQL query workspace.
+          Your account does not have access to the SQL query workspace. Use the Permission Management page if you need temporary access.
         </div>
 
         <template v-else>
-          <div v-if="pageError" class="rounded-3xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
-            {{ pageError }}
-          </div>
-
-          <div class="grid gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.9fr)]">
-            <div class="grid gap-4">
-              <div class="flex flex-wrap items-center gap-3">
-                <label class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Common Queries</label>
-                <select
-                  v-model="commonQueryId"
-                  class="min-w-[220px]"
-                  :class="selectClass(commonQueryDisabled)"
-                  :disabled="commonQueryDisabled"
-                  @change="void selectCommonQuery()"
-                >
-                  <option value="">{{ commonQueryPlaceholder }}</option>
-                  <option v-for="favorite in favorites" :key="favorite.id" :value="`${favorite.id}`">
-                    {{ favorite.alias || `${favorite.instance_name} / ${favorite.db_name}` }}
-                  </option>
-                </select>
-                <span v-if="favoritesLoading" class="text-xs text-slate-500">Loading favorites...</span>
-              </div>
-
-              <SqlCodeEditor
-                ref="editorRef"
-                v-model="sqlText"
-                :db-type="selectedDbType"
-                :disabled="workspaceLoading"
-              />
-            </div>
-
-            <div class="grid gap-4 rounded-[1.75rem] border border-slate-200 bg-slate-50/90 p-4">
-              <div>
-                <p class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Target</p>
-                <p class="mt-1 text-sm text-slate-600">Choose an instance, database, and optional table context before running or explaining a query.</p>
-              </div>
-
-              <div class="grid gap-3">
-                <select
-                  v-model.number="form.instanceId"
-                  :class="selectClass(instanceSelectDisabled)"
-                  :disabled="instanceSelectDisabled"
-                  @change="void handleInstanceChange()"
-                >
-                  <option :value="0">{{ instancePlaceholder }}</option>
-                  <optgroup
-                    v-for="group in groupedInstances"
-                    :key="group.label"
-                    :label="group.label"
-                  >
-                    <option v-for="instance in group.items" :key="instance.id" :value="instance.id">
-                      {{ instance.instance_name }}
-                    </option>
-                  </optgroup>
-                </select>
-
-                <select
-                  v-model="form.dbName"
-                  :class="selectClass(databaseSelectDisabled)"
-                  :disabled="databaseSelectDisabled"
-                  @change="void handleDatabaseChange()"
-                >
-                  <option value="">{{ databasePlaceholder }}</option>
-                  <option v-for="database in databases" :key="database" :value="database">
-                    {{ database }}
-                  </option>
-                </select>
-
-                <select
-                  v-if="needsSchemaSelection"
-                  v-model="form.schemaName"
-                  :class="selectClass(schemaSelectDisabled)"
-                  :disabled="schemaSelectDisabled"
-                  @change="void handleSchemaChange()"
-                >
-                  <option value="">{{ schemaPlaceholder }}</option>
-                  <option v-for="schema in schemas" :key="schema" :value="schema">
-                    {{ schema }}
-                  </option>
-                </select>
-
-                <select
-                  v-model="form.tableName"
-                  :class="selectClass(tableSelectDisabled)"
-                  :disabled="tableSelectDisabled"
-                  @change="void handleTableChange()"
-                >
-                  <option value="">{{ tablePlaceholder }}</option>
-                  <option v-for="table in tables" :key="table" :value="table">
-                    {{ table }}
-                  </option>
-                </select>
-
-                <select
-                  v-model.number="form.limitNum"
-                  :class="selectClass(false)"
-                >
-                  <option :value="100">100 rows</option>
-                  <option :value="500">500 rows</option>
-                  <option :value="1000">1000 rows</option>
-                  <option :value="0">Maximum allowed rows</option>
-                </select>
-              </div>
-
-              <div class="grid grid-cols-1 gap-2 sm:grid-cols-3 xl:grid-cols-1">
-                <Button variant="outline" :disabled="!canFormat || workspaceLoading" @click="void formatCurrentSql()">
-                  <Wand2 class="h-4 w-4" />
-                  Format
-                </Button>
-                <Button variant="secondary" :disabled="!canRunQueries || !canExplain || queryRunning" @click="void runQuery('plan')">
-                  <Sparkles class="h-4 w-4" />
-                  Execution Plan
-                </Button>
-                <Button :disabled="!canRunQueries || queryRunning" @click="void runQuery('query')">
-                  <Play class="h-4 w-4" />
-                  {{ queryRunning ? 'Running...' : 'Run Query' }}
-                </Button>
-              </div>
-
-              <div class="rounded-2xl border border-slate-200 bg-white/70 p-3 text-xs text-slate-600">
-                <p>Comment lines are supported. If you select part of the editor, only that selection is executed.</p>
-                <p class="mt-2">Table structure opens automatically when you pick a table. Query history is refreshed after each successful run.</p>
-              </div>
-            </div>
-          </div>
-
-          <Card class="border-slate-200 shadow-none">
-            <CardHeader class="border-b border-slate-200 bg-slate-50/80">
-              <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <CardTitle class="text-lg">Query Results</CardTitle>
-                  <CardDescription>
-                    Switch between query history, dynamic execution results, and table-structure tabs.
-                  </CardDescription>
-                </div>
-                <div class="flex items-center gap-2">
-                  <Button variant="outline" size="sm" @click="createResultTab()">
-                    <Plus class="h-4 w-4" />
-                  </Button>
-                  <Button variant="outline" size="sm" @click="removeActiveTab">
-                    <Minus class="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-
-            <CardContent class="p-0">
-              <div class="flex flex-wrap gap-2 border-b border-slate-200 px-4 py-4">
+          <div class="overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white shadow-sm">
+            <div class="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 lg:flex-row lg:items-end lg:justify-between">
+              <div class="flex flex-wrap items-end gap-2">
                 <button
                   v-if="showRedisHelp"
                   type="button"
-                  class="rounded-full px-3 py-1.5 text-sm font-medium transition"
-                  :class="activeTab === 'redis-help' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
-                  @click="activeTab = 'redis-help'"
+                  class="rounded-t-xl border border-b-0 px-4 py-2 text-sm font-medium transition"
+                  :class="
+                    activeTab === 'redis-help'
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  "
+                  @click="void activateWorkspaceTab('redis-help')"
                 >
                   Redis Help
                 </button>
                 <button
                   type="button"
-                  class="rounded-full px-3 py-1.5 text-sm font-medium transition"
-                  :class="activeTab === 'history' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
-                  @click="activeTab = 'history'"
+                  class="rounded-t-xl border border-b-0 px-4 py-2 text-sm font-medium transition"
+                  :class="
+                    activeTab === 'history'
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  "
+                  @click="void activateWorkspaceTab('history')"
                 >
                   Query History
                 </button>
@@ -1078,219 +1275,220 @@ onBeforeUnmount(() => {
                   v-for="tab in queryTabs"
                   :key="tab.id"
                   type="button"
-                  class="rounded-full px-3 py-1.5 text-sm font-medium transition"
-                  :class="activeTab === tab.id ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
-                  @click="activeTab = tab.id"
+                  class="group flex items-center gap-2 rounded-t-xl border border-b-0 px-4 py-2 text-sm font-medium transition"
+                  :class="
+                    activeTab === tab.id
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  "
+                  @click="void activateWorkspaceTab(tab.id)"
+                  @dblclick.stop="renameWorkspaceTab(tab.id)"
                 >
-                  {{ tab.title }}
+                  <span class="max-w-[180px] truncate">{{ tab.title }}</span>
+                  <span
+                    class="rounded-full p-1 text-slate-400 opacity-0 transition group-hover:opacity-100 hover:bg-slate-200 hover:text-slate-700"
+                    @click.stop="renameWorkspaceTab(tab.id)"
+                  >
+                    <Pencil class="h-3.5 w-3.5" />
+                    <span class="sr-only">Rename tab</span>
+                  </span>
                 </button>
               </div>
+              <div class="flex items-center gap-2">
+                <Button variant="outline" size="sm" @click="createResultTab()">
+                  <Plus class="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="sm" @click="removeActiveTab">
+                  <Minus class="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
 
-              <div v-if="activeTab === 'redis-help'" class="grid gap-4 p-6 md:grid-cols-2">
-                <div
-                  v-for="line in REDIS_HELP"
-                  :key="line"
-                  class="rounded-3xl border border-sky-100 bg-sky-50/70 p-4 text-sm text-slate-700"
-                >
-                  {{ line }}
+            <div v-if="activeTab !== 'history'" class="grid gap-4 p-5">
+              <div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                <div class="flex flex-wrap items-center gap-3">
+                  <label class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Common Queries</label>
+                  <select
+                    v-model="commonQueryId"
+                    class="min-w-[240px]"
+                    :class="selectClass(commonQueryDisabled)"
+                    :disabled="commonQueryDisabled"
+                    @change="void selectCommonQuery()"
+                  >
+                    <option value="">{{ commonQueryDisabled ? 'No saved queries' : 'Select a saved query' }}</option>
+                    <option v-for="favorite in favorites" :key="favorite.id" :value="`${favorite.id}`">
+                      {{ favorite.alias || `${favorite.instance_name} / ${favorite.db_name}` }}
+                    </option>
+                  </select>
+                  <span v-if="favoritesLoading" class="text-xs text-slate-500">Loading favorites...</span>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2">
+                  <select v-model.number="form.limitNum" :class="selectClass(false)">
+                    <option :value="100">100 rows</option>
+                    <option :value="500">500 rows</option>
+                    <option :value="1000">1000 rows</option>
+                    <option :value="0">Maximum allowed rows</option>
+                  </select>
+                  <Button variant="outline" :disabled="!canFormat || workspaceLoading" @click="void formatCurrentSql()">
+                    <Wand2 class="h-4 w-4" />
+                    Format
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    :disabled="!canRunQueries || !canExplain || queryRunning"
+                    @click="void runQuery('plan')"
+                  >
+                    <Sparkles class="h-4 w-4" />
+                    Execution Plan
+                  </Button>
+                  <Button :disabled="!canRunQueries || queryRunning" @click="void runQuery('query')">
+                    <Play class="h-4 w-4" />
+                    {{ queryRunning ? 'Running...' : 'Run Query' }}
+                  </Button>
                 </div>
               </div>
 
-              <div v-else-if="activeTab === 'history'" class="grid gap-5 p-6">
-                <div v-if="!canManageHistory" class="rounded-3xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">
-                  Query history and common queries are disabled for your account.
+              <SqlCodeEditor
+                ref="editorRef"
+                v-model="sqlText"
+                :db-type="selectedDbType"
+                :disabled="workspaceLoading"
+                :height="editorPaneHeight"
+                @submit="void runQuery('query')"
+              />
+
+              <div class="flex flex-wrap gap-x-5 gap-y-2 px-1 text-xs text-slate-500">
+                <p>Single-click a table to inspect its structure.</p>
+                <p>Double-click a table to insert its qualified name into the editor.</p>
+                <p>If you select part of the editor, only that selection is executed.</p>
+              </div>
+            </div>
+
+            <button
+              v-if="activeTab !== 'history'"
+              type="button"
+              class="group flex w-full cursor-row-resize items-center gap-3 border-t border-slate-200 bg-slate-50/80 px-5 py-3 transition hover:bg-slate-100/80"
+              @mousedown.prevent="startEditorResize"
+            >
+              <span class="h-px flex-1 bg-slate-200 transition group-hover:bg-slate-300" />
+              <span class="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500 shadow-sm">
+                <span class="h-1.5 w-1.5 rounded-full bg-slate-300" />
+                <span class="h-1.5 w-1.5 rounded-full bg-slate-300" />
+                Resize
+                <span class="h-1.5 w-1.5 rounded-full bg-slate-300" />
+                <span class="h-1.5 w-1.5 rounded-full bg-slate-300" />
+              </span>
+              <span class="h-px flex-1 bg-slate-200 transition group-hover:bg-slate-300" />
+            </button>
+
+            <div class="bg-slate-50/40">
+              <div class="p-0">
+                <div v-if="activeTab === 'redis-help'" class="grid gap-4 p-6 md:grid-cols-2">
+              <div
+                v-for="line in REDIS_HELP"
+                :key="line"
+                class="rounded-3xl border border-sky-100 bg-sky-50/70 p-4 text-sm text-slate-700"
+              >
+                {{ line }}
                 </div>
-
-                <template v-else>
-                  <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
-                    <form class="flex flex-1 gap-3" @submit.prevent="submitHistorySearch">
-                      <Input v-model="historyFilters.search" placeholder="Search by database, instance, user, alias, or SQL text" />
-                      <Button variant="outline" type="submit" :disabled="historyLoading">
-                        <Search class="h-4 w-4" />
-                        Search
-                      </Button>
-                    </form>
-
-                    <div class="flex flex-wrap gap-3">
-                      <select
-                        v-model="historyFilters.star"
-                        class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm"
-                        @change="submitHistorySearch"
-                      >
-                        <option value="all">All</option>
-                        <option value="true">Starred</option>
-                        <option value="false">Unstarred</option>
-                      </select>
-
-                      <select
-                        v-model="historyFilters.aliasId"
-                        class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm"
-                        @change="submitHistorySearch"
-                      >
-                        <option value="all">All aliases</option>
-                        <option v-for="favorite in favorites" :key="favorite.id" :value="`${favorite.id}`">
-                          {{ favorite.alias || favorite.id }}
-                        </option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div class="overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white">
-                    <div class="overflow-x-auto">
-                      <table class="min-w-full divide-y divide-slate-200 text-left text-sm">
-                        <thead class="bg-slate-50 text-slate-600">
-                          <tr>
-                            <th class="px-4 py-3 font-medium">Actions</th>
-                            <th class="px-4 py-3 font-medium">Alias</th>
-                            <th class="px-4 py-3 font-medium">Instance</th>
-                            <th class="px-4 py-3 font-medium">Database</th>
-                            <th class="px-4 py-3 font-medium">User</th>
-                            <th class="px-4 py-3 font-medium">Rows</th>
-                            <th class="px-4 py-3 font-medium">Duration</th>
-                            <th class="px-4 py-3 font-medium">Query Time</th>
-                            <th class="px-4 py-3 font-medium">Statement</th>
-                          </tr>
-                        </thead>
-                        <tbody class="divide-y divide-slate-100">
-                          <tr v-if="historyLoading">
-                            <td colspan="9" class="px-4 py-6 text-center text-slate-500">
-                              Loading query history...
-                            </td>
-                          </tr>
-                          <tr v-else-if="historyPage.results.length === 0">
-                            <td colspan="9" class="px-4 py-6 text-center text-slate-500">
-                              No matching query history.
-                            </td>
-                          </tr>
-                          <tr v-for="item in historyPage.results" :key="item.id" class="align-top">
-                            <td class="px-4 py-3">
-                              <div class="flex gap-2">
-                                <Button variant="outline" size="sm" @click="void rerunHistoryItem(item)">
-                                  <RefreshCcw class="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  :variant="item.favorite ? 'default' : 'outline'"
-                                  size="sm"
-                                  @click="void toggleFavorite(item)"
-                                >
-                                  <Star class="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </td>
-                            <td class="px-4 py-3 font-medium text-slate-800">{{ item.alias || 'Not saved' }}</td>
-                            <td class="px-4 py-3 text-slate-600">{{ item.instance_name }}</td>
-                            <td class="px-4 py-3 text-slate-600">{{ item.db_name }}</td>
-                            <td class="px-4 py-3 text-slate-600">{{ item.user_display }}</td>
-                            <td class="px-4 py-3 text-slate-600">{{ item.effect_row }}</td>
-                            <td class="px-4 py-3 text-slate-600">{{ item.cost_time }}</td>
-                            <td class="px-4 py-3 text-slate-600">{{ formatTimestamp(item.create_time) }}</td>
-                            <td class="max-w-xl px-4 py-3 text-slate-600">
-                              <pre class="max-h-28 overflow-auto whitespace-pre-wrap rounded-2xl bg-slate-50 p-3 text-xs">{{ item.sqllog }}</pre>
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  <div class="flex flex-col gap-3 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-                    <p>
-                      Showing {{ historyStart }}-{{ historyEnd }} of {{ historyPage.count }}
-                    </p>
-                    <div class="flex gap-2">
-                      <Button variant="outline" size="sm" :disabled="historyFilters.page === 1 || historyLoading" @click="previousHistoryPage">
-                        Previous
-                      </Button>
-                      <Button variant="outline" size="sm" :disabled="!historyPage.next || historyLoading" @click="nextHistoryPage">
-                        Next
-                      </Button>
-                    </div>
-                  </div>
-                </template>
               </div>
 
-              <div v-else-if="currentTab" class="grid gap-5 p-6">
-                <div class="flex flex-col gap-3 rounded-[1.5rem] border border-slate-200 bg-slate-50/60 p-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
-                    <p class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Execution Context</p>
-                    <p class="mt-2 text-sm text-slate-700">
-                      {{ currentTab.instanceName || 'No instance' }} / {{ currentTab.dbName || 'No database' }}
-                    </p>
-                  </div>
-                  <div class="flex flex-wrap gap-2 text-xs text-slate-600">
-                    <Badge variant="secondary" class="bg-white text-slate-700">
-                      {{ currentTab.kind === 'describe' ? 'Table Structure' : 'Execution Result' }}
-                    </Badge>
-                    <Badge
-                      v-if="currentTab.payload && 'query_time' in currentTab.payload"
-                      variant="secondary"
-                      class="bg-white text-slate-700"
+                <div v-else-if="activeTab === 'history'" class="grid gap-5 p-6">
+              <div v-if="!canManageHistory" class="rounded-3xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">
+                Query history and common queries are disabled for your account.
+              </div>
+
+              <template v-else>
+                <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
+                  <form class="flex flex-1 gap-3" @submit.prevent="submitHistorySearch">
+                    <Input v-model="historyFilters.search" placeholder="Search by database, instance, user, alias, or SQL text" />
+                    <Button variant="outline" type="submit" :disabled="historyLoading">
+                      <Search class="h-4 w-4" />
+                      Search
+                    </Button>
+                  </form>
+
+                  <div class="flex flex-wrap gap-3">
+                    <select
+                      v-model="historyFilters.star"
+                      class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm"
+                      @change="submitHistorySearch"
                     >
-                      Query {{ currentTab.payload.query_time }} sec
-                    </Badge>
-                    <Badge
-                      v-if="currentTab.payload && 'mask_time' in currentTab.payload && currentTab.payload.mask_time"
-                      variant="secondary"
-                      class="bg-white text-slate-700"
+                      <option value="all">All</option>
+                      <option value="true">Starred</option>
+                      <option value="false">Unstarred</option>
+                    </select>
+
+                    <select
+                      v-model="historyFilters.aliasId"
+                      class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm"
+                      @change="submitHistorySearch"
                     >
-                      Mask {{ currentTab.payload.mask_time }} sec
-                    </Badge>
+                      <option value="all">All aliases</option>
+                      <option v-for="favorite in favorites" :key="favorite.id" :value="`${favorite.id}`">
+                        {{ favorite.alias || favorite.id }}
+                      </option>
+                    </select>
                   </div>
                 </div>
 
-                <div v-if="currentTab.error" class="rounded-3xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
-                  {{ currentTab.error }}
-                </div>
-
-                <div
-                  v-else-if="currentTab.kind === 'describe' && currentTab.payload && 'display_mode' in currentTab.payload && currentTab.payload.display_mode === 'ddl'"
-                  class="overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white"
-                >
-                  <div class="border-b border-slate-200 px-5 py-4">
-                    <p class="text-sm font-medium text-slate-900">Create Table</p>
-                  </div>
-                  <pre class="max-h-[32rem] overflow-auto bg-slate-950 px-5 py-5 text-sm leading-7 text-slate-100">{{ ddlContent(currentTab.payload, currentTab.dbType) }}</pre>
-                </div>
-
-                <div v-else class="overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white">
-                  <div class="border-b border-slate-200 px-5 py-4">
-                    <p class="text-sm font-medium text-slate-900">
-                      {{ tableRows(currentTab.payload).length }} rows returned
-                    </p>
-                  </div>
+                <div class="overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white">
                   <div class="overflow-x-auto">
                     <table class="min-w-full divide-y divide-slate-200 text-left text-sm">
                       <thead class="bg-slate-50 text-slate-600">
                         <tr>
-                          <th
-                            v-for="column in resultColumns(currentTab.payload)"
-                            :key="column"
-                            class="px-4 py-3 font-medium"
-                          >
-                            {{ column }}
-                          </th>
+                          <th class="px-4 py-3 font-medium">Actions</th>
+                          <th class="px-4 py-3 font-medium">Alias</th>
+                          <th class="px-4 py-3 font-medium">Instance</th>
+                          <th class="px-4 py-3 font-medium">Database</th>
+                          <th class="px-4 py-3 font-medium">User</th>
+                          <th class="px-4 py-3 font-medium">Rows</th>
+                          <th class="px-4 py-3 font-medium">Duration</th>
+                          <th class="px-4 py-3 font-medium">Query Time</th>
+                          <th class="px-4 py-3 font-medium">Statement</th>
                         </tr>
                       </thead>
                       <tbody class="divide-y divide-slate-100">
-                        <tr v-if="tableRows(currentTab.payload).length === 0">
-                          <td
-                            :colspan="Math.max(resultColumns(currentTab.payload).length, 1)"
-                            class="px-4 py-6 text-center text-slate-500"
-                          >
-                            No rows returned.
+                        <tr v-if="historyLoading">
+                          <td colspan="9" class="px-4 py-6 text-center text-slate-500">
+                            Loading query history...
+                          </td>
+                        </tr>
+                        <tr v-else-if="historyPage.results.length === 0">
+                          <td colspan="9" class="px-4 py-6 text-center text-slate-500">
+                            No matching query history.
                           </td>
                         </tr>
                         <tr
-                          v-for="(row, index) in tableRows(currentTab.payload)"
-                          :key="`${currentTab.id}-${index}`"
-                          class="align-top"
+                          v-for="item in historyPage.results"
+                          :key="item.id"
+                          class="align-top transition hover:bg-slate-50/80 cursor-pointer"
+                          @click="void rerunHistoryItem(item)"
                         >
-                          <td
-                            v-for="column in resultColumns(currentTab.payload)"
-                            :key="`${currentTab.id}-${index}-${column}`"
-                            class="max-w-sm px-4 py-3 text-slate-700"
-                          >
-                            <pre class="whitespace-pre-wrap break-words text-xs">{{ stringifyValue(row[column]) }}</pre>
+                          <td class="px-4 py-3">
+                            <div class="flex gap-2">
+                              <Button variant="outline" size="sm" @click.stop="void rerunHistoryItem(item)">
+                                <RefreshCcw class="h-4 w-4" />
+                              </Button>
+                              <Button
+                                :variant="item.favorite ? 'default' : 'outline'"
+                                size="sm"
+                                @click.stop="void toggleFavorite(item)"
+                              >
+                                <Star class="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </td>
+                          <td class="px-4 py-3 font-medium text-slate-800">{{ item.alias || 'Not saved' }}</td>
+                          <td class="px-4 py-3 text-slate-600">{{ item.instance_name }}</td>
+                          <td class="px-4 py-3 text-slate-600">{{ item.db_name }}</td>
+                          <td class="px-4 py-3 text-slate-600">{{ item.user_display }}</td>
+                          <td class="px-4 py-3 text-slate-600">{{ item.effect_row }}</td>
+                          <td class="px-4 py-3 text-slate-600">{{ item.cost_time }}</td>
+                          <td class="px-4 py-3 text-slate-600">{{ formatTimestamp(item.create_time) }}</td>
+                          <td class="max-w-xl px-4 py-3 text-slate-600">
+                            <pre class="max-h-28 overflow-auto whitespace-pre-wrap rounded-2xl bg-slate-50 p-3 text-xs">{{ item.sqllog }}</pre>
                           </td>
                         </tr>
                       </tbody>
@@ -1298,19 +1496,93 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div
-                  v-if="currentTab.sqlCache"
-                  class="rounded-[1.5rem] border border-slate-200 bg-slate-50/70 p-4"
-                >
-                  <p class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Executed SQL</p>
-                  <pre class="mt-3 max-h-48 overflow-auto whitespace-pre-wrap rounded-2xl bg-white p-4 text-xs text-slate-700">{{ currentTab.sqlCache }}</pre>
+                <div class="flex flex-col gap-3 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+                  <p>
+                    Showing {{ historyStart }}-{{ historyEnd }} of {{ historyPage.count }}
+                  </p>
+                  <div class="flex gap-2">
+                    <Button variant="outline" size="sm" :disabled="historyFilters.page === 1 || historyLoading" @click="previousHistoryPage">
+                      Previous
+                    </Button>
+                    <Button variant="outline" size="sm" :disabled="!historyPage.next || historyLoading" @click="nextHistoryPage">
+                      Next
+                    </Button>
+                  </div>
+                </div>
+                  </template>
+                </div>
+
+                <div v-else-if="currentTab" class="grid gap-5 p-6">
+              <div v-if="currentTab.error" class="rounded-3xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
+                {{ currentTab.error }}
+              </div>
+
+              <div v-else class="overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white">
+                <div class="flex flex-col gap-2 border-b border-slate-200 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-slate-900">
+                      {{ tableRows(currentTab.payload).length }} rows returned
+                    </p>
+                    <p class="mt-1 text-xs text-slate-500">
+                      {{ currentTab.instanceName || 'No instance' }} / {{ currentTab.dbName || 'No database' }}
+                      <span v-if="form.schemaName"> / {{ form.schemaName }}</span>
+                    </p>
+                  </div>
+                  <div class="flex flex-wrap gap-4 text-xs text-slate-500">
+                    <span v-if="currentTab.payload && 'query_time' in currentTab.payload">
+                      Execution {{ currentTab.payload.query_time }} sec
+                    </span>
+                    <span v-if="currentTab.payload && 'mask_time' in currentTab.payload && currentTab.payload.mask_time">
+                      Mask {{ currentTab.payload.mask_time }} sec
+                    </span>
+                  </div>
+                </div>
+                <div class="overflow-x-auto">
+                  <table class="min-w-full divide-y divide-slate-200 text-left text-sm">
+                    <thead class="bg-slate-50 text-slate-600">
+                      <tr>
+                        <th
+                          v-for="column in resultColumns(currentTab.payload)"
+                          :key="column"
+                          class="px-4 py-3 font-medium"
+                        >
+                          {{ column }}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                      <tr v-if="tableRows(currentTab.payload).length === 0">
+                        <td
+                          :colspan="Math.max(resultColumns(currentTab.payload).length, 1)"
+                          class="px-4 py-6 text-center text-slate-500"
+                        >
+                          No rows returned.
+                        </td>
+                      </tr>
+                      <tr
+                        v-for="(row, index) in tableRows(currentTab.payload)"
+                        :key="`${currentTab.id}-${index}`"
+                        class="align-top"
+                      >
+                        <td
+                          v-for="column in resultColumns(currentTab.payload)"
+                          :key="`${currentTab.id}-${index}-${column}`"
+                          class="max-w-sm px-4 py-3 text-slate-700"
+                        >
+                          <pre class="whitespace-pre-wrap break-words text-xs">{{ stringifyValue(row[column]) }}</pre>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
               </div>
-            </CardContent>
-          </Card>
+                </div>
+              </div>
+            </div>
+          </div>
         </template>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
 
     <TransitionGroup
       tag="div"

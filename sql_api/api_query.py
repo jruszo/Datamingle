@@ -395,13 +395,17 @@ class QueryLogBase(generics.ListAPIView):
         star = self.request.query_params.get("star")
 
         queryset = self.queryset
+        if not self.audit_only:
+            queryset = queryset.filter(username=user.username)
         if star == "true":
             queryset = queryset.filter(favorite=True)
         elif star == "false":
             queryset = queryset.filter(favorite=False)
         if query_log_id:
             queryset = queryset.filter(id=query_log_id)
-        if not (user.is_superuser or user.has_perm("sql.audit_user")):
+        if self.audit_only and not (
+            user.is_superuser or user.has_perm("sql.audit_user")
+        ):
             queryset = queryset.filter(username=user.username)
         if start_date and end_date:
             try:
@@ -514,17 +518,11 @@ class QueryFavorite(views.APIView):
         data = serializer.validated_data
 
         try:
-            query_log = QueryLog.objects.get(id=data["query_log_id"])
+            query_log = QueryLog.objects.get(
+                id=data["query_log_id"], username=request.user.username
+            )
         except QueryLog.DoesNotExist:
             raise serializers.ValidationError({"errors": "Query log does not exist."})
-
-        user = request.user
-        if (
-            query_log.username != user.username
-            and not user.is_superuser
-            and not user.has_perm("sql.audit_user")
-        ):
-            raise PermissionDenied("You can only modify your own query logs.")
 
         query_log.favorite = data["star"]
         query_log.alias = data["alias"]

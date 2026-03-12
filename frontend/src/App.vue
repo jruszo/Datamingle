@@ -73,17 +73,27 @@ const visibleSettingsNavigation = computed(() =>
   settingsNavigation.filter((item) => item.isVisible()),
 )
 
+function isPrimaryItemActive(item: { to: string; label: string }) {
+  if (item.to === '/') {
+    return route.path === '/'
+  }
+  return route.path.startsWith(item.to)
+}
+
+function primaryNavClass(item: { to: string; label: string }) {
+  const baseClass = 'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition'
+  if (isPrimaryItemActive(item)) {
+    return `${baseClass} bg-slate-100 text-slate-900`
+  }
+  return `${baseClass} text-slate-600 hover:bg-slate-100 hover:text-slate-900`
+}
+
 const pageTitle = computed(() => {
   if (typeof route.meta.title === 'string') {
     return route.meta.title
   }
 
-  const matched = primaryNavigation.find((item) => {
-    if (item.to === '/') {
-      return route.path === '/'
-    }
-    return route.path.startsWith(item.to)
-  })
+  const matched = primaryNavigation.find((item) => isPrimaryItemActive(item))
   return matched?.label || 'Datamingle'
 })
 
@@ -190,8 +200,7 @@ watch(
             :key="item.to"
             :to="item.to"
             :title="isSidebarCollapsed ? item.label : undefined"
-            class="flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
-            active-class="bg-slate-100 text-slate-900"
+            :class="primaryNavClass(item)"
           >
             <component :is="item.icon" class="h-4 w-4 shrink-0" />
             <span v-if="!isSidebarCollapsed">{{ item.label }}</span>
