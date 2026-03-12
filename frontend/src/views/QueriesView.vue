@@ -50,6 +50,7 @@ type QueryTab = {
   error: string
   instanceName: string
   dbName: string
+  schemaName: string
   dbType: string
   sqlCache: string
   tableName: string
@@ -299,6 +300,7 @@ function createResultTab(title?: string, sqlCache = '') {
     error: '',
     instanceName: '',
     dbName: '',
+    schemaName: '',
     dbType: '',
     sqlCache,
     tableName: '',
@@ -309,11 +311,21 @@ function createResultTab(title?: string, sqlCache = '') {
   return tab
 }
 
-function activateWorkspaceTab(tabId: string) {
+async function activateWorkspaceTab(tabId: string) {
   activeTab.value = tabId
 
   const tab = queryTabs.value.find((item) => item.id === tabId)
   if (tab) {
+    const instance = instances.value.find((item) => item.instance_name === tab.instanceName)
+    if (instance && form.instanceId !== instance.id) {
+      await selectInstance(instance.id)
+    } else if (instance) {
+      form.instanceId = instance.id
+    }
+
+    form.dbName = tab.dbName
+    form.schemaName = tab.schemaName
+    form.tableName = tab.tableName
     applyEditorValue(tab.sqlCache)
   }
 }
@@ -357,6 +369,7 @@ async function openQueryInNewTab(instanceName: string, dbName: string, statement
   const tab = createResultTab(title, statement)
   tab.instanceName = instance.instance_name
   tab.dbName = dbName
+  tab.schemaName = ''
   tab.dbType = instance.db_type
 }
 
@@ -367,6 +380,7 @@ function upsertResultTab(payload: QueryResultPayload, sqlCache: string, error = 
   tab.error = error
   tab.instanceName = selectedInstance.value?.instance_name || ''
   tab.dbName = form.dbName
+  tab.schemaName = form.schemaName
   tab.dbType = selectedDbType.value
   tab.sqlCache = sqlCache
   tab.tableName = form.tableName
@@ -380,6 +394,7 @@ function setResultError(message: string, sqlCache: string) {
   tab.payload = null
   tab.instanceName = selectedInstance.value?.instance_name || ''
   tab.dbName = form.dbName
+  tab.schemaName = form.schemaName
   tab.dbType = selectedDbType.value
   tab.sqlCache = sqlCache
   tab.tableName = form.tableName
@@ -397,7 +412,7 @@ function removeActiveTab() {
   }
 
   queryTabs.value.splice(tabIndex, 1)
-  activateWorkspaceTab(queryTabs.value[queryTabs.value.length - 1]?.id || 'history')
+  void activateWorkspaceTab(queryTabs.value[queryTabs.value.length - 1]?.id || 'history')
 }
 
 function resultColumns(payload: QueryResultPayload | QueryDescribePayload | null) {
@@ -1010,6 +1025,13 @@ async function runQuery(mode: 'query' | 'plan') {
   const selectedSql = selectedQueryText()
   const instance = selectedInstance.value
 
+  if (!canRunQueries.value) {
+    pushToast('Your account cannot run queries.', 'error')
+    return
+  }
+  if (queryRunning.value) {
+    return
+  }
   if (!instance) {
     pushToast('Please select an instance.', 'error')
     return
@@ -1229,7 +1251,7 @@ onBeforeUnmount(() => {
                       ? 'bg-white text-slate-900 shadow-sm'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   "
-                  @click="activateWorkspaceTab('redis-help')"
+                  @click="void activateWorkspaceTab('redis-help')"
                 >
                   Redis Help
                 </button>
@@ -1241,7 +1263,7 @@ onBeforeUnmount(() => {
                       ? 'bg-white text-slate-900 shadow-sm'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   "
-                  @click="activateWorkspaceTab('history')"
+                  @click="void activateWorkspaceTab('history')"
                 >
                   Query History
                 </button>
@@ -1255,7 +1277,7 @@ onBeforeUnmount(() => {
                       ? 'bg-white text-slate-900 shadow-sm'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   "
-                  @click="activateWorkspaceTab(tab.id)"
+                  @click="void activateWorkspaceTab(tab.id)"
                   @dblclick.stop="renameWorkspaceTab(tab.id)"
                 >
                   <span class="max-w-[180px] truncate">{{ tab.title }}</span>

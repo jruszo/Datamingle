@@ -197,7 +197,7 @@ watch(
         <nav class="flex-1 space-y-1 p-3">
           <RouterLink
             v-for="item in visiblePrimaryNavigation"
-            :key="item.label"
+            :key="item.to"
             :to="item.to"
             :title="isSidebarCollapsed ? item.label : undefined"
             :class="primaryNavClass(item)"
