@@ -187,12 +187,17 @@ def _scheduled_run_date(workflow):
 
 
 def _submission_scope(user):
+    can_submit_directly = user.is_superuser or user.has_perm("sql.sql_submit")
     instances = (
         user_instances(user, tag_codes=["can_write"])
         .prefetch_related("resource_group")
         .order_by("instance_name", "id")
     )
-    direct_group_ids = {group.group_id for group in user_groups(user)}
+    direct_group_ids = (
+        {group.group_id for group in user_groups(user)}
+        if can_submit_directly
+        else set()
+    )
     temporary_groups_by_instance = {}
 
     for grant in (
@@ -729,11 +734,15 @@ class WorkflowExecutionWindowUpdate(views.APIView):
         serializer = WorkflowWindowSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        SqlWorkflow(
-            id=workflow_id,
-            run_date_start=data.get("run_date_start"),
-            run_date_end=data.get("run_date_end"),
-        ).save(update_fields=["run_date_start", "run_date_end"])
+        workflow = get_object_or_404(SqlWorkflow, id=workflow_id)
+        update_fields = []
+        for field in ["run_date_start", "run_date_end"]:
+            if field not in data:
+                continue
+            setattr(workflow, field, data[field])
+            update_fields.append(field)
+        if update_fields:
+            workflow.save(update_fields=update_fields)
         return success_response(detail="Execution window updated.")
 
 

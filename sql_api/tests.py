@@ -2346,6 +2346,17 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(len(payload["instances"]), 1)
         self.assertEqual(payload["instances"][0]["id"], self.ins.id)
 
+    def test_workflow_submission_metadata_excludes_direct_group_access_without_submit_permission(
+        self,
+    ):
+        self.user.user_permissions.remove(Permission.objects.get(codename="sql_submit"))
+
+        r = self.client.get("/api/v1/workflow/submission-metadata/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["resource_groups"], [])
+        self.assertEqual(payload["instances"], [])
+
     def test_workflow_submission_metadata_includes_temporary_instance_grant_group(self):
         temp_user = User.objects.create(
             username="temp_workflow_submitter",
@@ -2949,6 +2960,27 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.wf1.refresh_from_db()
         self.assertIsNotNone(self.wf1.run_date_start)
         self.assertIsNotNone(self.wf1.run_date_end)
+
+    def test_update_workflow_execution_window_preserves_omitted_bound(self):
+        original_start = datetime.now() + timedelta(days=1)
+        original_end = datetime.now() + timedelta(days=2)
+        self.wf1.run_date_start = original_start
+        self.wf1.run_date_end = original_end
+        self.wf1.save(update_fields=["run_date_start", "run_date_end"])
+
+        updated_end = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%dT%H:%M")
+        r = self.client.patch(
+            f"/api/v1/workflow/{self.wf1.id}/execution-window/",
+            {"run_date_end": updated_end},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.wf1.refresh_from_db()
+        self.assertEqual(
+            self.wf1.run_date_start.strftime("%Y-%m-%dT%H:%M"),
+            original_start.strftime("%Y-%m-%dT%H:%M"),
+        )
+        self.assertEqual(self.wf1.run_date_end.strftime("%Y-%m-%dT%H:%M"), updated_end)
 
 
 class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
