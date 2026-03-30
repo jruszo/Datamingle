@@ -14,6 +14,7 @@ from sql.engines.models import ReviewResult, ResultSet
 from sql.models import (
     ResourceGroup,
     Instance,
+    InstanceAccessLevel,
     AliyunRdsConfig,
     CloudAccessKey,
     Tunnel,
@@ -2300,6 +2301,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.notify_patcher.start()
 
     def tearDown(self):
+        TemporaryInstanceGrant.objects.all().delete()
         self.user.delete()
         self.group.delete()
         self.res_group.delete()
@@ -2307,6 +2309,9 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         SqlWorkflow.objects.all().delete()
         WorkflowAudit.objects.all().delete()
         WorkflowLog.objects.all().delete()
+        User.objects.filter(
+            username__in=["temp_workflow_submitter", "temp_preview_submitter"]
+        ).delete()
         self.notify_patcher.stop()
 
     def test_get_sql_workflow_list(self):
@@ -2341,6 +2346,44 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(len(payload["instances"]), 1)
         self.assertEqual(payload["instances"][0]["id"], self.ins.id)
 
+    def test_workflow_submission_metadata_includes_temporary_instance_grant_group(self):
+        temp_user = User.objects.create(
+            username="temp_workflow_submitter",
+            display="Temp Workflow Submitter",
+            is_active=True,
+        )
+        temp_user.set_password("test_password")
+        temp_user.save()
+        TemporaryInstanceGrant.objects.create(
+            user=temp_user,
+            resource_group=self.res_group,
+            instance=self.ins,
+            access_level=InstanceAccessLevel.QUERY_DML,
+            valid_date=datetime.now().date() + timedelta(days=1),
+        )
+        login = self.client.post(
+            "/api/auth/token/",
+            {"username": temp_user.username, "password": "test_password"},
+            format="json",
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
+        )
+
+        r = self.client.get("/api/v1/workflow/submission-metadata/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(len(payload["resource_groups"]), 1)
+        self.assertEqual(
+            payload["resource_groups"][0]["group_id"], self.res_group.group_id
+        )
+        self.assertEqual(
+            payload["instances"][0]["group_ids"], [self.res_group.group_id]
+        )
+        self.assertEqual(
+            payload["instances"][0]["group_names"], [self.res_group.group_name]
+        )
+
     def test_workflow_approval_preview(self):
         r = self.client.get(
             f"/api/v1/workflow/approval-preview/?group_id={self.res_group.group_id}",
@@ -2351,6 +2394,69 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(payload["group_id"], self.res_group.group_id)
         self.assertEqual(payload["display"], self.group.name)
         self.assertEqual(payload["review_info"][0]["group_name"], self.group.name)
+
+    def test_workflow_approval_preview_allows_temporary_instance_grant_submitter(self):
+        temp_user = User.objects.create(
+            username="temp_preview_submitter",
+            display="Temp Preview Submitter",
+            is_active=True,
+        )
+        temp_user.set_password("test_password")
+        temp_user.save()
+        TemporaryInstanceGrant.objects.create(
+            user=temp_user,
+            resource_group=self.res_group,
+            instance=self.ins,
+            access_level=InstanceAccessLevel.QUERY_DML,
+            valid_date=datetime.now().date() + timedelta(days=1),
+        )
+        login = self.client.post(
+            "/api/auth/token/",
+            {"username": temp_user.username, "password": "test_password"},
+            format="json",
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
+        )
+
+        r = self.client.get(
+            f"/api/v1/workflow/approval-preview/?group_id={self.res_group.group_id}",
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["display"], self.group.name)
+
+    def test_workflow_approval_preview_reports_missing_configuration(self):
+        WorkflowAuditSetting.objects.filter(
+            group_id=self.res_group.group_id, workflow_type=WorkflowType.SQL_REVIEW
+        ).delete()
+
+        r = self.client.get(
+            f"/api/v1/workflow/approval-preview/?group_id={self.res_group.group_id}",
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            r.json()["errors"],
+            "Approval flow is not configured for this resource group.",
+        )
+
+    def test_workflow_approval_preview_supports_explicit_auto_pass(self):
+        WorkflowAuditSetting.objects.filter(
+            group_id=self.res_group.group_id, workflow_type=WorkflowType.SQL_REVIEW
+        ).update(audit_auth_groups="")
+
+        r = self.client.get(
+            f"/api/v1/workflow/approval-preview/?group_id={self.res_group.group_id}",
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["audit_auth_groups"], "")
+        self.assertEqual(payload["display"], "No approval required")
+        self.assertEqual(payload["review_info"][0]["group_name"], "Auto")
+        self.assertTrue(payload["review_info"][0]["is_auto_pass"])
 
     def test_workflow_detail(self):
         self.wfc1.review_content = json.dumps([{"id": 1, "sql": "select 1"}])

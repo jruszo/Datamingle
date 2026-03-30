@@ -326,18 +326,23 @@ async function submitWorkflow() {
 watch(
   () => form.groupId,
   (groupIdValue) => {
+    const retainedInstanceId = Number(form.instanceId)
+    const keepsCurrentInstance = filteredInstances.value.some((instance) => instance.id === retainedInstanceId)
+
     approvalPreview.value = null
     approvalError.value = ''
-    form.instanceId = filteredInstances.value.some((instance) => instance.id === Number(form.instanceId))
-      ? form.instanceId
-      : ''
+    form.instanceId = keepsCurrentInstance ? form.instanceId : ''
     form.dbName = ''
     availableDatabases.value = []
+    databasesError.value = ''
     invalidateCheck()
 
     const groupId = Number(groupIdValue)
     if (groupId) {
       void loadApprovalPreview(groupId)
+    }
+    if (groupId && keepsCurrentInstance && retainedInstanceId) {
+      void loadDatabases(retainedInstanceId)
     }
   },
 )

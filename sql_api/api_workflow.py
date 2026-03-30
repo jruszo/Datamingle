@@ -27,6 +27,8 @@ from sql.models import (
 from sql.notify import notify_for_audit, notify_for_execute
 from sql.query_privileges import _query_apply_audit_call_back
 from sql.utils.resource_group import (
+    WRITE_ACCESS_LEVELS,
+    active_instance_grants,
     user_groups,
     user_instances,
     user_member_groups,
@@ -184,6 +186,69 @@ def _scheduled_run_date(workflow):
     return job.next_run if job else None
 
 
+def _submission_scope(user):
+    instances = (
+        user_instances(user, tag_codes=["can_write"])
+        .prefetch_related("resource_group")
+        .order_by("instance_name", "id")
+    )
+    direct_group_ids = {group.group_id for group in user_groups(user)}
+    temporary_groups_by_instance = {}
+
+    for grant in (
+        active_instance_grants(user)
+        .filter(access_level__in=WRITE_ACCESS_LEVELS, resource_group__is_deleted=0)
+        .select_related("resource_group")
+    ):
+        groups = temporary_groups_by_instance.setdefault(grant.instance_id, {})
+        groups[grant.resource_group_id] = grant.resource_group.group_name
+
+    resource_groups = {}
+    instance_payload = []
+    for instance in instances:
+        allowed_groups = {
+            group_id: group_name
+            for group_id, group_name in instance.resource_group.filter(
+                is_deleted=0, group_id__in=direct_group_ids
+            ).values_list("group_id", "group_name")
+        }
+        allowed_groups.update(temporary_groups_by_instance.get(instance.id, {}))
+        if not allowed_groups:
+            continue
+
+        sorted_groups = sorted(
+            allowed_groups.items(), key=lambda item: (item[1], item[0])
+        )
+        for group_id, group_name in sorted_groups:
+            resource_groups[group_id] = group_name
+        instance_payload.append(
+            {
+                "id": instance.id,
+                "instance_name": instance.instance_name,
+                "db_type": instance.db_type,
+                "type": instance.type,
+                "group_ids": [group_id for group_id, _ in sorted_groups],
+                "group_names": [group_name for _, group_name in sorted_groups],
+            }
+        )
+
+    resource_group_payload = [
+        {
+            "group_id": group_id,
+            "group_name": group_name,
+            "label": group_name,
+        }
+        for group_id, group_name in sorted(
+            resource_groups.items(), key=lambda item: (item[1], item[0])
+        )
+    ]
+
+    return {
+        "resource_groups": resource_group_payload,
+        "instances": instance_payload,
+    }
+
+
 def _serialize_workflow_detail(workflow, request_user):
     serializer_data = WorkflowSummarySerializer(workflow).data
     audit_handler = get_auditor(workflow=workflow)
@@ -314,42 +379,12 @@ class WorkflowSubmissionMetadata(views.APIView):
         description="List resource groups, submit-eligible instances, and workflow config flags for the SPA submission page.",
     )
     def get(self, request):
-        resource_groups = user_groups(request.user)
-        instances = (
-            user_instances(request.user, tag_codes=["can_write"])
-            .prefetch_related("resource_group")
-            .order_by("instance_name", "id")
-        )
+        submission_scope = _submission_scope(request.user)
         sys_config = SysConfig()
         return success_response(
             data={
-                "resource_groups": [
-                    {
-                        "group_id": group.group_id,
-                        "group_name": group.group_name,
-                        "label": group.group_name,
-                    }
-                    for group in resource_groups
-                ],
-                "instances": [
-                    {
-                        "id": instance.id,
-                        "instance_name": instance.instance_name,
-                        "db_type": instance.db_type,
-                        "type": instance.type,
-                        "group_ids": list(
-                            instance.resource_group.filter(is_deleted=0).values_list(
-                                "group_id", flat=True
-                            )
-                        ),
-                        "group_names": list(
-                            instance.resource_group.filter(is_deleted=0).values_list(
-                                "group_name", flat=True
-                            )
-                        ),
-                    }
-                    for instance in instances
-                ],
+                "resource_groups": submission_scope["resource_groups"],
+                "instances": submission_scope["instances"],
                 "enable_backup_switch": bool(sys_config.get("enable_backup_switch")),
                 "manual_execution_enabled": bool(sys_config.get("manual")),
             }
@@ -384,14 +419,20 @@ class WorkflowApprovalPreview(views.APIView):
                 {"errors": "group_id must be an integer."}
             )
 
-        if not request.user.is_superuser and group_id not in [
-            group.group_id for group in user_groups(request.user)
-        ]:
+        submission_scope = _submission_scope(request.user)
+        allowed_group_ids = {
+            group["group_id"] for group in submission_scope["resource_groups"]
+        }
+        if not request.user.is_superuser and group_id not in allowed_group_ids:
             raise PermissionDenied("You do not have access to this resource group.")
 
         resource_group = get_object_or_404(ResourceGroup, pk=group_id, is_deleted=0)
         audit_auth_groups = Audit.settings(group_id, WorkflowType.SQL_REVIEW)
-        if not audit_auth_groups:
+        if audit_auth_groups is None:
+            raise serializers.ValidationError(
+                {"errors": ("Approval flow is not configured for this resource group.")}
+            )
+        if audit_auth_groups == "":
             review_info = [
                 {
                     "group_name": "Auto",
@@ -421,7 +462,7 @@ class WorkflowApprovalPreview(views.APIView):
             data={
                 "group_id": resource_group.group_id,
                 "group_name": resource_group.group_name,
-                "audit_auth_groups": audit_auth_groups or "",
+                "audit_auth_groups": audit_auth_groups,
                 "display": readable,
                 "review_info": review_info,
             }
