@@ -42,8 +42,8 @@ services:
       - "./inception/config.toml:/etc/config.toml"
 
   archery:
-    image: datamingle-archery:local-arm
-    container_name: datamingle-archery
+    image: datamingle-app:local-arm
+    container_name: datamingle-app
     restart: always
     build:
       context: ../..
