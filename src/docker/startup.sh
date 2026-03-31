@@ -21,6 +21,11 @@ if [[ "${RUN_MIGRATIONS_ON_START:-0}" == "1" ]]; then
     python3 manage.py migrate --noinput
 fi
 
+if [[ "${RUN_LOCAL_DEMO_SEED:-0}" == "1" ]]; then
+    echo Seed local demo environment
+    python3 manage.py seed_local_demo
+fi
+
 echo Start nginx
 /usr/sbin/nginx
 
@@ -32,7 +37,6 @@ supervisord -c /etc/supervisord.conf
 
 echo Start services
 gunicorn -w 4 -b 127.0.0.1:8888 --timeout 600 archery.wsgi:application
-
 
 
 
