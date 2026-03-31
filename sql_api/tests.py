@@ -35,6 +35,7 @@ from sql.models import (
 from common.utils.const import WorkflowAction, WorkflowStatus, WorkflowType
 import json
 import pyotp
+import time
 
 User = get_user_model()
 
@@ -657,7 +658,11 @@ class TestTokenAuth2FA(CacheIsolatedAPITestCase):
             secret_key=secret,
             user=self.user,
         )
-        otp = pyotp.TOTP(secret).now()
+        totp = pyotp.TOTP(secret)
+        remaining_window = totp.interval - (time.time() % totp.interval)
+        if remaining_window < 1:
+            time.sleep(remaining_window + 0.1)
+        otp = totp.now()
         r = self.client.post(
             "/api/auth/token/",
             {
