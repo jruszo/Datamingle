@@ -215,8 +215,17 @@ function clearPollTimer() {
   }
 }
 
+const canBrowseSharedWorkflowList = computed(() => {
+  return (
+    hasPermission('sql.menu_sqlworkflow') ||
+    hasPermission('sql.audit_user') ||
+    hasPermission('sql.sql_review') ||
+    hasPermission('sql.sql_execute_for_resource_group')
+  )
+})
+
 const canViewWorkflowList = computed(() => {
-  return hasPermission('sql.menu_sqlworkflow') || hasPermission('sql.audit_user')
+  return Boolean(authStore.currentUser)
 })
 
 const canCreateDml = computed(() => {
@@ -535,6 +544,16 @@ watch(page, () => {
   void loadWorkflows()
 })
 
+watch(
+  canBrowseSharedWorkflowList,
+  (canBrowseShared) => {
+    if (!canBrowseShared && scope.value !== 'mine') {
+      scope.value = 'mine'
+    }
+  },
+  { immediate: true },
+)
+
 watch(groupFilter, (groupIdValue) => {
   const groupId = Number(groupIdValue)
   if (groupId && !filteredInstanceOptions.value.some((instance) => instance.id === Number(instanceFilter.value))) {
@@ -630,7 +649,7 @@ onBeforeUnmount(() => {
       <CardHeader>
         <CardTitle>Workflow list unavailable</CardTitle>
         <CardDescription>
-          `sql.menu_sqlworkflow` or `sql.audit_user` is required to browse the shared workflow list.
+          Sign in again to load workflow data.
         </CardDescription>
       </CardHeader>
     </Card>
@@ -651,10 +670,10 @@ onBeforeUnmount(() => {
 
         <div class="grid gap-3 xl:grid-cols-4">
           <Input v-model="search" placeholder="Search workflow, requester, group, instance, or DB" />
-          <select v-model="scope" :class="selectClass">
-            <option value="all">All visible workflows</option>
+          <select v-model="scope" :class="selectClass" :disabled="!canBrowseSharedWorkflowList">
             <option value="mine">My submissions</option>
-            <option value="pending_review">Pending my review</option>
+            <option v-if="canBrowseSharedWorkflowList" value="all">All visible workflows</option>
+            <option v-if="canBrowseSharedWorkflowList" value="pending_review">Pending my review</option>
           </select>
           <select v-model="syntaxFilter" :class="selectClass">
             <option value="">DDL + DML</option>
