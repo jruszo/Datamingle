@@ -2310,7 +2310,11 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         WorkflowAudit.objects.all().delete()
         WorkflowLog.objects.all().delete()
         User.objects.filter(
-            username__in=["temp_workflow_submitter", "temp_preview_submitter"]
+            username__in=[
+                "temp_workflow_submitter",
+                "temp_preview_submitter",
+                "self_service_submitter",
+            ]
         ).delete()
         self.notify_patcher.stop()
 
@@ -2334,6 +2338,42 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         payload = response_data(r)
         self.assertEqual(payload["count"], 1)
         self.assertEqual(payload["results"][0]["id"], self.wf1.id)
+
+    def test_workflow_list_allows_self_service_scope_without_menu_permission(self):
+        submitter = User.objects.create(
+            username="self_service_submitter",
+            display="Self Service Submitter",
+            is_active=True,
+        )
+        submitter.set_password("test_password")
+        submitter.save()
+        own_workflow = SqlWorkflow.objects.create(
+            workflow_name="own_workflow",
+            group_id=self.res_group.group_id,
+            group_name=self.res_group.group_name,
+            engineer=submitter.username,
+            engineer_display=submitter.display,
+            audit_auth_groups="1",
+            status="workflow_review_pass",
+            is_backup=False,
+            instance=self.ins,
+            db_name="some_db",
+            syntax_type=2,
+        )
+        login = self.client.post(
+            "/api/auth/token/",
+            {"username": submitter.username, "password": "test_password"},
+            format="json",
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
+        )
+
+        r = self.client.get("/api/v1/workflow/?scope=mine", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["id"], own_workflow.id)
 
     def test_workflow_submission_metadata(self):
         r = self.client.get("/api/v1/workflow/submission-metadata/", format="json")
@@ -2947,6 +2987,19 @@ class TestWorkflow(CacheIsolatedAPITestCase):
                 audit_id=self.audit1.audit_id, operation_type=4
             ).exists()
         )
+
+    @patch("sql_api.api_workflow.task_info")
+    def test_workflow_detail_uses_timing_schedule_name(self, mock_task_info):
+        scheduled_run = datetime.now() + timedelta(days=1)
+        mock_task_info.return_value = Mock(next_run=scheduled_run)
+        self.wf1.status = "workflow_timingtask"
+        self.wf1.save(update_fields=["status"])
+
+        r = self.client.get(f"/api/v1/workflow/{self.wf1.id}/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["run_date"], scheduled_run.isoformat())
+        mock_task_info.assert_called_once_with(f"sqlreview-timing-{self.wf1.id}")
 
     def test_update_workflow_execution_window(self):
         start_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")

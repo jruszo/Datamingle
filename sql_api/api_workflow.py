@@ -181,7 +181,7 @@ def _last_operation_info(workflow):
 def _scheduled_run_date(workflow):
     if workflow.status != "workflow_timingtask":
         return None
-    job_id = Const.workflowJobprefix["sqlreview"] + "-" + str(workflow.id)
+    job_id = f'{Const.workflowJobprefix["sqlreview"]}-timing-{workflow.id}'
     job = task_info(job_id)
     return job.next_run if job else None
 
@@ -604,9 +604,6 @@ class WorkflowList(generics.GenericAPIView):
         description="List DDL/DML workflows visible to the current user for the SPA workflow module.",
     )
     def get(self, request):
-        if not _can_view_workflow_module(request.user):
-            raise PermissionDenied("You do not have permission to view workflow list.")
-
         workflows = self._filter_queryset(_visible_workflow_queryset(request.user))
         page_wf = self.paginate_queryset(queryset=workflows)
         serializer_obj = self.get_serializer(page_wf, many=True)
