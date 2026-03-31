@@ -1,3 +1,4 @@
+CREATE DATABASE IF NOT EXISTS demo_orders;
 CREATE DATABASE IF NOT EXISTS demo_billing;
 
 GRANT ALL PRIVILEGES ON demo_orders.* TO 'demo_archery'@'%';
