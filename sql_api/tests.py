@@ -14,6 +14,7 @@ from sql.engines.models import ReviewResult, ResultSet
 from sql.models import (
     ResourceGroup,
     Instance,
+    InstanceAccessLevel,
     AliyunRdsConfig,
     CloudAccessKey,
     Tunnel,
@@ -34,6 +35,7 @@ from sql.models import (
 from common.utils.const import WorkflowAction, WorkflowStatus, WorkflowType
 import json
 import pyotp
+import time
 
 User = get_user_model()
 
@@ -656,7 +658,11 @@ class TestTokenAuth2FA(CacheIsolatedAPITestCase):
             secret_key=secret,
             user=self.user,
         )
-        otp = pyotp.TOTP(secret).now()
+        totp = pyotp.TOTP(secret)
+        remaining_window = totp.interval - (time.time() % totp.interval)
+        if remaining_window < 1:
+            time.sleep(remaining_window + 0.1)
+        otp = totp.now()
         r = self.client.post(
             "/api/auth/token/",
             {
@@ -2300,6 +2306,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.notify_patcher.start()
 
     def tearDown(self):
+        TemporaryInstanceGrant.objects.all().delete()
         self.user.delete()
         self.group.delete()
         self.res_group.delete()
@@ -2307,6 +2314,13 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         SqlWorkflow.objects.all().delete()
         WorkflowAudit.objects.all().delete()
         WorkflowLog.objects.all().delete()
+        User.objects.filter(
+            username__in=[
+                "temp_workflow_submitter",
+                "temp_preview_submitter",
+                "self_service_submitter",
+            ]
+        ).delete()
         self.notify_patcher.stop()
 
     def test_get_sql_workflow_list(self):
@@ -2322,6 +2336,217 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(
             set(list_data.keys()), {"count", "next", "previous", "results"}
         )
+
+    def test_workflow_list_supports_pending_review_scope(self):
+        r = self.client.get("/api/v1/workflow/?scope=pending_review", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["id"], self.wf1.id)
+
+    def test_workflow_list_allows_self_service_scope_without_menu_permission(self):
+        submitter = User.objects.create(
+            username="self_service_submitter",
+            display="Self Service Submitter",
+            is_active=True,
+        )
+        submitter.set_password("test_password")
+        submitter.save()
+        own_workflow = SqlWorkflow.objects.create(
+            workflow_name="own_workflow",
+            group_id=self.res_group.group_id,
+            group_name=self.res_group.group_name,
+            engineer=submitter.username,
+            engineer_display=submitter.display,
+            audit_auth_groups="1",
+            status="workflow_review_pass",
+            is_backup=False,
+            instance=self.ins,
+            db_name="some_db",
+            syntax_type=2,
+        )
+        login = self.client.post(
+            "/api/auth/token/",
+            {"username": submitter.username, "password": "test_password"},
+            format="json",
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
+        )
+
+        r = self.client.get("/api/v1/workflow/?scope=mine", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["id"], own_workflow.id)
+
+    def test_workflow_submission_metadata(self):
+        r = self.client.get("/api/v1/workflow/submission-metadata/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(len(payload["resource_groups"]), 1)
+        self.assertEqual(
+            payload["resource_groups"][0]["group_id"], self.res_group.group_id
+        )
+        self.assertEqual(len(payload["instances"]), 1)
+        self.assertEqual(payload["instances"][0]["id"], self.ins.id)
+
+    def test_workflow_submission_metadata_excludes_direct_group_access_without_submit_permission(
+        self,
+    ):
+        self.user.user_permissions.remove(Permission.objects.get(codename="sql_submit"))
+
+        r = self.client.get("/api/v1/workflow/submission-metadata/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["resource_groups"], [])
+        self.assertEqual(payload["instances"], [])
+
+    def test_workflow_submission_metadata_includes_temporary_instance_grant_group(self):
+        temp_user = User.objects.create(
+            username="temp_workflow_submitter",
+            display="Temp Workflow Submitter",
+            is_active=True,
+        )
+        temp_user.set_password("test_password")
+        temp_user.save()
+        TemporaryInstanceGrant.objects.create(
+            user=temp_user,
+            resource_group=self.res_group,
+            instance=self.ins,
+            access_level=InstanceAccessLevel.QUERY_DML,
+            valid_date=datetime.now().date() + timedelta(days=1),
+        )
+        login = self.client.post(
+            "/api/auth/token/",
+            {"username": temp_user.username, "password": "test_password"},
+            format="json",
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
+        )
+
+        r = self.client.get("/api/v1/workflow/submission-metadata/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(len(payload["resource_groups"]), 1)
+        self.assertEqual(
+            payload["resource_groups"][0]["group_id"], self.res_group.group_id
+        )
+        self.assertEqual(
+            payload["instances"][0]["group_ids"], [self.res_group.group_id]
+        )
+        self.assertEqual(
+            payload["instances"][0]["group_names"], [self.res_group.group_name]
+        )
+
+    def test_workflow_approval_preview(self):
+        r = self.client.get(
+            f"/api/v1/workflow/approval-preview/?group_id={self.res_group.group_id}",
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["group_id"], self.res_group.group_id)
+        self.assertEqual(payload["display"], self.group.name)
+        self.assertEqual(payload["review_info"][0]["group_name"], self.group.name)
+
+    def test_workflow_approval_preview_allows_temporary_instance_grant_submitter(self):
+        temp_user = User.objects.create(
+            username="temp_preview_submitter",
+            display="Temp Preview Submitter",
+            is_active=True,
+        )
+        temp_user.set_password("test_password")
+        temp_user.save()
+        TemporaryInstanceGrant.objects.create(
+            user=temp_user,
+            resource_group=self.res_group,
+            instance=self.ins,
+            access_level=InstanceAccessLevel.QUERY_DML,
+            valid_date=datetime.now().date() + timedelta(days=1),
+        )
+        login = self.client.post(
+            "/api/auth/token/",
+            {"username": temp_user.username, "password": "test_password"},
+            format="json",
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
+        )
+
+        r = self.client.get(
+            f"/api/v1/workflow/approval-preview/?group_id={self.res_group.group_id}",
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["display"], self.group.name)
+
+    def test_workflow_approval_preview_reports_missing_configuration(self):
+        WorkflowAuditSetting.objects.filter(
+            group_id=self.res_group.group_id, workflow_type=WorkflowType.SQL_REVIEW
+        ).delete()
+
+        r = self.client.get(
+            f"/api/v1/workflow/approval-preview/?group_id={self.res_group.group_id}",
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            r.json()["errors"],
+            "Approval flow is not configured for this resource group.",
+        )
+
+    def test_workflow_approval_preview_supports_explicit_auto_pass(self):
+        WorkflowAuditSetting.objects.filter(
+            group_id=self.res_group.group_id, workflow_type=WorkflowType.SQL_REVIEW
+        ).update(audit_auth_groups="")
+
+        r = self.client.get(
+            f"/api/v1/workflow/approval-preview/?group_id={self.res_group.group_id}",
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["audit_auth_groups"], "")
+        self.assertEqual(payload["display"], "No approval required")
+        self.assertEqual(payload["review_info"][0]["group_name"], "Auto")
+        self.assertTrue(payload["review_info"][0]["is_auto_pass"])
+
+    def test_workflow_detail(self):
+        self.wfc1.review_content = json.dumps([{"id": 1, "sql": "select 1"}])
+        self.wfc1.save(update_fields=["review_content"])
+        r = self.client.get(f"/api/v1/workflow/{self.wf1.id}/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["id"], self.wf1.id)
+        self.assertEqual(payload["sql_content"], self.wfc1.sql_content)
+        self.assertTrue(payload["is_can_review"])
+        self.assertEqual(payload["review_info"][0]["group_name"], self.group.name)
+
+    def test_workflow_content_detail(self):
+        self.wfc1.review_content = json.dumps([{"id": 1, "sql": "select 1"}])
+        self.wfc1.save(update_fields=["review_content"])
+        r = self.client.get(f"/api/v1/workflow/{self.wf1.id}/content/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["source"], "review")
+        self.assertEqual(payload["rows"][0]["sql"], "select 1")
+
+    @patch("sql_api.api_workflow.get_engine")
+    def test_workflow_rollback_detail(self, mock_get_engine):
+        self.wf1.status = "workflow_finish"
+        self.wf1.is_backup = True
+        self.wf1.save(update_fields=["status", "is_backup"])
+        mock_get_engine.return_value.get_rollback.return_value = [
+            ["delete from t", "insert into t values (1);"]
+        ]
+        r = self.client.get(f"/api/v1/workflow/{self.wf1.id}/rollback/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["rows"][0][0], "delete from t")
+        self.assertIn("insert into t values", payload["download_content"])
 
     def test_get_audit_list(self):
         """Test getting pending audit workflow list."""
@@ -2621,6 +2846,42 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.wf1.refresh_from_db()
         self.assertEqual(self.wf1.status, "workflow_review_pass")
 
+    def test_audit_cancel_by_reviewer_rejects_workflow(self):
+        reviewer = User.objects.create(
+            username="workflow_reviewer",
+            display="Workflow Reviewer",
+            is_active=True,
+        )
+        reviewer.set_password("test_password")
+        reviewer.save()
+        reviewer.user_permissions.add(Permission.objects.get(codename="sql_review"))
+        reviewer.groups.add(self.group.id)
+        reviewer.resource_group.add(self.res_group.group_id)
+
+        login_response = self.client.post(
+            "/api/auth/token/",
+            {"username": reviewer.username, "password": "test_password"},
+            format="json",
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION="Bearer " + response_data(login_response)["access"]
+        )
+        r = self.client.post(
+            f"/api/v1/workflow/{self.wf1.id}/reviews/",
+            {
+                "audit_remark": "rejected",
+                "workflow_type": self.audit1.workflow_type,
+                "audit_type": "cancel",
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.wf1.refresh_from_db()
+        self.audit1.refresh_from_db()
+        self.assertEqual(self.wf1.status, "workflow_abort")
+        self.assertEqual(self.audit1.current_status, WorkflowStatus.REJECTED)
+        reviewer.delete()
+
     def test_execute_workflow(self):
         """Test executing workflow."""
         # Audit first
@@ -2711,6 +2972,73 @@ class TestWorkflow(CacheIsolatedAPITestCase):
                 audit_id=self.audit1.audit_id, operation_type=6
             ).exists()
         )
+
+    @patch("sql_api.api_workflow.add_sql_schedule")
+    def test_schedule_workflow(self, mock_add_sql_schedule):
+        self.wf1.status = "workflow_review_pass"
+        self.wf1.save(update_fields=["status"])
+        run_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
+        r = self.client.post(
+            f"/api/v1/workflow/{self.wf1.id}/schedule/",
+            {"run_date": run_date},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.wf1.refresh_from_db()
+        self.assertEqual(self.wf1.status, "workflow_timingtask")
+        mock_add_sql_schedule.assert_called_once()
+        self.assertTrue(
+            WorkflowLog.objects.filter(
+                audit_id=self.audit1.audit_id, operation_type=4
+            ).exists()
+        )
+
+    @patch("sql_api.api_workflow.task_info")
+    def test_workflow_detail_uses_timing_schedule_name(self, mock_task_info):
+        scheduled_run = datetime.now() + timedelta(days=1)
+        mock_task_info.return_value = Mock(next_run=scheduled_run)
+        self.wf1.status = "workflow_timingtask"
+        self.wf1.save(update_fields=["status"])
+
+        r = self.client.get(f"/api/v1/workflow/{self.wf1.id}/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["run_date"], scheduled_run.isoformat())
+        mock_task_info.assert_called_once_with(f"sqlreview-timing-{self.wf1.id}")
+
+    def test_update_workflow_execution_window(self):
+        start_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
+        end_date = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M")
+        r = self.client.patch(
+            f"/api/v1/workflow/{self.wf1.id}/execution-window/",
+            {"run_date_start": start_date, "run_date_end": end_date},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.wf1.refresh_from_db()
+        self.assertIsNotNone(self.wf1.run_date_start)
+        self.assertIsNotNone(self.wf1.run_date_end)
+
+    def test_update_workflow_execution_window_preserves_omitted_bound(self):
+        original_start = datetime.now() + timedelta(days=1)
+        original_end = datetime.now() + timedelta(days=2)
+        self.wf1.run_date_start = original_start
+        self.wf1.run_date_end = original_end
+        self.wf1.save(update_fields=["run_date_start", "run_date_end"])
+
+        updated_end = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%dT%H:%M")
+        r = self.client.patch(
+            f"/api/v1/workflow/{self.wf1.id}/execution-window/",
+            {"run_date_end": updated_end},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.wf1.refresh_from_db()
+        self.assertEqual(
+            self.wf1.run_date_start.strftime("%Y-%m-%dT%H:%M"),
+            original_start.strftime("%Y-%m-%dT%H:%M"),
+        )
+        self.assertEqual(self.wf1.run_date_end.strftime("%Y-%m-%dT%H:%M"), updated_end)
 
 
 class TestPermissionRequestAPI(CacheIsolatedAPITestCase):

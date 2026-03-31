@@ -45,6 +45,23 @@ Public Datamingle demo: coming soon.
 ### Docker
 Use the Docker and compose files in this repository (`src/docker` and `src/docker-compose`).
 
+### Local Demo Users
+The local ARM compose setup can seed demo users, resource groups, and demo database instances for manual UX testing.
+
+Seeded app users:
+
+- `demo_admin` / `demo123`
+- `demo_requester` / `demo123`
+- `demo_pm` / `demo123`
+- `demo_dba` / `demo123`
+
+See [src/docker-compose/LOCAL_DEMO.md](src/docker-compose/LOCAL_DEMO.md) for:
+
+- demo login roles and approval chains
+- demo MySQL/PostgreSQL instance credentials
+- the separate smoke-check command
+- reset and reseed instructions
+
 Manual Installation
 ===============
 Use this repository as the source of truth: https://github.com/jruszo/Datamingle

@@ -26,11 +26,13 @@ from sql.utils.resource_group import (
     user_has_group_instance_access,
     user_has_instance_workflow_access,
 )
-from common.utils.const import WorkflowType, WorkflowStatus
+from common.utils.const import WorkflowType, WorkflowStatus, Const
 from common.config import SysConfig
 import traceback
 import logging
 from sql.offlinedownload import OffLineDownLoad
+from sql.utils.sql_review import can_execute, can_timingtask, can_cancel, can_rollback
+from sql.utils.tasks import task_info
 
 logger = logging.getLogger("default")
 
@@ -1341,6 +1343,70 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
             "execute_result",
         )
         read_only_fields = ["review_content", "execute_result"]
+
+
+class WorkflowSummarySerializer(serializers.ModelSerializer):
+    instance_id = serializers.IntegerField(source="instance.id", read_only=True)
+    instance_name = serializers.CharField(
+        source="instance.instance_name", read_only=True
+    )
+    syntax_type_display = serializers.CharField(
+        source="get_syntax_type_display", read_only=True
+    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = SqlWorkflow
+        fields = (
+            "id",
+            "workflow_name",
+            "demand_url",
+            "group_id",
+            "group_name",
+            "instance_id",
+            "instance_name",
+            "db_name",
+            "syntax_type",
+            "syntax_type_display",
+            "is_backup",
+            "engineer",
+            "engineer_display",
+            "status",
+            "status_display",
+            "run_date_start",
+            "run_date_end",
+            "create_time",
+            "finish_time",
+            "is_manual",
+        )
+
+
+class WorkflowScheduleSerializer(serializers.Serializer):
+    run_date = serializers.DateTimeField(
+        input_formats=["%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M", "iso-8601"]
+    )
+
+
+class WorkflowWindowSerializer(serializers.Serializer):
+    run_date_start = serializers.DateTimeField(
+        input_formats=["%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M", "iso-8601"],
+        required=False,
+        allow_null=True,
+    )
+    run_date_end = serializers.DateTimeField(
+        input_formats=["%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M", "iso-8601"],
+        required=False,
+        allow_null=True,
+    )
+
+    def validate(self, attrs):
+        start = attrs.get("run_date_start")
+        end = attrs.get("run_date_end")
+        if start and end and start > end:
+            raise serializers.ValidationError(
+                {"errors": "run_date_start cannot be later than run_date_end."}
+            )
+        return attrs
 
 
 class AuditWorkflowSerializer(serializers.Serializer):
