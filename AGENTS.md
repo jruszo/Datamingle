@@ -9,12 +9,12 @@
 ## Docker And Python
 
 - Prefer running Django and other Python app commands inside the Archery container, not on the host.
-- The local development app container is `datamingle-archery`.
+- The local development app container is `datamingle-app`.
 - The local compose file in use is `src/docker-compose/docker-compose.local-arm.yml`.
 - Rebuild the app container with:
   - `docker-compose -f src/docker-compose/docker-compose.local-arm.yml up -d --build archery`
 - Run Django commands with:
-  - `docker exec datamingle-archery python manage.py <command>`
+  - `docker exec datamingle-app python manage.py <command>`
 - If container code is not bind-mounted for a file you changed, copy the file into the container with `docker cp` before running containerized commands.
 
 ## Migrations
@@ -23,7 +23,7 @@
 - Generate migrations by running `makemigrations` in the Archery container after syncing changed files if needed.
 - Copy generated migration files back out to the host repo and commit them.
 - Before finishing, verify migration drift with:
-  - `docker exec datamingle-archery python manage.py makemigrations sql --check`
+  - `docker exec datamingle-app python manage.py makemigrations sql --check`
 
 ## Linting And Verification
 

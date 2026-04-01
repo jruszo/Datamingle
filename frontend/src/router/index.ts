@@ -26,6 +26,7 @@ import SettingsInstanceTagDetailView from '@/views/SettingsInstanceTagDetailView
 import SettingsInstanceTagsView from '@/views/SettingsInstanceTagsView.vue'
 import SettingsUserDetailView from '@/views/SettingsUserDetailView.vue'
 import SettingsUsersView from '@/views/SettingsUsersView.vue'
+import WorkflowsCreateView from '@/views/WorkflowsCreateView.vue'
 import WorkflowsView from '@/views/WorkflowsView.vue'
 
 const router = createRouter({
@@ -37,6 +38,7 @@ const router = createRouter({
     { path: '/inventory/new', name: 'inventory-new', component: InventoryCreateView, meta: { title: 'Add Instance' } },
     { path: '/inventory/:instanceId', name: 'inventory-detail', component: InventoryCreateView, meta: { title: 'Edit Instance' } },
     { path: '/workflows', name: 'workflows', component: WorkflowsView, meta: { title: 'Workflows' } },
+    { path: '/workflows/new', name: 'workflows-new', component: WorkflowsCreateView, meta: { title: 'New Workflow' } },
     { path: '/queries', name: 'queries', component: QueriesView, meta: { title: 'Queries' } },
     { path: '/permission-management', name: 'permission-management', component: PermissionManagementView, meta: { title: 'Permission Management' } },
     { path: '/reports', name: 'reports', component: ReportsView, meta: { title: 'Reports' } },

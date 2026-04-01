@@ -183,6 +183,34 @@ class TestUser(CacheIsolatedAPITestCase):
         self.assertIn("groups", r_data)
         self.assertIn("resource_groups", r_data)
 
+    def test_get_current_user_context_includes_workflow_menu_for_temporary_write_access(
+        self,
+    ):
+        TemporaryInstanceGrant.objects.create(
+            user=self.member_user,
+            resource_group=self.res_group,
+            instance=self.instance,
+            access_level="query_dml_ddl",
+            valid_date=datetime.now().date() + timedelta(days=30),
+        )
+
+        self.client.credentials()
+        self.member_user.set_password("member_password")
+        self.member_user.save(update_fields=["password"])
+        login_response = self.client.post(
+            "/api/auth/token/",
+            {"username": self.member_user.username, "password": "member_password"},
+            format="json",
+        )
+        token = response_data(login_response)["access"]
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
+
+        response = self.client.get("/api/v1/me/", format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        permissions = response_data(response)["permissions"]
+        self.assertIn("sql.menu_sqlworkflow", permissions)
+        self.assertIn("sql.sql_submit", permissions)
+
     def test_update_current_user_profile(self):
         """Authenticated users can update their own display name."""
         r = self.client.patch("/api/v1/me/", {"display": "Updated Self"}, format="json")
@@ -2342,6 +2370,50 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(response_data(r)["count"], 1)
 
+    def test_get_workflow_metadata(self):
+        response = self.client.get("/api/v1/workflow/metadata/", format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response_data(response)
+        self.assertEqual(len(data["resource_groups"]), 1)
+        self.assertEqual(len(data["instances"]), 1)
+        self.assertEqual(data["instances"][0]["id"], self.ins.id)
+
+    def test_get_workflow_detail(self):
+        self.wfc1.review_content = json.dumps(
+            [
+                {
+                    "id": 1,
+                    "stage": "CHECKED",
+                    "errlevel": 0,
+                    "stagestatus": "Audit completed",
+                    "errormessage": "",
+                    "sql": "alter table demo add column note varchar(64)",
+                    "affected_rows": 0,
+                    "sequence": "0_0_00000001",
+                    "backup_dbname": "",
+                    "execute_time": "0",
+                    "sqlsha1": "",
+                    "backup_time": "",
+                    "actual_affected_rows": "",
+                }
+            ]
+        )
+        self.wfc1.save(update_fields=["review_content"])
+
+        response = self.client.get(f"/api/v1/workflow/{self.wf1.id}/", format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response_data(response)
+        self.assertEqual(data["id"], self.wf1.id)
+        self.assertEqual(data["syntax_type"], 1)
+        self.assertEqual(
+            data["review_rows"][0]["sql"],
+            "alter table demo add column note varchar(64)",
+        )
+        self.assertEqual(
+            data["logs"][0]["operation_type_desc"], self.wl.operation_type_desc
+        )
+        self.assertTrue(data["is_can_review"])
+
     def test_get_workflow_log_list_missing_params(self):
         """workflow_id and workflow_type are required query params."""
         r = self.client.get("/api/v1/workflow/log/", format="json")
@@ -2563,18 +2635,18 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(r.json()["detail"], "canceled")
 
-    def test_audit_workflow_invalid_audit_type(self):
+    def test_audit_workflow_reject(self):
         r = self.client.post(
             f"/api/v1/workflow/{self.wf1.id}/reviews/",
             {
-                "audit_remark": "noop",
+                "audit_remark": "reject",
                 "workflow_type": self.audit1.workflow_type,
                 "audit_type": "reject",
             },
             format="json",
         )
-        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("audit_type", r.json())
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.json()["detail"], "rejected")
 
     def test_audit_cancel_denies_non_owner(self):
         user2 = User.objects.create(
@@ -2620,6 +2692,21 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.wf1.refresh_from_db()
         self.assertEqual(self.wf1.status, "workflow_review_pass")
+
+    def test_audit_reject_updates_workflow_status(self):
+        r = self.client.post(
+            f"/api/v1/workflow/{self.wf1.id}/reviews/",
+            {
+                "audit_remark": "rejected",
+                "workflow_type": self.audit1.workflow_type,
+                "audit_type": "reject",
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.json()["detail"], "rejected")
+        self.wf1.refresh_from_db()
+        self.assertEqual(self.wf1.status, "workflow_abort")
 
     def test_execute_workflow(self):
         """Test executing workflow."""
@@ -2709,6 +2796,56 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertTrue(
             WorkflowLog.objects.filter(
                 audit_id=self.audit1.audit_id, operation_type=6
+            ).exists()
+        )
+
+    def test_update_workflow_execution_window(self):
+        response = self.client.patch(
+            f"/api/v1/workflow/{self.wf1.id}/window/",
+            {
+                "run_date_start": "2030-01-02T03:04",
+                "run_date_end": "2030-01-02T05:04",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.wf1.refresh_from_db()
+        self.assertEqual(
+            self.wf1.run_date_start.strftime("%Y-%m-%d %H:%M"), "2030-01-02 03:04"
+        )
+        self.assertEqual(
+            self.wf1.run_date_end.strftime("%Y-%m-%d %H:%M"), "2030-01-02 05:04"
+        )
+
+    @patch("sql_api.api_workflow.add_sql_schedule")
+    def test_schedule_workflow(self, mock_add_schedule):
+        self.client.post(
+            f"/api/v1/workflow/{self.wf1.id}/reviews/",
+            {
+                "audit_remark": "approved",
+                "workflow_type": self.audit1.workflow_type,
+                "audit_type": "pass",
+            },
+            format="json",
+        )
+
+        response = self.client.post(
+            f"/api/v1/workflow/{self.wf1.id}/schedule/",
+            {
+                "run_date": (datetime.now() + timedelta(hours=1)).strftime(
+                    "%Y-%m-%dT%H:%M"
+                ),
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.wf1.refresh_from_db()
+        self.assertEqual(self.wf1.status, "workflow_timingtask")
+        mock_add_schedule.assert_called_once()
+        self.assertTrue(
+            WorkflowLog.objects.filter(
+                audit_id=self.audit1.audit_id,
+                operation_type=WorkflowAction.EXECUTE_SET_TIME,
             ).exists()
         )
 

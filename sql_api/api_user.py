@@ -98,7 +98,7 @@ class CurrentUser(views.APIView):
         if active_instance_access.filter(
             access_level__in=["query_dml", "query_dml_ddl"]
         ).exists():
-            permissions.add("sql.sql_submit")
+            permissions.update({"sql.menu_sqlworkflow", "sql.sql_submit"})
 
         payload = {
             "id": user.id,

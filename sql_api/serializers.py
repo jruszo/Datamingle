@@ -1350,7 +1350,9 @@ class AuditWorkflowSerializer(serializers.Serializer):
         choices=WorkflowType.choices,
         label="Workflow type: 1-query privilege apply, 2-SQL release apply, 3-data archive apply",
     )
-    audit_type = serializers.ChoiceField(choices=["pass", "cancel"], label="Audit type")
+    audit_type = serializers.ChoiceField(
+        choices=["pass", "reject", "cancel"], label="Audit type"
+    )
 
     def validate(self, attrs):
         workflow_id = attrs.get("workflow_id")

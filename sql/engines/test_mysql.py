@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta
 from unittest.mock import patch, Mock, ANY
 
@@ -390,6 +391,48 @@ class TestMysql(TestCase):
         new_engine = MysqlEngine(instance=self.ins1)
         execute_result = new_engine.execute_workflow(self.wf)
         self.assertIsInstance(execute_result, ReviewSet)
+
+    @patch.object(MysqlEngine, "get_connection")
+    @patch.object(MysqlEngine, "query")
+    def test_execute_workflow_direct_for_ddl(self, mock_query, mock_get_connection):
+        self.wf.sqlworkflowcontent.sql_content = (
+            "alter table demo add column note varchar(64);"
+        )
+        self.wf.sqlworkflowcontent.review_content = json.dumps(
+            [
+                {
+                    "id": 1,
+                    "stage": "CHECKED",
+                    "errlevel": 0,
+                    "stagestatus": "Audit completed",
+                    "errormessage": "",
+                    "sql": "alter table demo add column note varchar(64)",
+                    "affected_rows": 0,
+                    "sequence": "0_0_00000001",
+                    "backup_dbname": "",
+                    "execute_time": "0",
+                    "sqlsha1": "",
+                    "backup_time": "",
+                    "actual_affected_rows": "",
+                }
+            ]
+        )
+        self.wf.sqlworkflowcontent.save(update_fields=["sql_content", "review_content"])
+
+        mock_query.return_value.rows = ((0,),)
+        mock_conn = Mock()
+        mock_cursor = Mock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_get_connection.return_value = mock_conn
+
+        new_engine = MysqlEngine(instance=self.ins1)
+        execute_result = new_engine.execute_workflow(self.wf)
+
+        mock_cursor.execute.assert_called_once_with(
+            "alter table demo add column note varchar(64)"
+        )
+        self.assertEqual(execute_result.error, None)
+        self.assertEqual(execute_result.rows[0].stagestatus, "Execute Successfully")
 
     @patch("MySQLdb.connect.cursor.execute")
     @patch("MySQLdb.connect.cursor")
