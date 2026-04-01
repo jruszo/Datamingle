@@ -2378,6 +2378,49 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(len(data["instances"]), 1)
         self.assertEqual(data["instances"][0]["id"], self.ins.id)
 
+    def test_get_workflow_metadata_includes_temporary_instance_grant_group(self):
+        temp_user = User.objects.create(
+            username="workflow_temp_user",
+            display="Workflow Temp User",
+            is_active=True,
+        )
+        temp_user.set_password("test_password")
+        temp_user.save()
+        TemporaryInstanceGrant.objects.create(
+            user=temp_user,
+            resource_group=self.res_group,
+            instance=self.ins,
+            access_level="query_dml",
+            valid_date=datetime.now().date() + timedelta(days=1),
+        )
+
+        login = self.client.post(
+            "/api/auth/token/",
+            {"username": "workflow_temp_user", "password": "test_password"},
+            format="json",
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
+        )
+
+        response = self.client.get("/api/v1/workflow/metadata/", format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response_data(response)
+        self.assertEqual(
+            [
+                (group["group_id"], group["group_name"])
+                for group in data["resource_groups"]
+            ],
+            [(self.res_group.group_id, self.res_group.group_name)],
+        )
+        self.assertEqual(len(data["instances"]), 1)
+        self.assertEqual(
+            data["instances"][0]["resource_groups"][0]["group_id"],
+            self.res_group.group_id,
+        )
+
+        temp_user.delete()
+
     def test_get_workflow_detail(self):
         self.wfc1.review_content = json.dumps(
             [
@@ -2413,6 +2456,31 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             data["logs"][0]["operation_type_desc"], self.wl.operation_type_desc
         )
         self.assertTrue(data["is_can_review"])
+
+    def test_get_workflow_detail_allows_audit_user(self):
+        audit_user = User.objects.create(
+            username="workflow_audit_user",
+            display="Workflow Audit User",
+            is_active=True,
+        )
+        audit_user.set_password("test_password")
+        audit_user.save()
+        audit_user.user_permissions.add(Permission.objects.get(codename="audit_user"))
+
+        login = self.client.post(
+            "/api/auth/token/",
+            {"username": "workflow_audit_user", "password": "test_password"},
+            format="json",
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
+        )
+
+        response = self.client.get(f"/api/v1/workflow/{self.wf1.id}/", format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response_data(response)["id"], self.wf1.id)
+
+        audit_user.delete()
 
     def test_get_workflow_log_list_missing_params(self):
         """workflow_id and workflow_type are required query params."""

@@ -27,6 +27,8 @@ from sql.models import (
 from sql.notify import notify_for_audit, notify_for_execute
 from sql.query_privileges import _query_apply_audit_call_back
 from sql.utils.resource_group import (
+    WRITE_ACCESS_LEVELS,
+    active_instance_grants,
     user_groups,
     user_instances,
     user_member_groups,
@@ -114,8 +116,13 @@ class WorkflowInstanceLookupSerializer(serializers.ModelSerializer):
         return f"{obj.instance_name} | {obj.db_type} | {obj.host}"
 
     def get_resource_groups(self, obj):
-        queryset = obj.resource_group.filter(is_deleted=0).order_by(
-            "group_name", "group_id"
+        groups_by_id = {
+            group.group_id: group for group in obj.resource_group.filter(is_deleted=0)
+        }
+        for group in self.context.get("temporary_instance_groups", {}).get(obj.id, []):
+            groups_by_id.setdefault(group.group_id, group)
+        queryset = sorted(
+            groups_by_id.values(), key=lambda group: (group.group_name, group.group_id)
         )
         return WorkflowResourceGroupLookupSerializer(queryset, many=True).data
 
@@ -346,6 +353,37 @@ def _can_access_workflow_module(user):
     )
 
 
+def _workflow_metadata_resource_groups(user):
+    groups_by_id = {group.group_id: group for group in user_groups(user)}
+    for grant in (
+        active_instance_grants(user)
+        .filter(access_level__in=WRITE_ACCESS_LEVELS, resource_group__is_deleted=0)
+        .select_related("resource_group")
+    ):
+        groups_by_id.setdefault(grant.resource_group_id, grant.resource_group)
+    return sorted(
+        groups_by_id.values(), key=lambda group: (group.group_name, group.group_id)
+    )
+
+
+def _workflow_metadata_instance_groups(user):
+    groups_by_instance = {}
+    for grant in (
+        active_instance_grants(user)
+        .filter(access_level__in=WRITE_ACCESS_LEVELS, resource_group__is_deleted=0)
+        .select_related("resource_group")
+    ):
+        instance_groups = groups_by_instance.setdefault(grant.instance_id, {})
+        instance_groups.setdefault(grant.resource_group_id, grant.resource_group)
+    return {
+        instance_id: sorted(
+            instance_groups.values(),
+            key=lambda group: (group.group_name, group.group_id),
+        )
+        for instance_id, instance_groups in groups_by_instance.items()
+    }
+
+
 class ExecuteCheck(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -515,15 +553,18 @@ class WorkflowMetadata(views.APIView):
                 "You do not have permission to submit SQL workflows."
             )
 
+        temporary_instance_groups = _workflow_metadata_instance_groups(request.user)
         payload = {
             "allow_backup_toggle": bool(SysConfig().get("enable_backup_switch")),
             "manual_execution_enabled": bool(SysConfig().get("manual")),
-            "resource_groups": user_groups(request.user),
+            "resource_groups": _workflow_metadata_resource_groups(request.user),
             "instances": user_instances(request.user, tag_codes=["can_write"])
             .prefetch_related("resource_group")
             .order_by("instance_name", "id"),
         }
-        serializer = WorkflowMetadataSerializer(payload)
+        serializer = WorkflowMetadataSerializer(
+            payload, context={"temporary_instance_groups": temporary_instance_groups}
+        )
         return success_response(data=serializer.data)
 
 

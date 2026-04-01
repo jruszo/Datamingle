@@ -904,7 +904,7 @@ onMounted(async () => {
                   </p>
 
                   <div
-                    v-if="selectedWorkflow.is_can_review || selectedWorkflow.is_can_abort"
+                    v-if="selectedWorkflow.is_can_review || selectedWorkflow.is_can_cancel"
                     class="mt-4 space-y-2"
                   >
                     <label class="text-sm font-medium text-slate-700" for="workflow-review-remark">
@@ -937,7 +937,7 @@ onMounted(async () => {
                       Reject
                     </Button>
                     <Button
-                      v-if="selectedWorkflow.is_can_abort"
+                      v-if="selectedWorkflow.is_can_cancel"
                       variant="outline"
                       type="button"
                       :disabled="reviewSubmitting"
