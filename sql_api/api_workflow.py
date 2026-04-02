@@ -763,7 +763,9 @@ class WorkflowList(generics.ListAPIView):
         description="List all SQL release workflows (filtering, pagination).",
     )
     def get(self, request):
-        if not _can_access_workflow_module(request.user):
+        scope = request.query_params.get("scope", "").strip()
+        can_view_own_scope = scope == "mine"
+        if not can_view_own_scope and not _can_access_workflow_module(request.user):
             raise PermissionDenied("You do not have permission to view workflow list.")
         workflows = self.get_queryset()
         page_wf = self.paginate_queryset(queryset=workflows)
