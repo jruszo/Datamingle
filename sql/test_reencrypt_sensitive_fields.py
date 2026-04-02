@@ -1,31 +1,26 @@
-import base64
-
-from cryptography.hazmat.primitives import padding
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from django.conf import settings
 from django.core.management import call_command
 from django.db import connection
 from django.test import TestCase, override_settings
-from django.utils.encoding import force_bytes, force_str
 
 from common.encryption import (
     ENCRYPTED_VALUE_PREFIX,
     generate_field_encryption_key,
     get_multi_fernet,
 )
+from common.test_fixtures import LEGACY_MIRAGE_CIPHERTEXTS, LEGACY_MIRAGE_SECRET_KEY
 from sql.models import CloudAccessKey, Instance
 
 
 def _encrypt_legacy_mirage(value, secret_key):
-    cipher_key = base64.urlsafe_b64encode(force_bytes(secret_key))[:32]
-    cipher = Cipher(algorithms.AES(cipher_key), modes.ECB()).encryptor()
-    padder = padding.PKCS7(algorithms.AES(cipher_key).block_size).padder()
-    padded = padder.update(force_bytes(value)) + padder.finalize()
-    encrypted = cipher.update(padded) + cipher.finalize()
-    return force_str(base64.urlsafe_b64encode(encrypted))
+    # Pinned ciphertexts captured from the legacy Mirage wire format.
+    assert secret_key == LEGACY_MIRAGE_SECRET_KEY
+    return LEGACY_MIRAGE_CIPHERTEXTS[value]
 
 
-@override_settings(FIELD_ENCRYPTION_KEYS=generate_field_encryption_key())
+@override_settings(
+    FIELD_ENCRYPTION_KEYS=generate_field_encryption_key(),
+    SECRET_KEY=LEGACY_MIRAGE_SECRET_KEY,
+)
 class ReencryptSensitiveFieldsCommandTest(TestCase):
     def setUp(self):
         get_multi_fernet.cache_clear()
@@ -44,10 +39,14 @@ class ReencryptSensitiveFieldsCommandTest(TestCase):
             key_secret="plain-sk",
         )
 
-        legacy_user = _encrypt_legacy_mirage("legacy-root", settings.SECRET_KEY)
-        legacy_password = _encrypt_legacy_mirage("legacy-password", settings.SECRET_KEY)
-        legacy_key_id = _encrypt_legacy_mirage("legacy-ak", settings.SECRET_KEY)
-        legacy_key_secret = _encrypt_legacy_mirage("legacy-sk", settings.SECRET_KEY)
+        legacy_user = _encrypt_legacy_mirage("legacy-root", LEGACY_MIRAGE_SECRET_KEY)
+        legacy_password = _encrypt_legacy_mirage(
+            "legacy-password", LEGACY_MIRAGE_SECRET_KEY
+        )
+        legacy_key_id = _encrypt_legacy_mirage("legacy-ak", LEGACY_MIRAGE_SECRET_KEY)
+        legacy_key_secret = _encrypt_legacy_mirage(
+            "legacy-sk", LEGACY_MIRAGE_SECRET_KEY
+        )
 
         with connection.cursor() as cursor:
             cursor.execute(

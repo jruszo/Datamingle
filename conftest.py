@@ -1,4 +1,9 @@
+import os
 import datetime
+
+os.environ.setdefault(
+    "FIELD_ENCRYPTION_KEYS", "9R_Jxat_be2SV-UbCS0dAYQ0SGjZVf0JyN-VPkVNyi0="
+)
 
 import pytest
 from pytest_mock import MockFixture

@@ -18,15 +18,14 @@ class EncryptedMixin(models.Field):
         return encrypt_value(value)
 
     def from_db_value(self, value, expression, connection):
-        return self.to_python(value)
-
-    def to_python(self, value):
-        value = super().to_python(value)
         if value is None:
             return None
         if value == "":
             return value
         return decrypt_value(value)
+
+    def to_python(self, value):
+        return super().to_python(value)
 
 
 class EncryptedTextField(EncryptedMixin, models.TextField):

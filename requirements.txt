@@ -19,7 +19,7 @@ aliyun-python-sdk-rds==2.1.1
 cx-Oracle==7.3.0
 supervisor==4.1.0
 phoenixdb==1.2.1
-cryptography>=45.0.0
+cryptography>=45.0.0,<46.0.0
 schema-sync==0.9.7
 parsedatetime==2.4
 sshtunnel==0.1.5

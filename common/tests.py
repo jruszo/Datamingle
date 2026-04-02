@@ -16,9 +16,12 @@ from sql.models import (
     SqlWorkflowContent,
     QueryLog,
     ResourceGroup,
+    TwoFactorAuthConfig,
 )
 from common.utils.chart_dao import ChartDao
 from common.auth import init_user
+from common.twofa.sms import SMS
+from common.twofa.totp import TOTP
 from common.utils.extend_json_encoder import ExtendJSONEncoderFTime
 
 User = get_user_model()
@@ -532,6 +535,35 @@ class AuthTest(TestCase):
         # init should be idempotent
         init_user(self.u1)
         self.assertEqual(self.u1, self.resource_group1.users_set.get(pk=self.u1.pk))
+
+
+class TestTwoFactorAuth(TestCase):
+    def setUp(self):
+        self.user = User.objects.create(
+            username="twofa_user",
+            display="TwoFA User",
+            is_active=True,
+        )
+
+    def tearDown(self):
+        TwoFactorAuthConfig.objects.all().delete()
+        self.user.delete()
+
+    def test_sms_verify_returns_controlled_error_when_config_missing(self):
+        result = SMS(user=self.user).verify("123456")
+
+        self.assertEqual(
+            result,
+            {"status": 1, "msg": "SMS 2FA is not configured for this account."},
+        )
+
+    def test_totp_verify_returns_controlled_error_when_config_missing(self):
+        result = TOTP(user=self.user).verify("123456")
+
+        self.assertEqual(
+            result,
+            {"status": 1, "msg": "TOTP 2FA is not configured for this account."},
+        )
 
 
 class PermissionTest(TestCase):

@@ -1,10 +1,9 @@
 import base64
-import hashlib
 import os
 import re
 from functools import lru_cache
 
-from cryptography.fernet import Fernet, InvalidToken, MultiFernet
+from cryptography.fernet import Fernet, MultiFernet
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -15,6 +14,10 @@ from common.utils.aes_decryptor import Prpcrypt
 
 ENCRYPTED_VALUE_PREFIX = "enc1:"
 HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
+
+
+class DecryptionError(ValueError):
+    pass
 
 
 def generate_field_encryption_key():
@@ -28,9 +31,10 @@ def is_encrypted_value(value):
 def encrypt_value(value):
     if value is None:
         return None
-    if is_encrypted_value(value):
-        decrypt_value(value)
-        return value
+    if not _load_field_encryption_keys():
+        raise ValueError(
+            "FIELD_ENCRYPTION_KEYS must be configured before writing encrypted values."
+        )
     token = get_multi_fernet().encrypt(force_bytes(value))
     return f"{ENCRYPTED_VALUE_PREFIX}{force_str(token)}"
 
@@ -58,7 +62,9 @@ def decrypt_legacy_value(value):
     if old_value is not None:
         return old_value
 
-    return value
+    raise DecryptionError(
+        "Unable to decrypt legacy value. " f"marker={value[:16]!r} length={len(value)}"
+    )
 
 
 @lru_cache(maxsize=1)
@@ -85,23 +91,7 @@ def _load_field_encryption_keys():
         except Exception as exc:
             raise ValueError("Invalid FIELD_ENCRYPTION_KEYS entry.") from exc
         keys.append(key.encode("ascii"))
-
-    legacy_key = _derive_secret_key_fernet_key()
-    if not keys:
-        return [legacy_key]
-    if legacy_key not in keys:
-        keys.append(legacy_key)
     return keys
-
-
-def _derive_secret_key_fernet_key():
-    secret_key = getattr(settings, "SECRET_KEY", "") or os.environ.get("SECRET_KEY", "")
-    if not secret_key:
-        raise ValueError(
-            "SECRET_KEY or FIELD_ENCRYPTION_KEYS must be configured for encryption."
-        )
-    digest = hashlib.sha256(force_bytes(secret_key)).digest()
-    return base64.urlsafe_b64encode(digest)
 
 
 def _try_decrypt_mirage(value):
