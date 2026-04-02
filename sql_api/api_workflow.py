@@ -6,6 +6,7 @@ import re
 from django.contrib.auth.models import Group
 from django.db import transaction
 from django.db.models import Q
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django_q.tasks import async_task
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
@@ -547,6 +548,41 @@ def _scheduled_run_date(workflow):
     return job.next_run if job else None
 
 
+def _load_workflow_result_rows(workflow):
+    if workflow.status in ["workflow_finish", "workflow_exception"]:
+        raw_rows = workflow.sqlworkflowcontent.execute_result
+        source = "execution"
+    else:
+        raw_rows = workflow.sqlworkflowcontent.review_content
+        source = "review"
+
+    if not raw_rows:
+        return {"source": source, "rows": [], "column_list": []}
+
+    try:
+        rows = json.loads(raw_rows)
+        if rows and isinstance(rows[-1], list):
+            review_set = ReviewSet()
+            for row in rows:
+                review_set.rows.append(ReviewResult(inception_result=row))
+            rows = review_set.to_dict()
+    except (json.decoder.JSONDecodeError, IndexError):
+        rows = [
+            {
+                "id": 1,
+                "sql": workflow.sqlworkflowcontent.sql_content,
+                "errormessage": JSON_PARSE_ERROR_MESSAGE,
+            }
+        ]
+
+    column_list = list(rows[0].keys()) if rows else []
+    return {"source": source, "rows": rows, "column_list": column_list}
+
+
+def _rollback_download_content(rollback_rows):
+    return "".join(f"/*{row[0]}*/\n{row[1]}\n" for row in rollback_rows)
+
+
 class ExecuteCheck(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -569,6 +605,8 @@ class ExecuteCheck(views.APIView):
             check_engine = get_engine(instance=instance)
             db_name = check_engine.escape_string(db_name)
             check_result = check_engine.execute_check(db_name=db_name, sql=full_sql)
+        except serializers.ValidationError:
+            raise
         except Exception as e:
             raise serializers.ValidationError({"errors": f"{e}"})
         has_group_write_access = user_has_group_instance_access(
@@ -917,6 +955,65 @@ class WorkflowDetail(views.APIView):
             pk=workflow_id,
         )
         return success_response(data=_serialize_workflow_detail(workflow, request.user))
+
+
+class WorkflowContentDetail(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary="Workflow Content Result",
+        responses={200: OpenApiTypes.OBJECT},
+        description="Return review or execution rows for a workflow detail result table.",
+    )
+    def get(self, request, workflow_id):
+        workflow = get_object_or_404(
+            SqlWorkflow.objects.select_related("sqlworkflowcontent"),
+            pk=workflow_id,
+        )
+        if not can_view(request.user, workflow_id):
+            raise PermissionDenied("You do not have permission to view this workflow.")
+        return success_response(data=_load_workflow_result_rows(workflow))
+
+
+class WorkflowRollbackDetail(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary="Workflow Rollback SQL",
+        responses={200: OpenApiTypes.OBJECT},
+        description="Return rollback SQL pairs for a completed workflow.",
+    )
+    def get(self, request, workflow_id):
+        if not can_rollback(request.user, workflow_id):
+            raise PermissionDenied("You do not have permission to view rollback SQL.")
+
+        workflow = get_object_or_404(
+            SqlWorkflow.objects.select_related("instance"),
+            pk=workflow_id,
+        )
+        try:
+            query_engine = get_engine(instance=workflow.instance)
+            rollback_rows = query_engine.get_rollback(workflow=workflow)
+        except Exception as exc:
+            logger.error("Failed to load rollback SQL", exc_info=True)
+            raise serializers.ValidationError({"errors": str(exc)})
+
+        if request.query_params.get("download") == "true":
+            response = HttpResponse(
+                _rollback_download_content(rollback_rows),
+                content_type="application/sql",
+            )
+            response["Content-Disposition"] = (
+                f'attachment; filename="rollback_{workflow_id}.sql"'
+            )
+            return response
+
+        return success_response(
+            data={
+                "rows": rollback_rows,
+                "download_content": _rollback_download_content(rollback_rows),
+            }
+        )
 
 
 class WorkflowExecutionWindowUpdate(views.APIView):

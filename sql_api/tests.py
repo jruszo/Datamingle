@@ -14,6 +14,7 @@ from sql.engines.models import ReviewResult, ResultSet
 from sql.models import (
     ResourceGroup,
     Instance,
+    InstanceAccessLevel,
     AliyunRdsConfig,
     CloudAccessKey,
     Tunnel,
