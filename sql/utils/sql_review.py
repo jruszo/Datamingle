@@ -126,7 +126,7 @@ def can_view(user, workflow_id):
     workflow_detail = SqlWorkflow.objects.get(id=workflow_id)
     result = False
     # Superuser can view all workflows.
-    if user.is_superuser:
+    if user.is_superuser or user.has_perm("sql.audit_user"):
         result = True
     # Non-admin users with review permission or resource-group-level execution
     # permission can view all workflows in their groups.

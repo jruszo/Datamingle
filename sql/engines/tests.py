@@ -1456,13 +1456,11 @@ end;"""
         SqlWorkflowContent.objects.create(
             workflow=wf, sql_content=sql, review_content=ReviewSet(rows=[row]).json()
         )
-        with self.assertRaises(AttributeError):
-            new_engine = OracleEngine(instance=self.ins)
-            execute_result = new_engine.execute_workflow(workflow=wf)
-            self.assertIsInstance(execute_result, ReviewSet)
-            self.assertEqual(
-                execute_result.rows[0].__dict__.keys(), row.__dict__.keys()
-            )
+        new_engine = OracleEngine(instance=self.ins)
+        execute_result = new_engine.execute_workflow(workflow=wf)
+        self.assertIsInstance(execute_result, ReviewSet)
+        self.assertEqual(execute_result.rows[0].stagestatus, "Execute Failed")
+        self.assertIn("Exception info:", execute_result.rows[0].errormessage)
 
     @patch("cx_Oracle.connect.cursor.execute")
     @patch("cx_Oracle.connect.cursor")

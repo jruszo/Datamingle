@@ -91,6 +91,7 @@ urlpatterns = [
     path("v1/instance/tunnel/", api_instance.TunnelList.as_view()),
     path("v1/instance/rds/", api_instance.AliyunRdsList.as_view()),
     path("v1/workflow/", api_workflow.WorkflowList.as_view()),
+    path("v1/workflow/metadata/", api_workflow.WorkflowMetadata.as_view()),
     path(
         "v1/workflow/submission-metadata/",
         api_workflow.WorkflowSubmissionMetadata.as_view(),
@@ -103,20 +104,16 @@ urlpatterns = [
     path("v1/workflow/auditlist/", api_workflow.WorkflowAuditList.as_view()),
     path("v1/workflow/<int:workflow_id>/", api_workflow.WorkflowDetail.as_view()),
     path(
-        "v1/workflow/<int:workflow_id>/content/",
-        api_workflow.WorkflowContentDetail.as_view(),
-    ),
-    path(
-        "v1/workflow/<int:workflow_id>/rollback/",
-        api_workflow.WorkflowRollbackDetail.as_view(),
-    ),
-    path(
-        "v1/workflow/<int:workflow_id>/schedule/",
-        api_workflow.WorkflowScheduleCreate.as_view(),
+        "v1/workflow/<int:workflow_id>/window/",
+        api_workflow.WorkflowExecutionWindowUpdate.as_view(),
     ),
     path(
         "v1/workflow/<int:workflow_id>/execution-window/",
         api_workflow.WorkflowExecutionWindowUpdate.as_view(),
+    ),
+    path(
+        "v1/workflow/<int:workflow_id>/schedule/",
+        api_workflow.WorkflowScheduleCreate.as_view(),
     ),
     path(
         "v1/workflow/<int:workflow_id>/reviews/",

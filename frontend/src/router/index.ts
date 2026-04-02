@@ -9,11 +9,11 @@ import {
 } from '@/lib/auth'
 import type { CurrentUserContext } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth'
+import DmlWorkflowCreateView from '@/views/DmlWorkflowCreateView.vue'
 import HomeView from '@/views/HomeView.vue'
 import InventoryCreateView from '@/views/InventoryCreateView.vue'
 import InventoryView from '@/views/InventoryView.vue'
 import LoginView from '@/views/LoginView.vue'
-import DmlWorkflowCreateView from '@/views/DmlWorkflowCreateView.vue'
 import PermissionManagementView from '@/views/PermissionManagementView.vue'
 import ProfileView from '@/views/ProfileView.vue'
 import QueriesView from '@/views/QueriesView.vue'
@@ -27,6 +27,7 @@ import SettingsInstanceTagDetailView from '@/views/SettingsInstanceTagDetailView
 import SettingsInstanceTagsView from '@/views/SettingsInstanceTagsView.vue'
 import SettingsUserDetailView from '@/views/SettingsUserDetailView.vue'
 import SettingsUsersView from '@/views/SettingsUsersView.vue'
+import WorkflowsCreateView from '@/views/WorkflowsCreateView.vue'
 import WorkflowsView from '@/views/WorkflowsView.vue'
 
 const router = createRouter({
@@ -38,6 +39,7 @@ const router = createRouter({
     { path: '/inventory/new', name: 'inventory-new', component: InventoryCreateView, meta: { title: 'Add Instance' } },
     { path: '/inventory/:instanceId', name: 'inventory-detail', component: InventoryCreateView, meta: { title: 'Edit Instance' } },
     { path: '/workflows', name: 'workflows', component: WorkflowsView, meta: { title: 'Workflows' } },
+    { path: '/workflows/new', name: 'workflows-new', component: WorkflowsCreateView, meta: { title: 'New Workflow' } },
     { path: '/workflows/dml/new', name: 'workflow-dml-new', component: DmlWorkflowCreateView, meta: { title: 'New DML Request' } },
     { path: '/workflows/:workflowId', name: 'workflow-detail', component: WorkflowsView, meta: { title: 'Workflows' } },
     { path: '/queries', name: 'queries', component: QueriesView, meta: { title: 'Queries' } },

@@ -35,6 +35,7 @@ from sql.utils.sql_review import (
     can_execute,
     can_timingtask,
     can_cancel,
+    can_view,
     on_correct_time_period,
 )
 from sql.utils.sql_utils import *
@@ -161,6 +162,12 @@ class TestTemporaryAccessHelpers(TestCase):
 
 
 class TestSQLReviewAccess(TestSQLReview):
+    def test_can_view_true_for_audit_user(self):
+        audit_permission = Permission.objects.get(codename="audit_user")
+        self.user.user_permissions.add(audit_permission)
+        r = can_view(user=self.user, workflow_id=self.wfc1.workflow_id)
+        self.assertTrue(r)
+
     def test_can_execute_for_resource_group(
         self,
     ):
