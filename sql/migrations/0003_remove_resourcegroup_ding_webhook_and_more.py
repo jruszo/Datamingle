@@ -11,13 +11,26 @@ from django.db import migrations, models
 from django.utils.encoding import force_bytes, force_str
 
 
-def _decrypt_mirage(value, secret_key):
-    cipher_key = base64.urlsafe_b64encode(force_bytes(secret_key))[:32]
+def _decrypt_mirage(value, secret_key=None, cipher_mode=None, cipher_iv=None):
+    from django.conf import settings
+
+    key = secret_key or getattr(settings, "MIRAGE_SECRET_KEY", None)
+    if not key:
+        return None
+    cipher_key = base64.urlsafe_b64encode(force_bytes(key))[:32]
     if len(cipher_key) not in (16, 24, 32):
         return None
-    cipher = Cipher(
-        algorithms.AES(cipher_key), modes.ECB(), default_backend()
-    ).decryptor()
+    cipher_mode = (
+        cipher_mode or getattr(settings, "MIRAGE_CIPHER_MODE", "ECB")
+    ).upper()
+    iv = force_bytes(
+        cipher_iv or getattr(settings, "MIRAGE_CIPHER_IV", "1234567890abcdef")
+    )
+    if cipher_mode == "CBC":
+        mode = modes.CBC(iv)
+    else:
+        mode = modes.ECB()
+    cipher = Cipher(algorithms.AES(cipher_key), mode, default_backend()).decryptor()
     unpadder = padding.PKCS7(algorithms.AES(cipher_key).block_size).unpadder()
     plaintext = cipher.update(base64.urlsafe_b64decode(force_bytes(value)))
     plaintext += cipher.finalize()
@@ -38,12 +51,14 @@ def _decrypt_old_hex(value):
         return None
 
 
-def _decrypt_legacy_value(value, secret_key):
+def _decrypt_legacy_value(value, secret_key, cipher_mode=None, cipher_iv=None):
     if value in ("", None):
         return value
 
     for decryptor in (
-        lambda ciphertext: _decrypt_mirage(ciphertext, secret_key),
+        lambda ciphertext: _decrypt_mirage(
+            ciphertext, secret_key, cipher_mode, cipher_iv
+        ),
         _decrypt_old_hex,
     ):
         try:
@@ -63,12 +78,16 @@ def decrypt_instanceaccount_user(apps, schema_editor):
     InstanceAccount = apps.get_model("sql", "InstanceAccount")
     from django.conf import settings
 
-    secret_key = settings.SECRET_KEY
+    secret_key = getattr(settings, "MIRAGE_SECRET_KEY", None) or settings.SECRET_KEY
+    cipher_mode = getattr(settings, "MIRAGE_CIPHER_MODE", "ECB")
+    cipher_iv = getattr(settings, "MIRAGE_CIPHER_IV", "1234567890abcdef")
 
     for account in InstanceAccount.objects.using(schema_editor.connection.alias).all():
         if account.user in ("", None):
             continue
-        plaintext = _decrypt_legacy_value(account.user, secret_key)
+        plaintext = _decrypt_legacy_value(
+            account.user, secret_key, cipher_mode, cipher_iv
+        )
         InstanceAccount.objects.using(schema_editor.connection.alias).filter(
             pk=account.pk
         ).update(user=plaintext)

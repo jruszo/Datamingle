@@ -1,13 +1,20 @@
+import importlib
+
 from django.core.management import call_command
 from django.db import connection
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 
 from common.encryption import (
     ENCRYPTED_VALUE_PREFIX,
     generate_field_encryption_key,
     get_multi_fernet,
 )
-from common.test_fixtures import LEGACY_MIRAGE_CIPHERTEXTS, LEGACY_MIRAGE_SECRET_KEY
+from common.test_fixtures import (
+    LEGACY_MIRAGE_CBC_CIPHERTEXTS,
+    LEGACY_MIRAGE_CBC_IV,
+    LEGACY_MIRAGE_CIPHERTEXTS,
+    LEGACY_MIRAGE_SECRET_KEY,
+)
 from sql.models import CloudAccessKey, Instance
 
 
@@ -88,3 +95,22 @@ class ReencryptSensitiveFieldsCommandTest(TestCase):
         self.assertEqual(self.instance.password, "legacy-password")
         self.assertEqual(self.access_key.key_id, "legacy-ak")
         self.assertEqual(self.access_key.key_secret, "legacy-sk")
+
+
+MIGRATION_0003 = importlib.import_module(
+    "sql.migrations.0003_remove_resourcegroup_ding_webhook_and_more"
+)
+
+
+class Migration0003MirageDecryptTest(SimpleTestCase):
+    @override_settings(
+        MIRAGE_SECRET_KEY=LEGACY_MIRAGE_SECRET_KEY,
+        MIRAGE_CIPHER_MODE="CBC",
+        MIRAGE_CIPHER_IV=LEGACY_MIRAGE_CBC_IV,
+    )
+    def test_decrypt_mirage_supports_configured_cbc_mode(self):
+        plaintext = MIGRATION_0003._decrypt_mirage(
+            LEGACY_MIRAGE_CBC_CIPHERTEXTS["legacy-cbc-user"]
+        )
+
+        self.assertEqual(plaintext, "legacy-cbc-user")
