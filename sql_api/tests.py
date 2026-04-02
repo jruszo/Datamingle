@@ -2385,7 +2385,9 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response_data(response)
         self.assertEqual(len(data["resource_groups"]), 1)
-        self.assertEqual(data["resource_groups"][0]["group_id"], self.res_group.group_id)
+        self.assertEqual(
+            data["resource_groups"][0]["group_id"], self.res_group.group_id
+        )
         self.assertEqual(len(data["instances"]), 1)
         self.assertEqual(data["instances"][0]["id"], self.ins.id)
         self.assertEqual(data["instances"][0]["group_ids"], [self.res_group.group_id])
