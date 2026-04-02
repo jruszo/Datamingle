@@ -327,7 +327,7 @@ class CheckTest(TestCase):
             password=smtp_pass,
             ssl=False,
         )
-        send_email.called_once_with(
+        send_email.assert_called_once_with(
             "Archery email delivery test",
             "Archery email delivery test...",
             [self.superuser1.email],

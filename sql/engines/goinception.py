@@ -6,6 +6,7 @@ import traceback
 import MySQLdb
 import pymysql
 import simplejson as json
+from pymysql.converters import escape_string as pymysql_escape_string
 
 from common.config import SysConfig
 from sql.models import AliyunRdsConfig
@@ -91,7 +92,7 @@ class GoInceptionEngine(EngineBase):
 
     def escape_string(self, value: str) -> str:
         """Escape string parameters."""
-        return pymysql.escape_string(value)
+        return pymysql_escape_string(value)
 
     def execute_check(self, instance=None, db_name=None, sql=""):
         """inception check"""

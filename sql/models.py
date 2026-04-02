@@ -626,7 +626,12 @@ class QueryPrivileges(models.Model):
     class Meta:
         managed = True
         db_table = "query_privileges"
-        index_together = ["user_name", "instance", "db_name", "valid_date"]
+        indexes = [
+            models.Index(
+                fields=["user_name", "instance", "db_name", "valid_date"],
+                name="query_privilege_lookup_idx",
+            )
+        ]
         verbose_name = "Query Privilege Record"
         verbose_name_plural = "Query Privilege Record"
 
@@ -1451,7 +1456,12 @@ class SlowQueryHistory(models.Model):
         managed = False
         db_table = "mysql_slow_query_review_history"
         unique_together = ("checksum", "ts_min", "ts_max")
-        index_together = ("hostname_max", "ts_min")
+        indexes = [
+            models.Index(
+                fields=["hostname_max", "ts_min"],
+                name="slow_query_hostname_ts_idx",
+            )
+        ]
         verbose_name = "Slow Query Detail"
         verbose_name_plural = "Slow Query Detail"
 

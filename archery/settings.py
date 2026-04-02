@@ -187,7 +187,6 @@ USE_I18N = True
 USE_TZ = False
 
 # Time formatting
-USE_L10N = False
 DATETIME_FORMAT = "Y-m-d H:i:s"
 DATE_FORMAT = "Y-m-d"
 
@@ -197,7 +196,10 @@ STATIC_ROOT = os.path.join(BASE_DIR, "static")
 STATICFILES_DIRS = [
     os.path.join(BASE_DIR, "common/static"),
 ]
-STATICFILES_STORAGE = "common.storage.ForgivingManifestStaticFilesStorage"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "common.storage.ForgivingManifestStaticFilesStorage"},
+}
 
 # Used to extend users field in Django admin, pointing to sql/models.py Users class
 AUTH_USER_MODEL = "sql.Users"
