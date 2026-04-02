@@ -384,6 +384,63 @@ def _workflow_metadata_instance_groups(user):
     }
 
 
+def _workflow_submission_scope(user):
+    direct_groups = {
+        group.group_id: group for group in user_groups(user) if group.is_deleted == 0
+    }
+    temporary_instance_groups = _workflow_metadata_instance_groups(user)
+    instances = (
+        user_instances(user, tag_codes=["can_write"])
+        .prefetch_related("resource_group")
+        .order_by("instance_name", "id")
+    )
+
+    resource_groups = {}
+    instance_payload = []
+    for instance in instances:
+        groups_by_id = {
+            group.group_id: group
+            for group in instance.resource_group.filter(
+                is_deleted=0, group_id__in=direct_groups.keys()
+            )
+        }
+        for group in temporary_instance_groups.get(instance.id, []):
+            groups_by_id.setdefault(group.group_id, group)
+        if not groups_by_id:
+            continue
+
+        sorted_groups = sorted(
+            groups_by_id.values(), key=lambda group: (group.group_name, group.group_id)
+        )
+        for group in sorted_groups:
+            resource_groups[group.group_id] = group
+        instance_payload.append(
+            {
+                "id": instance.id,
+                "instance_name": instance.instance_name,
+                "db_type": instance.db_type,
+                "type": instance.type,
+                "group_ids": [group.group_id for group in sorted_groups],
+                "group_names": [group.group_name for group in sorted_groups],
+            }
+        )
+
+    return {
+        "resource_groups": [
+            {
+                "group_id": group.group_id,
+                "group_name": group.group_name,
+                "label": group.group_name,
+            }
+            for group in sorted(
+                resource_groups.values(),
+                key=lambda group: (group.group_name, group.group_id),
+            )
+        ],
+        "instances": instance_payload,
+    }
+
+
 class ExecuteCheck(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -566,6 +623,115 @@ class WorkflowMetadata(views.APIView):
             payload, context={"temporary_instance_groups": temporary_instance_groups}
         )
         return success_response(data=serializer.data)
+
+
+class WorkflowSubmissionMetadata(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary="Workflow Submission Metadata",
+        responses={200: OpenApiTypes.OBJECT},
+        description="Return submission-scope resource groups, instances, and config flags used by the workflow submission SPA.",
+    )
+    def get(self, request):
+        if not _can_access_workflow_module(request.user):
+            raise PermissionDenied(
+                "You do not have permission to submit SQL workflows."
+            )
+
+        submission_scope = _workflow_submission_scope(request.user)
+        return success_response(
+            data={
+                "resource_groups": submission_scope["resource_groups"],
+                "instances": submission_scope["instances"],
+                "enable_backup_switch": bool(SysConfig().get("enable_backup_switch")),
+                "manual_execution_enabled": bool(SysConfig().get("manual")),
+            }
+        )
+
+
+class WorkflowApprovalPreview(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary="Workflow Approval Preview",
+        parameters=[
+            OpenApiParameter(
+                name="group_id",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="Resource group ID.",
+            )
+        ],
+        responses={200: OpenApiTypes.OBJECT},
+        description="Resolve the approval chain for a SQL workflow before submission.",
+    )
+    def get(self, request):
+        if not _can_access_workflow_module(request.user):
+            raise PermissionDenied(
+                "You do not have permission to submit SQL workflows."
+            )
+
+        group_id = request.query_params.get("group_id")
+        if not group_id:
+            raise serializers.ValidationError({"errors": "group_id is required."})
+        try:
+            group_id = int(group_id)
+        except (TypeError, ValueError):
+            raise serializers.ValidationError(
+                {"errors": "group_id must be an integer."}
+            )
+
+        allowed_group_ids = {
+            group["group_id"]
+            for group in _workflow_submission_scope(request.user)["resource_groups"]
+        }
+        if not request.user.is_superuser and group_id not in allowed_group_ids:
+            raise PermissionDenied("You do not have access to this resource group.")
+
+        resource_group = get_object_or_404(ResourceGroup, pk=group_id, is_deleted=0)
+        audit_auth_groups = Audit.settings(group_id, WorkflowType.SQL_REVIEW)
+        if audit_auth_groups is None:
+            raise serializers.ValidationError(
+                {"errors": "Approval flow is not configured for this resource group."}
+            )
+
+        if audit_auth_groups == "":
+            readable = "No approval required"
+            review_info = [
+                {
+                    "group_name": "Auto",
+                    "is_auto_pass": True,
+                    "is_current_node": False,
+                    "is_passed_node": True,
+                }
+            ]
+        else:
+            readable_groups = []
+            review_info = []
+            for auth_group_id in audit_auth_groups.split(","):
+                group = Group.objects.get(id=int(auth_group_id))
+                readable_groups.append(group.name)
+                review_info.append(
+                    {
+                        "group_name": group.name,
+                        "is_auto_pass": False,
+                        "is_current_node": False,
+                        "is_passed_node": False,
+                    }
+                )
+            readable = " -> ".join(readable_groups)
+
+        return success_response(
+            data={
+                "group_id": resource_group.group_id,
+                "group_name": resource_group.group_name,
+                "audit_auth_groups": audit_auth_groups,
+                "display": readable,
+                "review_info": review_info,
+            }
+        )
 
 
 class WorkflowDetail(views.APIView):

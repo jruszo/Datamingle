@@ -9,6 +9,7 @@ import {
 } from '@/lib/auth'
 import type { CurrentUserContext } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth'
+import DmlWorkflowCreateView from '@/views/DmlWorkflowCreateView.vue'
 import HomeView from '@/views/HomeView.vue'
 import InventoryCreateView from '@/views/InventoryCreateView.vue'
 import InventoryView from '@/views/InventoryView.vue'
@@ -39,6 +40,8 @@ const router = createRouter({
     { path: '/inventory/:instanceId', name: 'inventory-detail', component: InventoryCreateView, meta: { title: 'Edit Instance' } },
     { path: '/workflows', name: 'workflows', component: WorkflowsView, meta: { title: 'Workflows' } },
     { path: '/workflows/new', name: 'workflows-new', component: WorkflowsCreateView, meta: { title: 'New Workflow' } },
+    { path: '/workflows/dml/new', name: 'workflow-dml-new', component: DmlWorkflowCreateView, meta: { title: 'New DML Request' } },
+    { path: '/workflows/:workflowId', name: 'workflow-detail', component: WorkflowsView, meta: { title: 'Workflows' } },
     { path: '/queries', name: 'queries', component: QueriesView, meta: { title: 'Queries' } },
     { path: '/permission-management', name: 'permission-management', component: PermissionManagementView, meta: { title: 'Permission Management' } },
     { path: '/reports', name: 'reports', component: ReportsView, meta: { title: 'Reports' } },

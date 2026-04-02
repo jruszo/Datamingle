@@ -2378,6 +2378,31 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(len(data["instances"]), 1)
         self.assertEqual(data["instances"][0]["id"], self.ins.id)
 
+    def test_get_workflow_submission_metadata(self):
+        response = self.client.get(
+            "/api/v1/workflow/submission-metadata/", format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response_data(response)
+        self.assertEqual(len(data["resource_groups"]), 1)
+        self.assertEqual(data["resource_groups"][0]["group_id"], self.res_group.group_id)
+        self.assertEqual(len(data["instances"]), 1)
+        self.assertEqual(data["instances"][0]["id"], self.ins.id)
+        self.assertEqual(data["instances"][0]["group_ids"], [self.res_group.group_id])
+
+    def test_get_workflow_approval_preview(self):
+        response = self.client.get(
+            "/api/v1/workflow/approval-preview/",
+            {"group_id": self.res_group.group_id},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response_data(response)
+        self.assertEqual(data["group_id"], self.res_group.group_id)
+        self.assertEqual(data["group_name"], self.res_group.group_name)
+        self.assertEqual(data["review_info"][0]["group_name"], self.group.name)
+        self.assertFalse(data["review_info"][0]["is_auto_pass"])
+
     def test_get_workflow_metadata_includes_temporary_instance_grant_group(self):
         temp_user = User.objects.create(
             username="workflow_temp_user",
@@ -2870,6 +2895,24 @@ class TestWorkflow(CacheIsolatedAPITestCase):
     def test_update_workflow_execution_window(self):
         response = self.client.patch(
             f"/api/v1/workflow/{self.wf1.id}/window/",
+            {
+                "run_date_start": "2030-01-02T03:04",
+                "run_date_end": "2030-01-02T05:04",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.wf1.refresh_from_db()
+        self.assertEqual(
+            self.wf1.run_date_start.strftime("%Y-%m-%d %H:%M"), "2030-01-02 03:04"
+        )
+        self.assertEqual(
+            self.wf1.run_date_end.strftime("%Y-%m-%d %H:%M"), "2030-01-02 05:04"
+        )
+
+    def test_update_workflow_execution_window_alias(self):
+        response = self.client.patch(
+            f"/api/v1/workflow/{self.wf1.id}/execution-window/",
             {
                 "run_date_start": "2030-01-02T03:04",
                 "run_date_end": "2030-01-02T05:04",

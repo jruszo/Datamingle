@@ -290,10 +290,11 @@ async function loadWorkflowDetail(workflowId: number) {
     selectedWorkflow.value = detail
     syncDetailForms(detail)
     await router.replace({
-      query: {
-        ...route.query,
-        workflowId: `${workflowId}`,
-      },
+      name: 'workflow-detail',
+      params: { workflowId: `${workflowId}` },
+      query: Object.fromEntries(
+        Object.entries(route.query).filter(([key]) => key !== 'workflowId'),
+      ),
     })
   } catch (errorValue) {
     detailError.value = toUserFacingMessage(errorValue, 'Failed to load workflow detail.')
@@ -444,11 +445,18 @@ async function clearFilters() {
 }
 
 async function openWorkflowFromQuery() {
-  const queryValue = route.query.workflowId
-  if (!queryValue) {
+  const routeValue = route.params.workflowId
+  const rawValue = (
+    typeof routeValue === 'string' && routeValue
+      ? routeValue
+      : typeof route.query.workflowId === 'string'
+        ? route.query.workflowId
+        : ''
+  )
+  if (!rawValue) {
     return
   }
-  const workflowId = Number(queryValue)
+  const workflowId = Number(rawValue)
   if (!workflowId) {
     return
   }

@@ -92,11 +92,23 @@ urlpatterns = [
     path("v1/instance/rds/", api_instance.AliyunRdsList.as_view()),
     path("v1/workflow/", api_workflow.WorkflowList.as_view()),
     path("v1/workflow/metadata/", api_workflow.WorkflowMetadata.as_view()),
+    path(
+        "v1/workflow/submission-metadata/",
+        api_workflow.WorkflowSubmissionMetadata.as_view(),
+    ),
+    path(
+        "v1/workflow/approval-preview/",
+        api_workflow.WorkflowApprovalPreview.as_view(),
+    ),
     path("v1/workflow/sqlcheck/", api_workflow.ExecuteCheck.as_view()),
     path("v1/workflow/auditlist/", api_workflow.WorkflowAuditList.as_view()),
     path("v1/workflow/<int:workflow_id>/", api_workflow.WorkflowDetail.as_view()),
     path(
         "v1/workflow/<int:workflow_id>/window/",
+        api_workflow.WorkflowExecutionWindowUpdate.as_view(),
+    ),
+    path(
+        "v1/workflow/<int:workflow_id>/execution-window/",
         api_workflow.WorkflowExecutionWindowUpdate.as_view(),
     ),
     path(

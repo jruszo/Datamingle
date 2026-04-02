@@ -1431,3 +1431,52 @@ export function revokePermissionGrant(
     extractDetail(payload, 'Grant revoked successfully.'),
   )
 }
+
+export type WorkflowScope = 'all' | 'mine' | 'pending_review'
+export type WorkflowExecutionMode = 'auto' | 'manual'
+
+export type WorkflowSubmitResourceGroupRecord = {
+  group_id: number
+  group_name: string
+  label: string
+}
+
+export type WorkflowSubmitInstanceRecord = {
+  id: number
+  instance_name: string
+  db_type: string
+  type: string
+  group_ids: number[]
+  group_names: string[]
+}
+
+export type WorkflowSubmissionMetadata = {
+  resource_groups: WorkflowSubmitResourceGroupRecord[]
+  instances: WorkflowSubmitInstanceRecord[]
+  enable_backup_switch: boolean
+  manual_execution_enabled: boolean
+}
+
+export type WorkflowApprovalPreview = {
+  group_id: number
+  group_name: string
+  audit_auth_groups: string
+  display: string
+  review_info: Array<{
+    group_name: string
+    is_auto_pass: boolean
+    is_current_node: boolean
+    is_passed_node: boolean
+  }>
+}
+export function fetchWorkflowSubmissionMetadata(token: string) {
+  return apiGet<unknown>('/v1/workflow/submission-metadata/', { token }).then((payload) =>
+    extractData<WorkflowSubmissionMetadata>(payload),
+  )
+}
+
+export function fetchWorkflowApprovalPreview(groupId: number, token: string) {
+  return apiGet<unknown>(`/v1/workflow/approval-preview/?group_id=${groupId}`, { token }).then(
+    (payload) => extractData<WorkflowApprovalPreview>(payload),
+  )
+}
