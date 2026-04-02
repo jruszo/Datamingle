@@ -24,15 +24,15 @@ jobs:
       mysql:
         image: mysql:8.0
         env:
-          MYSQL_ALLOW_EMPTY_PASSWORD: yes
+          MYSQL_ROOT_PASSWORD: root
         ports:
         - 3306:3306
         options: >-
           --name=mysql 
-          --health-cmd="mysqladmin ping" 
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot" 
           --health-interval=10s 
           --health-timeout=5s 
-          --health-retries=5
+          --health-retries=10
       redis:
         image: redis
         ports:
@@ -62,6 +62,9 @@ jobs:
         EOF
         docker cp my.cnf mysql:/etc/mysql/conf.d/
         docker restart mysql
+        until docker exec mysql mysqladmin ping -h127.0.0.1 -uroot -proot --silent; do
+          sleep 2
+        done
     
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
@@ -77,8 +80,8 @@ jobs:
         
     - name: Init Table
       run: |
-        mysql -h127.0.0.1 -uroot -e "CREATE DATABASE archery CHARSET UTF8MB4;"
-        mysql -h127.0.0.1 -uroot -e "DROP DATABASE IF EXISTS test_archery;CREATE DATABASE test_archery CHARSET UTF8MB4;"
+        mysql -h127.0.0.1 -uroot -proot -e "CREATE DATABASE archery CHARSET UTF8MB4;"
+        mysql -h127.0.0.1 -uroot -proot -e "DROP DATABASE IF EXISTS test_archery;CREATE DATABASE test_archery CHARSET UTF8MB4;"
 
     - name: Run Tests
       env:
