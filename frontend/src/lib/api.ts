@@ -1261,6 +1261,7 @@ export type WorkflowSubmitInstanceRecord = {
   type: string
   group_ids: number[]
   group_names: string[]
+  allowed_syntax_types: WorkflowSyntaxType[]
 }
 
 export type WorkflowSubmissionMetadata = {
@@ -1282,6 +1283,29 @@ export type WorkflowCheckRequest = {
   instance_id: number
   db_name: string
   full_sql: string
+}
+
+export type WorkflowParseRequest = {
+  text: string
+  db_type?: string
+}
+
+export type WorkflowParsedStatementRecord = {
+  sql_id: string | number
+  sql: string
+  syntax_type: WorkflowSyntaxType | null
+}
+
+export type WorkflowParseSummary = {
+  syntax_type: WorkflowSyntaxType | null
+  has_mixed_syntax: boolean
+  has_unknown_syntax: boolean
+}
+
+export type WorkflowParseResult = {
+  total: number
+  rows: WorkflowParsedStatementRecord[]
+  summary: WorkflowParseSummary
 }
 
 export type WorkflowCheckResult = {
@@ -1418,6 +1442,12 @@ export function fetchWorkflows(token: string, filters: WorkflowListFilters = {})
 export function checkWorkflowSql(payload: WorkflowCheckRequest, token: string) {
   return apiPost<unknown>('/v1/workflow/sqlcheck/', payload, { token }).then((responsePayload) =>
     extractData<WorkflowCheckResult>(responsePayload),
+  )
+}
+
+export function parseWorkflowSql(payload: WorkflowParseRequest, token: string) {
+  return apiPost<unknown>('/v1/workflow/parse/', payload, { token }).then((responsePayload) =>
+    extractData<WorkflowParseResult>(responsePayload),
   )
 }
 

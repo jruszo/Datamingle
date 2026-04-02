@@ -228,8 +228,16 @@ const canViewWorkflowList = computed(() => {
   return Boolean(authStore.currentUser)
 })
 
+const canCreateDdl = computed(() => {
+  return (metadata.value?.instances ?? []).some((instance) =>
+    instance.allowed_syntax_types.includes(1),
+  )
+})
+
 const canCreateDml = computed(() => {
-  return hasPermission('sql.sql_submit') || (metadata.value?.instances.length ?? 0) > 0
+  return (metadata.value?.instances ?? []).some((instance) =>
+    instance.allowed_syntax_types.includes(2),
+  )
 })
 
 const filteredInstanceOptions = computed(() => {
@@ -615,6 +623,16 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="flex flex-wrap items-center gap-2">
+        <Button
+          v-if="canCreateDdl"
+          variant="outline"
+          type="button"
+          class="gap-2"
+          @click="void router.push({ name: 'workflow-ddl-new' })"
+        >
+          <Send class="h-4 w-4" />
+          New DDL request
+        </Button>
         <Button
           v-if="canCreateDml"
           type="button"

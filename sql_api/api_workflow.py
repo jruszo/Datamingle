@@ -1,6 +1,7 @@
 import datetime
 import json
 import logging
+import re
 
 from django.contrib.auth.models import Group
 from django.db import transaction
@@ -27,6 +28,7 @@ from sql.models import (
 from sql.notify import notify_for_audit, notify_for_execute
 from sql.query_privileges import _query_apply_audit_call_back
 from sql.utils.resource_group import (
+    DDL_ACCESS_LEVELS,
     WRITE_ACCESS_LEVELS,
     active_instance_grants,
     user_groups,
@@ -35,6 +37,7 @@ from sql.utils.resource_group import (
     user_has_group_instance_access,
     user_has_instance_workflow_access,
 )
+from sql.utils.sql_utils import generate_sql, get_syntax_type
 from sql.utils.sql_review import (
     can_cancel,
     can_execute,
@@ -54,6 +57,8 @@ from .serializers import (
     ExecuteCheckResultSerializer,
     ExecuteCheckSerializer,
     ExecuteWorkflowSerializer,
+    WorkflowParseResultSerializer,
+    WorkflowParseSerializer,
     WorkflowAuditListSerializer,
     WorkflowContentSerializer,
     WorkflowLogListSerializer,
@@ -63,6 +68,38 @@ from .serializers import (
 )
 
 logger = logging.getLogger("default")
+LOAD_DATA_PATTERN = re.compile(r"^\s*load\s+data\b", re.IGNORECASE)
+
+
+def _syntax_types_for_access_level(access_level):
+    if access_level in DDL_ACCESS_LEVELS:
+        return {1, 2}
+    if access_level in WRITE_ACCESS_LEVELS:
+        return {2}
+    return set()
+
+
+def _classify_statement_syntax(statement, db_type="mysql"):
+    syntax_name = get_syntax_type(statement, parser=True, db_type=db_type)
+    if syntax_name not in {"DDL", "DML"}:
+        syntax_name = get_syntax_type(statement, parser=False, db_type=db_type)
+    if syntax_name == "DDL":
+        return 1
+    if syntax_name == "DML":
+        return 2
+    return None
+
+
+def _ensure_no_load_data_statements(text):
+    for row in generate_sql(text):
+        if LOAD_DATA_PATTERN.match(row["sql"]):
+            raise serializers.ValidationError(
+                {
+                    "errors": (
+                        "LOAD DATA statements are not supported for workflow submission."
+                    )
+                }
+            )
 
 
 def _can_view_workflow_module(user):
@@ -189,7 +226,7 @@ def _scheduled_run_date(workflow):
 def _submission_scope(user):
     can_submit_directly = user.is_superuser or user.has_perm("sql.sql_submit")
     instances = (
-        user_instances(user, tag_codes=["can_write"])
+        user_instances(user)
         .prefetch_related("resource_group")
         .order_by("instance_name", "id")
     )
@@ -202,30 +239,56 @@ def _submission_scope(user):
 
     for grant in (
         active_instance_grants(user)
-        .filter(access_level__in=WRITE_ACCESS_LEVELS, resource_group__is_deleted=0)
+        .filter(
+            access_level__in=(WRITE_ACCESS_LEVELS | DDL_ACCESS_LEVELS),
+            resource_group__is_deleted=0,
+        )
         .select_related("resource_group")
     ):
         groups = temporary_groups_by_instance.setdefault(grant.instance_id, {})
-        groups[grant.resource_group_id] = grant.resource_group.group_name
+        group_info = groups.setdefault(
+            grant.resource_group_id,
+            {"group_name": grant.resource_group.group_name, "syntax_types": set()},
+        )
+        group_info["syntax_types"].update(
+            _syntax_types_for_access_level(grant.access_level)
+        )
 
     resource_groups = {}
     instance_payload = []
     for instance in instances:
-        allowed_groups = {
-            group_id: group_name
-            for group_id, group_name in instance.resource_group.filter(
-                is_deleted=0, group_id__in=direct_group_ids
-            ).values_list("group_id", "group_name")
-        }
-        allowed_groups.update(temporary_groups_by_instance.get(instance.id, {}))
+        allowed_groups = {}
+        allowed_syntax_types = set()
+
+        if can_submit_directly and user_has_group_instance_access(
+            user, instance, tag_codes=["can_write"]
+        ):
+            direct_groups = {
+                group_id: {"group_name": group_name, "syntax_types": {1, 2}}
+                for group_id, group_name in instance.resource_group.filter(
+                    is_deleted=0, group_id__in=direct_group_ids
+                ).values_list("group_id", "group_name")
+            }
+            allowed_groups.update(direct_groups)
+            allowed_syntax_types.update({1, 2})
+
+        for group_id, group_info in temporary_groups_by_instance.get(
+            instance.id, {}
+        ).items():
+            allowed_groups[group_id] = {
+                "group_name": group_info["group_name"],
+                "syntax_types": set(group_info["syntax_types"]),
+            }
+            allowed_syntax_types.update(group_info["syntax_types"])
+
         if not allowed_groups:
             continue
 
         sorted_groups = sorted(
-            allowed_groups.items(), key=lambda item: (item[1], item[0])
+            allowed_groups.items(), key=lambda item: (item[1]["group_name"], item[0])
         )
         for group_id, group_name in sorted_groups:
-            resource_groups[group_id] = group_name
+            resource_groups[group_id] = group_name["group_name"]
         instance_payload.append(
             {
                 "id": instance.id,
@@ -233,7 +296,10 @@ def _submission_scope(user):
                 "db_type": instance.db_type,
                 "type": instance.type,
                 "group_ids": [group_id for group_id, _ in sorted_groups],
-                "group_names": [group_name for _, group_name in sorted_groups],
+                "group_names": [
+                    group_info["group_name"] for _, group_info in sorted_groups
+                ],
+                "allowed_syntax_types": sorted(allowed_syntax_types),
             }
         )
 
@@ -349,6 +415,7 @@ class ExecuteCheck(views.APIView):
         try:
             db_name = serializer.validated_data["db_name"]
             full_sql = serializer.validated_data["full_sql"].strip()
+            _ensure_no_load_data_statements(full_sql)
             check_engine = get_engine(instance=instance)
             db_name = check_engine.escape_string(db_name)
             check_result = check_engine.execute_check(db_name=db_name, sql=full_sql)
@@ -373,6 +440,61 @@ class ExecuteCheck(views.APIView):
         check_result.rows = check_result.to_dict()
         serializer_obj = ExecuteCheckResultSerializer(check_result)
         return success_response(data=serializer_obj.data)
+
+
+class WorkflowParse(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary="Parse Workflow SQL Text",
+        request=WorkflowParseSerializer,
+        responses={200: WorkflowParseResultSerializer},
+        description="Split SQL text into statements and classify each statement for SPA workflow uploads.",
+    )
+    def post(self, request):
+        serializer = WorkflowParseSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        text = serializer.validated_data["text"]
+        db_type = serializer.validated_data.get("db_type") or "mysql"
+        _ensure_no_load_data_statements(text)
+        rows = generate_sql(text)
+
+        detected_syntax_types = set()
+        has_unknown_syntax = False
+        parsed_rows = []
+        for row in rows:
+            syntax_type = _classify_statement_syntax(row["sql"], db_type=db_type)
+            if syntax_type is None:
+                has_unknown_syntax = True
+            else:
+                detected_syntax_types.add(syntax_type)
+            parsed_rows.append(
+                {
+                    "sql_id": row["sql_id"],
+                    "sql": row["sql"],
+                    "syntax_type": syntax_type,
+                }
+            )
+
+        has_mixed_syntax = len(detected_syntax_types) > 1
+        summary_syntax_type = (
+            next(iter(detected_syntax_types))
+            if len(detected_syntax_types) == 1 and not has_unknown_syntax
+            else None
+        )
+
+        return success_response(
+            data={
+                "total": len(parsed_rows),
+                "rows": parsed_rows,
+                "summary": {
+                    "syntax_type": summary_syntax_type,
+                    "has_mixed_syntax": has_mixed_syntax,
+                    "has_unknown_syntax": has_unknown_syntax,
+                },
+            }
+        )
 
 
 class WorkflowSubmissionMetadata(views.APIView):

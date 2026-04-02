@@ -2317,6 +2317,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         User.objects.filter(
             username__in=[
                 "temp_workflow_submitter",
+                "temp_workflow_submitter_ddl",
                 "temp_preview_submitter",
                 "self_service_submitter",
             ]
@@ -2390,6 +2391,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         )
         self.assertEqual(len(payload["instances"]), 1)
         self.assertEqual(payload["instances"][0]["id"], self.ins.id)
+        self.assertEqual(payload["instances"][0]["allowed_syntax_types"], [1, 2])
 
     def test_workflow_submission_metadata_excludes_direct_group_access_without_submit_permission(
         self,
@@ -2438,6 +2440,84 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         )
         self.assertEqual(
             payload["instances"][0]["group_names"], [self.res_group.group_name]
+        )
+        self.assertEqual(payload["instances"][0]["allowed_syntax_types"], [2])
+
+    def test_workflow_submission_metadata_includes_ddl_temporary_instance_grant(self):
+        temp_user = User.objects.create(
+            username="temp_workflow_submitter_ddl",
+            display="Temp Workflow Submitter DDL",
+            is_active=True,
+        )
+        temp_user.set_password("test_password")
+        temp_user.save()
+        TemporaryInstanceGrant.objects.create(
+            user=temp_user,
+            resource_group=self.res_group,
+            instance=self.ins,
+            access_level=InstanceAccessLevel.QUERY_DML_DDL,
+            valid_date=datetime.now().date() + timedelta(days=1),
+        )
+        login = self.client.post(
+            "/api/auth/token/",
+            {"username": temp_user.username, "password": "test_password"},
+            format="json",
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
+        )
+
+        r = self.client.get("/api/v1/workflow/submission-metadata/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(len(payload["instances"]), 1)
+        self.assertEqual(payload["instances"][0]["allowed_syntax_types"], [1, 2])
+
+    def test_workflow_parse_sql_returns_dml_summary(self):
+        r = self.client.post(
+            "/api/v1/workflow/parse/",
+            {
+                "text": "insert into demo values (1);\nupdate demo set id = 2 where id = 1;",
+                "db_type": "mysql",
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["total"], 2)
+        self.assertEqual(payload["summary"]["syntax_type"], 2)
+        self.assertFalse(payload["summary"]["has_mixed_syntax"])
+        self.assertFalse(payload["summary"]["has_unknown_syntax"])
+        self.assertEqual(payload["rows"][0]["syntax_type"], 2)
+
+    def test_workflow_parse_sql_reports_mixed_syntax(self):
+        r = self.client.post(
+            "/api/v1/workflow/parse/",
+            {
+                "text": "insert into demo values (1);\ncreate table demo_two(id int);",
+                "db_type": "mysql",
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertIsNone(payload["summary"]["syntax_type"])
+        self.assertTrue(payload["summary"]["has_mixed_syntax"])
+        self.assertFalse(payload["summary"]["has_unknown_syntax"])
+
+    def test_workflow_parse_sql_rejects_load_data(self):
+        r = self.client.post(
+            "/api/v1/workflow/parse/",
+            {
+                "text": "load data infile '/tmp/demo.csv' into table demo fields terminated by ',';",
+                "db_type": "mysql",
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            r.json()["errors"],
+            "LOAD DATA statements are not supported for workflow submission.",
         )
 
     def test_workflow_approval_preview(self):
@@ -2774,6 +2854,38 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         }
         r = self.client.post("/api/v1/workflow/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_sqlcheck_rejects_load_data(self):
+        json_data = {
+            "full_sql": "load data infile '/tmp/demo.csv' into table demo fields terminated by ',';",
+            "db_name": "test_db",
+            "instance_id": self.ins.id,
+        }
+        r = self.client.post("/api/v1/workflow/sqlcheck/", json_data, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            r.json()["errors"],
+            "LOAD DATA statements are not supported for workflow submission.",
+        )
+
+    def test_submit_workflow_rejects_load_data(self):
+        json_data = {
+            "workflow": {
+                "workflow_name": "Release Workflow 1",
+                "demand_url": "test",
+                "group_id": 1,
+                "db_name": "test_db",
+                "instance": self.ins.id,
+                "is_offline_export": 0,
+            },
+            "sql_content": "load data infile '/tmp/demo.csv' into table demo fields terminated by ',';",
+        }
+        r = self.client.post("/api/v1/workflow/", json_data, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            r.json()["errors"],
+            "LOAD DATA statements are not supported for workflow submission.",
+        )
 
     def test_audit_workflow(self):
         """Test auditing workflow."""

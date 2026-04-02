@@ -13,6 +13,7 @@ import HomeView from '@/views/HomeView.vue'
 import InventoryCreateView from '@/views/InventoryCreateView.vue'
 import InventoryView from '@/views/InventoryView.vue'
 import LoginView from '@/views/LoginView.vue'
+import DdlWorkflowCreateView from '@/views/DdlWorkflowCreateView.vue'
 import DmlWorkflowCreateView from '@/views/DmlWorkflowCreateView.vue'
 import PermissionManagementView from '@/views/PermissionManagementView.vue'
 import ProfileView from '@/views/ProfileView.vue'
@@ -38,6 +39,7 @@ const router = createRouter({
     { path: '/inventory/new', name: 'inventory-new', component: InventoryCreateView, meta: { title: 'Add Instance' } },
     { path: '/inventory/:instanceId', name: 'inventory-detail', component: InventoryCreateView, meta: { title: 'Edit Instance' } },
     { path: '/workflows', name: 'workflows', component: WorkflowsView, meta: { title: 'Workflows' } },
+    { path: '/workflows/ddl/new', name: 'workflow-ddl-new', component: DdlWorkflowCreateView, meta: { title: 'New DDL Request' } },
     { path: '/workflows/dml/new', name: 'workflow-dml-new', component: DmlWorkflowCreateView, meta: { title: 'New DML Request' } },
     { path: '/workflows/:workflowId', name: 'workflow-detail', component: WorkflowsView, meta: { title: 'Workflows' } },
     { path: '/queries', name: 'queries', component: QueriesView, meta: { title: 'Queries' } },
