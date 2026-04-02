@@ -897,172 +897,9 @@ export type WorkflowDetailRecord = WorkflowSummaryRecord & {
   manual_execution_enabled: boolean
 }
 
-export type WorkflowListFilters = {
-  page?: number
-  size?: number
-  search?: string
-  status?: string
-  syntax_type?: string
-  group_id?: number
-  instance_id?: number
-  engineer?: string
-  start_date?: string
-  end_date?: string
-}
-
-export type WorkflowCheckPayload = {
-  instance_id: number
-  db_name: string
-  full_sql: string
-}
-
-export type WorkflowCheckResult = {
-  is_execute: boolean
-  checked: string | null
-  warning: string | null
-  error: string | null
-  warning_count: number
-  error_count: number
-  is_critical: boolean
-  syntax_type: WorkflowSyntaxType
-  rows: WorkflowResultRow[]
-  column_list: string[]
-  status: string | null
-  affected_rows: number
-}
-
-export type WorkflowCreatePayload = {
-  workflow: {
-    workflow_name: string
-    demand_url?: string
-    group_id: number
-    db_name: string
-    instance: number
-    is_offline_export: 0
-    is_backup?: boolean
-    run_date_start?: string | null
-    run_date_end?: string | null
-  }
-  sql_content: string
-}
-
-export type WorkflowCreateResult = {
-  id: number
-  workflow_id: number
-  workflow: WorkflowSummaryRecord
-  sql_content: string
-}
-
-export type WorkflowReviewPayload = {
-  workflow_type: 2
-  audit_type: 'pass' | 'reject' | 'cancel'
-  audit_remark?: string
-}
-
-export type WorkflowExecutePayload = {
-  workflow_type: 2
-  mode: 'auto' | 'manual'
-}
-
-export type WorkflowSchedulePayload = {
-  run_date: string
-}
-
-export type WorkflowExecutionWindowPayload = {
-  run_date_start?: string | null
-  run_date_end?: string | null
-}
-
 export function fetchWorkflowMetadata(token: string) {
   return apiGet<unknown>('/v1/workflow/metadata/', { token }).then((payload) =>
     extractData<WorkflowMetadataRecord>(payload),
-  )
-}
-
-export function fetchWorkflows(token: string, filters: WorkflowListFilters = {}) {
-  const params = new URLSearchParams()
-
-  if (filters.page) {
-    params.set('page', `${filters.page}`)
-  }
-  if (filters.size) {
-    params.set('size', `${filters.size}`)
-  }
-  if (filters.search?.trim()) {
-    params.set('search', filters.search.trim())
-  }
-  if (filters.status) {
-    params.set('status', filters.status)
-  }
-  if (filters.syntax_type) {
-    params.set('syntax_type', filters.syntax_type)
-  }
-  if (filters.group_id) {
-    params.set('group_id', `${filters.group_id}`)
-  }
-  if (filters.instance_id) {
-    params.set('instance_id', `${filters.instance_id}`)
-  }
-  if (filters.engineer?.trim()) {
-    params.set('engineer', filters.engineer.trim())
-  }
-  if (filters.start_date) {
-    params.set('start_date', filters.start_date)
-  }
-  if (filters.end_date) {
-    params.set('end_date', filters.end_date)
-  }
-
-  const queryString = params.toString()
-  const path = queryString ? `/v1/workflow/?${queryString}` : '/v1/workflow/'
-  return apiGet<unknown>(path, { token }).then((payload) =>
-    extractData<PaginatedResponse<WorkflowSummaryRecord>>(payload),
-  )
-}
-
-export function fetchWorkflowDetail(workflowId: number, token: string) {
-  return apiGet<unknown>(`/v1/workflow/${workflowId}/`, { token }).then((payload) =>
-    extractData<WorkflowDetailRecord>(payload),
-  )
-}
-
-export function checkWorkflowSql(payload: WorkflowCheckPayload, token: string) {
-  return apiPost<unknown>('/v1/workflow/sqlcheck/', payload, { token }).then((responsePayload) =>
-    extractData<WorkflowCheckResult>(responsePayload),
-  )
-}
-
-export function createWorkflow(payload: WorkflowCreatePayload, token: string) {
-  return apiPost<unknown>('/v1/workflow/', payload, { token }).then((responsePayload) =>
-    extractData<WorkflowCreateResult>(responsePayload),
-  )
-}
-
-export function reviewWorkflow(workflowId: number, payload: WorkflowReviewPayload, token: string) {
-  return apiPost<unknown>(`/v1/workflow/${workflowId}/reviews/`, payload, { token }).then(
-    (responsePayload) => extractDetail(responsePayload, 'Workflow reviewed successfully.'),
-  )
-}
-
-export function executeWorkflow(workflowId: number, payload: WorkflowExecutePayload, token: string) {
-  return apiPost<unknown>(`/v1/workflow/${workflowId}/executions/`, payload, { token }).then(
-    (responsePayload) => extractDetail(responsePayload, 'Execution started.'),
-  )
-}
-
-export function scheduleWorkflow(workflowId: number, payload: WorkflowSchedulePayload, token: string) {
-  return apiPost<unknown>(`/v1/workflow/${workflowId}/schedule/`, payload, { token }).then(
-    (responsePayload) => extractDetail(responsePayload, 'Execution scheduled.'),
-  )
-}
-
-export function updateWorkflowExecutionWindow(
-  workflowId: number,
-  payload: WorkflowExecutionWindowPayload,
-  token: string,
-) {
-  return apiPatch<unknown>(`/v1/workflow/${workflowId}/window/`, payload, { token }).then(
-    (responsePayload) => extractDetail(responsePayload, 'Execution window updated.'),
   )
 }
 
@@ -1414,6 +1251,17 @@ export function reviewPermissionRequest(
   )
 }
 
+export type WorkflowContentRecord = {
+  source: 'review' | 'execution'
+  rows: Array<Record<string, unknown>>
+  column_list: string[]
+}
+
+export type WorkflowRollbackRecord = {
+  rows: Array<[string, string]>
+  download_content: string
+}
+
 export function fetchPermissionGrants(token: string, filters: PermissionGrantListFilters = {}) {
   const queryString = buildListQueryString(filters)
   const path = queryString ? `/v1/access/grant/?${queryString}` : '/v1/access/grant/'
@@ -1448,6 +1296,7 @@ export type WorkflowSubmitInstanceRecord = {
   type: string
   group_ids: number[]
   group_names: string[]
+  allowed_syntax_types: WorkflowSyntaxType[]
 }
 
 export type WorkflowSubmissionMetadata = {
@@ -1469,6 +1318,146 @@ export type WorkflowApprovalPreview = {
     is_passed_node: boolean
   }>
 }
+
+export type WorkflowCheckRequest = {
+  instance_id: number
+  db_name: string
+  full_sql: string
+}
+
+export type WorkflowParseRequest = {
+  text: string
+  db_type?: string
+}
+
+export type WorkflowParsedStatementRecord = {
+  sql_id: string | number
+  sql: string
+  syntax_type: WorkflowSyntaxType | null
+}
+
+export type WorkflowParseSummary = {
+  syntax_type: WorkflowSyntaxType | null
+  has_mixed_syntax: boolean
+  has_unknown_syntax: boolean
+}
+
+export type WorkflowParseResult = {
+  total: number
+  rows: WorkflowParsedStatementRecord[]
+  summary: WorkflowParseSummary
+}
+
+export type WorkflowCheckResult = {
+  is_execute: boolean
+  checked: string | null
+  warning: string | null
+  error: string | null
+  warning_count: number
+  error_count: number
+  is_critical: boolean
+  syntax_type: number
+  rows: Array<Record<string, unknown>>
+  column_list: string[]
+  status: string
+  affected_rows: number
+}
+
+export type WorkflowCreatePayload = {
+  workflow: {
+    workflow_name: string
+    demand_url?: string
+    group_id: number
+    db_name: string
+    instance: number
+    is_backup?: boolean
+    is_offline_export: 0
+    run_date_start?: string | null
+    run_date_end?: string | null
+  }
+  sql_content: string
+}
+
+export type WorkflowCreateResult = {
+  id: number
+  workflow_id: number
+  workflow: WorkflowSummaryRecord & {
+    instance: number
+  }
+  sql_content: string
+  review_content: string
+  execute_result: string
+}
+
+export type WorkflowListFilters = {
+  page?: number
+  size?: number
+  search?: string
+  scope?: WorkflowScope
+  status?: string
+  syntax_type?: WorkflowSyntaxType | ''
+  instance_id?: number | ''
+  group_id?: number | ''
+  start_date?: string
+  end_date?: string
+}
+
+export type WorkflowReviewPayload = {
+  workflow_type: 2
+  audit_type: 'pass' | 'reject' | 'cancel'
+  audit_remark: string
+}
+
+export type WorkflowExecutionPayload = {
+  workflow_type: 2
+  mode: WorkflowExecutionMode
+}
+
+export type WorkflowSchedulePayload = {
+  run_date: string
+}
+
+export type WorkflowWindowPayload = {
+  run_date_start?: string | null
+  run_date_end?: string | null
+}
+
+function buildWorkflowListQueryString(filters: WorkflowListFilters) {
+  const params = new URLSearchParams()
+
+  if (filters.page) {
+    params.set('page', `${filters.page}`)
+  }
+  if (filters.size) {
+    params.set('size', `${filters.size}`)
+  }
+  if (filters.search?.trim()) {
+    params.set('search', filters.search.trim())
+  }
+  if (filters.scope && filters.scope !== 'all') {
+    params.set('scope', filters.scope)
+  }
+  if (filters.status?.trim()) {
+    params.set('status', filters.status.trim())
+  }
+  if (filters.syntax_type) {
+    params.set('syntax_type', `${filters.syntax_type}`)
+  }
+  if (filters.instance_id) {
+    params.set('instance_id', `${filters.instance_id}`)
+  }
+  if (filters.group_id) {
+    params.set('group_id', `${filters.group_id}`)
+  }
+  if (filters.start_date?.trim()) {
+    params.set('start_date', filters.start_date.trim())
+  }
+  if (filters.end_date?.trim()) {
+    params.set('end_date', filters.end_date.trim())
+  }
+
+  return params.toString()
+}
 export function fetchWorkflowSubmissionMetadata(token: string) {
   return apiGet<unknown>('/v1/workflow/submission-metadata/', { token }).then((payload) =>
     extractData<WorkflowSubmissionMetadata>(payload),
@@ -1478,5 +1467,91 @@ export function fetchWorkflowSubmissionMetadata(token: string) {
 export function fetchWorkflowApprovalPreview(groupId: number, token: string) {
   return apiGet<unknown>(`/v1/workflow/approval-preview/?group_id=${groupId}`, { token }).then(
     (payload) => extractData<WorkflowApprovalPreview>(payload),
+  )
+}
+
+export function fetchWorkflows(token: string, filters: WorkflowListFilters = {}) {
+  const queryString = buildWorkflowListQueryString(filters)
+  const path = queryString ? `/v1/workflow/?${queryString}` : '/v1/workflow/'
+  return apiGet<unknown>(path, { token }).then((payload) =>
+    extractData<PaginatedResponse<WorkflowSummaryRecord>>(payload),
+  )
+}
+
+export function checkWorkflowSql(payload: WorkflowCheckRequest, token: string) {
+  return apiPost<unknown>('/v1/workflow/sqlcheck/', payload, { token }).then((responsePayload) =>
+    extractData<WorkflowCheckResult>(responsePayload),
+  )
+}
+
+export function parseWorkflowSql(payload: WorkflowParseRequest, token: string) {
+  return apiPost<unknown>('/v1/workflow/parse/', payload, { token }).then((responsePayload) =>
+    extractData<WorkflowParseResult>(responsePayload),
+  )
+}
+
+export function createWorkflow(payload: WorkflowCreatePayload, token: string) {
+  return apiPost<unknown>('/v1/workflow/', payload, { token }).then((responsePayload) =>
+    extractData<WorkflowCreateResult>(responsePayload),
+  )
+}
+
+export function fetchWorkflowDetail(workflowId: number, token: string) {
+  return apiGet<unknown>(`/v1/workflow/${workflowId}/`, { token }).then((payload) =>
+    extractData<WorkflowDetailRecord>(payload),
+  )
+}
+
+export function fetchWorkflowContent(workflowId: number, token: string) {
+  return apiGet<unknown>(`/v1/workflow/${workflowId}/content/`, { token }).then((payload) =>
+    extractData<WorkflowContentRecord>(payload),
+  )
+}
+
+export function fetchWorkflowRollback(workflowId: number, token: string) {
+  return apiGet<unknown>(`/v1/workflow/${workflowId}/rollback/`, { token }).then((payload) =>
+    extractData<WorkflowRollbackRecord>(payload),
+  )
+}
+
+export function reviewWorkflow(
+  workflowId: number,
+  payload: WorkflowReviewPayload,
+  token: string,
+) {
+  return apiPost<unknown>(`/v1/workflow/${workflowId}/reviews/`, payload, { token }).then(
+    (responsePayload) => extractDetail(responsePayload, 'Workflow reviewed successfully.'),
+  )
+}
+
+export function executeWorkflow(
+  workflowId: number,
+  payload: WorkflowExecutionPayload,
+  token: string,
+) {
+  return apiPost<unknown>(`/v1/workflow/${workflowId}/executions/`, payload, { token }).then(
+    (responsePayload) => extractDetail(responsePayload, 'Workflow execution started.'),
+  )
+}
+
+export function scheduleWorkflow(
+  workflowId: number,
+  payload: WorkflowSchedulePayload,
+  token: string,
+) {
+  return apiPost<unknown>(`/v1/workflow/${workflowId}/schedule/`, payload, { token }).then(
+    (responsePayload) => extractDetail(responsePayload, 'Workflow scheduled for execution.'),
+  )
+}
+
+export function updateWorkflowExecutionWindow(
+  workflowId: number,
+  payload: WorkflowWindowPayload,
+  token: string,
+) {
+  return apiPatch<unknown>(`/v1/workflow/${workflowId}/execution-window/`, payload, {
+    token,
+  }).then((responsePayload) =>
+    extractDetail(responsePayload, 'Execution window updated successfully.'),
   )
 }

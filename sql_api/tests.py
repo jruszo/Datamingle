@@ -14,6 +14,7 @@ from sql.engines.models import ReviewResult, ResultSet
 from sql.models import (
     ResourceGroup,
     Instance,
+    InstanceAccessLevel,
     AliyunRdsConfig,
     CloudAccessKey,
     Tunnel,
@@ -2335,6 +2336,14 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         SqlWorkflow.objects.all().delete()
         WorkflowAudit.objects.all().delete()
         WorkflowLog.objects.all().delete()
+        User.objects.filter(
+            username__in=[
+                "temp_workflow_submitter",
+                "temp_workflow_submitter_ddl",
+                "temp_preview_submitter",
+                "self_service_submitter",
+            ]
+        ).delete()
         self.notify_patcher.stop()
 
     def test_get_sql_workflow_list(self):
@@ -2350,6 +2359,296 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(
             set(list_data.keys()), {"count", "next", "previous", "results"}
         )
+
+    def test_workflow_list_supports_pending_review_scope(self):
+        r = self.client.get("/api/v1/workflow/?scope=pending_review", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["id"], self.wf1.id)
+
+    def test_workflow_list_allows_self_service_scope_without_menu_permission(self):
+        submitter = User.objects.create(
+            username="self_service_submitter",
+            display="Self Service Submitter",
+            is_active=True,
+        )
+        submitter.set_password("test_password")
+        submitter.save()
+        own_workflow = SqlWorkflow.objects.create(
+            workflow_name="own_workflow",
+            group_id=self.res_group.group_id,
+            group_name=self.res_group.group_name,
+            engineer=submitter.username,
+            engineer_display=submitter.display,
+            audit_auth_groups="1",
+            status="workflow_review_pass",
+            is_backup=False,
+            instance=self.ins,
+            db_name="some_db",
+            syntax_type=2,
+        )
+        login = self.client.post(
+            "/api/auth/token/",
+            {"username": submitter.username, "password": "test_password"},
+            format="json",
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
+        )
+
+        r = self.client.get("/api/v1/workflow/?scope=mine", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["id"], own_workflow.id)
+
+    def test_workflow_submission_metadata(self):
+        r = self.client.get("/api/v1/workflow/submission-metadata/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(len(payload["resource_groups"]), 1)
+        self.assertEqual(
+            payload["resource_groups"][0]["group_id"], self.res_group.group_id
+        )
+        self.assertEqual(len(payload["instances"]), 1)
+        self.assertEqual(payload["instances"][0]["id"], self.ins.id)
+        self.assertEqual(payload["instances"][0]["allowed_syntax_types"], [1, 2])
+
+    def test_workflow_submission_metadata_excludes_direct_group_access_without_submit_permission(
+        self,
+    ):
+        self.user.user_permissions.remove(Permission.objects.get(codename="sql_submit"))
+
+        r = self.client.get("/api/v1/workflow/submission-metadata/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["resource_groups"], [])
+        self.assertEqual(payload["instances"], [])
+
+    def test_workflow_submission_metadata_includes_temporary_instance_grant_group(self):
+        temp_user = User.objects.create(
+            username="temp_workflow_submitter",
+            display="Temp Workflow Submitter",
+            is_active=True,
+        )
+        temp_user.set_password("test_password")
+        temp_user.save()
+        TemporaryInstanceGrant.objects.create(
+            user=temp_user,
+            resource_group=self.res_group,
+            instance=self.ins,
+            access_level=InstanceAccessLevel.QUERY_DML,
+            valid_date=datetime.now().date() + timedelta(days=1),
+        )
+        login = self.client.post(
+            "/api/auth/token/",
+            {"username": temp_user.username, "password": "test_password"},
+            format="json",
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
+        )
+
+        r = self.client.get("/api/v1/workflow/submission-metadata/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(len(payload["resource_groups"]), 1)
+        self.assertEqual(
+            payload["resource_groups"][0]["group_id"], self.res_group.group_id
+        )
+        self.assertEqual(
+            payload["instances"][0]["group_ids"], [self.res_group.group_id]
+        )
+        self.assertEqual(
+            payload["instances"][0]["group_names"], [self.res_group.group_name]
+        )
+        self.assertEqual(payload["instances"][0]["allowed_syntax_types"], [2])
+
+    def test_workflow_submission_metadata_includes_ddl_temporary_instance_grant(self):
+        temp_user = User.objects.create(
+            username="temp_workflow_submitter_ddl",
+            display="Temp Workflow Submitter DDL",
+            is_active=True,
+        )
+        temp_user.set_password("test_password")
+        temp_user.save()
+        TemporaryInstanceGrant.objects.create(
+            user=temp_user,
+            resource_group=self.res_group,
+            instance=self.ins,
+            access_level=InstanceAccessLevel.QUERY_DML_DDL,
+            valid_date=datetime.now().date() + timedelta(days=1),
+        )
+        login = self.client.post(
+            "/api/auth/token/",
+            {"username": temp_user.username, "password": "test_password"},
+            format="json",
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
+        )
+
+        r = self.client.get("/api/v1/workflow/submission-metadata/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(len(payload["instances"]), 1)
+        self.assertEqual(payload["instances"][0]["allowed_syntax_types"], [1, 2])
+
+    def test_workflow_parse_sql_returns_dml_summary(self):
+        r = self.client.post(
+            "/api/v1/workflow/parse/",
+            {
+                "text": "insert into demo values (1);\nupdate demo set id = 2 where id = 1;",
+                "db_type": "mysql",
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["total"], 2)
+        self.assertEqual(payload["summary"]["syntax_type"], 2)
+        self.assertFalse(payload["summary"]["has_mixed_syntax"])
+        self.assertFalse(payload["summary"]["has_unknown_syntax"])
+        self.assertEqual(payload["rows"][0]["syntax_type"], 2)
+
+    def test_workflow_parse_sql_reports_mixed_syntax(self):
+        r = self.client.post(
+            "/api/v1/workflow/parse/",
+            {
+                "text": "insert into demo values (1);\ncreate table demo_two(id int);",
+                "db_type": "mysql",
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertIsNone(payload["summary"]["syntax_type"])
+        self.assertTrue(payload["summary"]["has_mixed_syntax"])
+        self.assertFalse(payload["summary"]["has_unknown_syntax"])
+
+    def test_workflow_parse_sql_rejects_load_data(self):
+        r = self.client.post(
+            "/api/v1/workflow/parse/",
+            {
+                "text": "load data infile '/tmp/demo.csv' into table demo fields terminated by ',';",
+                "db_type": "mysql",
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            r.json()["errors"],
+            "LOAD DATA statements are not supported for workflow submission.",
+        )
+
+    def test_workflow_approval_preview(self):
+        r = self.client.get(
+            f"/api/v1/workflow/approval-preview/?group_id={self.res_group.group_id}",
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["group_id"], self.res_group.group_id)
+        self.assertEqual(payload["display"], self.group.name)
+        self.assertEqual(payload["review_info"][0]["group_name"], self.group.name)
+
+    def test_workflow_approval_preview_allows_temporary_instance_grant_submitter(self):
+        temp_user = User.objects.create(
+            username="temp_preview_submitter",
+            display="Temp Preview Submitter",
+            is_active=True,
+        )
+        temp_user.set_password("test_password")
+        temp_user.save()
+        TemporaryInstanceGrant.objects.create(
+            user=temp_user,
+            resource_group=self.res_group,
+            instance=self.ins,
+            access_level=InstanceAccessLevel.QUERY_DML,
+            valid_date=datetime.now().date() + timedelta(days=1),
+        )
+        login = self.client.post(
+            "/api/auth/token/",
+            {"username": temp_user.username, "password": "test_password"},
+            format="json",
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
+        )
+
+        r = self.client.get(
+            f"/api/v1/workflow/approval-preview/?group_id={self.res_group.group_id}",
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["display"], self.group.name)
+
+    def test_workflow_approval_preview_reports_missing_configuration(self):
+        WorkflowAuditSetting.objects.filter(
+            group_id=self.res_group.group_id, workflow_type=WorkflowType.SQL_REVIEW
+        ).delete()
+
+        r = self.client.get(
+            f"/api/v1/workflow/approval-preview/?group_id={self.res_group.group_id}",
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            r.json()["errors"],
+            "Approval flow is not configured for this resource group.",
+        )
+
+    def test_workflow_approval_preview_supports_explicit_auto_pass(self):
+        WorkflowAuditSetting.objects.filter(
+            group_id=self.res_group.group_id, workflow_type=WorkflowType.SQL_REVIEW
+        ).update(audit_auth_groups="")
+
+        r = self.client.get(
+            f"/api/v1/workflow/approval-preview/?group_id={self.res_group.group_id}",
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["audit_auth_groups"], "")
+        self.assertEqual(payload["display"], "No approval required")
+        self.assertEqual(payload["review_info"][0]["group_name"], "Auto")
+        self.assertTrue(payload["review_info"][0]["is_auto_pass"])
+
+    def test_workflow_detail(self):
+        self.wfc1.review_content = json.dumps([{"id": 1, "sql": "select 1"}])
+        self.wfc1.save(update_fields=["review_content"])
+        r = self.client.get(f"/api/v1/workflow/{self.wf1.id}/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["id"], self.wf1.id)
+        self.assertEqual(payload["sql_content"], self.wfc1.sql_content)
+        self.assertTrue(payload["is_can_review"])
+        self.assertEqual(payload["review_info"][0]["group_name"], self.group.name)
+
+    def test_workflow_content_detail(self):
+        self.wfc1.review_content = json.dumps([{"id": 1, "sql": "select 1"}])
+        self.wfc1.save(update_fields=["review_content"])
+        r = self.client.get(f"/api/v1/workflow/{self.wf1.id}/content/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["source"], "review")
+        self.assertEqual(payload["rows"][0]["sql"], "select 1")
+
+    @patch("sql_api.api_workflow.get_engine")
+    def test_workflow_rollback_detail(self, mock_get_engine):
+        self.wf1.status = "workflow_finish"
+        self.wf1.is_backup = True
+        self.wf1.save(update_fields=["status", "is_backup"])
+        mock_get_engine.return_value.get_rollback.return_value = [
+            ["delete from t", "insert into t values (1);"]
+        ]
+        r = self.client.get(f"/api/v1/workflow/{self.wf1.id}/rollback/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["rows"][0][0], "delete from t")
+        self.assertIn("insert into t values", payload["download_content"])
 
     def test_get_audit_list(self):
         """Test getting pending audit workflow list."""
@@ -2716,6 +3015,38 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         }
         r = self.client.post("/api/v1/workflow/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_sqlcheck_rejects_load_data(self):
+        json_data = {
+            "full_sql": "load data infile '/tmp/demo.csv' into table demo fields terminated by ',';",
+            "db_name": "test_db",
+            "instance_id": self.ins.id,
+        }
+        r = self.client.post("/api/v1/workflow/sqlcheck/", json_data, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            r.json()["errors"],
+            "LOAD DATA statements are not supported for workflow submission.",
+        )
+
+    def test_submit_workflow_rejects_load_data(self):
+        json_data = {
+            "workflow": {
+                "workflow_name": "Release Workflow 1",
+                "demand_url": "test",
+                "group_id": 1,
+                "db_name": "test_db",
+                "instance": self.ins.id,
+                "is_offline_export": 0,
+            },
+            "sql_content": "load data infile '/tmp/demo.csv' into table demo fields terminated by ',';",
+        }
+        r = self.client.post("/api/v1/workflow/", json_data, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            r.json()["errors"],
+            "LOAD DATA statements are not supported for workflow submission.",
+        )
 
     def test_audit_workflow(self):
         """Test auditing workflow."""

@@ -3,5 +3,5 @@ import WorkflowCreateView from '@/views/WorkflowCreateView.vue'
 </script>
 
 <template>
-  <WorkflowCreateView :expected-syntax-type="2" :enable-file-parse="true" />
+  <WorkflowCreateView :expected-syntax-type="1" />
 </template>

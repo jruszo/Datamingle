@@ -1,10 +1,12 @@
 import datetime
 import json
 import logging
+import re
 
 from django.contrib.auth.models import Group
 from django.db import transaction
 from django.db.models import Q
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django_q.tasks import async_task
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
@@ -13,7 +15,7 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from common.config import SysConfig
-from common.utils.const import WorkflowStatus, WorkflowType, WorkflowAction
+from common.utils.const import Const, WorkflowStatus, WorkflowType, WorkflowAction
 from sql.engines import get_engine
 from sql.engines.models import ReviewResult, ReviewSet
 from sql.models import (
@@ -27,6 +29,7 @@ from sql.models import (
 from sql.notify import notify_for_audit, notify_for_execute
 from sql.query_privileges import _query_apply_audit_call_back
 from sql.utils.resource_group import (
+    DDL_ACCESS_LEVELS,
     WRITE_ACCESS_LEVELS,
     active_instance_grants,
     user_groups,
@@ -35,6 +38,7 @@ from sql.utils.resource_group import (
     user_has_group_instance_access,
     user_has_instance_workflow_access,
 )
+from sql.utils.sql_utils import generate_sql, get_syntax_type
 from sql.utils.sql_review import (
     can_cancel,
     can_execute,
@@ -51,6 +55,8 @@ from .response import success_response
 from .serializers import (
     ExecuteCheckResultSerializer,
     ExecuteCheckSerializer,
+    WorkflowParseResultSerializer,
+    WorkflowParseSerializer,
     WorkflowAuditListSerializer,
     AuditWorkflowSerializer,
     ExecuteWorkflowSerializer,
@@ -59,6 +65,39 @@ from .serializers import (
 )
 
 logger = logging.getLogger("default")
+LOAD_DATA_PATTERN = re.compile(r"^\s*load\s+data\b", re.IGNORECASE)
+
+
+def _syntax_types_for_access_level(access_level):
+    if access_level in DDL_ACCESS_LEVELS:
+        return {1, 2}
+    if access_level in WRITE_ACCESS_LEVELS:
+        return {2}
+    return set()
+
+
+def _classify_statement_syntax(statement, db_type="mysql"):
+    syntax_name = get_syntax_type(statement, parser=True, db_type=db_type)
+    if syntax_name not in {"DDL", "DML"}:
+        syntax_name = get_syntax_type(statement, parser=False, db_type=db_type)
+    if syntax_name == "DDL":
+        return 1
+    if syntax_name == "DML":
+        return 2
+    return None
+
+
+def _ensure_no_load_data_statements(text):
+    for row in generate_sql(text):
+        if LOAD_DATA_PATTERN.match(row["sql"]):
+            raise serializers.ValidationError(
+                {
+                    "errors": (
+                        "LOAD DATA statements are not supported for workflow submission."
+                    )
+                }
+            )
+
 
 JSON_PARSE_ERROR_MESSAGE = (
     "Json decode failed. Execution result JSON parsing failed. Please contact admin."
@@ -353,11 +392,30 @@ def _can_access_workflow_module(user):
     )
 
 
+def _pending_review_workflow_ids(user):
+    group_ids = [group.group_id for group in user_member_groups(user)]
+    if user.is_superuser:
+        auth_group_ids = [group.id for group in Group.objects.all()]
+    else:
+        auth_group_ids = [group.id for group in Group.objects.filter(user=user)]
+    return list(
+        WorkflowAudit.objects.filter(
+            current_status=WorkflowStatus.WAITING,
+            workflow_type=WorkflowType.SQL_REVIEW,
+            group_id__in=group_ids,
+            current_audit__in=auth_group_ids,
+        ).values_list("workflow_id", flat=True)
+    )
+
+
 def _workflow_metadata_resource_groups(user):
     groups_by_id = {group.group_id: group for group in user_groups(user)}
     for grant in (
         active_instance_grants(user)
-        .filter(access_level__in=WRITE_ACCESS_LEVELS, resource_group__is_deleted=0)
+        .filter(
+            access_level__in=(WRITE_ACCESS_LEVELS | DDL_ACCESS_LEVELS),
+            resource_group__is_deleted=0,
+        )
         .select_related("resource_group")
     ):
         groups_by_id.setdefault(grant.resource_group_id, grant.resource_group)
@@ -370,7 +428,10 @@ def _workflow_metadata_instance_groups(user):
     groups_by_instance = {}
     for grant in (
         active_instance_grants(user)
-        .filter(access_level__in=WRITE_ACCESS_LEVELS, resource_group__is_deleted=0)
+        .filter(
+            access_level__in=(WRITE_ACCESS_LEVELS | DDL_ACCESS_LEVELS),
+            resource_group__is_deleted=0,
+        )
         .select_related("resource_group")
     ):
         instance_groups = groups_by_instance.setdefault(grant.instance_id, {})
@@ -385,60 +446,141 @@ def _workflow_metadata_instance_groups(user):
 
 
 def _workflow_submission_scope(user):
-    direct_groups = {
-        group.group_id: group for group in user_groups(user) if group.is_deleted == 0
-    }
-    temporary_instance_groups = _workflow_metadata_instance_groups(user)
+    can_submit_directly = user.is_superuser or user.has_perm("sql.sql_submit")
     instances = (
-        user_instances(user, tag_codes=["can_write"])
+        user_instances(user)
         .prefetch_related("resource_group")
         .order_by("instance_name", "id")
     )
+    direct_group_ids = (
+        {group.group_id for group in user_groups(user) if group.is_deleted == 0}
+        if can_submit_directly
+        else set()
+    )
+    temporary_groups_by_instance = {}
+
+    for grant in (
+        active_instance_grants(user)
+        .filter(
+            access_level__in=(WRITE_ACCESS_LEVELS | DDL_ACCESS_LEVELS),
+            resource_group__is_deleted=0,
+        )
+        .select_related("resource_group")
+    ):
+        groups = temporary_groups_by_instance.setdefault(grant.instance_id, {})
+        group_info = groups.setdefault(
+            grant.resource_group_id,
+            {"group_name": grant.resource_group.group_name, "syntax_types": set()},
+        )
+        group_info["syntax_types"].update(
+            _syntax_types_for_access_level(grant.access_level)
+        )
 
     resource_groups = {}
     instance_payload = []
     for instance in instances:
-        groups_by_id = {
-            group.group_id: group
-            for group in instance.resource_group.filter(
-                is_deleted=0, group_id__in=direct_groups.keys()
-            )
-        }
-        for group in temporary_instance_groups.get(instance.id, []):
-            groups_by_id.setdefault(group.group_id, group)
-        if not groups_by_id:
+        allowed_groups = {}
+        allowed_syntax_types = set()
+
+        if can_submit_directly and user_has_group_instance_access(
+            user, instance, tag_codes=["can_write"]
+        ):
+            direct_groups = {
+                group_id: {"group_name": group_name, "syntax_types": {1, 2}}
+                for group_id, group_name in instance.resource_group.filter(
+                    is_deleted=0, group_id__in=direct_group_ids
+                ).values_list("group_id", "group_name")
+            }
+            allowed_groups.update(direct_groups)
+            allowed_syntax_types.update({1, 2})
+
+        for group_id, group_info in temporary_groups_by_instance.get(
+            instance.id, {}
+        ).items():
+            allowed_groups[group_id] = {
+                "group_name": group_info["group_name"],
+                "syntax_types": set(group_info["syntax_types"]),
+            }
+            allowed_syntax_types.update(group_info["syntax_types"])
+
+        if not allowed_groups:
             continue
 
         sorted_groups = sorted(
-            groups_by_id.values(), key=lambda group: (group.group_name, group.group_id)
+            allowed_groups.items(), key=lambda item: (item[1]["group_name"], item[0])
         )
-        for group in sorted_groups:
-            resource_groups[group.group_id] = group
+        for group_id, group_info in sorted_groups:
+            resource_groups[group_id] = group_info["group_name"]
         instance_payload.append(
             {
                 "id": instance.id,
                 "instance_name": instance.instance_name,
                 "db_type": instance.db_type,
                 "type": instance.type,
-                "group_ids": [group.group_id for group in sorted_groups],
-                "group_names": [group.group_name for group in sorted_groups],
+                "group_ids": [group_id for group_id, _ in sorted_groups],
+                "group_names": [
+                    group_info["group_name"] for _, group_info in sorted_groups
+                ],
+                "allowed_syntax_types": sorted(allowed_syntax_types),
             }
         )
 
     return {
         "resource_groups": [
             {
-                "group_id": group.group_id,
-                "group_name": group.group_name,
-                "label": group.group_name,
+                "group_id": group_id,
+                "group_name": group_name,
+                "label": group_name,
             }
-            for group in sorted(
-                resource_groups.values(),
-                key=lambda group: (group.group_name, group.group_id),
+            for group_id, group_name in sorted(
+                resource_groups.items(), key=lambda item: (item[1], item[0])
             )
         ],
         "instances": instance_payload,
     }
+
+
+def _scheduled_run_date(workflow):
+    if workflow.status != "workflow_timingtask":
+        return None
+    job_id = f'{Const.workflowJobprefix["sqlreview"]}-timing-{workflow.id}'
+    job = task_info(job_id)
+    return job.next_run if job else None
+
+
+def _load_workflow_result_rows(workflow):
+    if workflow.status in ["workflow_finish", "workflow_exception"]:
+        raw_rows = workflow.sqlworkflowcontent.execute_result
+        source = "execution"
+    else:
+        raw_rows = workflow.sqlworkflowcontent.review_content
+        source = "review"
+
+    if not raw_rows:
+        return {"source": source, "rows": [], "column_list": []}
+
+    try:
+        rows = json.loads(raw_rows)
+        if rows and isinstance(rows[-1], list):
+            review_set = ReviewSet()
+            for row in rows:
+                review_set.rows.append(ReviewResult(inception_result=row))
+            rows = review_set.to_dict()
+    except (json.decoder.JSONDecodeError, IndexError):
+        rows = [
+            {
+                "id": 1,
+                "sql": workflow.sqlworkflowcontent.sql_content,
+                "errormessage": JSON_PARSE_ERROR_MESSAGE,
+            }
+        ]
+
+    column_list = list(rows[0].keys()) if rows else []
+    return {"source": source, "rows": rows, "column_list": column_list}
+
+
+def _rollback_download_content(rollback_rows):
+    return "".join(f"/*{row[0]}*/\n{row[1]}\n" for row in rollback_rows)
 
 
 class ExecuteCheck(views.APIView):
@@ -459,9 +601,12 @@ class ExecuteCheck(views.APIView):
         try:
             db_name = serializer.validated_data["db_name"]
             full_sql = serializer.validated_data["full_sql"].strip()
+            _ensure_no_load_data_statements(full_sql)
             check_engine = get_engine(instance=instance)
             db_name = check_engine.escape_string(db_name)
             check_result = check_engine.execute_check(db_name=db_name, sql=full_sql)
+        except serializers.ValidationError:
+            raise
         except Exception as e:
             raise serializers.ValidationError({"errors": f"{e}"})
         has_group_write_access = user_has_group_instance_access(
@@ -483,6 +628,61 @@ class ExecuteCheck(views.APIView):
         check_result.rows = check_result.to_dict()
         serializer_obj = ExecuteCheckResultSerializer(check_result)
         return success_response(data=serializer_obj.data)
+
+
+class WorkflowParse(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary="Parse Workflow SQL Text",
+        request=WorkflowParseSerializer,
+        responses={200: WorkflowParseResultSerializer},
+        description="Split SQL text into statements and classify each statement for SPA workflow uploads.",
+    )
+    def post(self, request):
+        serializer = WorkflowParseSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        text = serializer.validated_data["text"]
+        db_type = serializer.validated_data.get("db_type") or "mysql"
+        _ensure_no_load_data_statements(text)
+        rows = generate_sql(text)
+
+        detected_syntax_types = set()
+        has_unknown_syntax = False
+        parsed_rows = []
+        for row in rows:
+            syntax_type = _classify_statement_syntax(row["sql"], db_type=db_type)
+            if syntax_type is None:
+                has_unknown_syntax = True
+            else:
+                detected_syntax_types.add(syntax_type)
+            parsed_rows.append(
+                {
+                    "sql_id": row["sql_id"],
+                    "sql": row["sql"],
+                    "syntax_type": syntax_type,
+                }
+            )
+
+        has_mixed_syntax = len(detected_syntax_types) > 1
+        summary_syntax_type = (
+            next(iter(detected_syntax_types))
+            if len(detected_syntax_types) == 1 and not has_unknown_syntax
+            else None
+        )
+
+        return success_response(
+            data={
+                "total": len(parsed_rows),
+                "rows": parsed_rows,
+                "summary": {
+                    "syntax_type": summary_syntax_type,
+                    "has_mixed_syntax": has_mixed_syntax,
+                    "has_unknown_syntax": has_unknown_syntax,
+                },
+            }
+        )
 
 
 class WorkflowList(generics.ListAPIView):
@@ -516,6 +716,7 @@ class WorkflowList(generics.ListAPIView):
             queryset = queryset.filter(engineer=user.username)
 
         query_params = self.request.query_params
+        scope = query_params.get("scope", "").strip()
         search = query_params.get("search", "").strip()
         status_value = query_params.get("status", "").strip()
         syntax_type = query_params.get("syntax_type", "").strip()
@@ -525,6 +726,11 @@ class WorkflowList(generics.ListAPIView):
         start_date = query_params.get("start_date", "").strip()
         end_date = query_params.get("end_date", "").strip()
 
+        if scope == "mine":
+            queryset = queryset.filter(engineer=user.username)
+        elif scope == "pending_review":
+            queryset = queryset.filter(id__in=_pending_review_workflow_ids(user))
+
         if search:
             queryset = queryset.filter(
                 Q(workflow_name__icontains=search)
@@ -532,6 +738,7 @@ class WorkflowList(generics.ListAPIView):
                 | Q(instance__instance_name__icontains=search)
                 | Q(db_name__icontains=search)
                 | Q(group_name__icontains=search)
+                | Q(demand_url__icontains=search)
             )
         if status_value:
             queryset = queryset.filter(status=status_value)
@@ -556,7 +763,9 @@ class WorkflowList(generics.ListAPIView):
         description="List all SQL release workflows (filtering, pagination).",
     )
     def get(self, request):
-        if not _can_access_workflow_module(request.user):
+        scope = request.query_params.get("scope", "").strip()
+        can_view_own_scope = scope == "mine"
+        if not can_view_own_scope and not _can_access_workflow_module(request.user):
             raise PermissionDenied("You do not have permission to view workflow list.")
         workflows = self.get_queryset()
         page_wf = self.paginate_queryset(queryset=workflows)
@@ -748,6 +957,65 @@ class WorkflowDetail(views.APIView):
             pk=workflow_id,
         )
         return success_response(data=_serialize_workflow_detail(workflow, request.user))
+
+
+class WorkflowContentDetail(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary="Workflow Content Result",
+        responses={200: OpenApiTypes.OBJECT},
+        description="Return review or execution rows for a workflow detail result table.",
+    )
+    def get(self, request, workflow_id):
+        workflow = get_object_or_404(
+            SqlWorkflow.objects.select_related("sqlworkflowcontent"),
+            pk=workflow_id,
+        )
+        if not can_view(request.user, workflow_id):
+            raise PermissionDenied("You do not have permission to view this workflow.")
+        return success_response(data=_load_workflow_result_rows(workflow))
+
+
+class WorkflowRollbackDetail(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary="Workflow Rollback SQL",
+        responses={200: OpenApiTypes.OBJECT},
+        description="Return rollback SQL pairs for a completed workflow.",
+    )
+    def get(self, request, workflow_id):
+        if not can_rollback(request.user, workflow_id):
+            raise PermissionDenied("You do not have permission to view rollback SQL.")
+
+        workflow = get_object_or_404(
+            SqlWorkflow.objects.select_related("instance"),
+            pk=workflow_id,
+        )
+        try:
+            query_engine = get_engine(instance=workflow.instance)
+            rollback_rows = query_engine.get_rollback(workflow=workflow)
+        except Exception as exc:
+            logger.error("Failed to load rollback SQL", exc_info=True)
+            raise serializers.ValidationError({"errors": str(exc)})
+
+        if request.query_params.get("download") == "true":
+            response = HttpResponse(
+                _rollback_download_content(rollback_rows),
+                content_type="application/sql",
+            )
+            response["Content-Disposition"] = (
+                f'attachment; filename="rollback_{workflow_id}.sql"'
+            )
+            return response
+
+        return success_response(
+            data={
+                "rows": rollback_rows,
+                "download_content": _rollback_download_content(rollback_rows),
+            }
+        )
 
 
 class WorkflowExecutionWindowUpdate(views.APIView):

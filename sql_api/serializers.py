@@ -1,4 +1,5 @@
 from rest_framework import serializers
+import re
 from sql.models import (
     Users,
     Instance,
@@ -33,8 +34,10 @@ import logging
 from sql.offlinedownload import OffLineDownLoad
 from sql.utils.sql_review import can_execute, can_timingtask, can_cancel, can_rollback
 from sql.utils.tasks import task_info
+from sql.utils.sql_utils import generate_sql
 
 logger = logging.getLogger("default")
+LOAD_DATA_PATTERN = re.compile(r"^\s*load\s+data\b", re.IGNORECASE)
 
 
 class UserManagementGroupSerializer(serializers.ModelSerializer):
@@ -1184,6 +1187,37 @@ class ExecuteCheckResultSerializer(serializers.Serializer):
     affected_rows = serializers.IntegerField(read_only=True)
 
 
+class WorkflowParseSerializer(serializers.Serializer):
+    text = serializers.CharField(label="SQL text")
+    db_type = serializers.CharField(
+        label="Database type", required=False, allow_blank=True, default=""
+    )
+
+    def validate_text(self, value):
+        return value.strip()
+
+    def validate_db_type(self, value):
+        return value.strip().lower()
+
+
+class WorkflowParsedStatementSerializer(serializers.Serializer):
+    sql_id = serializers.JSONField(read_only=True)
+    sql = serializers.CharField(read_only=True)
+    syntax_type = serializers.IntegerField(read_only=True, allow_null=True)
+
+
+class WorkflowParseSummarySerializer(serializers.Serializer):
+    syntax_type = serializers.IntegerField(read_only=True, allow_null=True)
+    has_mixed_syntax = serializers.BooleanField(read_only=True)
+    has_unknown_syntax = serializers.BooleanField(read_only=True)
+
+
+class WorkflowParseResultSerializer(serializers.Serializer):
+    total = serializers.IntegerField(read_only=True)
+    rows = WorkflowParsedStatementSerializer(many=True, read_only=True)
+    summary = WorkflowParseSummarySerializer(read_only=True)
+
+
 class WorkflowSerializer(serializers.ModelSerializer):
     def to_internal_value(self, data):
         if data.get("run_date_start") == "":
@@ -1230,6 +1264,15 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
         workflow_data = validated_data.pop("workflow")
         instance = workflow_data["instance"]
         sql_content = validated_data["sql_content"].strip()
+        for row in generate_sql(sql_content):
+            if LOAD_DATA_PATTERN.match(row["sql"]):
+                raise serializers.ValidationError(
+                    {
+                        "errors": (
+                            "LOAD DATA statements are not supported for workflow submission."
+                        )
+                    }
+                )
         group = ResourceGroup.objects.get(pk=workflow_data["group_id"])
         engineer = workflow_data.get("engineer")
 

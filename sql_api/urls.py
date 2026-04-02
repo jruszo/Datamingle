@@ -100,9 +100,18 @@ urlpatterns = [
         "v1/workflow/approval-preview/",
         api_workflow.WorkflowApprovalPreview.as_view(),
     ),
+    path("v1/workflow/parse/", api_workflow.WorkflowParse.as_view()),
     path("v1/workflow/sqlcheck/", api_workflow.ExecuteCheck.as_view()),
     path("v1/workflow/auditlist/", api_workflow.WorkflowAuditList.as_view()),
     path("v1/workflow/<int:workflow_id>/", api_workflow.WorkflowDetail.as_view()),
+    path(
+        "v1/workflow/<int:workflow_id>/content/",
+        api_workflow.WorkflowContentDetail.as_view(),
+    ),
+    path(
+        "v1/workflow/<int:workflow_id>/rollback/",
+        api_workflow.WorkflowRollbackDetail.as_view(),
+    ),
     path(
         "v1/workflow/<int:workflow_id>/window/",
         api_workflow.WorkflowExecutionWindowUpdate.as_view(),

@@ -7,7 +7,7 @@ import {
   ExternalLink,
   Play,
   RefreshCw,
-  ShieldCheck,
+  Send,
 } from 'lucide-vue-next'
 
 import { Badge } from '@/components/ui/badge'
@@ -17,15 +17,15 @@ import { Input } from '@/components/ui/input'
 import {
   executeWorkflow,
   fetchWorkflowDetail,
-  fetchWorkflowMetadata,
+  fetchWorkflowSubmissionMetadata,
   fetchWorkflows,
   reviewWorkflow,
   scheduleWorkflow,
   updateWorkflowExecutionWindow,
   type PaginatedResponse,
   type WorkflowDetailRecord,
-  type WorkflowMetadataRecord,
   type WorkflowResultRow,
+  type WorkflowSubmissionMetadata,
   type WorkflowSummaryRecord,
 } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth'
@@ -46,7 +46,7 @@ const pageError = ref('')
 const detailError = ref('')
 const feedback = ref('')
 
-const metadata = ref<WorkflowMetadataRecord | null>(null)
+const metadata = ref<WorkflowSubmissionMetadata | null>(null)
 const selectedWorkflowId = ref<number | null>(null)
 const selectedWorkflow = ref<WorkflowDetailRecord | null>(null)
 
@@ -207,15 +207,26 @@ const canViewWorkflows = computed(() => (
   || hasPermission('sql.audit_user')
 ))
 
-const canSubmitWorkflow = computed(() => hasPermission('sql.sql_submit'))
+const canCreateDdl = computed(() => {
+  return (metadata.value?.instances ?? []).some((instance) =>
+    instance.allowed_syntax_types.includes(1),
+  )
+})
+
+const canCreateDml = computed(() => {
+  return (metadata.value?.instances ?? []).some((instance) =>
+    instance.allowed_syntax_types.includes(2),
+  )
+})
+
 const filteredInstances = computed(() => {
-  const rows = metadata.value?.instances ?? []
   const groupId = Number(filters.groupId)
+  const instances = metadata.value?.instances ?? []
   if (!groupId) {
-    return rows
+    return instances
   }
-  return rows.filter((instance) =>
-    instance.resource_groups.some((group) => group.group_id === groupId),
+  return instances.filter((instance) =>
+    instance.group_ids.includes(groupId),
   )
 })
 
@@ -245,7 +256,7 @@ async function loadMetadata() {
 
   metadataLoading.value = true
   try {
-    metadata.value = await fetchWorkflowMetadata(requireToken())
+    metadata.value = await fetchWorkflowSubmissionMetadata(requireToken())
   } catch (errorValue) {
     pageError.value = toUserFacingMessage(errorValue, 'Failed to load workflow metadata.')
   } finally {
@@ -267,7 +278,7 @@ async function loadWorkflows() {
       size: filters.size,
       search: filters.search,
       status: filters.status || undefined,
-      syntax_type: filters.syntaxType || undefined,
+      syntax_type: filters.syntaxType ? Number(filters.syntaxType) as 1 | 2 : undefined,
       group_id: filters.groupId ? Number(filters.groupId) : undefined,
       instance_id: filters.instanceId ? Number(filters.instanceId) : undefined,
       start_date: filters.startDate || undefined,
@@ -505,13 +516,23 @@ onMounted(async () => {
 
       <div class="flex flex-wrap items-center gap-2">
         <Button
-          v-if="canSubmitWorkflow"
+          v-if="canCreateDdl"
+          variant="outline"
           type="button"
           class="gap-2"
-          @click="void router.push({ name: 'workflows-new' })"
+          @click="void router.push({ name: 'workflow-ddl-new' })"
         >
-          <ShieldCheck class="h-4 w-4" />
-          New workflow
+          <Send class="h-4 w-4" />
+          New DDL request
+        </Button>
+        <Button
+          v-if="canCreateDml"
+          type="button"
+          class="gap-2"
+          @click="void router.push({ name: 'workflow-dml-new' })"
+        >
+          <Send class="h-4 w-4" />
+          New DML request
         </Button>
         <Button variant="outline" type="button" class="gap-2" @click="void loadWorkflows()">
           <RefreshCw class="h-4 w-4" />
