@@ -62,7 +62,20 @@ class SMS(TwoFactorAuthBase):
         if phone:
             phone = phone
         else:
-            phone = TwoFactorAuthConfig.objects.get(username=self.user.username).phone
+            try:
+                phone = TwoFactorAuthConfig.objects.get(
+                    user=self.user, auth_type=self.auth_type
+                ).phone
+            except TwoFactorAuthConfig.DoesNotExist:
+                logger.warning(
+                    "Missing SMS 2FA config for user=%s auth_type=%s",
+                    getattr(self.user, "username", None),
+                    self.auth_type,
+                )
+                return {
+                    "status": 1,
+                    "msg": "SMS 2FA is not configured for this account.",
+                }
 
         r = get_redis_connection("default")
         data = r.get(f"captcha-{phone}")
@@ -86,7 +99,6 @@ class SMS(TwoFactorAuthBase):
                 self.disable(self.auth_type)
                 # Create new 2FA config
                 TwoFactorAuthConfig.objects.create(
-                    username=self.user.username,
                     auth_type=self.auth_type,
                     phone=phone,
                     user=self.user,

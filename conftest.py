@@ -1,4 +1,9 @@
+import os
 import datetime
+
+os.environ.setdefault(
+    "FIELD_ENCRYPTION_KEYS", "9R_Jxat_be2SV-UbCS0dAYQ0SGjZVf0JyN-VPkVNyi0="
+)
 
 import pytest
 from pytest_mock import MockFixture
@@ -167,7 +172,6 @@ def create_resource_group(db):
         is_deleted=False,
         qywx_webhook="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx",
         feishu_webhook="https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
-        ding_webhook="https://oapi.dingtalk.com/robot/send?access_token=xxx",
     )
     yield resource_group
     resource_group.delete()

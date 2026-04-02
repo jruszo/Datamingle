@@ -26,14 +26,10 @@ env = environ.Env(
     ),  # Reference: https://docs.djangoproject.com/en/4.0/ref/settings/#secret-key
     DATABASE_URL=(str, "mysql://root:@127.0.0.1:3306/archery"),
     CACHE_URL=(str, "redis://127.0.0.1:6379/0"),
-    # External authentication currently supports LDAP, OIDC, and DINGDING.
-    # Only one method should be enabled. If multiple are enabled, only one takes effect with priority LDAP > DINGDING > OIDC.
+    # External authentication currently supports LDAP and OIDC.
+    # Only one method should be enabled. If multiple are enabled, only one takes effect with priority LDAP > OIDC.
     ENABLE_LDAP=(bool, False),
     ENABLE_OIDC=(bool, False),
-    ENABLE_DINGDING=(
-        bool,
-        False,
-    ),  # DingTalk authentication reference: https://open.dingtalk.com/document/orgapp/tutorial-obtaining-user-personal-information
     AUTH_LDAP_ALWAYS_UPDATE_USER=(bool, True),
     AUTH_LDAP_USER_ATTR_MAP=(
         dict,
@@ -72,8 +68,6 @@ env = environ.Env(
     ENABLED_NOTIFIERS=(
         list,
         [
-            "sql.notify:DingdingWebhookNotifier",
-            "sql.notify:DingdingPersonNotifier",
             "sql.notify:FeishuWebhookNotifier",
             "sql.notify:FeishuPersonNotifier",
             "sql.notify:QywxWebhookNotifier",
@@ -84,6 +78,7 @@ env = environ.Env(
     ),
     CURRENT_AUDITOR=(str, "sql.utils.workflow_audit:AuditV2"),
     PASSWORD_MIXIN_PATH=(str, "sql.plugins.password:DummyMixin"),
+    FIELD_ENCRYPTION_KEYS=(str, ""),
 )
 
 # SECURITY WARNING: keep the secret key used in production secret!
@@ -128,6 +123,8 @@ ENABLED_ENGINES = env("ENABLED_ENGINES")
 CURRENT_AUDITOR = env("CURRENT_AUDITOR")
 
 PASSWORD_MIXIN_PATH = env("PASSWORD_MIXIN_PATH")
+
+FIELD_ENCRYPTION_KEYS = env("FIELD_ENCRYPTION_KEYS")
 
 # Application definition
 INSTALLED_APPS = (
@@ -343,20 +340,6 @@ if ENABLE_OIDC:
 
     LOGIN_REDIRECT_URL = "/"
 
-# Dingding
-ENABLE_DINGDING = env("ENABLE_DINGDING", False)
-if ENABLE_DINGDING:
-    INSTALLED_APPS += ("django_auth_dingding",)
-    AUTHENTICATION_BACKENDS = (
-        "common.authenticate.dingding_auth.DingdingAuthenticationBackend",
-        "django.contrib.auth.backends.ModelBackend",
-    )
-    AUTH_DINGDING_AUTHENTICATION_CALLBACK_URL = env(
-        "AUTH_DINGDING_AUTHENTICATION_CALLBACK_URL"
-    )
-    AUTH_DINGDING_APP_KEY = env("AUTH_DINGDING_APP_KEY")
-    AUTH_DINGDING_APP_SECRET = env("AUTH_DINGDING_APP_SECRET")
-
 # LDAP
 ENABLE_LDAP = env("ENABLE_LDAP", False)
 if ENABLE_LDAP:
@@ -421,7 +404,6 @@ if ENABLE_CAS:
 
 SUPPORTED_AUTHENTICATION = [
     ("LDAP", ENABLE_LDAP),
-    ("DINGDING", ENABLE_DINGDING),
     ("OIDC", ENABLE_OIDC),
     ("CAS", ENABLE_CAS),
 ]
@@ -432,7 +414,7 @@ ENABLE_AUTHENTICATION_COUNT = len(
 if ENABLE_AUTHENTICATION_COUNT > 0:
     if ENABLE_AUTHENTICATION_COUNT > 1:
         logger.warning(
-            "External authentication currently supports LDAP, DINGDING, OIDC, and CAS. Only one method should be enabled. If multiple are enabled, only one takes effect with priority LDAP > DINGDING > OIDC > CAS."
+            "External authentication currently supports LDAP, OIDC, and CAS. Only one method should be enabled. If multiple are enabled, only one takes effect with priority LDAP > OIDC > CAS."
         )
     authentication = ""  # Empty by default
     for name, enabled in SUPPORTED_AUTHENTICATION:

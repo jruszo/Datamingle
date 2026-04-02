@@ -25,11 +25,6 @@ if settings.ENABLE_OIDC:  # pragma: no cover
         path("oidc/", include("mozilla_django_oidc.urls")),
     ]
 
-if settings.ENABLE_DINGDING:  # pragma: no cover
-    urlpatterns += [
-        path("dingding/", include("django_auth_dingding.urls")),
-    ]
-
 handler400 = views.bad_request
 handler403 = views.permission_denied
 handler404 = views.page_not_found

@@ -16,9 +16,12 @@ from sql.models import (
     SqlWorkflowContent,
     QueryLog,
     ResourceGroup,
+    TwoFactorAuthConfig,
 )
 from common.utils.chart_dao import ChartDao
 from common.auth import init_user
+from common.twofa.sms import SMS
+from common.twofa.totp import TOTP
 from common.utils.extend_json_encoder import ExtendJSONEncoderFTime
 
 User = get_user_model()
@@ -162,31 +165,6 @@ class SendMessageTest(TestCase):
         archer_config.set("mail_smtp_password", "")
         archer_config.set("mail_smtp_port", "")
         archer_config.set("mail_ssl", "")
-
-
-class DingTest(TestCase):
-    def setUp(self):
-        self.url = "some_url"
-        self.content = "some_content"
-
-    @patch("requests.post")
-    def testDing(self, post):
-        sender = MsgSender()
-        post.return_value.json.return_value = {"errcode": 0}
-        with self.assertLogs("default", level="DEBUG") as lg:
-            sender.send_ding(self.url, self.content)
-            post.assert_called_once_with(
-                url=self.url,
-                json={"msgtype": "text", "text": {"content": self.content}},
-            )
-            self.assertIn("DingTalk webhook sent successfully", lg.output[0])
-        post.return_value.json.return_value = {"errcode": 1, "errmsg": "test_error"}
-        with self.assertLogs("default", level="ERROR") as lg:
-            sender.send_ding(self.url, self.content)
-            self.assertIn("test_error", lg.output[0])
-
-    def tearDown(self):
-        pass
 
 
 class GlobalInfoTest(TestCase):
@@ -557,6 +535,35 @@ class AuthTest(TestCase):
         # init should be idempotent
         init_user(self.u1)
         self.assertEqual(self.u1, self.resource_group1.users_set.get(pk=self.u1.pk))
+
+
+class TestTwoFactorAuth(TestCase):
+    def setUp(self):
+        self.user = User.objects.create(
+            username="twofa_user",
+            display="TwoFA User",
+            is_active=True,
+        )
+
+    def tearDown(self):
+        TwoFactorAuthConfig.objects.all().delete()
+        self.user.delete()
+
+    def test_sms_verify_returns_controlled_error_when_config_missing(self):
+        result = SMS(user=self.user).verify("123456")
+
+        self.assertEqual(
+            result,
+            {"status": 1, "msg": "SMS 2FA is not configured for this account."},
+        )
+
+    def test_totp_verify_returns_controlled_error_when_config_missing(self):
+        result = TOTP(user=self.user).verify("123456")
+
+        self.assertEqual(
+            result,
+            {"status": 1, "msg": "TOTP 2FA is not configured for this account."},
+        )
 
 
 class PermissionTest(TestCase):

@@ -41,18 +41,6 @@ def add_kill_conn_schedule(name, run_date, instance_id, thread_id):
     )
 
 
-def add_sync_ding_user_schedule():
-    """Add a scheduled task to sync DingTalk user IDs."""
-    del_schedule(name="Sync DingTalk User IDs")
-    schedule(
-        "common.utils.ding_api.sync_ding_user_id",
-        name="Sync DingTalk User IDs",
-        schedule_type="D",
-        repeats=-1,
-        timeout=-1,
-    )
-
-
 def del_schedule(name):
     """Delete a schedule."""
     try:

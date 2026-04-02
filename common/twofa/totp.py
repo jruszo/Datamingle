@@ -24,9 +24,20 @@ class TOTP(TwoFactorAuthBase):
         if key:
             secret_key = key
         else:
-            secret_key = TwoFactorAuthConfig.objects.get(
-                username=self.user.username, auth_type=self.auth_type
-            ).secret_key
+            try:
+                secret_key = TwoFactorAuthConfig.objects.get(
+                    user=self.user, auth_type=self.auth_type
+                ).secret_key
+            except TwoFactorAuthConfig.DoesNotExist:
+                logger.warning(
+                    "Missing TOTP 2FA config for user=%s auth_type=%s",
+                    getattr(self.user, "username", None),
+                    self.auth_type,
+                )
+                return {
+                    "status": 1,
+                    "msg": "TOTP 2FA is not configured for this account.",
+                }
         t = pyotp.TOTP(secret_key)
         status = t.verify(otp)
         result["status"] = 0 if status else 1
@@ -53,7 +64,6 @@ class TOTP(TwoFactorAuthBase):
                 self.disable(self.auth_type)
                 # Create new 2FA config
                 TwoFactorAuthConfig.objects.create(
-                    username=self.user.username,
                     auth_type=self.auth_type,
                     secret_key=secret_key,
                     user=self.user,

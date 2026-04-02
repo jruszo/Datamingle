@@ -25,8 +25,6 @@ from sql.notify import (
     LegacyRender,
     GenericWebhookNotifier,
     My2SqlResult,
-    DingdingWebhookNotifier,
-    DingdingPersonNotifier,
     FeishuPersonNotifier,
     FeishuWebhookNotifier,
     QywxWebhookNotifier,
@@ -144,7 +142,7 @@ class TestNotify(TestCase):
             remark="Test query note",
         )
 
-        self.rs = ResourceGroup.objects.create(group_id=1, ding_webhook="url")
+        self.rs = ResourceGroup.objects.create(group_id=1)
 
         self.archive_apply = ArchiveConfig.objects.create(
             title="Test archive",
@@ -505,8 +503,6 @@ class TestNotify(TestCase):
 @pytest.mark.parametrize(
     "notifier_to_test,method_assert_called",
     [
-        (DingdingWebhookNotifier, "send_ding"),
-        (DingdingPersonNotifier, "send_ding2user"),
         (FeishuWebhookNotifier, "send_feishu_webhook"),
         (FeishuPersonNotifier, "send_feishu_user"),
         (QywxWebhookNotifier, "send_qywx_webhook"),

@@ -61,7 +61,6 @@ class UsersAdmin(UserAdmin):
                 "fields": (
                     "display",
                     "email",
-                    "ding_user_id",
                     "wx_user_id",
                     "feishu_open_id",
                 )
@@ -91,7 +90,6 @@ class UsersAdmin(UserAdmin):
                 "fields": (
                     "display",
                     "email",
-                    "ding_user_id",
                     "wx_user_id",
                     "feishu_open_id",
                 )
@@ -118,7 +116,7 @@ class UsersAdmin(UserAdmin):
 # User 2FA management
 @admin.register(TwoFactorAuthConfig)
 class TwoFactorAuthConfigAdmin(admin.ModelAdmin):
-    list_display = ("id", "username", "auth_type", "phone", "secret_key", "user_id")
+    list_display = ("id", "user", "auth_type", "phone", "secret_key", "user_id")
 
 
 # Resource group management
@@ -127,7 +125,6 @@ class ResourceGroupAdmin(admin.ModelAdmin):
     list_display = (
         "group_id",
         "group_name",
-        "ding_webhook",
         "feishu_webhook",
         "qywx_webhook",
         "is_deleted",

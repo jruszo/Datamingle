@@ -784,6 +784,10 @@ class CloudAccessKeySerializer(serializers.ModelSerializer):
     class Meta:
         model = CloudAccessKey
         fields = "__all__"
+        extra_kwargs = {
+            "key_id": {"write_only": True},
+            "key_secret": {"write_only": True},
+        }
 
 
 class AliyunRdsSerializer(serializers.ModelSerializer):
