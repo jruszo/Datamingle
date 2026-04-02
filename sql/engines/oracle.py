@@ -3,6 +3,8 @@
 import logging
 import traceback
 import re
+import sys
+import types
 import sqlparse
 import MySQLdb
 import simplejson as json
@@ -16,7 +18,23 @@ from sql.utils.sql_utils import (
     get_exec_sqlitem_list,
 )
 from . import EngineBase
-import cx_Oracle
+
+try:
+    import cx_Oracle
+except ModuleNotFoundError:
+    cx_Oracle = types.ModuleType("cx_Oracle")
+
+    def _missing_cx_oracle(*args, **kwargs):
+        raise ModuleNotFoundError("cx_Oracle is not installed")
+
+    class _OracleLob:
+        pass
+
+    cx_Oracle.connect = _missing_cx_oracle
+    cx_Oracle.makedsn = lambda *args, **kwargs: "cx_oracle_unavailable_dsn"
+    cx_Oracle.LOB = _OracleLob
+    cx_Oracle.CLOB = object()
+    sys.modules.setdefault("cx_Oracle", cx_Oracle)
 from .models import ResultSet, ReviewSet, ReviewResult
 from sql.utils.data_masking import simple_column_mask
 
@@ -1620,5 +1638,6 @@ class OracleEngine(EngineBase):
 
     def close(self):
         if self.conn:
-            self.conn.close()
+            if hasattr(self.conn, "close"):
+                self.conn.close()
             self.conn = None

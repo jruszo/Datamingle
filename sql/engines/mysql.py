@@ -1,4 +1,5 @@
 # -*- coding: UTF-8 -*-
+import json
 import logging
 import traceback
 import MySQLdb
@@ -11,6 +12,7 @@ import sqlparse
 from MySQLdb.constants import FIELD_TYPE
 from schemaobject.connection import build_database_url
 
+from common.utils.timer import FuncTimer
 from sql.engines.goinception import GoInceptionEngine
 from sql.utils.sql_utils import get_syntax_type, remove_comments
 from . import EngineBase
@@ -726,11 +728,128 @@ class MysqlEngine(EngineBase):
                 "Instance read_only=1, executing change statements is forbidden!",
             )
             return result
-        # TODO native execution
-        # if workflow.is_manual == 1:
-        #     return self.execute(db_name=workflow.db_name, sql=workflow.sqlworkflowcontent.sql_content)
-        # inception execution
+        if workflow.syntax_type == 1:
+            return self.execute_direct_workflow(workflow)
+        # DML and other workflow types continue through the existing review engine.
         return self.inc_engine.execute(workflow)
+
+    def execute_direct_workflow(self, workflow):
+        """Execute DDL statements natively without OSC tooling."""
+        sql = workflow.sqlworkflowcontent.sql_content
+        execute_result = ReviewSet(full_sql=sql)
+        statements = self._direct_workflow_statements(workflow)
+
+        if not statements:
+            execute_result.error = "No executable SQL statements found."
+            execute_result.rows.append(
+                ReviewResult(
+                    id=1,
+                    errlevel=2,
+                    stagestatus="Execute Failed",
+                    errormessage="No executable SQL statements found.",
+                    sql=sql,
+                )
+            )
+            return execute_result
+
+        conn = None
+        cursor = None
+        current_statement = sql
+
+        try:
+            conn = self.get_connection(db_name=workflow.db_name)
+            cursor = conn.cursor()
+            try:
+                conn.autocommit(False)
+            except Exception:
+                pass
+
+            for line, statement in enumerate(statements, start=1):
+                current_statement = statement
+                with FuncTimer() as timer:
+                    cursor.execute(statement)
+                conn.commit()
+                rowcount = getattr(cursor, "rowcount", 0)
+                affected_rows = (
+                    rowcount if isinstance(rowcount, int) and rowcount > 0 else 0
+                )
+                execute_result.rows.append(
+                    ReviewResult(
+                        id=line,
+                        errlevel=0,
+                        stagestatus="Execute Successfully",
+                        errormessage="None",
+                        sql=statement,
+                        affected_rows=affected_rows,
+                        execute_time=timer.cost,
+                    )
+                )
+        except Exception as e:
+            if conn:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            logger.warning(
+                "%s direct DDL execution failed, SQL: %s, error: %s",
+                self.name,
+                current_statement,
+                traceback.format_exc(),
+            )
+            execute_result.error = str(e)
+            execute_result.rows.append(
+                ReviewResult(
+                    id=len(execute_result.rows) + 1,
+                    errlevel=2,
+                    stagestatus="Execute Failed",
+                    errormessage=str(e),
+                    sql=current_statement,
+                )
+            )
+        finally:
+            try:
+                if cursor:
+                    cursor.close()
+            except Exception:
+                pass
+            self.close()
+
+        return execute_result
+
+    def _direct_workflow_statements(self, workflow):
+        """Prefer reviewed statements so direct execution matches the checked SQL."""
+        review_content = workflow.sqlworkflowcontent.review_content or "[]"
+        statements = []
+
+        try:
+            review_rows = json.loads(review_content)
+        except (TypeError, json.JSONDecodeError):
+            review_rows = []
+
+        for row in review_rows:
+            if isinstance(row, list):
+                review_row = ReviewResult(inception_result=row)
+            elif isinstance(row, dict):
+                review_row = ReviewResult(**row)
+            else:
+                continue
+
+            statement = remove_comments(review_row.sql, db_type="mysql").strip()
+            if statement:
+                statements.append(statement.rstrip(";"))
+
+        if statements:
+            return statements
+
+        normalized_sql = sqlparse.format(
+            workflow.sqlworkflowcontent.sql_content,
+            strip_comments=True,
+        )
+        return [
+            statement.strip().rstrip(";")
+            for statement in sqlparse.split(normalized_sql)
+            if statement.strip()
+        ]
 
     def execute(self, db_name=None, sql="", close_conn=True, parameters=None):
         """Execute statements natively."""

@@ -808,6 +808,101 @@ export type PaginatedResponse<T> = {
   results: T[]
 }
 
+export type WorkflowSyntaxType = 0 | 1 | 2 | 3
+
+export type WorkflowResourceGroupLookupRecord = {
+  group_id: number
+  group_name: string
+}
+
+export type WorkflowInstanceLookupRecord = {
+  id: number
+  instance_name: string
+  db_type: string
+  type: string
+  host: string
+  label: string
+  resource_groups: WorkflowResourceGroupLookupRecord[]
+}
+
+export type WorkflowMetadataRecord = {
+  allow_backup_toggle: boolean
+  manual_execution_enabled: boolean
+  resource_groups: WorkflowResourceGroupLookupRecord[]
+  instances: WorkflowInstanceLookupRecord[]
+}
+
+export type WorkflowSummaryRecord = {
+  id: number
+  workflow_name: string
+  demand_url: string
+  group_id: number
+  group_name: string
+  instance_id: number
+  instance_name: string
+  instance_db_type: string
+  db_name: string
+  syntax_type: WorkflowSyntaxType
+  syntax_type_label: string
+  status: string
+  status_label: string
+  is_backup: boolean
+  engineer: string
+  engineer_display: string
+  run_date_start: string | null
+  run_date_end: string | null
+  create_time: string
+  finish_time: string | null
+}
+
+export type WorkflowReviewNode = {
+  group_name: string
+  is_current_node: boolean
+  is_passed_node: boolean
+}
+
+export type WorkflowCurrentReviewer = {
+  id: number
+  username: string
+  display: string
+}
+
+export type WorkflowLogRecord = {
+  operation_type_desc: string
+  operation_info: string
+  operator_display: string
+  operation_time: string
+}
+
+export type WorkflowResultRow = Record<string, unknown>
+
+export type WorkflowDetailRecord = WorkflowSummaryRecord & {
+  sql_content: string
+  review_rows: WorkflowResultRow[]
+  execute_rows: WorkflowResultRow[]
+  review_info: WorkflowReviewNode[]
+  current_reviewers: WorkflowCurrentReviewer[]
+  logs: WorkflowLogRecord[]
+  last_operation_info: string
+  scheduled_run_date: string | null
+  is_can_review: boolean
+  is_can_reject: boolean
+  is_can_execute: boolean
+  is_can_schedule: boolean
+  is_can_cancel: boolean
+  is_can_abort: boolean
+  is_can_rollback: boolean
+  is_can_manual_execute: boolean
+  is_can_edit_execution_window: boolean
+  manual_execution_enabled: boolean
+}
+
+export function fetchWorkflowMetadata(token: string) {
+  return apiGet<unknown>('/v1/workflow/metadata/', { token }).then((payload) =>
+    extractData<WorkflowMetadataRecord>(payload),
+  )
+}
+
 export type QueryableInstance = {
   id: number
   instance_name: string
@@ -1156,6 +1251,17 @@ export function reviewPermissionRequest(
   )
 }
 
+export type WorkflowContentRecord = {
+  source: 'review' | 'execution'
+  rows: Array<Record<string, unknown>>
+  column_list: string[]
+}
+
+export type WorkflowRollbackRecord = {
+  rows: Array<[string, string]>
+  download_content: string
+}
+
 export function fetchPermissionGrants(token: string, filters: PermissionGrantListFilters = {}) {
   const queryString = buildListQueryString(filters)
   const path = queryString ? `/v1/access/grant/?${queryString}` : '/v1/access/grant/'
@@ -1175,78 +1281,7 @@ export function revokePermissionGrant(
 }
 
 export type WorkflowScope = 'all' | 'mine' | 'pending_review'
-export type WorkflowSyntaxType = 1 | 2
 export type WorkflowExecutionMode = 'auto' | 'manual'
-
-export type WorkflowSummaryRecord = {
-  id: number
-  workflow_name: string
-  demand_url: string
-  group_id: number
-  group_name: string
-  instance_id: number
-  instance_name: string
-  db_name: string
-  syntax_type: WorkflowSyntaxType
-  syntax_type_display: string
-  is_backup: boolean
-  engineer: string
-  engineer_display: string
-  status: string
-  status_display: string
-  run_date_start: string | null
-  run_date_end: string | null
-  create_time: string
-  finish_time: string | null
-  is_manual: number
-}
-
-export type WorkflowReviewNode = {
-  group_name: string
-  is_auto_pass: boolean
-  is_current_node: boolean
-  is_passed_node: boolean
-}
-
-export type WorkflowLogRecord = {
-  operation_type_desc: string
-  operation_info: string
-  operator_display: string
-  operation_time: string
-}
-
-export type WorkflowCurrentReviewer = {
-  username: string
-  display: string
-}
-
-export type WorkflowDetailRecord = WorkflowSummaryRecord & {
-  workflow_type: number
-  sql_content: string
-  review_info: WorkflowReviewNode[]
-  current_reviewers: WorkflowCurrentReviewer[]
-  logs: WorkflowLogRecord[]
-  last_operation_info: string
-  run_date: string | null
-  manual_execution_enabled: boolean
-  is_can_review: boolean
-  is_can_execute: boolean
-  is_can_timingtask: boolean
-  is_can_cancel: boolean
-  is_can_rollback: boolean
-  is_requester: boolean
-}
-
-export type WorkflowContentRecord = {
-  source: 'review' | 'execution'
-  rows: Array<Record<string, unknown>>
-  column_list: string[]
-}
-
-export type WorkflowRollbackRecord = {
-  rows: Array<[string, string]>
-  download_content: string
-}
 
 export type WorkflowSubmitResourceGroupRecord = {
   group_id: number
@@ -1276,7 +1311,12 @@ export type WorkflowApprovalPreview = {
   group_name: string
   audit_auth_groups: string
   display: string
-  review_info: WorkflowReviewNode[]
+  review_info: Array<{
+    group_name: string
+    is_auto_pass: boolean
+    is_current_node: boolean
+    is_passed_node: boolean
+  }>
 }
 
 export type WorkflowCheckRequest = {
@@ -1364,7 +1404,7 @@ export type WorkflowListFilters = {
 
 export type WorkflowReviewPayload = {
   workflow_type: 2
-  audit_type: 'pass' | 'cancel'
+  audit_type: 'pass' | 'reject' | 'cancel'
   audit_remark: string
 }
 
@@ -1418,7 +1458,6 @@ function buildWorkflowListQueryString(filters: WorkflowListFilters) {
 
   return params.toString()
 }
-
 export function fetchWorkflowSubmissionMetadata(token: string) {
   return apiGet<unknown>('/v1/workflow/submission-metadata/', { token }).then((payload) =>
     extractData<WorkflowSubmissionMetadata>(payload),

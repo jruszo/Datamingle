@@ -123,7 +123,7 @@ function expectedSyntaxDescription() {
   if (props.expectedSyntaxType === 1) {
     return 'schema-change statements such as CREATE, ALTER, and DROP'
   }
-  return 'data-change statements such as INSERT, UPDATE, DELETE, and LOAD DATA'
+  return 'data-change statements such as INSERT, UPDATE, and DELETE'
 }
 
 function uploadSyntaxMismatchMessage(actualSyntaxType: number | null | undefined) {
