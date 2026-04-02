@@ -805,95 +805,6 @@
                                 </div>
                             </div>
                             <div class="form-group">
-                                <label for="ding"
-                                       class="col-sm-4 control-label">DING</label>
-                                <div class="col-sm-8">
-                                    <div class="switch switch-small">
-                                        <label>
-                                            <input id="ding" key="ding" value="{{ config.ding }}"
-                                                   type="checkbox" /> Enable DingTalk webhook notifications
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="form-group">
-                                <label for="ding_to_person"
-                                       class="col-sm-4 control-label">DING_TO_PERSON</label>
-                                <div class="col-sm-8">
-                                    <div class="switch switch-small">
-                                        <label>
-                                            <input id="ding_to_person" key="ding_to_person"
-                                                   value="{{ config.ding_to_person }}"
-                                                   type="checkbox" /> Enable DingTalk direct message notifications
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-                            <div id="div-ding-config" style="display: none">
-                                <div class="form-group">
-                                    <i class="ace-icon fa fa-hand-o-right"></i>
-                                    DingTalk Archery app setup reference: <a target="_blank"
-                                                        href="https://ding-doc.dingtalk.com/doc#/bgb96b/aw3h75  ">DingTalk enterprise integration docs</a>
-                                    &nbsp;&nbsp;&nbsp;<button id='sync_ding_user' class='btn-xs btn-warning'>Sync Users
-                                </button>
-                                </div>
-                                <div class="form-group">
-                                    <label for="ding_agent_id"
-                                           class="col-sm-4 control-label">AgentId</label>
-                                    <div class="col-sm-5">
-                                        <input type="text" class="form-control"
-                                               id="ding_agent_id"
-                                               key="ding_agent_id"
-                                               value="{{ config.ding_agent_id }}"
-                                               placeholder="AgentId of the Archery app" />
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <label for="ding_app_key"
-                                           class="col-sm-4 control-label">AppKey</label>
-                                    <div class="col-sm-5">
-                                        <input type="text" class="form-control"
-                                               id="ding_app_key"
-                                               key="ding_app_key"
-                                               value="{{ config.ding_app_key }}"
-                                               placeholder="AppKey of the Archery app" />
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <label for="ding_app_secret"
-                                           class="col-sm-4 control-label">AppSecret</label>
-                                    <div class="col-sm-5">
-                                        <input type="password" class="form-control"
-                                               id="ding_app_secret"
-                                               key="ding_app_secret"
-                                               value="{{ config.ding_app_secret }}"
-                                               placeholder="AppSecret of the Archery app" />
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <label for="ding_archery_username"
-                                           class="col-sm-4 control-label">Archery2Ding</label>
-                                    <div class="col-sm-5">
-                                        <input type="text" class="form-control"
-                                               id="ding_archery_username"
-                                               key="ding_archery_username"
-                                               value="{{ config.ding_archery_username }}"
-                                               placeholder="Field in DingTalk mapped from Archery.username" />
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <label for="ding_dept_ids"
-                                           class="col-sm-4 control-label">DingDeptIDs</label>
-                                    <div class="col-sm-5">
-                                        <textarea class="form-control"
-                                                  id="ding_dept_ids"
-                                                  key="ding_dept_ids"
-                                                  placeholder="DingTalk department IDs, comma-separated">{{ config.ding_dept_ids }}</textarea />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="form-group">
                                 <label for="wx"
                                        class="col-sm-4 control-label">WeCom Custom App</label>
                                 <div class="col-sm-8">
@@ -1578,15 +1489,13 @@
         // System settings checkbox events
         $('input[type="checkbox"]').on('switchChange.bootstrapSwitch', function (event, state) {
             let id = $(this).attr("id");
-            if (state) {
-                $(this).val(true);
-                if (id === 'mail') {
-                    $("#div-mail-config").show();
-                } else if (id === 'ding_to_person') {
-                    $("#div-ding-config").show();
-                } else if (id === 'auto_review') {
-                    $("#div-auto-review-config").show();
-                } else if (id === 'wx') {
+                if (state) {
+                    $(this).val(true);
+                    if (id === 'mail') {
+                        $("#div-mail-config").show();
+                    } else if (id === 'auto_review') {
+                        $("#div-auto-review-config").show();
+                    } else if (id === 'wx') {
                     $("#div-wx-config").show();
                 } else if (id === 'feishu') {
                     $("#div-feishu-config").show();
@@ -1598,8 +1507,6 @@
                 if (id === 'mail') {
                     $("#mail_ssl").val(false);
                     $("#div-mail-config").hide();
-                } else if (id === 'ding_to_person') {
-                    $("#div-ding-config").hide();
                 } else if (id === 'auto_review') {
                     $("#div-auto-review-config").hide();
                 } else if (id === 'wx') {
@@ -1614,18 +1521,6 @@
 
         // Save system settings
         $("#saveconfig").click(function () {
-            // When DingTalk direct messages are enabled, required credentials must be filled
-            if ($("#ding_to_person").val() == 'true') {
-                var v1 = $("#ding_agent_id").val();
-                var v2 = $("#ding_app_key").val();
-                var v3 = $("#ding_app_secret").val();
-                var v4 = $("#ding_dept_ids").val();
-                var v5 = $("#ding_archery_username").val();
-                if (v1 == "" || v2 == "" || v3 == "" || v4 == "" | v5 == "") {
-                    alert("When DingTalk direct messages are enabled, corporate ID/secret fields must be provided.");
-                    return;
-                }
-            }
             var sys_config = $("#div-system-config");
             var configs = [];
             sys_config.find('[key]').each(
@@ -1930,44 +1825,6 @@
                 }
             });
         });
-
-        // Sync DingTalk user info
-        $("#sync_ding_user").click(function () {
-            // Validate configuration first
-            var v1 = $("#ding_agent_id").val();
-            var v2 = $("#ding_app_key").val();
-            var v3 = $("#ding_app_secret").val();
-            var v4 = $("#ding_dept_ids").val();
-            var v5 = $("#ding_archery_username").val();
-            if (v1 == "" || v2 == "" || v3 == "" || v4 == "" | v5 == "") {
-                alert("Please save the related configuration first.");
-                return;
-            }
-            $(this).addClass('disabled');
-            $(this).prop('disabled', true);
-            $.ajax({
-                type: "post",
-                url: "/4admin/sync_ding_user/",
-                dataType: "json",
-                data: {},
-                complete: function () {
-                    $("#sync_ding_user").removeClass('disabled');
-                    $("#sync_ding_user").prop('disabled', false);
-                },
-                success: function (data) {
-                    if (data.status === 0) {
-                        alert('Scheduled sync task has been added and triggered. Click OK to view task status.');
-                        window.open('/admin/django_q/schedule/?q=sync_ding_user_id')
-                    } else {
-                        alert(data.msg);
-                    }
-                },
-                error: function (XMLHttpRequest, textStatus, errorThrown) {
-                    alert(errorThrown);
-                }
-            });
-        });
-
 
         // Switch SMS provider
         $("#sms_provider").change(function () {

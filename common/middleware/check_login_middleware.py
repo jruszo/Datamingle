@@ -12,8 +12,6 @@ IGNORE_URL = [
     "/oidc/callback/",
     "/oidc/authenticate/",
     "/oidc/logout/",
-    "/dingding/callback/",
-    "/dingding/authenticate/",
     "/cas/authenticate/",
 ]
 

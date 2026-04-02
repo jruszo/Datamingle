@@ -5,11 +5,10 @@ from typing import Optional
 
 from django.db import models
 from django.contrib.auth.models import AbstractUser
-from mirage import fields
 from django.utils.translation import gettext as _
 from django.conf import settings
-from mirage.crypto import Crypto
 
+from common.fields import EncryptedCharField, EncryptedTextField
 from common.utils.const import WorkflowStatus, WorkflowType, WorkflowAction
 
 logger = logging.getLogger("default")
@@ -38,7 +37,6 @@ class ResourceGroup(models.Model):
     group_parent_id = models.BigIntegerField("Parent ID", default=0)
     group_sort = models.IntegerField("Sort Order", default=1)
     group_level = models.IntegerField("Level", default=1)
-    ding_webhook = models.CharField("DingTalk webhook URL", max_length=255, blank=True)
     feishu_webhook = models.CharField("Feishu webhook URL", max_length=255, blank=True)
     qywx_webhook = models.CharField("WeCom webhook URL", max_length=255, blank=True)
     is_deleted = models.IntegerField(
@@ -63,7 +61,6 @@ class Users(AbstractUser):
     """
 
     display = models.CharField("Display Name", max_length=50, default="")
-    ding_user_id = models.CharField("DingTalk User ID", max_length=64, blank=True)
     wx_user_id = models.CharField("WeCom User ID", max_length=64, blank=True)
     feishu_open_id = models.CharField("Feishu Open ID", max_length=64, blank=True)
     failed_login_count = models.IntegerField("Failed Login Count", default=0)
@@ -101,14 +98,13 @@ class TwoFactorAuthConfig(models.Model):
         ("sms", "SMS Verification Code"),
     )
 
-    username = fields.EncryptedCharField(verbose_name="Username", max_length=200)
-    auth_type = fields.EncryptedCharField(
+    auth_type = models.CharField(
         verbose_name="Authentication Type", max_length=128, choices=auth_type_choice
     )
-    phone = fields.EncryptedCharField(
+    phone = EncryptedCharField(
         verbose_name="Phone Number", max_length=64, null=True, default=""
     )
-    secret_key = fields.EncryptedCharField(
+    secret_key = EncryptedCharField(
         verbose_name="User Secret", max_length=256, null=True
     )
     user = models.ForeignKey(Users, on_delete=models.CASCADE)
@@ -166,17 +162,17 @@ class Tunnel(models.Model):
     tunnel_name = models.CharField("Tunnel Name", max_length=50, unique=True)
     host = models.CharField("Tunnel Host", max_length=200)
     port = models.IntegerField("Port", default=0)
-    user = fields.EncryptedCharField(
+    user = EncryptedCharField(
         verbose_name="Username", max_length=200, default="", blank=True, null=True
     )
-    password = fields.EncryptedCharField(
+    password = EncryptedCharField(
         verbose_name="Password", max_length=300, default="", blank=True, null=True
     )
-    pkey = fields.EncryptedTextField(verbose_name="Private Key", blank=True, null=True)
+    pkey = EncryptedTextField(verbose_name="Private Key", blank=True, null=True)
     pkey_path = models.FileField(
         verbose_name="Key File Path", blank=True, null=True, upload_to="keys/"
     )
-    pkey_password = fields.EncryptedCharField(
+    pkey_password = EncryptedCharField(
         verbose_name="Key Passphrase", max_length=300, default="", blank=True, null=True
     )
     create_time = models.DateTimeField("Created Time", auto_now_add=True)
@@ -219,10 +215,10 @@ class Instance(models.Model, PasswordMixin):
     )
     host = models.CharField("Instance Host", max_length=200)
     port = models.IntegerField("Port", default=0)
-    user = fields.EncryptedCharField(
+    user = EncryptedCharField(
         verbose_name="Username", max_length=200, default="", blank=True
     )
-    password = fields.EncryptedCharField(
+    password = EncryptedCharField(
         verbose_name="Password", max_length=300, default="", blank=True
     )
     is_ssl = models.BooleanField("Enable SSL", default=False)
@@ -862,14 +858,14 @@ class InstanceAccount(models.Model):
     """
 
     instance = models.ForeignKey(Instance, on_delete=models.CASCADE)
-    user = fields.EncryptedCharField(verbose_name="Account", max_length=128)
+    user = models.CharField(verbose_name="Account", max_length=128)
     host = models.CharField(
         verbose_name="Host", max_length=64
     )  # MySQL stores host info here.
     db_name = models.CharField(
         verbose_name="Database Name", max_length=128
     )  # MongoDB stores database name here.
-    password = fields.EncryptedCharField(
+    password = EncryptedCharField(
         verbose_name="Password", max_length=128, default="", blank=True
     )
     remark = models.CharField("Remark", max_length=255)
@@ -1054,7 +1050,7 @@ class Config(models.Model):
     """
 
     item = models.CharField("Config Item", max_length=100, unique=True)
-    value = fields.EncryptedCharField(verbose_name="Config Value", max_length=500)
+    value = EncryptedCharField(verbose_name="Config Value", max_length=500)
     description = models.CharField(
         "Description", max_length=200, default="", blank=True
     )
@@ -1071,28 +1067,19 @@ class CloudAccessKey(models.Model):
     cloud_type_choices = (("aliyun", "aliyun"),)
 
     type = models.CharField(max_length=20, default="", choices=cloud_type_choices)
-    key_id = models.CharField(max_length=200)
-    key_secret = models.CharField(max_length=200)
+    key_id = EncryptedCharField(max_length=200)
+    key_secret = EncryptedCharField(max_length=200)
     remark = models.CharField(max_length=50, default="", blank=True)
-
-    def __init__(self, *args, **kwargs):
-        self.c = Crypto()
-        super().__init__(*args, **kwargs)
 
     @property
     def raw_key_id(self):
         """Return key ID in plaintext."""
-        return self.c.decrypt(self.key_id)
+        return self.key_id
 
     @property
     def raw_key_secret(self):
         """Return key secret in plaintext."""
-        return self.c.decrypt(self.key_secret)
-
-    def save(self, *args, **kwargs):
-        self.key_id = self.c.encrypt(self.key_id)
-        self.key_secret = self.c.encrypt(self.key_secret)
-        super(CloudAccessKey, self).save(*args, **kwargs)
+        return self.key_secret
 
     def __str__(self):
         return f"{self.type}({self.remark})"

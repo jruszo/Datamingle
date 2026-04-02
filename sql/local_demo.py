@@ -291,7 +291,6 @@ def _seed_resource_groups(log):
                 "group_sort": index,
                 "group_level": 1,
                 "is_deleted": 0,
-                "ding_webhook": "",
                 "feishu_webhook": "",
                 "qywx_webhook": "",
             },

@@ -21,11 +21,7 @@
         <h3 class="text-center">Login To Archery{{ custom_title_suffix }}</h3>
         <form class="login-form fade-in-effect" id="login" method="post" role="form">
             {% csrf_token %}
-            {% if dingding_enabled %}
-                <div class="form-group">
-                    <a class="btn btn-primary btn-block" role="button" href="/dingding/authenticate/">Log in with DingTalk</a>
-                </div>
-            {% elif oidc_enabled %}
+            {% if oidc_enabled %}
                 <div class="form-group">
                     <a class="btn btn-primary btn-block" role="button" href="/oidc/authenticate/">{{ oidc_btn_name }}</a>
                 </div>
@@ -34,7 +30,7 @@
                 <a class="btn btn-primary btn-block" role="button" href="/cas/authenticate/">Log in with CAS</a>
             </div>
             {% endif %}
-            {% if dingding_enabled or oidc_enabled %}
+            {% if oidc_enabled %}
                 <a data-toggle="collapse" href="#collapseExample" aria-expanded="false" aria-controls="collapseExample">
                   Show legacy login
                 </a>

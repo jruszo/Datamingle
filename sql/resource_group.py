@@ -28,9 +28,7 @@ def group(request):
     # Filter search conditions.
     group_obj = ResourceGroup.objects.filter(group_name__icontains=search, is_deleted=0)
     group_count = group_obj.count()
-    group_list = group_obj[offset:limit].values(
-        "group_id", "group_name", "ding_webhook"
-    )
+    group_list = group_obj[offset:limit].values("group_id", "group_name")
 
     # Serialize QuerySet.
     rows = [row for row in group_list]

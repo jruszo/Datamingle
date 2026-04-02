@@ -62,7 +62,9 @@ class SMS(TwoFactorAuthBase):
         if phone:
             phone = phone
         else:
-            phone = TwoFactorAuthConfig.objects.get(username=self.user.username).phone
+            phone = TwoFactorAuthConfig.objects.get(
+                user=self.user, auth_type=self.auth_type
+            ).phone
 
         r = get_redis_connection("default")
         data = r.get(f"captcha-{phone}")
@@ -86,7 +88,6 @@ class SMS(TwoFactorAuthBase):
                 self.disable(self.auth_type)
                 # Create new 2FA config
                 TwoFactorAuthConfig.objects.create(
-                    username=self.user.username,
                     auth_type=self.auth_type,
                     phone=phone,
                     user=self.user,

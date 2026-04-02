@@ -25,7 +25,7 @@ class TOTP(TwoFactorAuthBase):
             secret_key = key
         else:
             secret_key = TwoFactorAuthConfig.objects.get(
-                username=self.user.username, auth_type=self.auth_type
+                user=self.user, auth_type=self.auth_type
             ).secret_key
         t = pyotp.TOTP(secret_key)
         status = t.verify(otp)
@@ -53,7 +53,6 @@ class TOTP(TwoFactorAuthBase):
                 self.disable(self.auth_type)
                 # Create new 2FA config
                 TwoFactorAuthConfig.objects.create(
-                    username=self.user.username,
                     auth_type=self.auth_type,
                     secret_key=secret_key,
                     user=self.user,

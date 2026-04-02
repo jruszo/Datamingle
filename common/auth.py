@@ -11,9 +11,7 @@ from django.contrib.auth.models import Group
 from django.http import HttpResponse, HttpResponseRedirect
 from django.urls import reverse
 
-from django.conf import settings
 from common.config import SysConfig
-from common.utils.ding_api import get_ding_user_id
 from sql.models import Users, ResourceGroup, TwoFactorAuthConfig
 
 logger = logging.getLogger("default")
@@ -162,11 +160,6 @@ def authenticate_entry(request):
             else:
                 # No 2FA configured; log in directly
                 login(request, authenticated_user)
-                # Fetch DingTalk user ID for direct notifications
-                if SysConfig().get(
-                    "ding_to_person"
-                ) is True and "admin" not in request.POST.get("username"):
-                    get_ding_user_id(request.POST.get("username"))
                 result = {"status": 0, "msg": "ok", "data": None}
 
     return HttpResponse(json.dumps(result), content_type="application/json")
@@ -221,11 +214,5 @@ def sign_up(request):
 
 # Sign out
 def sign_out(request):
-    user = request.user
     logout(request)
-    # If DingTalk auth is enabled, redirect to DingTalk logout page
-    if user.ding_user_id and settings.ENABLE_DINGDING:
-        return HttpResponseRedirect(
-            redirect_to="https://login.dingtalk.com/oauth2/logout"
-        )
     return HttpResponseRedirect(reverse("sql:login"))

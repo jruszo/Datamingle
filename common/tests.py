@@ -164,31 +164,6 @@ class SendMessageTest(TestCase):
         archer_config.set("mail_ssl", "")
 
 
-class DingTest(TestCase):
-    def setUp(self):
-        self.url = "some_url"
-        self.content = "some_content"
-
-    @patch("requests.post")
-    def testDing(self, post):
-        sender = MsgSender()
-        post.return_value.json.return_value = {"errcode": 0}
-        with self.assertLogs("default", level="DEBUG") as lg:
-            sender.send_ding(self.url, self.content)
-            post.assert_called_once_with(
-                url=self.url,
-                json={"msgtype": "text", "text": {"content": self.content}},
-            )
-            self.assertIn("DingTalk webhook sent successfully", lg.output[0])
-        post.return_value.json.return_value = {"errcode": 1, "errmsg": "test_error"}
-        with self.assertLogs("default", level="ERROR") as lg:
-            sender.send_ding(self.url, self.content)
-            self.assertIn("test_error", lg.output[0])
-
-    def tearDown(self):
-        pass
-
-
 class GlobalInfoTest(TestCase):
     def setUp(self):
         self.u1 = User(username="test_user", display="Chinese display", is_active=True)

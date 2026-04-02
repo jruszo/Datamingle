@@ -663,7 +663,6 @@ class TestTokenAuth2FA(CacheIsolatedAPITestCase):
     def test_token_requires_2fa_when_user_has_totp(self):
         secret = pyotp.random_base32(32)
         TwoFactorAuthConfig.objects.create(
-            username=self.user.username,
             auth_type="totp",
             secret_key=secret,
             user=self.user,
@@ -680,7 +679,6 @@ class TestTokenAuth2FA(CacheIsolatedAPITestCase):
     def test_token_totp_success(self):
         secret = pyotp.random_base32(32)
         TwoFactorAuthConfig.objects.create(
-            username=self.user.username,
             auth_type="totp",
             secret_key=secret,
             user=self.user,
@@ -784,7 +782,6 @@ class TestTokenAuth2FA(CacheIsolatedAPITestCase):
         self, mock_get_authenticator, mock_get_redis
     ):
         TwoFactorAuthConfig.objects.create(
-            username=self.user.username,
             auth_type="sms",
             phone="13800138000",
             user=self.user,

@@ -14,11 +14,8 @@ from django_q.models import Success, Failure
 from django_q.brokers import get_broker
 from django.utils import timezone
 
-from common.utils.aes_decryptor import Prpcrypt
 from common.utils.permission import superuser_required
 import archery
-from sql.models import Instance
-from mirage.tools import Migrator
 
 
 def info(request):
@@ -177,7 +174,6 @@ def debug(request):
     # Mask sensitive information.
     secret_keys = [
         "inception_remote_backup_password",
-        "ding_app_secret",
         "feishu_app_secret",
         "mail_smtp_password",
         "go_inception_password",
@@ -206,27 +202,3 @@ def debug(request):
         "packages": installed_packages_list,
     }
     return JsonResponse(system_info)
-
-
-@superuser_required
-def mirage(request):
-    """Migrate encrypted Instance data. Remove after enough versions."""
-    try:
-        pc = Prpcrypt()
-        mg_user = Migrator(app="sql", model="Instance", field="user")
-        mg_password = Migrator(app="sql", model="Instance", field="password")
-        # Restore password first.
-        for ins in Instance.objects.all():
-            # Ignore records that cannot be decrypted (already invalid data).
-            try:
-                Instance(pk=ins.pk, password=pc.decrypt(ins.password)).save(
-                    update_fields=["password"]
-                )
-            except:
-                pass
-        # Re-encrypt with django-mirage-field.
-        mg_user.encrypt()
-        mg_password.encrypt()
-        return JsonResponse({"msg": "ok"})
-    except Exception as msg:
-        return JsonResponse({"msg": f"{msg}"})

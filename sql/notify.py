@@ -379,38 +379,6 @@ Workflow Preview: {preview}"""
             self.render_m2sql()
 
 
-class DingdingWebhookNotifier(LegacyRender):
-    name = "dingding_webhook"
-    sys_config_key: str = "ding"
-
-    def send(self):
-        dingding_webhook = ResourceGroup.objects.get(
-            group_id=self.audit.group_id
-        ).ding_webhook
-        if not dingding_webhook:
-            return
-        msg_sender = MsgSender()
-        for m in self.messages:
-            msg_sender.send_ding(dingding_webhook, f"{m.msg_title}\n{m.msg_content}")
-
-
-class DingdingPersonNotifier(LegacyRender):
-    name = "ding_to_person"
-    sys_config_key: str = "ding_to_person"
-
-    def send(self):
-        msg_sender = MsgSender()
-        for m in self.messages:
-            ding_user_id_list = [
-                user.ding_user_id
-                for user in chain(m.msg_to, m.msg_cc)
-                if user.ding_user_id
-            ]
-            msg_sender.send_ding2user(
-                ding_user_id_list, f"{m.msg_title}\n{m.msg_content}"
-            )
-
-
 class FeishuWebhookNotifier(LegacyRender):
     name = "feishu_webhook"
     sys_config_key: str = "feishu_webhook"

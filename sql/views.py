@@ -64,7 +64,6 @@ def login(request):
         context={
             "sign_up_enabled": SysConfig().get("sign_up_enabled"),
             "oidc_enabled": settings.ENABLE_OIDC,
-            "dingding_enabled": settings.ENABLE_DINGDING,
             "cas_enabled": settings.ENABLE_CAS,
             "oidc_btn_name": SysConfig().get("oidc_btn_name", "Log in with OIDC"),
         },
@@ -79,7 +78,7 @@ def twofa(request):
     username = request.session.get("user")
     if username:
         verify_mode = request.session.get("verify_mode")
-        twofa_enabled = TwoFactorAuthConfig.objects.filter(username=username)
+        twofa_enabled = TwoFactorAuthConfig.objects.filter(user__username=username)
         user_auth_types = [twofa.auth_type for twofa in twofa_enabled]
 
         auth_types = []
@@ -93,7 +92,7 @@ def twofa(request):
             auth_types.append(auth_type)
         if "sms" in user_auth_types:
             phone = TwoFactorAuthConfig.objects.get(
-                username=username, auth_type="sms"
+                user__username=username, auth_type="sms"
             ).phone
         else:
             phone = 0

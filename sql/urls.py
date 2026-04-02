@@ -26,7 +26,6 @@ from sql import (
     offlinedownload,
 )
 from sql.utils import tasks
-from common.utils import ding_api
 
 urlpatterns = [
     path("", views.index),
@@ -163,7 +162,6 @@ urlpatterns = [
     path("archive/switch/", archiver.archive_switch),
     path("archive/once/", archiver.archive_once),
     path("archive/log/", archiver.archive_log),
-    path("4admin/sync_ding_user/", ding_api.sync_ding_user),
     path("audit/log/", audit_log.audit_log),
     path("audit/input/", audit_log.audit_input),
     path("user/list/", user.lists),
