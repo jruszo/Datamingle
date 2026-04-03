@@ -6,7 +6,6 @@ from datetime import datetime, date
 import tempfile
 import os
 import shutil
-import zipfile
 import simplejson as json
 import pandas as pd
 import csv
@@ -169,7 +168,7 @@ class TestOfflineDownload(TestCase):
         mock_engine.query.return_value = mock_result_set
         mock_get_engine.return_value = mock_engine
 
-        mock_save_format.return_value = "test_file.zip"
+        mock_save_format.return_value = "test_file.csv"
 
         mock_storage_instance = MagicMock()
         mock_storage.return_value = mock_storage_instance
@@ -185,11 +184,11 @@ class TestOfflineDownload(TestCase):
         # Verify result.
         self.assertEqual(result.error, None)
         self.assertEqual(result.rows[0].stagestatus, "Execution succeeded")
-        self.assertIn("test_file.zip", result.rows[0].errormessage)
+        self.assertIn("test_file.csv", result.rows[0].errormessage)
 
         # Verify workflow update.
         updated_workflow = SqlWorkflow.objects.get(id=self.workflow.id)
-        self.assertEqual(updated_workflow.file_name, "test_file.zip")
+        self.assertEqual(updated_workflow.file_name, "test_file.csv")
 
     @patch("sql.offlinedownload.get_engine")
     @patch("sql.offlinedownload.DynamicStorage")
@@ -478,13 +477,14 @@ class TestOfflineDownload(TestCase):
         csv_file_name = save_to_format_file(
             "csv", result, self.workflow, columns, temp_dir
         )
-        self.assertTrue(csv_file_name.endswith(".zip"))
-        # Verify ZIP contains CSV.
-        zip_file_path = os.path.join(temp_dir, csv_file_name)
-        with zipfile.ZipFile(zip_file_path, "r") as zipf:
-            file_list = zipf.namelist()
-            self.assertEqual(len(file_list), 1)
-            self.assertTrue(file_list[0].endswith(".csv"))
+        self.assertTrue(csv_file_name.endswith(".csv"))
+        self.assertTrue(os.path.exists(os.path.join(temp_dir, csv_file_name)))
+
+        tsv_file_name = save_to_format_file(
+            "tsv", result, self.workflow, columns, temp_dir
+        )
+        self.assertTrue(tsv_file_name.endswith(".tsv"))
+        self.assertTrue(os.path.exists(os.path.join(temp_dir, tsv_file_name)))
 
         # Cleanup.
         shutil.rmtree(temp_dir)

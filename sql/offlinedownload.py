@@ -7,7 +7,6 @@ import hashlib
 import shutil
 import datetime
 import xml.etree.ElementTree as ET
-import zipfile
 import sqlparse
 import time
 
@@ -24,6 +23,7 @@ from sql.engines import get_engine
 from common.config import SysConfig
 
 logger = logging.getLogger("default")
+EXPORT_FORMATS = {"csv", "tsv", "sql", "xlsx", "json", "xml"}
 
 
 class OffLineDownLoad(EngineBase):
@@ -71,7 +71,7 @@ class OffLineDownLoad(EngineBase):
                     result = results.rows
                     actual_rows = results.affected_rows
 
-                # Save query result into CSV/JSON/XML/XLSX/SQL file.
+                # Save query result into the requested export artifact.
                 get_format_type = workflow.export_format
                 file_name = save_to_format_file(
                     get_format_type, result, workflow, columns, temp_dir
@@ -186,6 +186,7 @@ class OffLineDownLoad(EngineBase):
                 execute_time=0,
             )
         check_result.rows = [result]
+        check_result.affected_rows = actual_rows_check
         # Count warnings and errors.
         for r in check_result.rows:
             if r.errlevel == 1:
@@ -216,6 +217,8 @@ def save_to_format_file(
     # Write query result into target format file.
     if format_type == "csv":
         save_csv(file_path, result, columns)
+    elif format_type == "tsv":
+        save_tsv(file_path, result, columns)
     elif format_type == "json":
         save_json(file_path, result, columns)
     elif format_type == "xml":
@@ -227,11 +230,19 @@ def save_to_format_file(
     else:
         raise ValueError(f"Unsupported format type: {format_type}")
 
-    zip_file_name = f"{base_name}.zip"
-    zip_file_path = os.path.join(temp_dir, zip_file_name)
-    with zipfile.ZipFile(zip_file_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        zipf.write(file_path, os.path.basename(file_path))
-    return zip_file_name
+    return file_name
+
+
+def save_delimited(file_path, result, columns, delimiter):
+    with open(file_path, "w", newline="", encoding="utf-8") as csv_file:
+        csv_writer = csv.writer(csv_file, quoting=csv.QUOTE_ALL, delimiter=delimiter)
+
+        if columns:
+            csv_writer.writerow(columns)
+
+        for row in result:
+            csv_row = ["null" if value is None else value for value in row]
+            csv_writer.writerow(csv_row)
 
 
 def save_csv(file_path, result, columns):
@@ -241,15 +252,17 @@ def save_csv(file_path, result, columns):
     :param result: Query result
     :param columns: Column names
     """
-    with open(file_path, "w", newline="", encoding="utf-8") as csv_file:
-        csv_writer = csv.writer(csv_file, quoting=csv.QUOTE_ALL)
+    save_delimited(file_path, result, columns, ",")
 
-        if columns:
-            csv_writer.writerow(columns)
 
-        for row in result:
-            csv_row = ["null" if value is None else value for value in row]
-            csv_writer.writerow(csv_row)
+def save_tsv(file_path, result, columns):
+    """
+    Save TSV file from query result.
+    :param file_path: TSV file path
+    :param result: Query result
+    :param columns: Column names
+    """
+    save_delimited(file_path, result, columns, "\t")
 
 
 def save_json(file_path, result, columns):
@@ -369,15 +382,15 @@ class StorageFileResponse(FileResponse):
             self.storage.close()
 
 
-def offline_file_download(request):
+def download_export_file(request, file_name, workflow_id):
     """
     Download file:
     local/SFTP returns file stream, cloud object storage returns redirect URL.
     :param request:
+    :param file_name:
+    :param workflow_id:
     :return:
     """
-    file_name = request.GET.get("file_name", " ")
-    workflow_id = request.GET.get("workflow_id", " ")
     action = "Offline download"
     extra_info = f"Workflow ID: {workflow_id}, file: {file_name}"
     config = SysConfig()
@@ -438,3 +451,12 @@ def offline_file_download(request):
                 action=action,
                 extra_info=extra_info,
             )
+
+
+def offline_file_download(request):
+    """
+    Legacy download endpoint wrapper.
+    """
+    file_name = request.GET.get("file_name", " ")
+    workflow_id = request.GET.get("workflow_id", " ")
+    return download_export_file(request, file_name, workflow_id)

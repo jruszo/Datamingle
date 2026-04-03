@@ -18,6 +18,7 @@ from common.config import SysConfig
 from common.utils.const import Const, WorkflowStatus, WorkflowType, WorkflowAction
 from sql.engines import get_engine
 from sql.engines.models import ReviewResult, ReviewSet
+from sql.offlinedownload import OffLineDownLoad, download_export_file
 from sql.models import (
     Instance,
     ResourceGroup,
@@ -30,6 +31,7 @@ from sql.notify import notify_for_audit, notify_for_execute
 from sql.query_privileges import _query_apply_audit_call_back
 from sql.utils.resource_group import (
     DDL_ACCESS_LEVELS,
+    READ_ACCESS_LEVELS,
     WRITE_ACCESS_LEVELS,
     active_instance_grants,
     user_groups,
@@ -37,6 +39,7 @@ from sql.utils.resource_group import (
     user_member_groups,
     user_has_group_instance_access,
     user_has_instance_workflow_access,
+    temp_instance_access_level,
 )
 from sql.utils.sql_utils import generate_sql, get_syntax_type
 from sql.utils.sql_review import (
@@ -114,6 +117,10 @@ class WorkflowSummarySerializer(serializers.ModelSerializer):
     syntax_type_label = serializers.CharField(
         source="get_syntax_type_display", read_only=True
     )
+    download_available = serializers.SerializerMethodField()
+
+    def get_download_available(self, obj):
+        return _workflow_download_available(obj)
 
     class Meta:
         model = SqlWorkflow
@@ -129,6 +136,10 @@ class WorkflowSummarySerializer(serializers.ModelSerializer):
             "db_name",
             "syntax_type",
             "syntax_type_label",
+            "is_offline_export",
+            "export_format",
+            "file_name",
+            "download_available",
             "status",
             "status_label",
             "is_backup",
@@ -309,6 +320,14 @@ def _serialize_current_reviewers(workflow):
     return reviewers
 
 
+def _workflow_download_available(workflow):
+    return bool(
+        workflow.is_offline_export
+        and workflow.status == "workflow_finish"
+        and workflow.file_name
+    )
+
+
 def _serialize_workflow_detail(workflow, user):
     if not can_view(user, workflow.id):
         raise PermissionDenied("You do not have permission to view this workflow.")
@@ -375,6 +394,7 @@ def _serialize_workflow_detail(workflow, user):
             "is_can_manual_execute": can_execute_now and manual_enabled,
             "is_can_edit_execution_window": can_review_now,
             "manual_execution_enabled": manual_enabled,
+            "download_available": _workflow_download_available(workflow),
         }
     )
     return payload
@@ -385,11 +405,18 @@ def _can_access_workflow_module(user):
         [
             user.is_superuser,
             user.has_perm("sql.menu_sqlworkflow"),
+            user.has_perm("sql.menu_sqlexportworkflow"),
             user.has_perm("sql.sql_submit"),
+            user.has_perm("sql.sqlexport_submit"),
+            user.has_perm("sql.offline_download"),
             user.has_perm("sql.audit_user"),
             user_instances(user, tag_codes=["can_write"]).exists(),
         ]
     )
+
+
+def _can_submit_export_workflow(user):
+    return user.is_superuser or user.has_perm("sql.sqlexport_submit")
 
 
 def _pending_review_workflow_ids(user):
@@ -540,6 +567,83 @@ def _workflow_submission_scope(user):
     }
 
 
+def _export_submission_scope(user):
+    instances = (
+        user_instances(user, tag_codes=["can_read"])
+        .prefetch_related("resource_group")
+        .order_by("instance_name", "id")
+    )
+    direct_group_ids = (
+        {group.group_id for group in user_groups(user) if group.is_deleted == 0}
+        if _can_submit_export_workflow(user)
+        else set()
+    )
+    temporary_groups_by_instance = {}
+
+    for grant in (
+        active_instance_grants(user)
+        .filter(access_level__in=READ_ACCESS_LEVELS, resource_group__is_deleted=0)
+        .select_related("resource_group")
+    ):
+        groups = temporary_groups_by_instance.setdefault(grant.instance_id, {})
+        groups[grant.resource_group_id] = grant.resource_group
+
+    resource_groups = {}
+    instance_payload = []
+    for instance in instances:
+        allowed_groups = {}
+
+        if _can_submit_export_workflow(user) and user_has_group_instance_access(
+            user, instance, tag_codes=["can_read"]
+        ):
+            direct_groups = {
+                group_id: group_name
+                for group_id, group_name in instance.resource_group.filter(
+                    is_deleted=0, group_id__in=direct_group_ids
+                ).values_list("group_id", "group_name")
+            }
+            allowed_groups.update(direct_groups)
+
+        for group_id, group in temporary_groups_by_instance.get(
+            instance.id, {}
+        ).items():
+            allowed_groups[group_id] = group.group_name
+
+        if not allowed_groups:
+            continue
+
+        sorted_groups = sorted(
+            allowed_groups.items(), key=lambda item: (item[1], item[0])
+        )
+        for group_id, group_name in sorted_groups:
+            resource_groups[group_id] = group_name
+        instance_payload.append(
+            {
+                "id": instance.id,
+                "instance_name": instance.instance_name,
+                "db_type": instance.db_type,
+                "type": instance.type,
+                "group_ids": [group_id for group_id, _ in sorted_groups],
+                "group_names": [group_name for _, group_name in sorted_groups],
+                "allowed_syntax_types": [3],
+            }
+        )
+
+    return {
+        "resource_groups": [
+            {
+                "group_id": group_id,
+                "group_name": group_name,
+                "label": group_name,
+            }
+            for group_id, group_name in sorted(
+                resource_groups.items(), key=lambda item: (item[1], item[0])
+            )
+        ],
+        "instances": instance_payload,
+    }
+
+
 def _scheduled_run_date(workflow):
     if workflow.status != "workflow_timingtask":
         return None
@@ -630,6 +734,44 @@ class ExecuteCheck(views.APIView):
         return success_response(data=serializer_obj.data)
 
 
+class WorkflowExportCheck(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary="Export SQL Check",
+        request=ExecuteCheckSerializer,
+        responses={200: ExecuteCheckResultSerializer},
+        description="Validate export SQL, count result rows, and enforce export thresholds.",
+    )
+    def post(self, request):
+        if not _can_submit_export_workflow(request.user):
+            raise PermissionDenied(
+                "You do not have permission to submit export workflows."
+            )
+
+        serializer = ExecuteCheckSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        instance = serializer.get_instance()
+        if (
+            not user_has_group_instance_access(
+                request.user, instance, tag_codes=["can_read"]
+            )
+            and temp_instance_access_level(request.user, instance)
+            not in READ_ACCESS_LEVELS
+        ):
+            raise PermissionDenied(
+                "You do not have permission to submit export workflows for this instance."
+            )
+
+        export_probe = instance
+        export_probe.sql_content = serializer.validated_data["full_sql"].strip()
+        export_probe.db_name = serializer.validated_data["db_name"]
+        check_result = OffLineDownLoad().pre_count_check(workflow=export_probe)
+        check_result.rows = check_result.to_dict()
+        serializer_obj = ExecuteCheckResultSerializer(check_result)
+        return success_response(data=serializer_obj.data)
+
+
 class WorkflowParse(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -706,8 +848,10 @@ class WorkflowList(generics.ListAPIView):
 
         if user.is_superuser or user.has_perm("sql.audit_user"):
             pass
-        elif user.has_perm("sql.sql_review") or user.has_perm(
-            "sql.sql_execute_for_resource_group"
+        elif (
+            user.has_perm("sql.sql_review")
+            or user.has_perm("sql.sql_execute_for_resource_group")
+            or user.has_perm("sql.menu_sqlexportworkflow")
         ):
             queryset = queryset.filter(
                 group_id__in=[group.group_id for group in user_groups(user)]
@@ -859,6 +1003,31 @@ class WorkflowSubmissionMetadata(views.APIView):
         )
 
 
+class WorkflowExportSubmissionMetadata(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary="Workflow Export Submission Metadata",
+        responses={200: OpenApiTypes.OBJECT},
+        description="Return resource groups and readable instances available for export workflow submission.",
+    )
+    def get(self, request):
+        if not _can_submit_export_workflow(request.user):
+            raise PermissionDenied(
+                "You do not have permission to submit export workflows."
+            )
+
+        submission_scope = _export_submission_scope(request.user)
+        return success_response(
+            data={
+                "resource_groups": submission_scope["resource_groups"],
+                "instances": submission_scope["instances"],
+                "enable_backup_switch": False,
+                "manual_execution_enabled": bool(SysConfig().get("manual")),
+            }
+        )
+
+
 class WorkflowApprovalPreview(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -895,6 +1064,9 @@ class WorkflowApprovalPreview(views.APIView):
         allowed_group_ids = {
             group["group_id"]
             for group in _workflow_submission_scope(request.user)["resource_groups"]
+        } | {
+            group["group_id"]
+            for group in _export_submission_scope(request.user)["resource_groups"]
         }
         if not request.user.is_superuser and group_id not in allowed_group_ids:
             raise PermissionDenied("You do not have access to this resource group.")
@@ -975,6 +1147,35 @@ class WorkflowContentDetail(views.APIView):
         if not can_view(request.user, workflow_id):
             raise PermissionDenied("You do not have permission to view this workflow.")
         return success_response(data=_load_workflow_result_rows(workflow))
+
+
+class WorkflowDownload(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        summary="Workflow Export Download",
+        responses={200: OpenApiTypes.BINARY},
+        description="Download a finished export workflow artifact or return a storage redirect URL.",
+    )
+    def get(self, request, workflow_id):
+        workflow = get_object_or_404(SqlWorkflow, pk=workflow_id)
+        if not can_view(request.user, workflow_id):
+            raise PermissionDenied("You do not have permission to view this workflow.")
+        if not (
+            request.user.is_superuser or request.user.has_perm("sql.offline_download")
+        ):
+            raise PermissionDenied(
+                "You do not have permission to download export files."
+            )
+        if not workflow.is_offline_export:
+            raise serializers.ValidationError(
+                {"errors": "This workflow does not have an export artifact."}
+            )
+        if workflow.status != "workflow_finish" or not workflow.file_name:
+            raise serializers.ValidationError(
+                {"errors": "The export artifact is not available yet."}
+            )
+        return download_export_file(request, workflow.file_name, workflow.id)
 
 
 class WorkflowRollbackDetail(views.APIView):

@@ -844,6 +844,10 @@ export type WorkflowSummaryRecord = {
   db_name: string
   syntax_type: WorkflowSyntaxType
   syntax_type_label: string
+  is_offline_export: boolean | number
+  export_format: string | null
+  file_name: string | null
+  download_available: boolean
   status: string
   status_label: string
   is_backup: boolean
@@ -1371,12 +1375,24 @@ export type WorkflowCreatePayload = {
     db_name: string
     instance: number
     is_backup?: boolean
-    is_offline_export: 0
+    is_offline_export: 0 | 1
+    export_format?: 'csv' | 'tsv' | 'sql' | 'xlsx'
     run_date_start?: string | null
     run_date_end?: string | null
   }
   sql_content: string
 }
+
+export type WorkflowDownloadResult =
+  | {
+      mode: 'redirect'
+      url: string
+    }
+  | {
+      mode: 'blob'
+      blob: Blob
+      fileName: string
+    }
 
 export type WorkflowCreateResult = {
   id: number
@@ -1464,6 +1480,12 @@ export function fetchWorkflowSubmissionMetadata(token: string) {
   )
 }
 
+export function fetchWorkflowExportSubmissionMetadata(token: string) {
+  return apiGet<unknown>('/v1/workflow/export/submission-metadata/', { token }).then((payload) =>
+    extractData<WorkflowSubmissionMetadata>(payload),
+  )
+}
+
 export function fetchWorkflowApprovalPreview(groupId: number, token: string) {
   return apiGet<unknown>(`/v1/workflow/approval-preview/?group_id=${groupId}`, { token }).then(
     (payload) => extractData<WorkflowApprovalPreview>(payload),
@@ -1484,6 +1506,12 @@ export function checkWorkflowSql(payload: WorkflowCheckRequest, token: string) {
   )
 }
 
+export function checkWorkflowExportSql(payload: WorkflowCheckRequest, token: string) {
+  return apiPost<unknown>('/v1/workflow/export/sqlcheck/', payload, { token }).then(
+    (responsePayload) => extractData<WorkflowCheckResult>(responsePayload),
+  )
+}
+
 export function parseWorkflowSql(payload: WorkflowParseRequest, token: string) {
   return apiPost<unknown>('/v1/workflow/parse/', payload, { token }).then((responsePayload) =>
     extractData<WorkflowParseResult>(responsePayload),
@@ -1500,6 +1528,94 @@ export function fetchWorkflowDetail(workflowId: number, token: string) {
   return apiGet<unknown>(`/v1/workflow/${workflowId}/`, { token }).then((payload) =>
     extractData<WorkflowDetailRecord>(payload),
   )
+}
+
+export async function downloadWorkflowExport(
+  workflowId: number,
+  token: string,
+  options: { skipAuthRetry?: boolean } = {},
+): Promise<WorkflowDownloadResult> {
+  let authorizationToken = ''
+
+  try {
+    authorizationToken = await getUsableAccessToken(token)
+  } catch (error) {
+    if (error instanceof AuthSessionExpiredError) {
+      notifyUnauthorized(error.message)
+      throw new Error(`GET /v1/workflow/${workflowId}/download/ failed (401): ${error.message}`)
+    }
+    throw error
+  }
+
+  const response = await fetch(buildUrl(`/v1/workflow/${workflowId}/download/`), {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${authorizationToken}`,
+    },
+  })
+
+  if (!response.ok) {
+    const body = await response.text()
+    let message = body
+
+    try {
+      message = flattenErrorMessage(JSON.parse(body)) || body
+    } catch {
+      message = body
+    }
+
+    if (response.status === 401 && !options.skipAuthRetry) {
+      try {
+        const refreshedAccessToken = await refreshAccessToken()
+        return downloadWorkflowExport(workflowId, refreshedAccessToken, { skipAuthRetry: true })
+      } catch (error) {
+        if (error instanceof AuthSessionExpiredError) {
+          notifyUnauthorized(error.message)
+          throw new Error(`GET /v1/workflow/${workflowId}/download/ failed (401): ${error.message}`)
+        }
+        throw error
+      }
+    }
+
+    if (response.status === 401) {
+      notifyUnauthorized(message)
+    }
+
+    throw new Error(`GET /v1/workflow/${workflowId}/download/ failed (${response.status}): ${message}`)
+  }
+
+  const contentType = response.headers.get('content-type') || ''
+  if (contentType.includes('application/json')) {
+    const payload = await response.json()
+    const redirectUrl = isRecord(payload) && typeof payload.url === 'string'
+      ? payload.url
+      : isRecord(payload)
+        && isRecord(payload.data)
+        && typeof payload.data.url === 'string'
+          ? payload.data.url
+          : ''
+
+    if (!redirectUrl) {
+      throw new Error('Download response did not include a redirect URL.')
+    }
+
+    return {
+      mode: 'redirect',
+      url: redirectUrl,
+    }
+  }
+
+  const blob = await response.blob()
+  const disposition = response.headers.get('content-disposition') || ''
+  const fileNameMatch = disposition.match(/filename="?([^"]+)"?$/i)
+  const fileName = fileNameMatch?.[1] || `workflow-${workflowId}-export`
+
+  return {
+    mode: 'blob',
+    blob,
+    fileName,
+  }
 }
 
 export function fetchWorkflowContent(workflowId: number, token: string) {

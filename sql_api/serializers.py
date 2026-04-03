@@ -25,6 +25,7 @@ from sql.engines import get_engine
 from sql.utils.workflow_audit import Audit, get_auditor
 from sql.utils.resource_group import (
     user_has_group_instance_access,
+    user_has_instance_query_access,
     user_has_instance_workflow_access,
 )
 from common.utils.const import WorkflowType, WorkflowStatus, Const
@@ -38,6 +39,7 @@ from sql.utils.sql_utils import generate_sql
 
 logger = logging.getLogger("default")
 LOAD_DATA_PATTERN = re.compile(r"^\s*load\s+data\b", re.IGNORECASE)
+EXPORT_FORMAT_CHOICES = {"csv", "tsv", "sql", "xlsx"}
 
 
 class UserManagementGroupSerializer(serializers.ModelSerializer):
@@ -1267,6 +1269,7 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
         actor = self.context["request"].user
         workflow_data = validated_data.pop("workflow")
         instance = workflow_data["instance"]
+        is_offline_export = bool(workflow_data.get("is_offline_export"))
         sql_content = validated_data["sql_content"].strip()
         for row in generate_sql(sql_content):
             if LOAD_DATA_PATTERN.match(row["sql"]):
@@ -1296,32 +1299,52 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
         try:
             check_engine = get_engine(instance=instance)
             sql_export = OffLineDownLoad()
-            if workflow_data["is_offline_export"]:
+            if is_offline_export:
+                export_format = (
+                    (workflow_data.get("export_format") or "").lower().strip()
+                )
+                if export_format not in EXPORT_FORMAT_CHOICES:
+                    raise serializers.ValidationError(
+                        {
+                            "errors": (
+                                "Export format must be one of: csv, tsv, sql, xlsx."
+                            )
+                        }
+                    )
+                workflow_data["export_format"] = export_format
                 instance.sql_content = sql_content
                 instance.db_name = workflow_data["db_name"]
                 check_result = sql_export.pre_count_check(workflow=instance)
             else:
+                workflow_data["export_format"] = None
                 check_result = check_engine.execute_check(
                     db_name=workflow_data["db_name"], sql=sql_content
                 )
+        except serializers.ValidationError:
+            raise
         except Exception as e:
             raise serializers.ValidationError({"errors": str(e)})
 
         has_group_write_access = user_has_group_instance_access(
             actor, instance, tag_codes=["can_write"]
         )
+        has_group_read_access = user_has_group_instance_access(
+            actor, instance, tag_codes=["can_read"]
+        )
         has_temporary_write_access = user_has_instance_workflow_access(
             actor, instance, check_result.syntax_type
         )
-        if workflow_data["is_offline_export"]:
-            if not (
-                actor.is_superuser
-                or (has_group_write_access and actor.has_perm("sql.sql_submit"))
-            ):
+        has_temporary_read_access = user_has_instance_query_access(actor, instance)
+        if is_offline_export:
+            if not (actor.is_superuser or actor.has_perm("sql.sqlexport_submit")):
+                raise serializers.ValidationError(
+                    {"errors": "You do not have permission to submit export workflows."}
+                )
+            if not (has_group_read_access or has_temporary_read_access):
                 raise serializers.ValidationError(
                     {
                         "errors": (
-                            "You do not have permission to submit offline export for this instance."
+                            "You do not have permission to submit export workflows for this instance."
                         )
                     }
                 )
@@ -1342,10 +1365,12 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
         )
         sys_config = SysConfig()
         if not sys_config.get("enable_backup_switch") and check_engine.auto_backup:
-            if workflow_data["is_offline_export"]:
+            if is_offline_export:
                 pass
             else:
                 is_backup = True
+        if is_offline_export:
+            is_backup = False
 
         workflow_data.update(
             status="workflow_manreviewing",

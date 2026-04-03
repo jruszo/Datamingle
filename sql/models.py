@@ -380,6 +380,7 @@ class SqlWorkflow(models.Model, WorkflowAuditMixin):
         max_length=10,
         choices=(
             ("csv", "CSV"),
+            ("tsv", "TSV"),
             ("xlsx", "Excel"),
             ("sql", "SQL"),
             ("json", "JSON"),

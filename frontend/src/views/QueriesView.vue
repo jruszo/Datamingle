@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { format as formatSqlText } from 'sql-formatter'
 import {
   Database,
@@ -12,6 +13,7 @@ import {
   Star,
   Wand2,
   Plus,
+  Send,
   X,
 } from 'lucide-vue-next'
 
@@ -80,6 +82,7 @@ const REDIS_HELP = [
 ]
 
 const authStore = useAuthStore()
+const router = useRouter()
 const editorRef = ref<QueryEditorHandle | null>(null)
 
 const workspaceLoading = ref(false)
@@ -1085,6 +1088,39 @@ async function runQuery(mode: 'query' | 'plan') {
   }
 }
 
+async function openExportRequest() {
+  const selectedSql = selectedQueryText()
+  const instance = selectedInstance.value
+
+  if (!canRequestExports.value) {
+    pushToast('Your account cannot submit export workflows.', 'error')
+    return
+  }
+  if (!instance) {
+    pushToast('Please select an instance first.', 'error')
+    return
+  }
+  if (!form.dbName) {
+    pushToast('Please select a database first.', 'error')
+    return
+  }
+  if (!selectedSql) {
+    pushToast('SQL content cannot be empty.', 'error')
+    return
+  }
+
+  window.sessionStorage.setItem(
+    'exportWorkflowDraft',
+    JSON.stringify({
+      instanceId: instance.id,
+      instanceName: instance.instance_name,
+      dbName: form.dbName,
+      sqlContent: selectedSql,
+    }),
+  )
+  await router.push({ name: 'workflow-export-new' })
+}
+
 async function loadWorkspace() {
   workspaceLoading.value = true
   pageError.value = ''
@@ -1138,6 +1174,7 @@ const canSeeWorkspace = computed(() => {
 
 const canManageHistory = computed(() => hasPermission('sql.menu_sqlquery'))
 const canRunQueries = computed(() => hasPermission('sql.query_submit'))
+const canRequestExports = computed(() => hasPermission('sql.sqlexport_submit'))
 const needsSchemaSelection = computed(() => selectedDbType.value === 'pgsql')
 const canExplain = computed(() => !EXPLAIN_DISABLED.has(selectedDbType.value))
 const canFormat = computed(() => !FORMAT_DISABLED.has(selectedDbType.value))
@@ -1345,6 +1382,15 @@ onBeforeUnmount(() => {
                   <Button :disabled="!canRunQueries || queryRunning" @click="void runQuery('query')">
                     <Play class="h-4 w-4" />
                     {{ queryRunning ? 'Running...' : 'Run Query' }}
+                  </Button>
+                  <Button
+                    v-if="canRequestExports"
+                    variant="outline"
+                    :disabled="queryRunning"
+                    @click="void openExportRequest()"
+                  >
+                    <Send class="h-4 w-4" />
+                    Request Export
                   </Button>
                 </div>
               </div>
