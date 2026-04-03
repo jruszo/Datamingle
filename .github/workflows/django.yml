@@ -55,7 +55,6 @@ jobs:
         log_bin=ON
         character-set-server = utf8mb4
         collation-server = utf8mb4_general_ci
-        lower_case_table_names=1
         default-time_zone = '+8:00'
         [client]
         default-character-set=utf8mb4
@@ -63,6 +62,10 @@ jobs:
         docker cp my.cnf mysql:/etc/mysql/conf.d/
         docker restart mysql
         until docker exec mysql mysqladmin ping -h127.0.0.1 -uroot -proot --silent; do
+          if [ "$(docker inspect -f '{{.State.Running}}' mysql 2>/dev/null)" != "true" ]; then
+            docker logs mysql
+            exit 1
+          fi
           sleep 2
         done
     
