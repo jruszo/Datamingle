@@ -20,21 +20,26 @@ from sql.utils.sql_utils import (
 from . import EngineBase
 
 try:
-    import cx_Oracle
-except ModuleNotFoundError:
-    cx_Oracle = types.ModuleType("cx_Oracle")
+    import oracledb as cx_Oracle
 
-    def _missing_cx_oracle(*args, **kwargs):
-        raise ModuleNotFoundError("cx_Oracle is not installed")
-
-    class _OracleLob:
-        pass
-
-    cx_Oracle.connect = _missing_cx_oracle
-    cx_Oracle.makedsn = lambda *args, **kwargs: "cx_oracle_unavailable_dsn"
-    cx_Oracle.LOB = _OracleLob
-    cx_Oracle.CLOB = object()
     sys.modules.setdefault("cx_Oracle", cx_Oracle)
+except ModuleNotFoundError:
+    try:
+        import cx_Oracle
+    except ModuleNotFoundError:
+        cx_Oracle = types.ModuleType("cx_Oracle")
+
+        def _missing_cx_oracle(*args, **kwargs):
+            raise ModuleNotFoundError("cx_Oracle is not installed")
+
+        class _OracleLob:
+            pass
+
+        cx_Oracle.connect = _missing_cx_oracle
+        cx_Oracle.makedsn = lambda *args, **kwargs: "cx_oracle_unavailable_dsn"
+        cx_Oracle.LOB = _OracleLob
+        cx_Oracle.CLOB = object()
+        sys.modules.setdefault("cx_Oracle", cx_Oracle)
 from .models import ResultSet, ReviewSet, ReviewResult
 from sql.utils.data_masking import simple_column_mask
 

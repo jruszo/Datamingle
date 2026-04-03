@@ -6,6 +6,7 @@ import MySQLdb
 import pymysql
 import re
 from enum import Enum
+from pymysql.converters import escape_string as pymysql_escape_string
 
 import schemaobject
 import sqlparse
@@ -109,7 +110,7 @@ class MysqlEngine(EngineBase):
 
     def escape_string(self, value: str) -> str:
         """Escape string parameters."""
-        return pymysql.escape_string(value)
+        return pymysql_escape_string(value)
 
     @property
     def auto_backup(self):

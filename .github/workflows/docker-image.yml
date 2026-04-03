@@ -44,11 +44,46 @@ jobs:
             hhyo/archery
             ghcr.io/${{ github.repository }}
 
-      - name: Build and push Docker images
-        uses: docker/build-push-action@v2
-        with:
-          context: .
-          file: src/docker/Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+      - name: Build Docker base image
+        run: docker build -f src/docker/Dockerfile-base -t archery-base:ci .
+
+      - name: Build Docker images
+        env:
+          DOCKER_TAGS: ${{ steps.meta.outputs.tags }}
+          DOCKER_LABELS: ${{ steps.meta.outputs.labels }}
+        run: |
+          readarray -t tags <<< "$DOCKER_TAGS"
+          readarray -t labels <<< "$DOCKER_LABELS"
+
+          tag_args=()
+          for tag in "${tags[@]}"; do
+            if [ -n "$tag" ]; then
+              tag_args+=("-t" "$tag")
+            fi
+          done
+
+          label_args=()
+          for label in "${labels[@]}"; do
+            if [ -n "$label" ]; then
+              label_args+=("--label" "$label")
+            fi
+          done
+
+          docker build \
+            --build-arg BASE_IMAGE=archery-base:ci \
+            "${tag_args[@]}" \
+            "${label_args[@]}" \
+            -f src/docker/Dockerfile \
+            .
+
+      - name: Push Docker images
+        if: github.event_name != 'pull_request'
+        env:
+          DOCKER_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          readarray -t tags <<< "$DOCKER_TAGS"
+          for tag in "${tags[@]}"; do
+            if [ -n "$tag" ]; then
+              docker push "$tag"
+            fi
+          done

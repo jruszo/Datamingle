@@ -1,4 +1,4 @@
-FROM python:3.11-bookworm
+FROM python:3.12-bookworm
 
 ENV TZ=UTC \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -27,13 +27,9 @@ ENV PATH="/opt/venv4archery/bin:${PATH}"
 COPY requirements.txt /tmp/requirements.txt
 COPY dev-requirements.txt /tmp/dev-requirements.txt
 
-# cx-Oracle in this repo targets x86/legacy client libraries and breaks ARM builds.
-RUN sed '/^cx-Oracle==/Id' /tmp/requirements.txt > /tmp/requirements.local.txt \
-    && sed -i '/^OpenAI$/Id' /tmp/requirements.local.txt \
-    && pip install --upgrade pip \
-    && pip install -r /tmp/requirements.local.txt \
-    && pip install -r /tmp/dev-requirements.txt \
-    && pip install openai
+RUN pip install --upgrade pip \
+    && pip install -r /tmp/requirements.txt \
+    && pip install -r /tmp/dev-requirements.txt
 
 COPY . /opt/archery
 
