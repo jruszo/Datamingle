@@ -462,6 +462,7 @@ class TestNotify(TestCase):
                 "group_id": 1,
                 "group_name": "g1",
                 "db_name": "some_db",
+                "schema_name": "",
                 "syntax_type": 1,
                 "is_backup": True,
                 "engineer": "test_user",
