@@ -97,16 +97,25 @@ urlpatterns = [
         api_workflow.WorkflowSubmissionMetadata.as_view(),
     ),
     path(
+        "v1/workflow/export/submission-metadata/",
+        api_workflow.WorkflowExportSubmissionMetadata.as_view(),
+    ),
+    path(
         "v1/workflow/approval-preview/",
         api_workflow.WorkflowApprovalPreview.as_view(),
     ),
     path("v1/workflow/parse/", api_workflow.WorkflowParse.as_view()),
     path("v1/workflow/sqlcheck/", api_workflow.ExecuteCheck.as_view()),
+    path("v1/workflow/export/sqlcheck/", api_workflow.WorkflowExportCheck.as_view()),
     path("v1/workflow/auditlist/", api_workflow.WorkflowAuditList.as_view()),
     path("v1/workflow/<int:workflow_id>/", api_workflow.WorkflowDetail.as_view()),
     path(
         "v1/workflow/<int:workflow_id>/content/",
         api_workflow.WorkflowContentDetail.as_view(),
+    ),
+    path(
+        "v1/workflow/<int:workflow_id>/download/",
+        api_workflow.WorkflowDownload.as_view(),
     ),
     path(
         "v1/workflow/<int:workflow_id>/rollback/",

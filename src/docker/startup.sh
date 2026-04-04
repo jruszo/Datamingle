@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -eo pipefail
+
 cd /opt/archery
 
 echo Switch Python runtime environment
@@ -37,7 +39,6 @@ supervisord -c /etc/supervisord.conf
 
 echo Start services
 gunicorn -w 4 -b 127.0.0.1:8888 --timeout 600 archery.wsgi:application
-
 
 
 

@@ -6,7 +6,6 @@ from datetime import datetime, date
 import tempfile
 import os
 import shutil
-import zipfile
 import simplejson as json
 import pandas as pd
 import csv
@@ -97,6 +96,7 @@ class TestOfflineDownload(TestCase):
         offline_download = OffLineDownLoad()
         # Set workflow SQL for this test.
         self.workflow.sql_content = "SELECT * FROM test_table"
+        self.workflow.schema_name = "analytics"
         result = offline_download.pre_count_check(self.workflow)
 
         # Verify result.
@@ -104,6 +104,7 @@ class TestOfflineDownload(TestCase):
         self.assertEqual(result.warning_count, 0)
         self.assertEqual(result.rows[0].stagestatus, "Row count completed")
         self.assertEqual(result.rows[0].affected_rows, 500)
+        self.assertEqual(mock_engine.query.call_args.kwargs["schema_name"], "analytics")
 
     @patch("sql.offlinedownload.get_engine")
     def test_pre_count_check_over_limit(self, mock_get_engine):
@@ -169,7 +170,7 @@ class TestOfflineDownload(TestCase):
         mock_engine.query.return_value = mock_result_set
         mock_get_engine.return_value = mock_engine
 
-        mock_save_format.return_value = "test_file.zip"
+        mock_save_format.return_value = "test_file.csv"
 
         mock_storage_instance = MagicMock()
         mock_storage.return_value = mock_storage_instance
@@ -180,16 +181,18 @@ class TestOfflineDownload(TestCase):
 
         # Execute test.
         offline_download = OffLineDownLoad()
+        self.workflow.schema_name = "analytics"
         result = offline_download.execute_offline_download(self.workflow)
 
         # Verify result.
         self.assertEqual(result.error, None)
         self.assertEqual(result.rows[0].stagestatus, "Execution succeeded")
-        self.assertIn("test_file.zip", result.rows[0].errormessage)
+        self.assertIn("test_file.csv", result.rows[0].errormessage)
+        self.assertEqual(mock_engine.query.call_args.kwargs["schema_name"], "analytics")
 
         # Verify workflow update.
         updated_workflow = SqlWorkflow.objects.get(id=self.workflow.id)
-        self.assertEqual(updated_workflow.file_name, "test_file.zip")
+        self.assertEqual(updated_workflow.file_name, "test_file.csv")
 
     @patch("sql.offlinedownload.get_engine")
     @patch("sql.offlinedownload.DynamicStorage")
@@ -478,13 +481,14 @@ class TestOfflineDownload(TestCase):
         csv_file_name = save_to_format_file(
             "csv", result, self.workflow, columns, temp_dir
         )
-        self.assertTrue(csv_file_name.endswith(".zip"))
-        # Verify ZIP contains CSV.
-        zip_file_path = os.path.join(temp_dir, csv_file_name)
-        with zipfile.ZipFile(zip_file_path, "r") as zipf:
-            file_list = zipf.namelist()
-            self.assertEqual(len(file_list), 1)
-            self.assertTrue(file_list[0].endswith(".csv"))
+        self.assertTrue(csv_file_name.endswith(".csv"))
+        self.assertTrue(os.path.exists(os.path.join(temp_dir, csv_file_name)))
+
+        tsv_file_name = save_to_format_file(
+            "tsv", result, self.workflow, columns, temp_dir
+        )
+        self.assertTrue(tsv_file_name.endswith(".tsv"))
+        self.assertTrue(os.path.exists(os.path.join(temp_dir, tsv_file_name)))
 
         # Cleanup.
         shutil.rmtree(temp_dir)
@@ -549,10 +553,13 @@ class TestOfflineDownload(TestCase):
         mock_storage_instance = MagicMock()
         mock_storage.return_value = mock_storage_instance
         mock_storage_instance.exists.return_value = False  # File does not exist.
+        self.workflow.file_name = "expected.zip"
+        self.workflow.status = "workflow_finish"
+        self.workflow.save(update_fields=["file_name", "status"])
 
         # Build request.
         request = HttpRequest()
-        request.GET = {"file_name": "missing.zip", "workflow_id": "123"}
+        request.GET = {"file_name": "ignored.zip", "workflow_id": f"{self.workflow.id}"}
         request.method = "GET"
         request.user = self.superuser
 
@@ -568,7 +575,7 @@ class TestOfflineDownload(TestCase):
         self.assertIsNotNone(audit_entry)
         self.assertEqual(audit_entry.action, "Offline download")
         self.assertIn(
-            "Workflow ID: 123, file: missing.zip, error: file does not exist.",
+            f"Workflow ID: {self.workflow.id}, file: expected.zip, error: file does not exist.",
             audit_entry.extra_info,
         )
         self.assertEqual(audit_entry.user_id, self.superuser.id)

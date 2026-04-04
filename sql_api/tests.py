@@ -5,6 +5,7 @@ from django.test import TestCase
 from django.core.cache import cache
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
+from django.http import HttpResponse
 from rest_framework.test import APITestCase, APIClient
 from rest_framework import status
 from common.config import SysConfig
@@ -2241,13 +2242,23 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.now = datetime.now()
         self.group = Group.objects.create(id=1, name="DBA")
         self.res_group = ResourceGroup.objects.create(group_id=1, group_name="test")
-        self.ins_tag = InstanceTag.objects.create(tag_code="can_write", active=1)
+        self.ins_tag = InstanceTag.objects.create(
+            tag_code="can_write", tag_name="Can Write", active=1
+        )
+        self.read_tag = InstanceTag.objects.create(
+            tag_code="can_read", tag_name="Can Read", active=1
+        )
         self.wfs = WorkflowAuditSetting.objects.create(
             group_id=self.res_group.group_id,
             workflow_type=2,
             audit_auth_groups=self.group.id,
         )
         can_submit = Permission.objects.get(codename="sql_submit")
+        can_export_submit = Permission.objects.get(codename="sqlexport_submit")
+        can_export_download = Permission.objects.get(codename="offline_download")
+        menu_sqlexportworkflow_permission = Permission.objects.get(
+            codename="menu_sqlexportworkflow"
+        )
         can_execute_permission = Permission.objects.get(codename="sql_execute")
         can_execute_resource_permission = Permission.objects.get(
             codename="sql_execute_for_resource_group"
@@ -2261,10 +2272,13 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.user.save()
         self.user.user_permissions.add(
             can_submit,
+            can_export_submit,
+            can_export_download,
             can_execute_permission,
             can_execute_resource_permission,
             can_review_permission,
             menu_sqlworkflow_permission,
+            menu_sqlexportworkflow_permission,
         )
         self.user.groups.add(self.group.id)
         self.user.resource_group.add(self.res_group.group_id)
@@ -2279,6 +2293,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         )
         self.ins.resource_group.add(self.res_group.group_id)
         self.ins.instance_tag.add(self.ins_tag.id)
+        self.ins.instance_tag.add(self.read_tag.id)
         self.wf1 = SqlWorkflow.objects.create(
             workflow_name="some_name",
             group_id=1,
@@ -2339,9 +2354,23 @@ class TestWorkflow(CacheIsolatedAPITestCase):
                 "temp_workflow_submitter_ddl",
                 "temp_preview_submitter",
                 "self_service_submitter",
+                "export_only_submitter",
+                "export_only_temp_submitter",
+                "export_download_blocked_user",
             ]
         ).delete()
         self.notify_patcher.stop()
+
+    def _login_as_user(self, username, password="test_password"):
+        login = self.client.post(
+            "/api/auth/token/",
+            {"username": username, "password": password},
+            format="json",
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
+        )
+        return login
 
     def test_get_sql_workflow_list(self):
         """Test getting SQL release workflow list."""
@@ -2492,6 +2521,85 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(len(payload["instances"]), 1)
         self.assertEqual(payload["instances"][0]["allowed_syntax_types"], [1, 2])
 
+    def test_workflow_export_submission_metadata(self):
+        r = self.client.get(
+            "/api/v1/workflow/export/submission-metadata/", format="json"
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(len(payload["resource_groups"]), 1)
+        self.assertEqual(
+            payload["resource_groups"][0]["group_id"], self.res_group.group_id
+        )
+        self.assertEqual(len(payload["instances"]), 1)
+        self.assertEqual(payload["instances"][0]["allowed_syntax_types"], [3])
+
+    def test_workflow_export_submission_metadata_requires_export_submit_permission(
+        self,
+    ):
+        self.user.user_permissions.remove(
+            Permission.objects.get(codename="sqlexport_submit")
+        )
+
+        r = self.client.get(
+            "/api/v1/workflow/export/submission-metadata/", format="json"
+        )
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_workflow_export_submission_metadata_allows_export_only_submitter(self):
+        export_user = User.objects.create(
+            username="export_only_submitter",
+            display="Export Only Submitter",
+            is_active=True,
+        )
+        export_user.set_password("test_password")
+        export_user.save()
+        export_user.user_permissions.add(
+            Permission.objects.get(codename="sqlexport_submit")
+        )
+        export_user.resource_group.add(self.res_group.group_id)
+
+        self._login_as_user(export_user.username)
+
+        r = self.client.get(
+            "/api/v1/workflow/export/submission-metadata/", format="json"
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["instances"][0]["id"], self.ins.id)
+        self.assertEqual(payload["instances"][0]["allowed_syntax_types"], [3])
+
+    def test_workflow_export_submission_metadata_allows_temporary_read_grant(self):
+        export_user = User.objects.create(
+            username="export_only_temp_submitter",
+            display="Export Temp Submitter",
+            is_active=True,
+        )
+        export_user.set_password("test_password")
+        export_user.save()
+        export_user.user_permissions.add(
+            Permission.objects.get(codename="sqlexport_submit")
+        )
+        TemporaryInstanceGrant.objects.create(
+            user=export_user,
+            resource_group=self.res_group,
+            instance=self.ins,
+            access_level=InstanceAccessLevel.QUERY,
+            valid_date=datetime.now().date() + timedelta(days=1),
+        )
+
+        self._login_as_user(export_user.username)
+
+        r = self.client.get(
+            "/api/v1/workflow/export/submission-metadata/", format="json"
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(
+            payload["instances"][0]["group_ids"], [self.res_group.group_id]
+        )
+        self.assertEqual(payload["instances"][0]["allowed_syntax_types"], [3])
+
     def test_workflow_parse_sql_returns_dml_summary(self):
         r = self.client.post(
             "/api/v1/workflow/parse/",
@@ -2580,6 +2688,30 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         payload = response_data(r)
+        self.assertEqual(payload["display"], self.group.name)
+
+    def test_workflow_approval_preview_allows_export_only_submitter(self):
+        export_user = User.objects.create(
+            username="export_only_submitter",
+            display="Export Only Submitter",
+            is_active=True,
+        )
+        export_user.set_password("test_password")
+        export_user.save()
+        export_user.user_permissions.add(
+            Permission.objects.get(codename="sqlexport_submit")
+        )
+        export_user.resource_group.add(self.res_group.group_id)
+
+        self._login_as_user(export_user.username)
+
+        r = self.client.get(
+            f"/api/v1/workflow/approval-preview/?group_id={self.res_group.group_id}",
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["group_id"], self.res_group.group_id)
         self.assertEqual(payload["display"], self.group.name)
 
     def test_workflow_approval_preview_reports_missing_configuration(self):
@@ -2931,6 +3063,120 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         data = assert_success_envelope(self, r)
         self.assertIn("rows", data)
 
+    @patch("sql_api.api_workflow.get_engine")
+    @patch("sql_api.api_workflow.OffLineDownLoad.pre_count_check")
+    def test_export_sqlcheck(self, mock_pre_count_check, mock_get_engine):
+        review_set = ReviewSet(
+            rows=[
+                ReviewResult(
+                    errlevel=0,
+                    stagestatus="Row count completed",
+                    errormessage="None",
+                    affected_rows=42,
+                    sql="select * from demo",
+                )
+            ],
+        )
+        review_set.syntax_type = 3
+        review_set.error_count = 0
+        review_set.warning_count = 0
+        review_set.affected_rows = 42
+        mock_pre_count_check.return_value = review_set
+        mock_engine = Mock()
+        mock_engine.escape_string.return_value = "escaped_test_db"
+        mock_get_engine.return_value = mock_engine
+        r = self.client.post(
+            "/api/v1/workflow/export/sqlcheck/",
+            {
+                "full_sql": "select * from demo",
+                "db_name": "test_db",
+                "schema_name": "analytics",
+                "instance_id": self.ins.id,
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["syntax_type"], 3)
+        self.assertEqual(payload["affected_rows"], 42)
+        self.assertEqual(
+            mock_pre_count_check.call_args.kwargs["workflow"].db_name,
+            "escaped_test_db",
+        )
+        self.assertEqual(
+            mock_pre_count_check.call_args.kwargs["workflow"].schema_name, "analytics"
+        )
+
+    @patch("sql_api.api_workflow.get_engine")
+    @patch("sql_api.api_workflow.OffLineDownLoad.pre_count_check")
+    def test_export_sqlcheck_returns_validation_error_for_count_failures(
+        self, mock_pre_count_check, mock_get_engine
+    ):
+        mock_engine = Mock()
+        mock_engine.escape_string.return_value = "escaped_test_db"
+        mock_get_engine.return_value = mock_engine
+        mock_pre_count_check.side_effect = Exception("COUNT(*) failed")
+
+        r = self.client.post(
+            "/api/v1/workflow/export/sqlcheck/",
+            {
+                "full_sql": "select * from demo",
+                "db_name": "test_db",
+                "instance_id": self.ins.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(r.json()["errors"], "COUNT(*) failed")
+
+    def test_export_sqlcheck_requires_export_submit_permission(self):
+        self.user.user_permissions.remove(
+            Permission.objects.get(codename="sqlexport_submit")
+        )
+
+        r = self.client.post(
+            "/api/v1/workflow/export/sqlcheck/",
+            {
+                "full_sql": "select * from demo",
+                "db_name": "test_db",
+                "instance_id": self.ins.id,
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    @patch("sql_api.api_workflow.OffLineDownLoad.pre_count_check")
+    def test_export_sqlcheck_requires_read_access_to_instance(
+        self, mock_pre_count_check
+    ):
+        isolated_group = ResourceGroup.objects.create(group_name="isolated_group")
+        isolated_user = User.objects.create(
+            username="export_only_submitter",
+            display="Export Only Submitter",
+            is_active=True,
+        )
+        isolated_user.set_password("test_password")
+        isolated_user.save()
+        isolated_user.user_permissions.add(
+            Permission.objects.get(codename="sqlexport_submit")
+        )
+        isolated_user.resource_group.add(isolated_group.group_id)
+
+        self._login_as_user(isolated_user.username)
+
+        r = self.client.post(
+            "/api/v1/workflow/export/sqlcheck/",
+            {
+                "full_sql": "select * from demo",
+                "db_name": "test_db",
+                "instance_id": self.ins.id,
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+        mock_pre_count_check.assert_not_called()
+
     def test_submit_workflow(self):
         """Test submitting SQL release workflow."""
         json_data = {
@@ -2950,6 +3196,346 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(r_data["workflow"]["workflow_name"], "Release Workflow 1")
         self.assertEqual(r_data["workflow"]["engineer"], self.user.username)
         self.assertEqual(r_data["workflow"]["engineer_display"], self.user.display)
+
+    @patch("sql_api.serializers.OffLineDownLoad.pre_count_check")
+    @patch("sql_api.serializers.get_engine")
+    def test_submit_export_workflow(self, mock_get_engine, mock_pre_count_check):
+        mock_get_engine.return_value.auto_backup = False
+        review_set = ReviewSet(
+            rows=[
+                ReviewResult(
+                    errlevel=0,
+                    stagestatus="Row count completed",
+                    errormessage="None",
+                    affected_rows=24,
+                    sql="select * from demo",
+                )
+            ],
+        )
+        review_set.syntax_type = 3
+        review_set.error_count = 0
+        review_set.warning_count = 0
+        mock_pre_count_check.return_value = review_set
+        json_data = {
+            "workflow": {
+                "workflow_name": "Export Workflow 1",
+                "group_id": 1,
+                "db_name": "test_db",
+                "schema_name": "analytics",
+                "instance": self.ins.id,
+                "is_offline_export": 1,
+                "export_format": "tsv",
+            },
+            "sql_content": "select * from demo;",
+        }
+        r = self.client.post("/api/v1/workflow/", json_data, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            mock_pre_count_check.call_args.kwargs["workflow"].export_format, "tsv"
+        )
+        workflow_id = response_data(r)["workflow"]["id"]
+        workflow = SqlWorkflow.objects.get(id=workflow_id)
+        self.assertEqual(workflow.syntax_type, 3)
+        self.assertEqual(workflow.is_offline_export, 1)
+        self.assertEqual(workflow.export_format, "tsv")
+        self.assertEqual(workflow.schema_name, "analytics")
+        self.assertFalse(workflow.is_backup)
+
+    @patch("sql_api.serializers.get_engine")
+    def test_submit_export_workflow_rejects_invalid_format(self, mock_get_engine):
+        mock_get_engine.return_value.auto_backup = False
+        json_data = {
+            "workflow": {
+                "workflow_name": "Export Workflow 1",
+                "group_id": 1,
+                "db_name": "test_db",
+                "instance": self.ins.id,
+                "is_offline_export": 1,
+                "export_format": "xls",
+            },
+            "sql_content": "select * from demo;",
+        }
+        r = self.client.post("/api/v1/workflow/", json_data, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn(
+            "not a valid choice.",
+            json.dumps(r.json()),
+        )
+
+    @patch("sql_api.serializers.OffLineDownLoad.pre_count_check")
+    @patch("sql_api.serializers.get_engine")
+    def test_submit_export_workflow_requires_export_submit_permission(
+        self, mock_get_engine, mock_pre_count_check
+    ):
+        self.user.user_permissions.remove(
+            Permission.objects.get(codename="sqlexport_submit")
+        )
+        mock_get_engine.return_value.auto_backup = False
+        review_set = ReviewSet(
+            rows=[ReviewResult(sql="select * from demo", errlevel=0)]
+        )
+        review_set.syntax_type = 3
+        mock_pre_count_check.return_value = review_set
+        json_data = {
+            "workflow": {
+                "workflow_name": "Export Workflow 1",
+                "group_id": 1,
+                "db_name": "test_db",
+                "instance": self.ins.id,
+                "is_offline_export": 1,
+                "export_format": "csv",
+            },
+            "sql_content": "select * from demo;",
+        }
+        r = self.client.post("/api/v1/workflow/", json_data, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            r.json()["errors"],
+            "You do not have permission to submit export workflows.",
+        )
+
+    def test_workflow_list_includes_export_metadata(self):
+        export_workflow = SqlWorkflow.objects.create(
+            workflow_name="export_listed",
+            group_id=self.res_group.group_id,
+            group_name=self.res_group.group_name,
+            engineer=self.user.username,
+            engineer_display=self.user.display,
+            audit_auth_groups="1",
+            status="workflow_finish",
+            is_backup=False,
+            instance=self.ins,
+            db_name="some_db",
+            schema_name="analytics",
+            syntax_type=3,
+            is_offline_export=1,
+            export_format="csv",
+            file_name="demo.csv",
+        )
+        SqlWorkflowContent.objects.create(
+            workflow=export_workflow,
+            sql_content="select * from demo",
+        )
+
+        r = self.client.get("/api/v1/workflow/?syntax_type=3", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["count"], 1)
+        row = payload["results"][0]
+        self.assertEqual(row["id"], export_workflow.id)
+        self.assertTrue(row["is_offline_export"])
+        self.assertEqual(row["export_format"], "csv")
+        self.assertEqual(row["file_name"], "demo.csv")
+        self.assertEqual(row["schema_name"], "analytics")
+        self.assertTrue(row["download_available"])
+
+    def test_workflow_detail_includes_export_metadata(self):
+        export_workflow = SqlWorkflow.objects.create(
+            workflow_name="export_detail",
+            group_id=self.res_group.group_id,
+            group_name=self.res_group.group_name,
+            engineer=self.user.username,
+            engineer_display=self.user.display,
+            audit_auth_groups="1",
+            status="workflow_finish",
+            is_backup=False,
+            instance=self.ins,
+            db_name="some_db",
+            schema_name="analytics",
+            syntax_type=3,
+            is_offline_export=1,
+            export_format="sql",
+            file_name="demo.sql",
+        )
+        SqlWorkflowContent.objects.create(
+            workflow=export_workflow,
+            sql_content="select * from demo",
+            execute_result=json.dumps([{"stagestatus": "Execution succeeded"}]),
+        )
+        WorkflowAudit.objects.create(
+            group_id=self.res_group.group_id,
+            group_name=self.res_group.group_name,
+            workflow_id=export_workflow.id,
+            workflow_type=2,
+            workflow_title="Export Apply",
+            workflow_remark="Export",
+            audit_auth_groups="1",
+            current_audit="-1",
+            next_audit="-1",
+            current_status=1,
+            create_user=self.user.username,
+            create_user_display=self.user.display,
+        )
+
+        r = self.client.get(f"/api/v1/workflow/{export_workflow.id}/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertTrue(payload["is_offline_export"])
+        self.assertEqual(payload["export_format"], "sql")
+        self.assertEqual(payload["file_name"], "demo.sql")
+        self.assertEqual(payload["schema_name"], "analytics")
+        self.assertTrue(payload["download_available"])
+
+    @patch("sql_api.api_workflow.download_export_file")
+    def test_download_export_workflow(self, mock_download_export_file):
+        export_workflow = SqlWorkflow.objects.create(
+            workflow_name="export_ready",
+            group_id=self.res_group.group_id,
+            group_name=self.res_group.group_name,
+            engineer=self.user.username,
+            engineer_display=self.user.display,
+            audit_auth_groups="1",
+            status="workflow_finish",
+            is_backup=False,
+            instance=self.ins,
+            db_name="some_db",
+            syntax_type=3,
+            is_offline_export=1,
+            export_format="csv",
+            file_name="demo.csv",
+        )
+        SqlWorkflowContent.objects.create(
+            workflow=export_workflow,
+            sql_content="select * from demo",
+        )
+        WorkflowAudit.objects.create(
+            group_id=self.res_group.group_id,
+            group_name=self.res_group.group_name,
+            workflow_id=export_workflow.id,
+            workflow_type=2,
+            workflow_title="Export Apply",
+            workflow_remark="Export",
+            audit_auth_groups="1",
+            current_audit="-1",
+            next_audit="-1",
+            current_status=1,
+            create_user=self.user.username,
+            create_user_display=self.user.display,
+        )
+        mock_download_export_file.return_value = HttpResponse("ok")
+
+        r = self.client.get(
+            f"/api/v1/workflow/{export_workflow.id}/download/", format="json"
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        mock_download_export_file.assert_called_once()
+        self.assertEqual(
+            mock_download_export_file.call_args.args[1:],
+            ("demo.csv", export_workflow.id),
+        )
+
+    def test_download_export_workflow_requires_download_permission(self):
+        export_workflow = SqlWorkflow.objects.create(
+            workflow_name="export_ready",
+            group_id=self.res_group.group_id,
+            group_name=self.res_group.group_name,
+            engineer=self.user.username,
+            engineer_display=self.user.display,
+            audit_auth_groups="1",
+            status="workflow_finish",
+            is_backup=False,
+            instance=self.ins,
+            db_name="some_db",
+            syntax_type=3,
+            is_offline_export=1,
+            export_format="csv",
+            file_name="demo.csv",
+        )
+        SqlWorkflowContent.objects.create(
+            workflow=export_workflow,
+            sql_content="select * from demo",
+        )
+        WorkflowAudit.objects.create(
+            group_id=self.res_group.group_id,
+            group_name=self.res_group.group_name,
+            workflow_id=export_workflow.id,
+            workflow_type=2,
+            workflow_title="Export Apply",
+            workflow_remark="Export",
+            audit_auth_groups="1",
+            current_audit="-1",
+            next_audit="-1",
+            current_status=1,
+            create_user=self.user.username,
+            create_user_display=self.user.display,
+        )
+
+        blocked_user = User.objects.create(
+            username="export_download_blocked_user",
+            display="Export Download Blocked",
+            is_active=True,
+        )
+        blocked_user.set_password("test_password")
+        blocked_user.save()
+        blocked_user.user_permissions.add(
+            Permission.objects.get(codename="menu_sqlexportworkflow")
+        )
+        blocked_user.user_permissions.remove(
+            Permission.objects.get(codename="offline_download")
+        )
+        blocked_user.resource_group.add(self.res_group.group_id)
+        export_workflow.engineer = blocked_user.username
+        export_workflow.engineer_display = blocked_user.display
+        export_workflow.save(update_fields=["engineer", "engineer_display"])
+        self._login_as_user(blocked_user.username)
+
+        r = self.client.get(
+            f"/api/v1/workflow/{export_workflow.id}/download/", format="json"
+        )
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_download_export_workflow_rejects_unfinished_artifact(self):
+        export_workflow = SqlWorkflow.objects.create(
+            workflow_name="export_pending",
+            group_id=self.res_group.group_id,
+            group_name=self.res_group.group_name,
+            engineer=self.user.username,
+            engineer_display=self.user.display,
+            audit_auth_groups="1",
+            status="workflow_manreviewing",
+            is_backup=False,
+            instance=self.ins,
+            db_name="some_db",
+            syntax_type=3,
+            is_offline_export=1,
+            export_format="csv",
+            file_name=None,
+        )
+        SqlWorkflowContent.objects.create(
+            workflow=export_workflow,
+            sql_content="select * from demo",
+        )
+        WorkflowAudit.objects.create(
+            group_id=self.res_group.group_id,
+            group_name=self.res_group.group_name,
+            workflow_id=export_workflow.id,
+            workflow_type=2,
+            workflow_title="Export Apply",
+            workflow_remark="Export",
+            audit_auth_groups="1",
+            current_audit="1",
+            next_audit="-1",
+            current_status=0,
+            create_user=self.user.username,
+            create_user_display=self.user.display,
+        )
+
+        r = self.client.get(
+            f"/api/v1/workflow/{export_workflow.id}/download/", format="json"
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            r.json()["errors"],
+            "The export artifact is not available yet.",
+        )
+
+    def test_download_export_workflow_rejects_non_export_workflow(self):
+        r = self.client.get(f"/api/v1/workflow/{self.wf1.id}/download/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            r.json()["errors"],
+            "This workflow does not have an export artifact.",
+        )
 
     def test_submit_workflow_super(self):
         """Test admin submitting SQL release workflow with specified user."""

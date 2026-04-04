@@ -16,7 +16,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import {
   executeWorkflow,
+  downloadWorkflowExport,
   fetchWorkflowDetail,
+  fetchWorkflowExportSubmissionMetadata,
   fetchWorkflowSubmissionMetadata,
   fetchWorkflows,
   reviewWorkflow,
@@ -41,12 +43,14 @@ const reviewSubmitting = ref(false)
 const executeSubmitting = ref(false)
 const scheduleSubmitting = ref(false)
 const windowSubmitting = ref(false)
+const downloadSubmitting = ref(false)
 
 const pageError = ref('')
 const detailError = ref('')
 const feedback = ref('')
 
 const metadata = ref<WorkflowSubmissionMetadata | null>(null)
+const exportMetadata = ref<WorkflowSubmissionMetadata | null>(null)
 const selectedWorkflowId = ref<number | null>(null)
 const selectedWorkflow = ref<WorkflowDetailRecord | null>(null)
 
@@ -166,6 +170,25 @@ function syntaxBadgeClass(syntaxType: number) {
   }
 }
 
+function humanExportFormat(value: string | null) {
+  switch (value) {
+    case 'csv':
+      return 'CSV'
+    case 'tsv':
+      return 'TSV'
+    case 'sql':
+      return 'SQL'
+    case 'xlsx':
+      return 'Excel (.xlsx)'
+    case 'json':
+      return 'JSON'
+    case 'xml':
+      return 'XML'
+    default:
+      return 'Not generated'
+  }
+}
+
 function statusBadgeClass(status: string) {
   switch (status) {
     case 'workflow_finish':
@@ -203,7 +226,10 @@ function syncDetailForms(detail: WorkflowDetailRecord | null) {
 
 const canViewWorkflows = computed(() => (
   hasPermission('sql.menu_sqlworkflow')
+  || hasPermission('sql.menu_sqlexportworkflow')
   || hasPermission('sql.sql_submit')
+  || hasPermission('sql.sqlexport_submit')
+  || hasPermission('sql.offline_download')
   || hasPermission('sql.audit_user')
 ))
 
@@ -219,9 +245,52 @@ const canCreateDml = computed(() => {
   )
 })
 
+const canCreateExport = computed(() => (exportMetadata.value?.instances ?? []).length > 0)
+
+const filterGroups = computed(() => {
+  const groups = new Map<number, WorkflowSubmissionMetadata['resource_groups'][number]>()
+  for (const group of metadata.value?.resource_groups ?? []) {
+    groups.set(group.group_id, group)
+  }
+  for (const group of exportMetadata.value?.resource_groups ?? []) {
+    groups.set(group.group_id, group)
+  }
+  return Array.from(groups.values()).sort((left, right) => left.group_name.localeCompare(right.group_name))
+})
+
+const allFilterInstances = computed(() => {
+  const instances = new Map<number, WorkflowSubmissionMetadata['instances'][number]>()
+  for (const instance of metadata.value?.instances ?? []) {
+    instances.set(instance.id, instance)
+  }
+  for (const instance of exportMetadata.value?.instances ?? []) {
+    const current = instances.get(instance.id)
+    if (!current) {
+      instances.set(instance.id, instance)
+      continue
+    }
+
+    const mergedGroupIds = Array.from(new Set([...current.group_ids, ...instance.group_ids]))
+    const mergedGroupNames = Array.from(new Set([...current.group_names, ...instance.group_names]))
+    const mergedSyntaxTypes = Array.from(
+      new Set([...current.allowed_syntax_types, ...instance.allowed_syntax_types]),
+    ).sort((left, right) => left - right)
+    instances.set(instance.id, {
+      ...current,
+      group_ids: mergedGroupIds,
+      group_names: mergedGroupNames,
+      allowed_syntax_types: mergedSyntaxTypes,
+    })
+  }
+
+  return Array.from(instances.values()).sort((left, right) =>
+    left.instance_name.localeCompare(right.instance_name),
+  )
+})
+
 const filteredInstances = computed(() => {
   const groupId = Number(filters.groupId)
-  const instances = metadata.value?.instances ?? []
+  const instances = allFilterInstances.value
   if (!groupId) {
     return instances
   }
@@ -234,6 +303,9 @@ const reviewResultColumns = computed(() => resultColumns(selectedWorkflow.value?
 const executeResultColumns = computed(() => resultColumns(selectedWorkflow.value?.execute_rows ?? []))
 const canMoveBackward = computed(() => workflowsPage.value.previous !== null && filters.page > 1)
 const canMoveForward = computed(() => workflowsPage.value.next !== null)
+const canDownloadSelectedExport = computed(() => {
+  return Boolean(selectedWorkflow.value?.download_available) && hasPermission('sql.offline_download')
+})
 
 watch(
   () => filters.groupId,
@@ -256,7 +328,27 @@ async function loadMetadata() {
 
   metadataLoading.value = true
   try {
-    metadata.value = await fetchWorkflowSubmissionMetadata(requireToken())
+    const token = requireToken()
+    const [workflowResult, exportResult] = await Promise.allSettled([
+      fetchWorkflowSubmissionMetadata(token),
+      fetchWorkflowExportSubmissionMetadata(token),
+    ])
+
+    if (workflowResult.status === 'fulfilled') {
+      metadata.value = workflowResult.value
+    } else {
+      metadata.value = null
+    }
+
+    if (exportResult.status === 'fulfilled') {
+      exportMetadata.value = exportResult.value
+    } else {
+      exportMetadata.value = null
+    }
+
+    if (workflowResult.status === 'rejected' && exportResult.status === 'rejected') {
+      throw workflowResult.reason
+    }
   } catch (errorValue) {
     pageError.value = toUserFacingMessage(errorValue, 'Failed to load workflow metadata.')
   } finally {
@@ -278,7 +370,7 @@ async function loadWorkflows() {
       size: filters.size,
       search: filters.search,
       status: filters.status || undefined,
-      syntax_type: filters.syntaxType ? Number(filters.syntaxType) as 1 | 2 : undefined,
+      syntax_type: filters.syntaxType ? Number(filters.syntaxType) as 1 | 2 | 3 : undefined,
       group_id: filters.groupId ? Number(filters.groupId) : undefined,
       instance_id: filters.instanceId ? Number(filters.instanceId) : undefined,
       start_date: filters.startDate || undefined,
@@ -438,6 +530,37 @@ async function saveSchedule() {
   }
 }
 
+async function downloadSelectedExport() {
+  if (!selectedWorkflowId.value) {
+    return
+  }
+
+  downloadSubmitting.value = true
+  detailError.value = ''
+
+  try {
+    const result = await downloadWorkflowExport(selectedWorkflowId.value, requireToken())
+    if (result.mode === 'redirect') {
+      window.location.href = result.url
+      return
+    }
+
+    const objectUrl = window.URL.createObjectURL(result.data)
+    const anchor = document.createElement('a')
+    anchor.href = objectUrl
+    anchor.download = result.filename
+    anchor.style.display = 'none'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    window.URL.revokeObjectURL(objectUrl)
+  } catch (errorValue) {
+    detailError.value = toUserFacingMessage(errorValue, 'Failed to download the export artifact.')
+  } finally {
+    downloadSubmitting.value = false
+  }
+}
+
 async function applyFilters() {
   filters.page = 1
   await loadWorkflows()
@@ -510,7 +633,7 @@ onMounted(async () => {
       <div class="space-y-1">
         <h1 class="text-2xl font-semibold text-slate-900">SQL Workflows</h1>
         <p class="text-sm text-slate-500">
-          Submit SQL change tickets, review approvals, and execute approved DDL or DML workflows.
+          Submit SQL change and export requests, review approvals, and track execution or file delivery from one place.
         </p>
       </div>
 
@@ -534,6 +657,16 @@ onMounted(async () => {
           <Send class="h-4 w-4" />
           New DML request
         </Button>
+        <Button
+          v-if="canCreateExport"
+          variant="outline"
+          type="button"
+          class="gap-2"
+          @click="void router.push({ name: 'workflow-export-new' })"
+        >
+          <Send class="h-4 w-4" />
+          New export request
+        </Button>
         <Button variant="outline" type="button" class="gap-2" @click="void loadWorkflows()">
           <RefreshCw class="h-4 w-4" />
           Refresh
@@ -552,7 +685,7 @@ onMounted(async () => {
       <CardHeader>
         <CardTitle>Access denied</CardTitle>
         <CardDescription>
-          `sql.menu_sqlworkflow` or `sql.sql_submit` is required to access the workflow module.
+          Workflow access requires SQL workflow, export workflow, submit, download, or audit permissions.
         </CardDescription>
       </CardHeader>
     </Card>
@@ -592,11 +725,12 @@ onMounted(async () => {
               <option value="">All syntax types</option>
               <option value="1">DDL</option>
               <option value="2">DML</option>
+              <option value="3">Export</option>
             </select>
             <select v-model="filters.groupId" :class="selectClass" :disabled="metadataLoading">
               <option value="">All groups</option>
               <option
-                v-for="group in metadata?.resource_groups ?? []"
+                v-for="group in filterGroups"
                 :key="group.group_id"
                 :value="`${group.group_id}`"
               >
@@ -789,12 +923,22 @@ onMounted(async () => {
                 </p>
               </div>
               <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <p class="text-xs uppercase tracking-wide text-slate-500">Execution window</p>
+                <p class="text-xs uppercase tracking-wide text-slate-500">
+                  {{ selectedWorkflow.is_offline_export ? 'Export file' : 'Execution window' }}
+                </p>
                 <p class="mt-2 text-sm font-medium text-slate-900">
-                  {{ formatDateTime(selectedWorkflow.run_date_start) }}
+                  {{
+                    selectedWorkflow.is_offline_export
+                      ? humanExportFormat(selectedWorkflow.export_format)
+                      : formatDateTime(selectedWorkflow.run_date_start)
+                  }}
                 </p>
                 <p class="text-sm text-slate-500">
-                  Ends {{ formatDateTime(selectedWorkflow.run_date_end) }}
+                  {{
+                    selectedWorkflow.is_offline_export
+                      ? selectedWorkflow.file_name || 'No file generated yet'
+                      : `Ends ${formatDateTime(selectedWorkflow.run_date_end)}`
+                  }}
                 </p>
               </div>
             </div>
@@ -990,6 +1134,15 @@ onMounted(async () => {
                       @click="void executeSelectedWorkflow('manual')"
                     >
                       Mark manual complete
+                    </Button>
+                    <Button
+                      v-if="canDownloadSelectedExport"
+                      variant="outline"
+                      type="button"
+                      :disabled="downloadSubmitting"
+                      @click="void downloadSelectedExport()"
+                    >
+                      {{ downloadSubmitting ? 'Preparing download...' : 'Download export' }}
                     </Button>
                   </div>
                 </div>
