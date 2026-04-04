@@ -129,6 +129,7 @@ const canSubmit = computed(() => {
     Boolean(form.dbName) &&
     Boolean(form.sqlContent.trim()) &&
     checkResult.value?.syntax_type === 3 &&
+    !checkResult.value?.error_count &&
     isCheckFresh.value
   )
 })

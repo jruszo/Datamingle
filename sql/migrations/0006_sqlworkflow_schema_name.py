@@ -6,13 +6,15 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('sql', '0005_alter_sqlworkflow_export_format'),
+        ("sql", "0005_alter_sqlworkflow_export_format"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='sqlworkflow',
-            name='schema_name',
-            field=models.CharField(blank=True, default='', max_length=128, verbose_name='Schema'),
+            model_name="sqlworkflow",
+            name="schema_name",
+            field=models.CharField(
+                blank=True, default="", max_length=128, verbose_name="Schema"
+            ),
         ),
     ]

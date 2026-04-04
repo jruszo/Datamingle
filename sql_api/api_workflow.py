@@ -767,11 +767,22 @@ class WorkflowExportCheck(views.APIView):
                 "You do not have permission to submit export workflows for this instance."
             )
 
-        export_probe = instance
-        export_probe.sql_content = serializer.validated_data["full_sql"].strip()
-        export_probe.db_name = serializer.validated_data["db_name"]
-        export_probe.schema_name = serializer.validated_data.get("schema_name") or ""
-        check_result = OffLineDownLoad().pre_count_check(workflow=export_probe)
+        try:
+            db_name = serializer.validated_data["db_name"]
+            schema_name = serializer.validated_data.get("schema_name") or None
+            full_sql = serializer.validated_data["full_sql"].strip()
+            check_engine = get_engine(instance=instance)
+            db_name = check_engine.escape_string(db_name)
+
+            export_probe = instance
+            export_probe.sql_content = full_sql
+            export_probe.db_name = db_name
+            export_probe.schema_name = schema_name or ""
+            check_result = OffLineDownLoad().pre_count_check(workflow=export_probe)
+        except serializers.ValidationError:
+            raise
+        except Exception as e:
+            raise serializers.ValidationError({"errors": f"{e}"})
         check_result.rows = check_result.to_dict()
         serializer_obj = ExecuteCheckResultSerializer(check_result)
         return success_response(data=serializer_obj.data)

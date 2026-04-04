@@ -1318,6 +1318,7 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                 instance.sql_content = sql_content
                 instance.db_name = workflow_data["db_name"]
                 instance.schema_name = workflow_data.get("schema_name") or ""
+                instance.export_format = export_format
                 check_result = sql_export.pre_count_check(workflow=instance)
             else:
                 workflow_data["export_format"] = None

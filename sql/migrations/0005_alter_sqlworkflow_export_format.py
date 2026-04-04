@@ -6,13 +6,29 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('sql', '0004_rename_queryprivileges_user_name_instance_db_name_valid_date_query_privilege_lookup_idx'),
+        (
+            "sql",
+            "0004_rename_queryprivileges_user_name_instance_db_name_valid_date_query_privilege_lookup_idx",
+        ),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='sqlworkflow',
-            name='export_format',
-            field=models.CharField(blank=True, choices=[('csv', 'CSV'), ('tsv', 'TSV'), ('xlsx', 'Excel'), ('sql', 'SQL'), ('json', 'JSON'), ('xml', 'XML')], max_length=10, null=True, verbose_name='Export Format'),
+            model_name="sqlworkflow",
+            name="export_format",
+            field=models.CharField(
+                blank=True,
+                choices=[
+                    ("csv", "CSV"),
+                    ("tsv", "TSV"),
+                    ("xlsx", "Excel"),
+                    ("sql", "SQL"),
+                    ("json", "JSON"),
+                    ("xml", "XML"),
+                ],
+                max_length=10,
+                null=True,
+                verbose_name="Export Format",
+            ),
         ),
     ]

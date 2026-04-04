@@ -553,10 +553,13 @@ class TestOfflineDownload(TestCase):
         mock_storage_instance = MagicMock()
         mock_storage.return_value = mock_storage_instance
         mock_storage_instance.exists.return_value = False  # File does not exist.
+        self.workflow.file_name = "expected.zip"
+        self.workflow.status = "workflow_finish"
+        self.workflow.save(update_fields=["file_name", "status"])
 
         # Build request.
         request = HttpRequest()
-        request.GET = {"file_name": "missing.zip", "workflow_id": "123"}
+        request.GET = {"file_name": "ignored.zip", "workflow_id": f"{self.workflow.id}"}
         request.method = "GET"
         request.user = self.superuser
 
@@ -572,7 +575,7 @@ class TestOfflineDownload(TestCase):
         self.assertIsNotNone(audit_entry)
         self.assertEqual(audit_entry.action, "Offline download")
         self.assertIn(
-            "Workflow ID: 123, file: missing.zip, error: file does not exist.",
+            f"Workflow ID: {self.workflow.id}, file: expected.zip, error: file does not exist.",
             audit_entry.extra_info,
         )
         self.assertEqual(audit_entry.user_id, self.superuser.id)

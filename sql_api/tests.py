@@ -3063,8 +3063,9 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         data = assert_success_envelope(self, r)
         self.assertIn("rows", data)
 
+    @patch("sql_api.api_workflow.get_engine")
     @patch("sql_api.api_workflow.OffLineDownLoad.pre_count_check")
-    def test_export_sqlcheck(self, mock_pre_count_check):
+    def test_export_sqlcheck(self, mock_pre_count_check, mock_get_engine):
         review_set = ReviewSet(
             rows=[
                 ReviewResult(
@@ -3081,6 +3082,9 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         review_set.warning_count = 0
         review_set.affected_rows = 42
         mock_pre_count_check.return_value = review_set
+        mock_engine = Mock()
+        mock_engine.escape_string.return_value = "escaped_test_db"
+        mock_get_engine.return_value = mock_engine
         r = self.client.post(
             "/api/v1/workflow/export/sqlcheck/",
             {
@@ -3096,8 +3100,35 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(payload["syntax_type"], 3)
         self.assertEqual(payload["affected_rows"], 42)
         self.assertEqual(
+            mock_pre_count_check.call_args.kwargs["workflow"].db_name,
+            "escaped_test_db",
+        )
+        self.assertEqual(
             mock_pre_count_check.call_args.kwargs["workflow"].schema_name, "analytics"
         )
+
+    @patch("sql_api.api_workflow.get_engine")
+    @patch("sql_api.api_workflow.OffLineDownLoad.pre_count_check")
+    def test_export_sqlcheck_returns_validation_error_for_count_failures(
+        self, mock_pre_count_check, mock_get_engine
+    ):
+        mock_engine = Mock()
+        mock_engine.escape_string.return_value = "escaped_test_db"
+        mock_get_engine.return_value = mock_engine
+        mock_pre_count_check.side_effect = Exception("COUNT(*) failed")
+
+        r = self.client.post(
+            "/api/v1/workflow/export/sqlcheck/",
+            {
+                "full_sql": "select * from demo",
+                "db_name": "test_db",
+                "instance_id": self.ins.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(r.json()["errors"], "COUNT(*) failed")
 
     def test_export_sqlcheck_requires_export_submit_permission(self):
         self.user.user_permissions.remove(
@@ -3199,6 +3230,9 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         }
         r = self.client.post("/api/v1/workflow/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            mock_pre_count_check.call_args.kwargs["workflow"].export_format, "tsv"
+        )
         workflow_id = response_data(r)["workflow"]["id"]
         workflow = SqlWorkflow.objects.get(id=workflow_id)
         self.assertEqual(workflow.syntax_type, 3)
@@ -3436,7 +3470,13 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         blocked_user.user_permissions.add(
             Permission.objects.get(codename="menu_sqlexportworkflow")
         )
+        blocked_user.user_permissions.remove(
+            Permission.objects.get(codename="offline_download")
+        )
         blocked_user.resource_group.add(self.res_group.group_id)
+        export_workflow.engineer = blocked_user.username
+        export_workflow.engineer_display = blocked_user.display
+        export_workflow.save(update_fields=["engineer", "engineer_display"])
         self._login_as_user(blocked_user.username)
 
         r = self.client.get(

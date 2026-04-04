@@ -12,7 +12,9 @@ import time
 
 import simplejson as json
 import pandas as pd
+from django.core.exceptions import PermissionDenied
 from django.http import JsonResponse, FileResponse
+from django.shortcuts import get_object_or_404
 
 
 from sql.models import SqlWorkflow, AuditEntry
@@ -20,6 +22,7 @@ from sql.engines import EngineBase
 from sql.engines.models import ReviewSet, ReviewResult
 from sql.storage import DynamicStorage
 from sql.engines import get_engine
+from sql.utils.sql_review import can_view
 from common.config import SysConfig
 
 logger = logging.getLogger("default")
@@ -463,7 +466,34 @@ def download_export_file(request, file_name, workflow_id):
 def offline_file_download(request):
     """
     Legacy download endpoint wrapper.
+    Mirrors WorkflowDownload authorization, but derives the artifact name
+    server-side before delegating to download_export_file.
     """
-    file_name = request.GET.get("file_name", " ")
-    workflow_id = request.GET.get("workflow_id", " ")
-    return download_export_file(request, file_name, workflow_id)
+    workflow_id = request.GET.get("workflow_id", "").strip()
+    if not workflow_id:
+        return JsonResponse({"error": "workflow_id is required"}, status=400)
+
+    workflow = get_object_or_404(SqlWorkflow, pk=workflow_id)
+
+    try:
+        if not can_view(request.user, workflow.id):
+            raise PermissionDenied("You do not have permission to view this workflow.")
+        if not (
+            request.user.is_superuser or request.user.has_perm("sql.offline_download")
+        ):
+            raise PermissionDenied(
+                "You do not have permission to download export files."
+            )
+    except PermissionDenied as exc:
+        return JsonResponse({"error": str(exc)}, status=403)
+
+    if not workflow.is_offline_export:
+        return JsonResponse(
+            {"error": "This workflow does not have an export artifact."}, status=400
+        )
+    if workflow.status != "workflow_finish" or not workflow.file_name:
+        return JsonResponse(
+            {"error": "The export artifact is not available yet."}, status=400
+        )
+
+    return download_export_file(request, workflow.file_name, workflow.id)
