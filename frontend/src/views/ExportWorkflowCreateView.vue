@@ -26,6 +26,7 @@ type ExportDraft = {
   instanceId?: number
   instanceName?: string
   dbName?: string
+  schemaName?: string
   sqlContent?: string
 }
 
@@ -57,6 +58,7 @@ const form = reactive({
   groupId: '',
   instanceId: '',
   dbName: '',
+  schemaName: '',
   exportFormat: 'csv' as 'csv' | 'tsv' | 'sql' | 'xlsx',
   runDateStart: '',
   runDateEnd: '',
@@ -91,6 +93,7 @@ function workflowFingerprint() {
   return JSON.stringify({
     instanceId: form.instanceId,
     dbName: form.dbName.trim(),
+    schemaName: form.schemaName.trim(),
     sqlContent: form.sqlContent.trim(),
     exportFormat: form.exportFormat,
   })
@@ -212,6 +215,7 @@ function restoreDraft() {
   }
   form.instanceId = `${matchedInstance.id}`
   form.dbName = draft.dbName?.trim() || ''
+  form.schemaName = draft.schemaName?.trim() || ''
 }
 
 async function runCheck() {
@@ -229,6 +233,7 @@ async function runCheck() {
       {
         instance_id: Number(form.instanceId),
         db_name: form.dbName,
+        schema_name: form.schemaName.trim() || undefined,
         full_sql: form.sqlContent,
       },
       requireToken(),
@@ -289,6 +294,7 @@ async function submitWorkflow() {
           workflow_name: form.workflowName.trim(),
           group_id: Number(form.groupId),
           db_name: form.dbName,
+          schema_name: form.schemaName.trim() || undefined,
           instance: Number(form.instanceId),
           export_format: form.exportFormat,
           is_backup: false,
@@ -322,6 +328,7 @@ watch(
     approvalError.value = ''
     form.instanceId = keepsCurrentInstance ? form.instanceId : ''
     form.dbName = ''
+    form.schemaName = ''
     availableDatabases.value = []
     databasesError.value = ''
     invalidateCheck()
@@ -340,6 +347,7 @@ watch(
   () => form.instanceId,
   (instanceIdValue) => {
     form.dbName = ''
+    form.schemaName = ''
     availableDatabases.value = []
     databasesError.value = ''
     invalidateCheck()
@@ -354,6 +362,7 @@ watch(
 watch(
   () => form.dbName,
   () => {
+    form.schemaName = ''
     invalidateCheck()
   },
 )
@@ -459,7 +468,7 @@ onMounted(async () => {
               v-else-if="checkResult && !isCheckFresh"
               class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700"
             >
-              SQL, instance, database, or format changed after the last validation. Run export validation again before submitting.
+              SQL, instance, database, schema, or format changed after the last validation. Run export validation again before submitting.
             </p>
 
             <div
@@ -535,6 +544,14 @@ onMounted(async () => {
                   </option>
                 </select>
                 <p v-if="databasesError" class="text-sm text-red-600">{{ databasesError }}</p>
+              </div>
+
+              <div v-if="form.schemaName" class="space-y-2">
+                <label class="text-sm font-medium text-slate-700">Schema</label>
+                <Input :model-value="form.schemaName" disabled />
+                <p class="text-xs text-slate-500">
+                  Reused from the query workspace so the export runs in the same schema context.
+                </p>
               </div>
 
               <div class="space-y-2">

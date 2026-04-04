@@ -1115,6 +1115,7 @@ async function openExportRequest() {
       instanceId: instance.id,
       instanceName: instance.instance_name,
       dbName: form.dbName,
+      schemaName: needsSchemaSelection.value ? form.schemaName : '',
       sqlContent: selectedSql,
     }),
   )

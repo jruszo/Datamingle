@@ -51,6 +51,7 @@ class OffLineDownLoad(EngineBase):
             full_sql = sqlparse.split(full_sql)[0]
             sql = full_sql.strip()
             instance = workflow.instance
+            schema_name = getattr(workflow, "schema_name", None) or None
             execute_result = ReviewSet(full_sql=sql)
             check_engine = get_engine(instance=instance)
 
@@ -62,6 +63,7 @@ class OffLineDownLoad(EngineBase):
                 results = check_engine.query(
                     db_name=workflow.db_name,
                     sql=sql,
+                    schema_name=schema_name,
                     max_execution_time=max_execution_time * 1000,
                 )
                 if results.error:
@@ -138,10 +140,15 @@ class OffLineDownLoad(EngineBase):
         count_sql = f"SELECT COUNT(*) FROM ({sql.rstrip(';')}) t"
         clean_sql = sql.strip().lower()
         instance = workflow
+        schema_name = getattr(workflow, "schema_name", None) or None
         check_result = ReviewSet(full_sql=sql)
         check_result.syntax_type = 3
         check_engine = get_engine(instance=instance)
-        result_set = check_engine.query(db_name=workflow.db_name, sql=count_sql)
+        result_set = check_engine.query(
+            db_name=workflow.db_name,
+            sql=count_sql,
+            schema_name=schema_name,
+        )
         actual_rows_check = result_set.rows[0][0]
         max_export_rows_str = config.get("max_export_rows", "10000")
         max_export_rows = int(max_export_rows_str) if max_export_rows_str else 10000

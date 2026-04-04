@@ -1163,6 +1163,9 @@ class InstanceResourceListSerializer(serializers.Serializer):
 class ExecuteCheckSerializer(serializers.Serializer):
     instance_id = serializers.IntegerField(label="Instance ID")
     db_name = serializers.CharField(label="Database name")
+    schema_name = serializers.CharField(
+        required=False, allow_blank=True, label="Schema name"
+    )
     full_sql = serializers.CharField(label="SQL content")
 
     def validate_instance_id(self, instance_id):
@@ -1314,6 +1317,7 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                 workflow_data["export_format"] = export_format
                 instance.sql_content = sql_content
                 instance.db_name = workflow_data["db_name"]
+                instance.schema_name = workflow_data.get("schema_name") or ""
                 check_result = sql_export.pre_count_check(workflow=instance)
             else:
                 workflow_data["export_format"] = None

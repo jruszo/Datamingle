@@ -545,10 +545,10 @@ async function downloadSelectedExport() {
       return
     }
 
-    const objectUrl = window.URL.createObjectURL(result.blob)
+    const objectUrl = window.URL.createObjectURL(result.data)
     const anchor = document.createElement('a')
     anchor.href = objectUrl
-    anchor.download = result.fileName
+    anchor.download = result.filename
     anchor.style.display = 'none'
     document.body.appendChild(anchor)
     anchor.click()

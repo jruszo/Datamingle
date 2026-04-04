@@ -842,6 +842,7 @@ export type WorkflowSummaryRecord = {
   instance_name: string
   instance_db_type: string
   db_name: string
+  schema_name: string
   syntax_type: WorkflowSyntaxType
   syntax_type_label: string
   is_offline_export: boolean | number
@@ -1326,6 +1327,7 @@ export type WorkflowApprovalPreview = {
 export type WorkflowCheckRequest = {
   instance_id: number
   db_name: string
+  schema_name?: string
   full_sql: string
 }
 
@@ -1373,6 +1375,7 @@ export type WorkflowCreatePayload = {
     demand_url?: string
     group_id: number
     db_name: string
+    schema_name?: string | null
     instance: number
     is_backup?: boolean
     is_offline_export: 0 | 1
@@ -1390,8 +1393,8 @@ export type WorkflowDownloadResult =
     }
   | {
       mode: 'blob'
-      blob: Blob
-      fileName: string
+      data: Blob
+      filename: string
     }
 
 export type WorkflowCreateResult = {
@@ -1613,8 +1616,8 @@ export async function downloadWorkflowExport(
 
   return {
     mode: 'blob',
-    blob,
-    fileName,
+    data: blob,
+    filename: fileName,
   }
 }
 

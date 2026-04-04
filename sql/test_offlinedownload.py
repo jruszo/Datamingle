@@ -96,6 +96,7 @@ class TestOfflineDownload(TestCase):
         offline_download = OffLineDownLoad()
         # Set workflow SQL for this test.
         self.workflow.sql_content = "SELECT * FROM test_table"
+        self.workflow.schema_name = "analytics"
         result = offline_download.pre_count_check(self.workflow)
 
         # Verify result.
@@ -103,6 +104,7 @@ class TestOfflineDownload(TestCase):
         self.assertEqual(result.warning_count, 0)
         self.assertEqual(result.rows[0].stagestatus, "Row count completed")
         self.assertEqual(result.rows[0].affected_rows, 500)
+        self.assertEqual(mock_engine.query.call_args.kwargs["schema_name"], "analytics")
 
     @patch("sql.offlinedownload.get_engine")
     def test_pre_count_check_over_limit(self, mock_get_engine):
@@ -179,12 +181,14 @@ class TestOfflineDownload(TestCase):
 
         # Execute test.
         offline_download = OffLineDownLoad()
+        self.workflow.schema_name = "analytics"
         result = offline_download.execute_offline_download(self.workflow)
 
         # Verify result.
         self.assertEqual(result.error, None)
         self.assertEqual(result.rows[0].stagestatus, "Execution succeeded")
         self.assertIn("test_file.csv", result.rows[0].errormessage)
+        self.assertEqual(mock_engine.query.call_args.kwargs["schema_name"], "analytics")
 
         # Verify workflow update.
         updated_workflow = SqlWorkflow.objects.get(id=self.workflow.id)

@@ -3086,6 +3086,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             {
                 "full_sql": "select * from demo",
                 "db_name": "test_db",
+                "schema_name": "analytics",
                 "instance_id": self.ins.id,
             },
             format="json",
@@ -3094,6 +3095,9 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         payload = response_data(r)
         self.assertEqual(payload["syntax_type"], 3)
         self.assertEqual(payload["affected_rows"], 42)
+        self.assertEqual(
+            mock_pre_count_check.call_args.kwargs["workflow"].schema_name, "analytics"
+        )
 
     def test_export_sqlcheck_requires_export_submit_permission(self):
         self.user.user_permissions.remove(
@@ -3186,6 +3190,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
                 "workflow_name": "Export Workflow 1",
                 "group_id": 1,
                 "db_name": "test_db",
+                "schema_name": "analytics",
                 "instance": self.ins.id,
                 "is_offline_export": 1,
                 "export_format": "tsv",
@@ -3199,6 +3204,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(workflow.syntax_type, 3)
         self.assertEqual(workflow.is_offline_export, 1)
         self.assertEqual(workflow.export_format, "tsv")
+        self.assertEqual(workflow.schema_name, "analytics")
         self.assertFalse(workflow.is_backup)
 
     @patch("sql_api.serializers.get_engine")
@@ -3266,6 +3272,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             is_backup=False,
             instance=self.ins,
             db_name="some_db",
+            schema_name="analytics",
             syntax_type=3,
             is_offline_export=1,
             export_format="csv",
@@ -3285,6 +3292,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertTrue(row["is_offline_export"])
         self.assertEqual(row["export_format"], "csv")
         self.assertEqual(row["file_name"], "demo.csv")
+        self.assertEqual(row["schema_name"], "analytics")
         self.assertTrue(row["download_available"])
 
     def test_workflow_detail_includes_export_metadata(self):
@@ -3299,6 +3307,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             is_backup=False,
             instance=self.ins,
             db_name="some_db",
+            schema_name="analytics",
             syntax_type=3,
             is_offline_export=1,
             export_format="sql",
@@ -3330,6 +3339,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertTrue(payload["is_offline_export"])
         self.assertEqual(payload["export_format"], "sql")
         self.assertEqual(payload["file_name"], "demo.sql")
+        self.assertEqual(payload["schema_name"], "analytics")
         self.assertTrue(payload["download_available"])
 
     @patch("sql_api.api_workflow.download_export_file")

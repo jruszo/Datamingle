@@ -339,6 +339,7 @@ class SqlWorkflow(models.Model, WorkflowAuditMixin):
     group_name = models.CharField("Group Name", max_length=100)
     instance = models.ForeignKey(Instance, on_delete=models.CASCADE)
     db_name = models.CharField("Database", max_length=64)
+    schema_name = models.CharField("Schema", max_length=128, blank=True, default="")
     syntax_type = models.IntegerField(
         "Workflow Type (0=Unknown, 1=DDL, 2=DML, 3=Offline Export)",
         choices=((0, "Other"), (1, "DDL"), (2, "DML"), (3, "Offline Export")),
