@@ -19,3 +19,7 @@ src/docker-compose-dev
 .coverage
 archery_custom
 src/docker-compose/mysql/datadir/
+src/docker-compose/archery/downloads/DataExportFile/
+src/docker-compose/archery/downloads/dictionary/
+frontend/playwright-report/
+frontend/test-results/

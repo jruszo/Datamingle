@@ -451,7 +451,13 @@ onMounted(async () => {
                 <RefreshCw class="h-4 w-4" />
                 Validate export
               </Button>
-              <Button type="button" class="gap-2" :disabled="submitting || checking || !canSubmit" @click="void submitWorkflow()">
+              <Button
+                type="button"
+                class="gap-2"
+                data-testid="export-submit"
+                :disabled="submitting || checking || !canSubmit"
+                @click="void submitWorkflow()"
+              >
                 <Send class="h-4 w-4" />
                 Submit export request
               </Button>
@@ -498,6 +504,7 @@ onMounted(async () => {
               :disabled="checking || submitting"
               :min-height="420"
               placeholder="Paste a SELECT or WITH query for export."
+              test-id="export-sql-editor"
             />
           </CardContent>
         </Card>
@@ -512,13 +519,13 @@ onMounted(async () => {
             </CardHeader>
             <CardContent class="space-y-4">
               <div class="space-y-2">
-                <label class="text-sm font-medium text-slate-700">Workflow name</label>
-                <Input v-model="form.workflowName" placeholder="Short summary of the export request" :disabled="submitting" />
+                <label class="text-sm font-medium text-slate-700" for="export-workflow-name">Workflow name</label>
+                <Input id="export-workflow-name" v-model="form.workflowName" data-testid="export-workflow-name" placeholder="Short summary of the export request" :disabled="submitting" />
               </div>
 
               <div class="space-y-2">
-                <label class="text-sm font-medium text-slate-700">Resource group</label>
-                <select v-model="form.groupId" :class="selectClass" :disabled="submitting">
+                <label class="text-sm font-medium text-slate-700" for="export-workflow-group">Resource group</label>
+                <select id="export-workflow-group" v-model="form.groupId" data-testid="export-workflow-group" :class="selectClass" :disabled="submitting">
                   <option value="">Select a resource group</option>
                   <option v-for="group in eligibleGroups" :key="group.group_id" :value="group.group_id">
                     {{ group.group_name }}
@@ -527,8 +534,8 @@ onMounted(async () => {
               </div>
 
               <div class="space-y-2">
-                <label class="text-sm font-medium text-slate-700">Instance</label>
-                <select v-model="form.instanceId" :class="selectClass" :disabled="!form.groupId || submitting">
+                <label class="text-sm font-medium text-slate-700" for="export-workflow-instance">Instance</label>
+                <select id="export-workflow-instance" v-model="form.instanceId" data-testid="export-workflow-instance" :class="selectClass" :disabled="!form.groupId || submitting">
                   <option value="">Select an instance</option>
                   <option v-for="instance in filteredInstances" :key="instance.id" :value="instance.id">
                     {{ instance.instance_name }} / {{ instance.db_type.toUpperCase() }}
@@ -537,8 +544,8 @@ onMounted(async () => {
               </div>
 
               <div class="space-y-2">
-                <label class="text-sm font-medium text-slate-700">Database</label>
-                <select v-model="form.dbName" :class="selectClass" :disabled="!form.instanceId || databasesLoading || submitting">
+                <label class="text-sm font-medium text-slate-700" for="export-workflow-db">Database</label>
+                <select id="export-workflow-db" v-model="form.dbName" data-testid="export-workflow-db" :class="selectClass" :disabled="!form.instanceId || databasesLoading || submitting">
                   <option value="">{{ databasesLoading ? 'Loading databases...' : 'Select a database' }}</option>
                   <option v-for="databaseName in availableDatabases" :key="databaseName" :value="databaseName">
                     {{ databaseName }}
@@ -556,8 +563,8 @@ onMounted(async () => {
               </div>
 
               <div class="space-y-2">
-                <label class="text-sm font-medium text-slate-700">Export format</label>
-                <select v-model="form.exportFormat" :class="selectClass" :disabled="submitting">
+                <label class="text-sm font-medium text-slate-700" for="export-format">Export format</label>
+                <select id="export-format" v-model="form.exportFormat" data-testid="export-format" :class="selectClass" :disabled="submitting">
                   <option value="csv">CSV</option>
                   <option value="tsv">TSV</option>
                   <option value="sql">SQL</option>
@@ -594,7 +601,7 @@ onMounted(async () => {
                 Select a resource group to preview the approval chain.
               </p>
               <template v-else>
-                <p class="text-sm text-slate-500">{{ approvalPreview.display }}</p>
+                <p data-testid="export-approval-preview" class="text-sm text-slate-500">{{ approvalPreview.display }}</p>
                 <div class="flex flex-wrap gap-2">
                   <Badge
                     v-for="(node, index) in approvalPreview.review_info"

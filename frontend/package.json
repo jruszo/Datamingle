@@ -12,7 +12,11 @@
     "lint": "run-s lint:*",
     "lint:oxlint": "oxlint . --fix",
     "lint:eslint": "eslint . --fix --cache",
-    "format": "prettier --write --experimental-cli src/"
+    "format": "prettier --write --experimental-cli src/",
+    "e2e:install": "playwright install chromium",
+    "e2e:test": "bash ../scripts/e2e/run-local-playwright.sh",
+    "e2e:reset": "bash ../scripts/e2e/reset-local-env.sh",
+    "e2e": "E2E_START_FRONTEND=1 bash ../scripts/e2e/run-local-smoke.sh"
   },
   "dependencies": {
     "@codemirror/lang-sql": "^6.10.0",
@@ -34,6 +38,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.2",
+    "@playwright/test": "^1.55.0",
     "@tsconfig/node24": "^24.0.4",
     "@types/node": "^25.5.0",
     "@vitejs/plugin-vue": "^6.0.5",

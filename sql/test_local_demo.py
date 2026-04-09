@@ -38,6 +38,8 @@ class TestLocalDemoSeed(TestCase):
         requester = Users.objects.get(username="demo_requester")
         self.assertTrue(requester.check_password(DEMO_APP_PASSWORD))
         self.assertEqual(requester.groups.values_list("name", flat=True).get(), "RD")
+        self.assertTrue(requester.has_perm("sql.sqlexport_submit"))
+        self.assertTrue(requester.has_perm("sql.menu_sqlexportworkflow"))
         self.assertEqual(
             set(requester.resource_group.values_list("group_name", flat=True)),
             {
@@ -51,6 +53,10 @@ class TestLocalDemoSeed(TestCase):
             set(pm_user.resource_group.values_list("group_name", flat=True)),
             {"Demo Workflow Multi Stage"},
         )
+
+        dba_user = Users.objects.get(username="demo_dba")
+        self.assertTrue(dba_user.has_perm("sql.offline_download"))
+        self.assertTrue(dba_user.has_perm("sql.menu_sqlexportworkflow"))
 
         mysql_instance = Instance.objects.get(instance_name="demo-mysql-workflow")
         self.assertEqual(mysql_instance.host, "mysql_demo")

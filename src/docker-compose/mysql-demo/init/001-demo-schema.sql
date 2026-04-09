@@ -3,6 +3,7 @@ CREATE DATABASE IF NOT EXISTS demo_billing;
 
 GRANT ALL PRIVILEGES ON demo_orders.* TO 'demo_archery'@'%';
 GRANT ALL PRIVILEGES ON demo_billing.* TO 'demo_archery'@'%';
+GRANT REPLICATION CLIENT ON *.* TO 'demo_archery'@'%';
 FLUSH PRIVILEGES;
 
 USE demo_orders;

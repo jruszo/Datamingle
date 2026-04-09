@@ -29,7 +29,6 @@ from sql.utils.resource_group import (
     user_has_instance_workflow_access,
 )
 from common.utils.const import WorkflowType, WorkflowStatus, Const
-from common.config import SysConfig
 import traceback
 import logging
 from sql.offlinedownload import OffLineDownLoad
@@ -1364,16 +1363,9 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                 }
             )
 
-        # If backup switch is off but engine supports backup, force backup on
         is_backup = (
             workflow_data["is_backup"] if "is_backup" in workflow_data.keys() else False
         )
-        sys_config = SysConfig()
-        if not sys_config.get("enable_backup_switch") and check_engine.auto_backup:
-            if is_offline_export:
-                pass
-            else:
-                is_backup = True
         if is_offline_export:
             is_backup = False
 

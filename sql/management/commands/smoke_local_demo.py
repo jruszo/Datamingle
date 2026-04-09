@@ -86,6 +86,20 @@ class Command(BaseCommand):
             raise CommandError("Submission metadata is missing seeded demo instances.")
         self.stdout.write("Workflow submission metadata OK")
 
+        response = client.get(
+            "/api/v1/workflow/export/submission-metadata/", format="json"
+        )
+        if response.status_code != 200:
+            raise CommandError(
+                f"Export submission metadata failed: {response.status_code} {response.content}"
+            )
+        export_metadata = _response_data(response)
+        if len(export_metadata.get("instances", [])) < 1:
+            raise CommandError(
+                "Export submission metadata is missing readable demo instances."
+            )
+        self.stdout.write("Export submission metadata OK")
+
         for resource_group_config in DEMO_RESOURCE_GROUPS.values():
             resource_group = resource_groups[resource_group_config["group_name"]]
             response = client.get(
@@ -108,6 +122,11 @@ class Command(BaseCommand):
                     )
                 )
             self.stdout.write(f"Approval preview OK: {resource_group.group_name}")
+
+        dba_user = users["demo_dba"]
+        if not dba_user.has_perm("sql.offline_download"):
+            raise CommandError("Demo DBA is missing offline_download permission.")
+        self.stdout.write("Export download permission OK: demo_dba")
 
         for instance_config in DEMO_INSTANCES.values():
             instance = instances[instance_config["instance_name"]]

@@ -868,7 +868,7 @@ onMounted(async () => {
                 Review approvals, time windows, execution controls, and result logs for the selected workflow.
               </CardDescription>
             </div>
-            <Button variant="outline" type="button" class="gap-2" @click="void refreshSelectedWorkflow()">
+            <Button variant="outline" type="button" class="gap-2" data-testid="workflow-detail-refresh" @click="void refreshSelectedWorkflow()">
               <RefreshCw class="h-4 w-4" />
               Refresh detail
             </Button>
@@ -877,7 +877,7 @@ onMounted(async () => {
             <Badge variant="outline" :class="syntaxBadgeClass(selectedWorkflow.syntax_type)">
               {{ selectedWorkflow.syntax_type_label }}
             </Badge>
-            <Badge variant="outline" :class="statusBadgeClass(selectedWorkflow.status)">
+            <Badge variant="outline" data-testid="workflow-detail-status" :class="statusBadgeClass(selectedWorkflow.status)">
               {{ selectedWorkflow.status_label }}
             </Badge>
           </div>
@@ -1094,6 +1094,7 @@ onMounted(async () => {
                   <div class="mt-4 flex flex-wrap gap-2">
                     <Button
                       v-if="selectedWorkflow.is_can_review"
+                      data-testid="workflow-approve"
                       type="button"
                       :disabled="reviewSubmitting"
                       @click="void submitReviewAction('pass')"
@@ -1102,6 +1103,7 @@ onMounted(async () => {
                     </Button>
                     <Button
                       v-if="selectedWorkflow.is_can_reject"
+                      data-testid="workflow-reject"
                       variant="outline"
                       type="button"
                       :disabled="reviewSubmitting"
@@ -1111,6 +1113,7 @@ onMounted(async () => {
                     </Button>
                     <Button
                       v-if="selectedWorkflow.is_can_cancel"
+                      data-testid="workflow-cancel"
                       variant="outline"
                       type="button"
                       :disabled="reviewSubmitting"
@@ -1120,6 +1123,7 @@ onMounted(async () => {
                     </Button>
                     <Button
                       v-if="selectedWorkflow.is_can_execute"
+                      data-testid="workflow-execute-now"
                       type="button"
                       :disabled="executeSubmitting"
                       @click="void executeSelectedWorkflow('auto')"
@@ -1128,6 +1132,7 @@ onMounted(async () => {
                     </Button>
                     <Button
                       v-if="selectedWorkflow.is_can_manual_execute"
+                      data-testid="workflow-execute-manual"
                       variant="outline"
                       type="button"
                       :disabled="executeSubmitting"
@@ -1137,6 +1142,7 @@ onMounted(async () => {
                     </Button>
                     <Button
                       v-if="canDownloadSelectedExport"
+                      data-testid="workflow-download-export"
                       variant="outline"
                       type="button"
                       :disabled="downloadSubmitting"

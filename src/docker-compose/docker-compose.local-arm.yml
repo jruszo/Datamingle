@@ -21,7 +21,6 @@ services:
       - "3306:3306"
     volumes:
       - "./mysql/my.cnf:/etc/mysql/my.cnf"
-      - "./mysql/datadir:/var/lib/mysql"
     environment:
       MYSQL_DATABASE: archery
       MYSQL_ROOT_HOST: "%"
@@ -50,7 +49,6 @@ services:
     ports:
       - "3307:3306"
     volumes:
-      - mysql_demo_data:/var/lib/mysql
       - "./mysql-demo/init:/docker-entrypoint-initdb.d:ro"
     environment:
       MYSQL_DATABASE: demo_orders
@@ -70,7 +68,6 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - postgres_demo_data:/var/lib/postgresql/data
       - "./postgres-demo/init:/docker-entrypoint-initdb.d:ro"
     environment:
       POSTGRES_DB: workflow_pg
@@ -116,9 +113,3 @@ services:
     entrypoint: "bash /opt/archery/src/docker/startup.sh"
     env_file:
       - .env.local-arm
-
-volumes:
-  mysql_demo_data:
-    name: datamingle-mysql-demo-data
-  postgres_demo_data:
-    name: datamingle-postgres-demo-data
