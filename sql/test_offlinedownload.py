@@ -583,7 +583,9 @@ class TestOfflineDownload(TestCase):
         self.assertEqual(audit_entry.user_id, self.superuser.id)
 
     @patch("sql.offlinedownload.DynamicStorage")
-    def test_download_export_file_defaults_blank_storage_type_to_local(self, mock_storage):
+    def test_download_export_file_defaults_blank_storage_type_to_local(
+        self, mock_storage
+    ):
         Config.objects.filter(item="storage_type").update(value="")
 
         mock_storage_instance = MagicMock()
@@ -600,4 +602,6 @@ class TestOfflineDownload(TestCase):
         response = download_export_file(request, "demo.csv", self.workflow.id)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response["Content-Disposition"], 'attachment; filename="demo.csv"')
+        self.assertEqual(
+            response["Content-Disposition"], 'attachment; filename="demo.csv"'
+        )
