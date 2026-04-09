@@ -3,6 +3,7 @@ from django.test import TestCase, Client
 from django.conf import settings
 from django.http import HttpRequest
 from datetime import datetime, date
+from io import BytesIO
 import tempfile
 import os
 import shutil
@@ -14,6 +15,7 @@ import xml.etree.ElementTree as ET
 from sql.models import SqlWorkflow, SqlWorkflowContent, Instance, Config, AuditEntry
 from sql.offlinedownload import (
     OffLineDownLoad,
+    download_export_file,
     save_to_format_file,
     save_csv,
     save_json,
@@ -579,3 +581,23 @@ class TestOfflineDownload(TestCase):
             audit_entry.extra_info,
         )
         self.assertEqual(audit_entry.user_id, self.superuser.id)
+
+    @patch("sql.offlinedownload.DynamicStorage")
+    def test_download_export_file_defaults_blank_storage_type_to_local(self, mock_storage):
+        Config.objects.filter(item="storage_type").update(value="")
+
+        mock_storage_instance = MagicMock()
+        mock_storage_instance.storage_type = "local"
+        mock_storage_instance.exists.return_value = True
+        mock_storage_instance.open.return_value = BytesIO(b"demo")
+        mock_storage_instance.size.return_value = 4
+        mock_storage.return_value = mock_storage_instance
+
+        request = HttpRequest()
+        request.method = "GET"
+        request.user = self.superuser
+
+        response = download_export_file(request, "demo.csv", self.workflow.id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Disposition"], 'attachment; filename="demo.csv"')

@@ -403,9 +403,8 @@ def download_export_file(request, file_name, workflow_id):
     """
     action = "Offline download"
     extra_info = f"Workflow ID: {workflow_id}, file: {file_name}"
-    config = SysConfig()
-    storage_type = config.get("storage_type")
     storage = DynamicStorage()
+    storage_type = storage.storage_type
 
     try:
         if not storage.exists(file_name):

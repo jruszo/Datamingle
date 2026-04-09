@@ -3064,6 +3064,30 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertIn("rows", data)
 
     @patch("sql_api.api_workflow.get_engine")
+    def test_sqlcheck_ignores_schema_name_for_engine_execute_check(self, _get_engine):
+        json_data = {
+            "full_sql": "select 1",
+            "db_name": "test_db",
+            "schema_name": "public",
+            "instance_id": self.ins.id,
+        }
+        mock_engine = _get_engine.return_value
+        mock_engine.escape_string.return_value = "escaped_db"
+        mock_engine.execute_check.return_value = ReviewSet(
+            warning_count=0,
+            error_count=0,
+            column_list=[],
+            rows=[],
+        )
+
+        r = self.client.post("/api/v1/workflow/sqlcheck/", json_data, format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        mock_engine.execute_check.assert_called_once_with(
+            db_name="escaped_db", sql="select 1"
+        )
+
+    @patch("sql_api.api_workflow.get_engine")
     @patch("sql_api.api_workflow.OffLineDownLoad.pre_count_check")
     def test_export_sqlcheck(self, mock_pre_count_check, mock_get_engine):
         review_set = ReviewSet(
@@ -3196,6 +3220,92 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(r_data["workflow"]["workflow_name"], "Release Workflow 1")
         self.assertEqual(r_data["workflow"]["engineer"], self.user.username)
         self.assertEqual(r_data["workflow"]["engineer_display"], self.user.display)
+
+    @patch("sql_api.serializers.get_engine")
+    def test_submit_workflow_does_not_force_backup_when_toggle_disabled(
+        self, mock_get_engine
+    ):
+        review_set = ReviewSet(
+            rows=[
+                ReviewResult(
+                    errlevel=0,
+                    stagestatus="Audit completed",
+                    errormessage="None",
+                    sql="alter table abc add column note varchar(64);",
+                )
+            ]
+        )
+        review_set.syntax_type = 2
+        review_set.error_count = 0
+        review_set.warning_count = 0
+        mock_get_engine.return_value.auto_backup = True
+        mock_get_engine.return_value.execute_check.return_value = review_set
+
+        sys_config = SysConfig()
+        sys_config.set("enable_backup_switch", False)
+        try:
+            json_data = {
+                "workflow": {
+                    "workflow_name": "Release Workflow Without Backup",
+                    "demand_url": "test",
+                    "group_id": 1,
+                    "db_name": "test_db",
+                    "instance": self.ins.id,
+                    "is_backup": False,
+                    "is_offline_export": 0,
+                },
+                "sql_content": "alter table abc add column note varchar(64);",
+            }
+            r = self.client.post("/api/v1/workflow/", json_data, format="json")
+            self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+            workflow_id = response_data(r)["workflow"]["id"]
+            workflow = SqlWorkflow.objects.get(id=workflow_id)
+            self.assertFalse(workflow.is_backup)
+        finally:
+            sys_config.purge()
+
+    @patch("sql_api.serializers.get_engine")
+    def test_submit_workflow_preserves_backup_when_toggle_enabled(
+        self, mock_get_engine
+    ):
+        review_set = ReviewSet(
+            rows=[
+                ReviewResult(
+                    errlevel=0,
+                    stagestatus="Audit completed",
+                    errormessage="None",
+                    sql="update abc set note = 'backup';",
+                )
+            ]
+        )
+        review_set.syntax_type = 2
+        review_set.error_count = 0
+        review_set.warning_count = 0
+        mock_get_engine.return_value.auto_backup = True
+        mock_get_engine.return_value.execute_check.return_value = review_set
+
+        sys_config = SysConfig()
+        sys_config.set("enable_backup_switch", True)
+        try:
+            json_data = {
+                "workflow": {
+                    "workflow_name": "Release Workflow With Backup",
+                    "demand_url": "test",
+                    "group_id": 1,
+                    "db_name": "test_db",
+                    "instance": self.ins.id,
+                    "is_backup": True,
+                    "is_offline_export": 0,
+                },
+                "sql_content": "update abc set note = 'backup';",
+            }
+            r = self.client.post("/api/v1/workflow/", json_data, format="json")
+            self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+            workflow_id = response_data(r)["workflow"]["id"]
+            workflow = SqlWorkflow.objects.get(id=workflow_id)
+            self.assertTrue(workflow.is_backup)
+        finally:
+            sys_config.purge()
 
     @patch("sql_api.serializers.OffLineDownLoad.pre_count_check")
     @patch("sql_api.serializers.get_engine")

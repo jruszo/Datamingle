@@ -705,14 +705,11 @@ class ExecuteCheck(views.APIView):
         # Run check through engine
         try:
             db_name = serializer.validated_data["db_name"]
-            schema_name = serializer.validated_data.get("schema_name") or None
             full_sql = serializer.validated_data["full_sql"].strip()
             _ensure_no_load_data_statements(full_sql)
             check_engine = get_engine(instance=instance)
             db_name = check_engine.escape_string(db_name)
-            check_result = check_engine.execute_check(
-                db_name=db_name, sql=full_sql, schema_name=schema_name
-            )
+            check_result = check_engine.execute_check(db_name=db_name, sql=full_sql)
         except serializers.ValidationError:
             raise
         except Exception as e:

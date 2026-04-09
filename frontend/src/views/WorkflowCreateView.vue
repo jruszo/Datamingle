@@ -597,7 +597,13 @@ onMounted(() => {
                 <RefreshCw class="h-4 w-4" />
                 SQL check
               </Button>
-              <Button type="button" class="gap-2" :disabled="submitting || checking || parsingUpload || !canSubmit" @click="void submitWorkflow()">
+              <Button
+                type="button"
+                class="gap-2"
+                data-testid="workflow-submit"
+                :disabled="submitting || checking || parsingUpload || !canSubmit"
+                @click="void submitWorkflow()"
+              >
                 <Send class="h-4 w-4" />
                 {{ submitButtonLabel }}
               </Button>
@@ -664,6 +670,7 @@ onMounted(() => {
               :disabled="checking || submitting || parsingUpload"
               :min-height="420"
               :placeholder="editorPlaceholder"
+              test-id="workflow-sql-editor"
             />
           </CardContent>
         </Card>
@@ -678,18 +685,18 @@ onMounted(() => {
             </CardHeader>
             <CardContent class="space-y-4">
               <div class="space-y-2">
-                <label class="text-sm font-medium text-slate-700">Workflow name</label>
-                <Input v-model="form.workflowName" :placeholder="workflowNamePlaceholder" :disabled="submitting" />
+                <label class="text-sm font-medium text-slate-700" for="workflow-name">Workflow name</label>
+                <Input id="workflow-name" v-model="form.workflowName" data-testid="workflow-name" :placeholder="workflowNamePlaceholder" :disabled="submitting" />
               </div>
 
               <div class="space-y-2">
-                <label class="text-sm font-medium text-slate-700">Requirement URL</label>
-                <Input v-model="form.demandUrl" placeholder="Optional ticket or requirement link" :disabled="submitting" />
+                <label class="text-sm font-medium text-slate-700" for="workflow-demand-url">Requirement URL</label>
+                <Input id="workflow-demand-url" v-model="form.demandUrl" data-testid="workflow-demand-url" placeholder="Optional ticket or requirement link" :disabled="submitting" />
               </div>
 
               <div class="space-y-2">
-                <label class="text-sm font-medium text-slate-700">Resource group</label>
-                <select v-model="form.groupId" :class="selectClass" :disabled="submitting">
+                <label class="text-sm font-medium text-slate-700" for="workflow-group">Resource group</label>
+                <select id="workflow-group" v-model="form.groupId" data-testid="workflow-group" :class="selectClass" :disabled="submitting">
                   <option value="">Select a resource group</option>
                   <option
                     v-for="group in eligibleGroups"
@@ -702,8 +709,8 @@ onMounted(() => {
               </div>
 
               <div class="space-y-2">
-                <label class="text-sm font-medium text-slate-700">Instance</label>
-                <select v-model="form.instanceId" :class="selectClass" :disabled="!form.groupId || submitting">
+                <label class="text-sm font-medium text-slate-700" for="workflow-instance">Instance</label>
+                <select id="workflow-instance" v-model="form.instanceId" data-testid="workflow-instance" :class="selectClass" :disabled="!form.groupId || submitting">
                   <option value="">Select an instance</option>
                   <option
                     v-for="instance in filteredInstances"
@@ -716,8 +723,8 @@ onMounted(() => {
               </div>
 
               <div class="space-y-2">
-                <label class="text-sm font-medium text-slate-700">Database</label>
-                <select v-model="form.dbName" :class="selectClass" :disabled="!form.instanceId || databasesLoading || submitting">
+                <label class="text-sm font-medium text-slate-700" for="workflow-db">Database</label>
+                <select id="workflow-db" v-model="form.dbName" data-testid="workflow-db" :class="selectClass" :disabled="!form.instanceId || databasesLoading || submitting">
                   <option value="">{{ databasesLoading ? 'Loading databases...' : 'Select a database' }}</option>
                   <option v-for="databaseName in availableDatabases" :key="databaseName" :value="databaseName">
                     {{ databaseName }}
@@ -735,7 +742,14 @@ onMounted(() => {
                     <p class="text-sm font-medium text-slate-900">Backup SQL</p>
                     <p class="text-sm text-slate-500">Keep rollback data when the engine supports it.</p>
                   </div>
-                  <input v-model="form.isBackup" class="h-4 w-4 rounded border-slate-300" type="checkbox" :disabled="submitting" />
+                  <input
+                    id="workflow-backup-toggle"
+                    v-model="form.isBackup"
+                    data-testid="workflow-backup-toggle"
+                    class="h-4 w-4 rounded border-slate-300"
+                    type="checkbox"
+                    :disabled="submitting"
+                  />
                 </div>
               </div>
 
@@ -774,7 +788,7 @@ onMounted(() => {
                 Select a resource group to preview its approval chain.
               </div>
               <template v-else>
-                <p class="text-sm text-slate-600">{{ approvalPreview.display }}</p>
+                <p data-testid="workflow-approval-preview" class="text-sm text-slate-600">{{ approvalPreview.display }}</p>
                 <div class="space-y-2">
                   <div
                     v-for="(node, index) in approvalPreview.review_info"

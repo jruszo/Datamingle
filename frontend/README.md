@@ -34,4 +34,27 @@ npm run dev
 npm run build
 npm run lint
 npm run type-check
+npm run e2e
+```
+
+## Playwright E2E
+
+The Playwright smoke suite assumes the local Docker demo environment and resets it from zero before running:
+
+```sh
+npm run e2e
+```
+
+This command:
+
+- tears down the local ARM Docker stack
+- recreates the app and demo databases from scratch
+- runs `smoke_local_demo`
+- starts Vite on a fixed local port
+- runs the Playwright Chromium smoke tests
+
+For quick frontend iterations with an already running local Vite dev server on `127.0.0.1:5173`, rerun only the browser suite:
+
+```sh
+npm run e2e:test
 ```

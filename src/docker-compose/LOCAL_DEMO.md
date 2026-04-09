@@ -102,9 +102,16 @@ This command verifies:
 
 ## Resetting the demo databases
 
-The demo MySQL and PostgreSQL services use named Docker volumes:
+The local ARM compose services are intentionally ephemeral:
 
-- `datamingle-mysql-demo-data`
-- `datamingle-postgres-demo-data`
+- the app MySQL database is not bind-mounted
+- the demo MySQL/PostgreSQL services do not use named volumes
 
-If you want to recreate their initial SQL content from scratch, remove those volumes and recreate the services.
+If you want to recreate the initial SQL content from scratch, tear down the local stack and bring it back up again:
+
+```bash
+docker-compose -f src/docker-compose/docker-compose.local-arm.yml down -v
+docker-compose -f src/docker-compose/docker-compose.local-arm.yml up -d --build archery
+```
+
+That recreates the databases, reruns migrations, and reapplies the local demo seed.

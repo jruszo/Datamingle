@@ -14,6 +14,7 @@ const props = withDefaults(
     placeholder?: string
     minHeight?: number
     height?: number
+    testId?: string
   }>(),
   {
     dbType: '',
@@ -21,6 +22,7 @@ const props = withDefaults(
     placeholder: 'Write a query or paste a statement here...',
     minHeight: 240,
     height: undefined,
+    testId: undefined,
   },
 )
 
@@ -248,6 +250,7 @@ onBeforeUnmount(() => {
 <template>
   <div
     ref="container"
+    :data-testid="props.testId"
     class="overflow-hidden rounded-3xl border border-sky-100 bg-slate-50 shadow-inner"
     :style="{ height: containerHeight }"
   />

@@ -51,12 +51,12 @@ async function submit() {
           <p v-if="sessionMessage" class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
             {{ sessionMessage }}
           </p>
-          <Input v-model="form.username" placeholder="Username" />
-          <Input v-model="form.password" type="password" placeholder="Password" />
+          <Input id="login-username" v-model="form.username" data-testid="login-username" placeholder="Username" />
+          <Input id="login-password" v-model="form.password" data-testid="login-password" type="password" placeholder="Password" />
           <p v-if="error" class="text-sm text-destructive">{{ error }}</p>
         </CardContent>
         <CardFooter>
-          <Button class="w-full" type="submit" :disabled="loading">
+          <Button class="w-full" data-testid="login-submit" type="submit" :disabled="loading">
             {{ loading ? 'Signing in...' : 'Sign in' }}
           </Button>
         </CardFooter>
