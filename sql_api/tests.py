@@ -12,6 +12,7 @@ from common.config import SysConfig
 from sql.utils.workflow_audit import AuditSetting
 from sql.engines import ReviewSet
 from sql.engines.models import ReviewResult, ResultSet
+from sql_api.api_settings import DEFAULT_CHAT_MODEL, NOTIFY_PHASE_OPTIONS
 from sql.models import (
     ResourceGroup,
     Instance,
@@ -4431,3 +4432,175 @@ class TestDashboardAPI(CacheIsolatedAPITestCase):
 
         response = self.client.get("/api/v1/dashboard/", format="json")
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class TestSystemSettings(CacheIsolatedAPITestCase):
+    """Test SPA system settings APIs."""
+
+    def setUp(self):
+        self.staff_user = User.objects.create(
+            username="staff_user",
+            display="Staff User",
+            email="staff@datamingle.test",
+            is_active=True,
+            is_staff=True,
+        )
+        self.staff_user.set_password("staff_password")
+        self.staff_user.save(update_fields=["password"])
+        self.regular_user = User.objects.create(
+            username="regular_user",
+            display="Regular User",
+            email="regular@datamingle.test",
+            is_active=True,
+            is_staff=False,
+        )
+        self.regular_user.set_password("regular_password")
+        self.regular_user.save(update_fields=["password"])
+        self.group = Group.objects.create(name="Ops")
+        self.resource_group = ResourceGroup.objects.create(group_name="Core Systems")
+        self.instance_tag = InstanceTag.objects.create(
+            tag_code="can_read", tag_name="Can Read"
+        )
+
+    def tearDown(self):
+        SysConfig().purge()
+        InstanceTag.objects.all().delete()
+        ResourceGroup.objects.all().delete()
+        Group.objects.all().delete()
+        User.objects.all().delete()
+
+    def authenticate(self, username, password):
+        response = self.client.post(
+            "/api/auth/token/",
+            {"username": username, "password": password},
+            format="json",
+        )
+        token = response_data(response)["access"]
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
+
+    def test_staff_can_get_system_settings(self):
+        self.authenticate("staff_user", "staff_password")
+
+        response = self.client.get("/api/v1/system-settings/", format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response_data(response)
+        self.assertEqual(payload["settings"]["default_chat_model"], DEFAULT_CHAT_MODEL)
+        self.assertEqual(
+            payload["settings"]["notify_phase_control"],
+            list(NOTIFY_PHASE_OPTIONS),
+        )
+        self.assertEqual(payload["settings"]["storage_type"], "local")
+        self.assertEqual(
+            payload["options"]["instance_tags"][0]["value"], self.instance_tag.tag_code
+        )
+        self.assertEqual(payload["options"]["auth_groups"][0]["value"], self.group.name)
+
+    def test_non_staff_users_cannot_access_system_settings(self):
+        self.authenticate("regular_user", "regular_password")
+
+        response = self.client.get("/api/v1/system-settings/", format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_staff_can_update_system_settings(self):
+        self.authenticate("staff_user", "staff_password")
+        current_settings = response_data(
+            self.client.get("/api/v1/system-settings/", format="json")
+        )["settings"]
+        current_settings.update(
+            {
+                "auto_review": True,
+                "auto_review_tag": [self.instance_tag.tag_code],
+                "notify_phase_control": ["Apply", "Execute"],
+                "storage_type": "sftp",
+                "sftp_host": "sftp.internal",
+                "sftp_port": 2222,
+                "default_auth_group": [self.group.name],
+                "default_resource_group": [self.resource_group.group_name],
+                "api_user_whitelist": [self.regular_user.id],
+                "openai_api_key": "sk-test",
+            }
+        )
+
+        response = self.client.put(
+            "/api/v1/system-settings/", current_settings, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response_data(response)["settings"]
+        self.assertTrue(payload["auto_review"])
+        self.assertEqual(payload["auto_review_tag"], [self.instance_tag.tag_code])
+        self.assertEqual(payload["notify_phase_control"], ["Apply", "Execute"])
+        self.assertEqual(payload["default_auth_group"], [self.group.name])
+        self.assertEqual(
+            payload["default_resource_group"], [self.resource_group.group_name]
+        )
+        self.assertEqual(payload["api_user_whitelist"], [self.regular_user.id])
+
+        config = SysConfig()
+        self.assertTrue(config.get("auto_review"))
+        self.assertEqual(config.get("auto_review_tag"), self.instance_tag.tag_code)
+        self.assertEqual(config.get("notify_phase_control"), "Apply,Execute")
+        self.assertEqual(config.get("storage_type"), "sftp")
+        self.assertEqual(config.get("sftp_port"), "2222")
+        self.assertEqual(config.get("default_auth_group"), self.group.name)
+        self.assertEqual(
+            config.get("default_resource_group"), self.resource_group.group_name
+        )
+        self.assertEqual(config.get("api_user_whitelist"), str(self.regular_user.id))
+        self.assertEqual(config.get("openai_api_key"), "sk-test")
+
+    @patch("sql_api.api_settings.validate_go_inception_payload")
+    def test_staff_can_run_go_inception_connection_test(self, validate_payload):
+        validate_payload.return_value = {"status": 0, "msg": "ok", "data": []}
+        self.authenticate("staff_user", "staff_password")
+
+        response = self.client.post(
+            "/api/v1/system-settings/tests/go-inception/",
+            {
+                "go_inception_host": "inception",
+                "go_inception_port": 4000,
+                "inception_remote_backup_host": "backup",
+                "inception_remote_backup_port": 3306,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("connection test succeeded", response.json()["detail"].lower())
+
+    @patch("sql_api.api_settings.validate_email_payload")
+    def test_staff_can_run_email_test(self, validate_payload):
+        validate_payload.return_value = {"status": 0, "msg": "ok", "data": []}
+        self.authenticate("staff_user", "staff_password")
+
+        response = self.client.post(
+            "/api/v1/system-settings/tests/email/",
+            {
+                "mail": True,
+                "mail_ssl": False,
+                "mail_smtp_server": "smtp.datamingle.test",
+                "mail_smtp_port": 587,
+                "mail_smtp_user": "mailer",
+                "mail_smtp_password": "secret",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        validate_payload.assert_called_once()
+
+    @patch("sql_api.api_settings.validate_file_storage_payload")
+    def test_staff_can_run_storage_test(self, validate_payload):
+        validate_payload.return_value = {"status": 0, "msg": "ok", "data": []}
+        self.authenticate("staff_user", "staff_password")
+
+        response = self.client.post(
+            "/api/v1/system-settings/tests/storage/",
+            {"storage_type": "local", "max_export_rows": 10000},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        validate_payload.assert_called_once()
