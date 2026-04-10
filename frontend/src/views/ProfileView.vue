@@ -32,6 +32,7 @@ const passwordForm = reactive({
 })
 
 const currentUser = computed(() => authStore.currentUser)
+const canChangePassword = computed(() => authStore.authMode !== 'workos')
 
 const currentUserInitials = computed(() => {
   const source = currentUser.value?.display || currentUser.value?.username || 'U'
@@ -183,6 +184,7 @@ async function updatePassword() {
 }
 
 onMounted(() => {
+  void authStore.loadAuthConfig()
   void loadProfile()
 })
 </script>
@@ -203,7 +205,11 @@ onMounted(() => {
                   {{ currentUser?.display || currentUser?.username || 'User profile' }}
                 </h2>
                 <p class="mt-1 text-sm text-slate-600">
-                  Manage the account details shown across Datamingle and rotate your password without leaving the SPA.
+                  {{
+                    canChangePassword
+                      ? 'Manage the account details shown across Datamingle and rotate your password without leaving the SPA.'
+                      : 'Manage the account details shown across Datamingle for your WorkOS-backed account.'
+                  }}
                 </p>
               </div>
             </div>
@@ -283,7 +289,7 @@ onMounted(() => {
         </CardContent>
       </Card>
 
-      <Card class="border-slate-200">
+      <Card v-if="canChangePassword" class="border-slate-200">
         <CardHeader>
           <CardTitle>Password</CardTitle>
           <CardDescription>

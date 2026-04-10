@@ -22,6 +22,11 @@ router = routers.DefaultRouter()
 urlpatterns = [
     path("v1/", include(router.urls)),
     path(
+        "auth/config/",
+        api_auth.AuthConfigView.as_view(),
+        name="auth_config",
+    ),
+    path(
         "auth/token/",
         api_auth.SPATokenObtainPairView.as_view(),
         name="token_obtain_pair",
@@ -40,6 +45,26 @@ urlpatterns = [
         "auth/token/verify/",
         api_auth.SPATokenVerifyView.as_view(),
         name="token_verify",
+    ),
+    path(
+        "auth/workos/authorize/",
+        api_auth.WorkOSAuthorizeView.as_view(),
+        name="workos_authorize",
+    ),
+    path(
+        "auth/workos/callback/",
+        api_auth.WorkOSCallbackView.as_view(),
+        name="workos_callback",
+    ),
+    path(
+        "auth/workos/exchange/",
+        api_auth.WorkOSExchangeView.as_view(),
+        name="workos_exchange",
+    ),
+    path(
+        "auth/workos/logout/",
+        api_auth.WorkOSLogoutView.as_view(),
+        name="workos_logout",
     ),
     path("schema/", SpectacularAPIView.as_view(), name="schema"),
     path(

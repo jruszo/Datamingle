@@ -2,6 +2,7 @@ from rest_framework import views, generics, status, permissions
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from drf_spectacular.utils import extend_schema
+from django.conf import settings
 from django.db.models import Count, Q
 from .serializers import (
     UserManagementReadSerializer,
@@ -166,6 +167,11 @@ class CurrentUserPassword(views.APIView):
         description="Change the authenticated user's password.",
     )
     def post(self, request):
+        if settings.AUTH_MODE == "workos":
+            raise ValidationError(
+                "Password changes are disabled while WorkOS authentication is active."
+            )
+
         serializer = CurrentUserPasswordChangeSerializer(
             data=request.data, context={"request": request}
         )

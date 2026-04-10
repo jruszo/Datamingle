@@ -18,6 +18,7 @@ import {
 } from 'lucide-vue-next'
 
 import { Button } from '@/components/ui/button'
+import { publicApiUrl } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
@@ -152,11 +153,22 @@ function toggleSettingsMenu() {
 }
 
 async function logout() {
+  try {
+    await authStore.loadAuthConfig()
+  } catch {
+    // Fall back to local sign-out if auth config cannot be loaded.
+  }
+  const authMode = authStore.authMode
   authStore.clearTokens()
+  if (authMode === 'workos') {
+    window.location.assign(publicApiUrl('/auth/workos/logout/'))
+    return
+  }
   await router.push('/login')
 }
 
 onMounted(() => {
+  void authStore.loadAuthConfig()
   void loadCurrentUser()
 })
 

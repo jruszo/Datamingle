@@ -66,6 +66,79 @@ Manual Installation
 ===============
 Use this repository as the source of truth: https://github.com/jruszo/Datamingle
 
+Authentication Modes
+===============
+Datamingle supports exactly two deployment-level authentication modes:
+
+- `builtin`: local Datamingle username/password auth
+- `workos`: WorkOS-only login for the deployment
+
+This is controlled with the `AUTH_MODE` environment variable in `.env`. A deployment uses one mode at a time.
+
+### Builtin Auth
+Use local Datamingle accounts and passwords:
+
+```env
+AUTH_MODE=builtin
+```
+
+Behavior:
+
+- The SPA login page shows the local username/password form.
+- The legacy server-rendered `/login/` page also shows the local login form.
+- `/authenticate/`, `/signup/`, and `/api/auth/token/` stay enabled.
+
+### WorkOS Auth
+Use WorkOS as the only sign-in method for the deployment:
+
+```env
+AUTH_MODE=workos
+WORKOS_API_KEY=sk_test_or_live_xxx
+WORKOS_CLIENT_ID=client_xxx
+WORKOS_ORGANIZATION_ID=org_xxx
+WORKOS_REDIRECT_URI=https://tenant.datamingle.dev/api/auth/workos/callback/
+WORKOS_LOGOUT_REDIRECT_URI=https://tenant.datamingle.dev/login
+WORKOS_STAFF_EMAILS=ops@datamingle.dev,admin@datamingle.dev
+WORKOS_SUPERUSER_EMAILS=admin@datamingle.dev
+```
+
+Behavior:
+
+- The SPA login page shows only the WorkOS button.
+- The legacy server-rendered `/login/` page also shows only the WorkOS button.
+- Local password login is disabled.
+- `/authenticate/`, `/signup/`, and `/api/auth/token/` reject password-based login attempts.
+- Datamingle still keeps its own local `Users`, groups, and resource-group assignments after login.
+
+WorkOS setup assumptions in this repo:
+
+- One Datamingle deployment maps to one tenant.
+- That deployment uses one fixed WorkOS organization via `WORKOS_ORGANIZATION_ID`.
+- Users are provisioned just-in-time on first successful WorkOS login.
+- The local Datamingle account uses the WorkOS email as the username.
+- `WORKOS_STAFF_EMAILS` and `WORKOS_SUPERUSER_EMAILS` are bootstrap allowlists for initial elevated access.
+
+### WorkOS Setup Steps
+1. Create or choose the tenant organization in your WorkOS account.
+2. Configure the Datamingle application redirect URI in WorkOS:
+   `https://<tenant-host>/api/auth/workos/callback/`
+3. Configure the logout return URL in WorkOS:
+   `https://<tenant-host>/login`
+4. Set `AUTH_MODE=workos` and the required `WORKOS_*` values in `.env`.
+5. Rebuild the app container so the `workos` Python dependency is installed:
+
+```bash
+docker-compose -f src/docker-compose/docker-compose.local-arm.yml up -d --build archery
+```
+
+6. Restart the deployment and open `/login/`.
+7. Sign in through WorkOS. A local Datamingle user will be created automatically on first login.
+
+### Notes
+- `AUTH_MODE` is deployment-wide, not configurable per request or per organization inside one running instance.
+- Switching an existing deployment from `builtin` to `workos` disables local password login immediately after restart.
+- WorkOS mode still issues Datamingle JWTs to the SPA after the WorkOS callback completes.
+
 Run Tests
 ===============
 ```bash
@@ -104,9 +177,9 @@ Dependencies
 - Phoenix connector [phoenixdb](https://github.com/lalinsky/python-phoenixdb)
 - ODPS connector [pyodps](https://github.com/aliyun/aliyun-odps-python-sdk)
 - ClickHouse connector [clickhouse-driver](https://github.com/mymarilyn/clickhouse-driver)
+- WorkOS auth [workos-python](https://github.com/workos/workos-python)
 - SQL parse/split/type detection [sqlparse](https://github.com/andialbrecht/sqlparse)
 - MySQL binlog parse/rollback [python-mysql-replication](https://github.com/noplay/python-mysql-replication)
-- LDAP [django-auth-ldap](https://github.com/django-auth-ldap/django-auth-ldap)
 - Serialization [simplejson](https://github.com/simplejson/simplejson)
 - Time utilities [python-dateutil](https://github.com/paxan/python-dateutil)
 

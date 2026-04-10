@@ -3,7 +3,6 @@ mysqlclient==2.2.8
 requests==2.33.1
 simplejson==3.20.2
 mybatis_mapper2sql==0.1.9
-django-auth-ldap==5.3.0
 python-dateutil==2.9.0.post0
 pymongo==4.16.0
 psycopg2-binary==2.9.11
@@ -38,11 +37,10 @@ qrcode==8.2
 django-environ==0.13.0
 alibabacloud_dysmsapi20170525==4.5.0
 tencentcloud-sdk-python==3.1.69
-mozilla-django-oidc==5.0.2
-django-cas-ng==5.1.0
 cassandra-driver==3.29.3
 httpx==0.28.1
 openai==2.30.0
+workos==5.45.0
 elasticsearch==9.3.0
 opensearch-py==3.1.0
 django-storages==1.14.6

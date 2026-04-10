@@ -15,6 +15,7 @@ import ExportWorkflowCreateView from '@/views/ExportWorkflowCreateView.vue'
 import HomeView from '@/views/HomeView.vue'
 import InventoryCreateView from '@/views/InventoryCreateView.vue'
 import InventoryView from '@/views/InventoryView.vue'
+import LoginCallbackView from '@/views/LoginCallbackView.vue'
 import LoginView from '@/views/LoginView.vue'
 import PermissionManagementView from '@/views/PermissionManagementView.vue'
 import ProfileView from '@/views/ProfileView.vue'
@@ -37,6 +38,7 @@ const router = createRouter({
   routes: [
     { path: '/', name: 'home', component: HomeView, meta: { title: 'Dashboard' } },
     { path: '/login', name: 'login', component: LoginView, meta: { public: true, title: 'Login' } },
+    { path: '/login/callback', name: 'login-callback', component: LoginCallbackView, meta: { public: true, title: 'Login' } },
     { path: '/inventory', name: 'inventory', component: InventoryView, meta: { title: 'Inventory' } },
     { path: '/inventory/new', name: 'inventory-new', component: InventoryCreateView, meta: { title: 'Add Instance' } },
     { path: '/inventory/:instanceId', name: 'inventory-detail', component: InventoryCreateView, meta: { title: 'Edit Instance' } },

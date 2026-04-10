@@ -6,6 +6,10 @@ function buildUrl(path: string): string {
   return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`
 }
 
+export function publicApiUrl(path: string): string {
+  return buildUrl(path)
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -163,6 +167,12 @@ export async function fetchSchemaInfo() {
 type TokenPair = {
   access: string
   refresh: string
+}
+
+export type AuthMode = 'builtin' | 'workos'
+
+export type AuthConfig = {
+  mode: AuthMode
 }
 
 export type CurrentUserContext = {
@@ -497,6 +507,16 @@ export function login(
     auth_type: authType,
     otp,
   }).then(extractTokenPair)
+}
+
+export function fetchAuthConfig() {
+  return apiGet<unknown>('/auth/config/').then((payload) =>
+    extractData<AuthConfig>(payload),
+  )
+}
+
+export function exchangeWorkosCode(code: string) {
+  return apiPost<unknown>('/auth/workos/exchange/', { code }).then(extractTokenPair)
 }
 
 export function fetchCurrentUserContext(token: string) {

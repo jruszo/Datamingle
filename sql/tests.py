@@ -5,7 +5,7 @@ from django.conf import settings
 from django.db import connection
 from django.contrib.auth.models import Group
 from django.contrib.auth.models import Permission
-from django.test import Client, TestCase, TransactionTestCase
+from django.test import Client, TestCase, TransactionTestCase, override_settings
 
 from common.config import SysConfig
 from common.utils.const import WorkflowStatus, WorkflowType, WorkflowAction
@@ -472,6 +472,54 @@ class TestUser(TestCase):
         self.u1.save()
         self.u1.refresh_from_db()
         self.assertEqual(0, self.u1.failed_login_count)
+
+    @override_settings(AUTH_MODE="workos")
+    def test_login_page_switches_to_workos(self):
+        response = self.client.get("/login/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "/api/auth/workos/authorize/")
+        self.assertNotContains(response, "Show legacy login")
+
+    @override_settings(AUTH_MODE="workos")
+    def test_legacy_password_login_is_disabled_in_workos_mode(self):
+        response = self.client.post(
+            "/authenticate/",
+            data={"username": "test_user", "password": "test_password"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "status": 1,
+                "msg": "Password login is disabled while WorkOS authentication is active.",
+                "data": None,
+            },
+        )
+
+    @override_settings(AUTH_MODE="workos")
+    def test_sign_up_is_disabled_in_workos_mode(self):
+        response = self.client.post(
+            "/signup/",
+            data={
+                "username": "test2",
+                "password": "123456test",
+                "password2": "123456test",
+                "display": "Test 2",
+                "email": "test2@example.com",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "status": 1,
+                "msg": "Sign-up is disabled while WorkOS authentication is active.",
+                "data": None,
+            },
+        )
 
 
 class TestQuery(TransactionTestCase):
