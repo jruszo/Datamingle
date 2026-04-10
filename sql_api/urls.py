@@ -14,6 +14,7 @@ from . import (
     api_query,
     api_dashboard,
     api_permission,
+    api_settings,
 )
 
 router = routers.DefaultRouter()
@@ -53,6 +54,19 @@ urlpatterns = [
     path("v1/me/", api_user.CurrentUser.as_view()),
     path("v1/me/password/", api_user.CurrentUserPassword.as_view()),
     path("v1/dashboard/", api_dashboard.DashboardOverview.as_view()),
+    path("v1/system-settings/", api_settings.SystemSettingsView.as_view()),
+    path(
+        "v1/system-settings/tests/go-inception/",
+        api_settings.SystemSettingsGoInceptionTestView.as_view(),
+    ),
+    path(
+        "v1/system-settings/tests/email/",
+        api_settings.SystemSettingsEmailTestView.as_view(),
+    ),
+    path(
+        "v1/system-settings/tests/storage/",
+        api_settings.SystemSettingsStorageTestView.as_view(),
+    ),
     path("v1/user/<int:pk>/", api_user.UserDetail.as_view()),
     path("v1/user/group/", api_user.GroupList.as_view()),
     path("v1/user/group/<int:pk>/", api_user.GroupDetail.as_view()),

@@ -179,6 +179,36 @@ export type CurrentUserContext = {
   two_factor_auth_types: string[]
 }
 
+export type SystemSettingsValue =
+  | string
+  | number
+  | boolean
+  | Array<string | number>
+  | null
+
+export type SystemSettings = Record<string, SystemSettingsValue>
+
+export type SystemSettingsOption = {
+  value: string | number
+  label: string
+}
+
+export type SystemSettingsOptions = {
+  instance_tags: SystemSettingsOption[]
+  auth_groups: SystemSettingsOption[]
+  resource_groups: SystemSettingsOption[]
+  users: SystemSettingsOption[]
+  notify_phases: SystemSettingsOption[]
+  auto_review_db_types: SystemSettingsOption[]
+  storage_types: SystemSettingsOption[]
+  sms_providers: SystemSettingsOption[]
+}
+
+export type SystemSettingsPayload = {
+  settings: SystemSettings
+  options: SystemSettingsOptions
+}
+
 export type GroupRecord = {
   id: number
   name: string
@@ -472,6 +502,36 @@ export function login(
 export function fetchCurrentUserContext(token: string) {
   return apiGet<unknown>('/v1/me/', { token }).then((payload) =>
     extractData<CurrentUserContext>(payload),
+  )
+}
+
+export function fetchSystemSettings(token: string) {
+  return apiGet<unknown>('/v1/system-settings/', { token }).then((payload) =>
+    extractData<SystemSettingsPayload>(payload),
+  )
+}
+
+export function updateSystemSettings(settings: SystemSettings, token: string) {
+  return apiPut<unknown>('/v1/system-settings/', settings, { token }).then((payload) =>
+    extractData<SystemSettingsPayload>(payload),
+  )
+}
+
+export function testSystemSettingsGoInception(payload: Record<string, unknown>, token: string) {
+  return apiPost<unknown>('/v1/system-settings/tests/go-inception/', payload, { token }).then(
+    (responsePayload) => extractDetail(responsePayload, 'goInception connection test succeeded.'),
+  )
+}
+
+export function testSystemSettingsEmail(payload: Record<string, unknown>, token: string) {
+  return apiPost<unknown>('/v1/system-settings/tests/email/', payload, { token }).then(
+    (responsePayload) => extractDetail(responsePayload, 'Email connection test succeeded.'),
+  )
+}
+
+export function testSystemSettingsStorage(payload: Record<string, unknown>, token: string) {
+  return apiPost<unknown>('/v1/system-settings/tests/storage/', payload, { token }).then(
+    (responsePayload) => extractDetail(responsePayload, 'Storage connection test succeeded.'),
   )
 }
 

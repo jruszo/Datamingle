@@ -8,7 +8,7 @@ const POLL_INTERVAL_MS = 2_000
 const DEFAULT_TIMEOUT_MS = 120_000
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url))
 
-export type DemoUser = 'demo_requester' | 'demo_pm' | 'demo_dba'
+export type DemoUser = 'demo_admin' | 'demo_requester' | 'demo_pm' | 'demo_dba'
 
 export async function createRoleSession(browser: Browser, username: DemoUser) {
   const context = await browser.newContext({ acceptDownloads: true })

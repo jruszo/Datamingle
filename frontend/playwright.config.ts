@@ -1,5 +1,7 @@
 import { defineConfig } from '@playwright/test'
 
+const baseURL = process.env.E2E_FRONTEND_URL || 'http://127.0.0.1:5173'
+
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: false,
@@ -10,9 +12,9 @@ export default defineConfig({
   },
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: 'http://127.0.0.1:5173',
+    baseURL,
     trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
+    screenshot: 'on',
     video: 'retain-on-failure',
   },
 })

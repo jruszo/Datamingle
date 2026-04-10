@@ -27,6 +27,7 @@ import SettingsResourceGroupsView from '@/views/SettingsResourceGroupsView.vue'
 import SettingsResourceGroupDetailView from '@/views/SettingsResourceGroupDetailView.vue'
 import SettingsInstanceTagDetailView from '@/views/SettingsInstanceTagDetailView.vue'
 import SettingsInstanceTagsView from '@/views/SettingsInstanceTagsView.vue'
+import SettingsSystemView from '@/views/SettingsSystemView.vue'
 import SettingsUserDetailView from '@/views/SettingsUserDetailView.vue'
 import SettingsUsersView from '@/views/SettingsUsersView.vue'
 import WorkflowsView from '@/views/WorkflowsView.vue'
@@ -49,6 +50,7 @@ const router = createRouter({
     { path: '/reports', name: 'reports', component: ReportsView, meta: { title: 'Reports' } },
     { path: '/profile', name: 'profile', component: ProfileView, meta: { title: 'Profile' } },
     { path: '/settings', name: 'settings', component: SettingsView, meta: { title: 'Settings' } },
+    { path: '/settings/system', name: 'settings-system', component: SettingsSystemView, meta: { title: 'System Settings', requiresStaffAdmin: true } },
     { path: '/settings/instance-tags', name: 'settings-instance-tags', component: SettingsInstanceTagsView, meta: { title: 'Instance Tags', requiresInventoryAdmin: true } },
     { path: '/settings/instance-tags/new', name: 'settings-instance-tags-new', component: SettingsInstanceTagDetailView, meta: { title: 'Instance Tags', requiresInventoryAdmin: true } },
     { path: '/settings/instance-tags/:tagId', name: 'settings-instance-tags-detail', component: SettingsInstanceTagDetailView, meta: { title: 'Instance Tags', requiresInventoryAdmin: true } },
@@ -75,6 +77,10 @@ function hasCurrentUserPermission(
     return true
   }
   return currentUser?.permissions.includes(permission) ?? false
+}
+
+function canAccessStaffAdminSettings(currentUser: CurrentUserContext | null) {
+  return currentUser?.is_superuser === true || currentUser?.is_staff === true
 }
 
 router.beforeEach(async (to) => {
@@ -122,6 +128,9 @@ router.beforeEach(async (to) => {
   if (to.name === 'settings') {
     try {
       const resolvedUser = await ensureCurrentUser()
+      if (canAccessStaffAdminSettings(resolvedUser)) {
+        return { name: 'settings-system' }
+      }
       if (hasCurrentUserPermission(resolvedUser, 'sql.menu_system')) {
         return { name: 'settings-groups' }
       }
@@ -136,10 +145,20 @@ router.beforeEach(async (to) => {
     }
   }
 
-  if (to.meta.requiresSuperuser === true || to.meta.requiresInventoryAdmin === true) {
+  if (
+    to.meta.requiresSuperuser === true ||
+    to.meta.requiresInventoryAdmin === true ||
+    to.meta.requiresStaffAdmin === true
+  ) {
     try {
       const resolvedUser = await ensureCurrentUser()
       if (to.meta.requiresSuperuser === true && !resolvedUser?.is_superuser) {
+        return { name: 'home' }
+      }
+      if (
+        to.meta.requiresStaffAdmin === true &&
+        !canAccessStaffAdminSettings(resolvedUser)
+      ) {
         return { name: 'home' }
       }
       if (
