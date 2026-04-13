@@ -12,6 +12,7 @@ class WorkOSAuthenticationResult:
     email: str
     first_name: str
     last_name: str
+    profile_picture_url: str
     organization_id: str
     session_id: str
 
@@ -107,6 +108,9 @@ class WorkOSAuthClient:
             email=email,
             first_name=str(_get_attr(user, "first_name", "") or ""),
             last_name=str(_get_attr(user, "last_name", "") or ""),
+            profile_picture_url=str(
+                _get_attr(user, "profile_picture_url", "") or ""
+            ).strip(),
             organization_id=str(organization_id or ""),
             session_id=str(session_id),
         )

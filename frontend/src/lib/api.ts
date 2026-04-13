@@ -180,6 +180,8 @@ export type CurrentUserContext = {
   username: string
   display: string
   email: string
+  avatar_url: string
+  is_workos_managed: boolean
   is_superuser: boolean
   is_staff: boolean
   is_active: boolean
@@ -235,6 +237,7 @@ export type UserManagementRecord = {
   username: string
   display: string
   email: string
+  is_workos_managed: boolean
   is_active: boolean
   is_superuser: boolean
   is_staff: boolean
@@ -261,11 +264,11 @@ export type CreateUserPayload = {
 }
 
 export type UpdateUserPayload = {
-  display: string
-  email: string
+  display?: string
+  email?: string
   password?: string
-  group_ids: number[]
-  is_active: boolean
+  group_ids?: number[]
+  is_active?: boolean
 }
 
 export type InstanceTagRecord = {

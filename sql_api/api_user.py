@@ -106,6 +106,8 @@ class CurrentUser(views.APIView):
             "username": user.username,
             "display": user.display,
             "email": user.email or "",
+            "avatar_url": user.avatar_url or "",
+            "is_workos_managed": bool(user.workos_user_id),
             "is_superuser": user.is_superuser,
             "is_staff": user.is_staff,
             "is_active": user.is_active,
@@ -146,6 +148,11 @@ class CurrentUser(views.APIView):
     def patch(self, request):
         serializer = CurrentUserProfileUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
+        if request.user.workos_user_id:
+            raise ValidationError(
+                "Profile fields synced from WorkOS cannot be edited in Datamingle."
+            )
 
         request.user.display = serializer.validated_data["display"]
         request.user.save(update_fields=["display"])

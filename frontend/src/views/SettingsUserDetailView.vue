@@ -58,6 +58,7 @@ const userId = computed(() => {
   return Number.isFinite(value) ? value : null
 })
 const canManageUsers = computed(() => authStore.currentUser?.is_superuser ?? false)
+const isWorkosManagedUser = computed(() => loadedUser.value?.is_workos_managed ?? false)
 const selectedGroupSet = computed(() => new Set(selectedGroupIds.value))
 const normalizedAvailableFilter = computed(() => availableFilter.value.trim().toLowerCase())
 const normalizedSelectedFilter = computed(() => selectedFilter.value.trim().toLowerCase())
@@ -296,11 +297,15 @@ async function saveUser() {
     const updatedUser = await updateUser(
       userId.value,
       {
-        display: trimmedDisplayName,
-        email: trimmedEmail,
         group_ids: [...selectedGroupIds.value].sort((left, right) => left - right),
         is_active: loadedUser.value?.is_active ?? true,
-        ...(trimmedPassword ? { password: trimmedPassword } : {}),
+        ...(!isWorkosManagedUser.value
+          ? {
+              display: trimmedDisplayName,
+              email: trimmedEmail,
+              ...(trimmedPassword ? { password: trimmedPassword } : {}),
+            }
+          : {}),
       },
       requireToken(),
     )
@@ -333,8 +338,6 @@ async function toggleUserStatus() {
     const updatedUser = await updateUser(
       userId.value,
       {
-        display: loadedUser.value.display,
-        email: loadedUser.value.email,
         group_ids: [...loadedUser.value.group_ids].sort((left, right) => left - right),
         is_active: nextIsActive,
       },
@@ -419,6 +422,14 @@ watch(
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-6">
+        <div
+          v-if="isWorkosManagedUser"
+          class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+        >
+          This user is managed by WorkOS. Display name, email, and password changes must be made in the identity
+          provider. Group assignments and active status remain editable in Datamingle.
+        </div>
+
         <div class="grid gap-4 md:grid-cols-2">
           <div class="space-y-2">
             <label for="user-username" class="text-sm font-medium text-slate-900">Username</label>
@@ -435,7 +446,7 @@ watch(
             <Input
               id="user-display"
               v-model="displayName"
-              :disabled="isLoading"
+              :disabled="isLoading || isWorkosManagedUser"
               placeholder="e.g. Jane Doe"
             />
           </div>
@@ -445,7 +456,7 @@ watch(
             <Input
               id="user-email"
               v-model="email"
-              :disabled="isLoading"
+              :disabled="isLoading || isWorkosManagedUser"
               placeholder="jane.doe@example.com"
             />
           </div>
@@ -457,7 +468,7 @@ watch(
             <Input
               id="user-password"
               v-model="password"
-              :disabled="isLoading"
+              :disabled="isLoading || isWorkosManagedUser"
               type="password"
               :placeholder="isCreateMode ? 'Create a password' : 'Leave blank to keep the current password'"
             />

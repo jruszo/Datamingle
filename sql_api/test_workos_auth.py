@@ -80,6 +80,7 @@ class WorkOSAuthApiTests(APITestCase):
             email="admin@datamingle.dev",
             first_name="Admin",
             last_name="User",
+            profile_picture_url="https://images.workos.dev/avatar.png",
             organization_id="org_test_123",
             session_id="session_123",
             display_name="Admin User",
@@ -98,6 +99,9 @@ class WorkOSAuthApiTests(APITestCase):
         created_user = Users.objects.get(workos_user_id="user_123")
         self.assertEqual(created_user.username, "admin@datamingle.dev")
         self.assertEqual(created_user.email, "admin@datamingle.dev")
+        self.assertEqual(
+            created_user.avatar_url, "https://images.workos.dev/avatar.png"
+        )
         self.assertTrue(created_user.is_staff)
         self.assertTrue(created_user.is_superuser)
         self.assertEqual(
@@ -183,6 +187,98 @@ class WorkOSAuthApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.json()["data"], {"mode": "workos"})
 
+    def test_current_user_context_marks_workos_managed_users(self):
+        user = Users.objects.create_user(
+            username="managed@datamingle.dev",
+            email="managed@datamingle.dev",
+            display="Managed User",
+            avatar_url="https://images.workos.dev/avatar.png",
+            workos_user_id="user_123",
+            is_active=True,
+        )
+        self.client.force_authenticate(user=user)
+
+        response = self.client.get("/api/v1/me/", format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.json()["data"]["is_workos_managed"])
+        self.assertEqual(
+            response.json()["data"]["avatar_url"],
+            "https://images.workos.dev/avatar.png",
+        )
+
+    def test_current_user_profile_update_is_blocked_for_workos_managed_users(self):
+        user = Users.objects.create_user(
+            username="managed@datamingle.dev",
+            email="managed@datamingle.dev",
+            display="Managed User",
+            workos_user_id="user_123",
+            is_active=True,
+        )
+        self.client.force_authenticate(user=user)
+
+        response = self.client.patch(
+            "/api/v1/me/",
+            {"display": "Updated Name"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.json()[0],
+            "Profile fields synced from WorkOS cannot be edited in Datamingle.",
+        )
+        user.refresh_from_db()
+        self.assertEqual(user.display, "Managed User")
+
+    def test_superuser_can_change_groups_but_not_identity_fields_for_workos_users(self):
+        superuser = Users.objects.create_user(
+            username="superuser@datamingle.dev",
+            email="superuser@datamingle.dev",
+            display="Super User",
+            is_active=True,
+            is_superuser=True,
+            is_staff=True,
+        )
+        workos_user = Users.objects.create_user(
+            username="managed@datamingle.dev",
+            email="managed@datamingle.dev",
+            display="Managed User",
+            workos_user_id="user_123",
+            is_active=True,
+        )
+        new_group = Group.objects.create(name="Ops")
+        self.client.force_authenticate(user=superuser)
+
+        reject_response = self.client.put(
+            f"/api/v1/user/{workos_user.id}/",
+            {
+                "display": "Updated Name",
+                "email": "updated@datamingle.dev",
+                "group_ids": [new_group.id],
+                "is_active": True,
+            },
+            format="json",
+        )
+        self.assertEqual(reject_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("display", reject_response.json())
+
+        allow_response = self.client.put(
+            f"/api/v1/user/{workos_user.id}/",
+            {
+                "group_ids": [new_group.id],
+                "is_active": False,
+            },
+            format="json",
+        )
+        self.assertEqual(allow_response.status_code, status.HTTP_200_OK)
+        workos_user.refresh_from_db()
+        self.assertFalse(workos_user.is_active)
+        self.assertEqual(
+            list(workos_user.groups.values_list("name", flat=True)),
+            ["Ops"],
+        )
+
     @patch("sql_api.api_auth.get_redis_connection")
     @patch("sql_api.api_auth.WorkOSAuthClient")
     def test_callback_rejects_unexpected_organization(
@@ -195,6 +291,7 @@ class WorkOSAuthApiTests(APITestCase):
             email="staff@datamingle.dev",
             first_name="Staff",
             last_name="User",
+            profile_picture_url="",
             organization_id="org_other",
             session_id="session_123",
             display_name="Staff User",

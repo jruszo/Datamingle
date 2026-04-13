@@ -148,6 +148,7 @@ class TestUser(CacheIsolatedAPITestCase):
                 "username",
                 "display",
                 "email",
+                "is_workos_managed",
                 "is_active",
                 "is_superuser",
                 "is_staff",

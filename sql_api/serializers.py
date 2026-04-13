@@ -50,6 +50,7 @@ class UserManagementGroupSerializer(serializers.ModelSerializer):
 class UserManagementReadSerializer(serializers.ModelSerializer):
     groups = serializers.SerializerMethodField()
     group_ids = serializers.SerializerMethodField()
+    is_workos_managed = serializers.SerializerMethodField()
 
     def get_groups(self, obj):
         groups = obj.groups.order_by("id")
@@ -58,6 +59,9 @@ class UserManagementReadSerializer(serializers.ModelSerializer):
     def get_group_ids(self, obj):
         return list(obj.groups.order_by("id").values_list("id", flat=True))
 
+    def get_is_workos_managed(self, obj):
+        return bool(obj.workos_user_id)
+
     class Meta:
         model = Users
         fields = (
@@ -65,6 +69,7 @@ class UserManagementReadSerializer(serializers.ModelSerializer):
             "username",
             "display",
             "email",
+            "is_workos_managed",
             "is_active",
             "is_superuser",
             "is_staff",
@@ -135,6 +140,25 @@ class UserManagementUpdateSerializer(serializers.ModelSerializer):
         return value.strip()
 
     def validate(self, attrs):
+        if self.instance and self.instance.workos_user_id:
+            current_display = (self.instance.display or "").strip()
+            current_email = (self.instance.email or "").strip()
+            next_display = attrs.get("display", current_display)
+            next_email = attrs.get("email", current_email)
+
+            if next_display != current_display:
+                raise serializers.ValidationError(
+                    {"display": "Display name is managed by WorkOS for this user."}
+                )
+            if next_email != current_email:
+                raise serializers.ValidationError(
+                    {"email": "Email is managed by WorkOS for this user."}
+                )
+            if attrs.get("password") not in (None, ""):
+                raise serializers.ValidationError(
+                    {"password": "Password is managed by WorkOS for this user."}
+                )
+
         password = attrs.get("password")
         if password == "":
             attrs.pop("password")
@@ -300,6 +324,8 @@ class CurrentUserSerializer(serializers.Serializer):
     username = serializers.CharField()
     display = serializers.CharField(allow_blank=True)
     email = serializers.CharField(allow_blank=True)
+    avatar_url = serializers.CharField(allow_blank=True)
+    is_workos_managed = serializers.BooleanField()
     is_superuser = serializers.BooleanField()
     is_staff = serializers.BooleanField()
     is_active = serializers.BooleanField()

@@ -108,6 +108,11 @@ def _provision_or_update_workos_user(auth_result):
         user.display = display_name
         updated_fields.append("display")
 
+    avatar_url = auth_result.profile_picture_url or ""
+    if user.avatar_url != avatar_url:
+        user.avatar_url = avatar_url
+        updated_fields.append("avatar_url")
+
     superuser_allowlist = _normalized_allowlist(settings.WORKOS_SUPERUSER_EMAILS)
     staff_allowlist = _normalized_allowlist(settings.WORKOS_STAFF_EMAILS)
     email = auth_result.email.lower()

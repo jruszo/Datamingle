@@ -33,6 +33,8 @@ const passwordForm = reactive({
 
 const currentUser = computed(() => authStore.currentUser)
 const canChangePassword = computed(() => authStore.authMode !== 'workos')
+const isWorkosManagedUser = computed(() => currentUser.value?.is_workos_managed ?? false)
+const currentUserAvatarUrl = computed(() => currentUser.value?.avatar_url?.trim() || '')
 
 const currentUserInitials = computed(() => {
   const source = currentUser.value?.display || currentUser.value?.username || 'U'
@@ -197,8 +199,15 @@ onMounted(() => {
           <div class="bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.24),_transparent_48%),linear-gradient(135deg,#f8fafc_0%,#eef4ff_42%,#fef3c7_100%)] p-6 lg:p-8">
             <Badge variant="outline" class="border-slate-300 bg-white/70 text-slate-700">Profile Center</Badge>
             <div class="mt-5 flex flex-col gap-5 sm:flex-row sm:items-center">
-              <div class="flex h-20 w-20 items-center justify-center rounded-3xl bg-slate-900 text-xl font-semibold text-white shadow-lg">
-                {{ currentUserInitials }}
+              <div class="flex h-20 w-20 items-center justify-center overflow-hidden rounded-3xl bg-slate-900 text-xl font-semibold text-white shadow-lg">
+                <img
+                  v-if="currentUserAvatarUrl"
+                  :src="currentUserAvatarUrl"
+                  :alt="`${currentUser?.display || currentUser?.username || 'User'} avatar`"
+                  class="h-full w-full object-cover"
+                  referrerpolicy="no-referrer"
+                />
+                <span v-else>{{ currentUserInitials }}</span>
               </div>
               <div>
                 <h2 class="text-2xl font-semibold text-slate-900">
@@ -206,7 +215,9 @@ onMounted(() => {
                 </h2>
                 <p class="mt-1 text-sm text-slate-600">
                   {{
-                    canChangePassword
+                    isWorkosManagedUser
+                      ? 'This account is managed by WorkOS. Datamingle shows the synced identity details but does not let you edit them here.'
+                      : canChangePassword
                       ? 'Manage the account details shown across Datamingle and rotate your password without leaving the SPA.'
                       : 'Manage the account details shown across Datamingle for your WorkOS-backed account.'
                   }}
@@ -252,7 +263,7 @@ onMounted(() => {
     </div>
 
     <div class="grid gap-6 xl:grid-cols-2">
-      <Card class="border-slate-200">
+      <Card v-if="!isWorkosManagedUser" class="border-slate-200">
         <CardHeader>
           <CardTitle>Display Name</CardTitle>
           <CardDescription>
@@ -286,6 +297,20 @@ onMounted(() => {
               {{ isSavingProfile ? 'Saving...' : 'Save display name' }}
             </Button>
           </form>
+        </CardContent>
+      </Card>
+
+      <Card v-else class="border-slate-200">
+        <CardHeader>
+          <CardTitle>Identity</CardTitle>
+          <CardDescription>
+            Your display name and email are synced from WorkOS and can only be changed in your identity provider.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            Datamingle will refresh these fields from WorkOS on sign-in.
+          </div>
         </CardContent>
       </Card>
 
