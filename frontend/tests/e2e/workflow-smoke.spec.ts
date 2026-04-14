@@ -29,6 +29,33 @@ test.describe.serial('workflow smoke', () => {
     setBackupSwitchEnabled(false)
   })
 
+  test('opens workflow detail on a dedicated page and restores filtered list state on return', async ({ browser }) => {
+    const requester = await createRoleSession(browser, 'demo_requester')
+
+    try {
+      await requester.page.goto('/workflows')
+      await requester.page.getByTestId('workflow-filter-syntax-type').selectOption('3')
+      await requester.page.getByRole('button', { name: 'Apply filters' }).click()
+      await requester.page.waitForURL(/\/workflows\?syntaxType=3$/)
+
+      const firstWorkflow = requester.page.locator('[data-testid^="workflow-list-item-"]').first()
+      await expect(firstWorkflow).toBeVisible()
+      await firstWorkflow.click()
+
+      await requester.page.waitForURL(/\/workflows\/\d+\?returnTo=/)
+      await expect(requester.page.getByTestId('workflow-detail-refresh')).toBeVisible()
+      await expect(requester.page.getByText('Workflow List')).toHaveCount(0)
+
+      await requester.page.getByTestId('workflow-detail-back').click()
+
+      await requester.page.waitForURL(/\/workflows\?syntaxType=3$/)
+      await expect(requester.page.getByTestId('workflow-filter-syntax-type')).toHaveValue('3')
+      await expect(firstWorkflow).toBeVisible()
+    } finally {
+      await closeRoleSessions(requester.context)
+    }
+  })
+
   test('runs a DDL single-stage workflow from submit through execution', async ({ browser }) => {
     const requester = await createRoleSession(browser, 'demo_requester')
     let dba: RoleSession | undefined
