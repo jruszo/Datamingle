@@ -2,6 +2,7 @@ from rest_framework import views, generics, status, permissions
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from drf_spectacular.utils import extend_schema
+from django.conf import settings
 from django.db.models import Count, Q
 from .serializers import (
     UserManagementReadSerializer,
@@ -105,6 +106,8 @@ class CurrentUser(views.APIView):
             "username": user.username,
             "display": user.display,
             "email": user.email or "",
+            "avatar_url": user.avatar_url or "",
+            "is_workos_managed": bool(user.workos_user_id),
             "is_superuser": user.is_superuser,
             "is_staff": user.is_staff,
             "is_active": user.is_active,
@@ -146,6 +149,11 @@ class CurrentUser(views.APIView):
         serializer = CurrentUserProfileUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
+        if request.user.workos_user_id:
+            raise ValidationError(
+                "Profile fields synced from WorkOS cannot be edited in Datamingle."
+            )
+
         request.user.display = serializer.validated_data["display"]
         request.user.save(update_fields=["display"])
 
@@ -166,6 +174,11 @@ class CurrentUserPassword(views.APIView):
         description="Change the authenticated user's password.",
     )
     def post(self, request):
+        if settings.AUTH_MODE == "workos":
+            raise ValidationError(
+                "Password changes are disabled while WorkOS authentication is active."
+            )
+
         serializer = CurrentUserPasswordChangeSerializer(
             data=request.data, context={"request": request}
         )

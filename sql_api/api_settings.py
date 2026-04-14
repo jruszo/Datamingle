@@ -136,7 +136,6 @@ SYSTEM_SETTINGS_SCHEMA = (
     {"name": "tencent_sign_name", "kind": "string", "default": ""},
     {"name": "tencent_template_id", "kind": "string", "default": ""},
     {"name": "tencent_sdk_appid", "kind": "string", "default": ""},
-    {"name": "oidc_btn_name", "kind": "string", "default": ""},
     {"name": "openai_base_url", "kind": "string", "default": ""},
     {"name": "openai_api_key", "kind": "string", "default": ""},
     {"name": "default_chat_model", "kind": "string", "default": DEFAULT_CHAT_MODEL},

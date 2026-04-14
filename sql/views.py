@@ -62,10 +62,9 @@ def login(request):
         request,
         "login.html",
         context={
-            "sign_up_enabled": SysConfig().get("sign_up_enabled"),
-            "oidc_enabled": settings.ENABLE_OIDC,
-            "cas_enabled": settings.ENABLE_CAS,
-            "oidc_btn_name": SysConfig().get("oidc_btn_name", "Log in with OIDC"),
+            "auth_mode": settings.AUTH_MODE,
+            "sign_up_enabled": settings.AUTH_MODE == "builtin"
+            and SysConfig().get("sign_up_enabled"),
         },
     )
 

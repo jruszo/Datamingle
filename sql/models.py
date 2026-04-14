@@ -61,6 +61,15 @@ class Users(AbstractUser):
     """
 
     display = models.CharField("Display Name", max_length=50, default="")
+    workos_user_id = models.CharField(
+        "WorkOS User ID",
+        max_length=64,
+        blank=True,
+        null=True,
+        unique=True,
+        db_index=True,
+    )
+    avatar_url = models.URLField("Avatar URL", max_length=500, blank=True, default="")
     wx_user_id = models.CharField("WeCom User ID", max_length=64, blank=True)
     feishu_open_id = models.CharField("Feishu Open ID", max_length=64, blank=True)
     failed_login_count = models.IntegerField("Failed Login Count", default=0)

@@ -6,6 +6,10 @@ function buildUrl(path: string): string {
   return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`
 }
 
+export function publicApiUrl(path: string): string {
+  return buildUrl(path)
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -165,11 +169,19 @@ type TokenPair = {
   refresh: string
 }
 
+export type AuthMode = 'builtin' | 'workos'
+
+export type AuthConfig = {
+  mode: AuthMode
+}
+
 export type CurrentUserContext = {
   id: number
   username: string
   display: string
   email: string
+  avatar_url: string
+  is_workos_managed: boolean
   is_superuser: boolean
   is_staff: boolean
   is_active: boolean
@@ -225,6 +237,7 @@ export type UserManagementRecord = {
   username: string
   display: string
   email: string
+  is_workos_managed: boolean
   is_active: boolean
   is_superuser: boolean
   is_staff: boolean
@@ -251,11 +264,11 @@ export type CreateUserPayload = {
 }
 
 export type UpdateUserPayload = {
-  display: string
-  email: string
+  display?: string
+  email?: string
   password?: string
-  group_ids: number[]
-  is_active: boolean
+  group_ids?: number[]
+  is_active?: boolean
 }
 
 export type InstanceTagRecord = {
@@ -497,6 +510,16 @@ export function login(
     auth_type: authType,
     otp,
   }).then(extractTokenPair)
+}
+
+export function fetchAuthConfig() {
+  return apiGet<unknown>('/auth/config/').then((payload) =>
+    extractData<AuthConfig>(payload),
+  )
+}
+
+export function exchangeWorkosCode(code: string) {
+  return apiPost<unknown>('/auth/workos/exchange/', { code }).then(extractTokenPair)
 }
 
 export function fetchCurrentUserContext(token: string) {

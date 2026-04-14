@@ -151,8 +151,6 @@ async function toggleUserActiveState(user: UserManagementRecord) {
     const updatedUser = await updateUser(
       user.id,
       {
-        display: user.display,
-        email: user.email,
         group_ids: user.groups.map((group) => group.id),
         is_active: nextIsActive,
       },

@@ -3,11 +3,10 @@
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 import os
-from typing import List
 from datetime import timedelta
 import environ
-import requests
 import logging
+from django.core.exceptions import ImproperlyConfigured
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -26,19 +25,14 @@ env = environ.Env(
     ),  # Reference: https://docs.djangoproject.com/en/4.0/ref/settings/#secret-key
     DATABASE_URL=(str, "mysql://root:@127.0.0.1:3306/archery"),
     CACHE_URL=(str, "redis://127.0.0.1:6379/0"),
-    # External authentication currently supports LDAP and OIDC.
-    # Only one method should be enabled. If multiple are enabled, only one takes effect with priority LDAP > OIDC.
-    ENABLE_LDAP=(bool, False),
-    ENABLE_OIDC=(bool, False),
-    AUTH_LDAP_ALWAYS_UPDATE_USER=(bool, True),
-    AUTH_LDAP_USER_ATTR_MAP=(
-        dict,
-        {"username": "cn", "display": "displayname", "email": "mail"},
-    ),
-    OIDC_USER_ATTR_MAP=(
-        dict,
-        {"username": "preferred_username", "display": "name", "email": "email"},
-    ),
+    AUTH_MODE=(str, "builtin"),
+    WORKOS_API_KEY=(str, ""),
+    WORKOS_CLIENT_ID=(str, ""),
+    WORKOS_ORGANIZATION_ID=(str, ""),
+    WORKOS_REDIRECT_URI=(str, ""),
+    WORKOS_LOGOUT_REDIRECT_URI=(str, ""),
+    WORKOS_STAFF_EMAILS=(list, []),
+    WORKOS_SUPERUSER_EMAILS=(list, []),
     Q_CLUISTER_SYNC=(
         bool,
         False,
@@ -88,6 +82,11 @@ SECRET_KEY = env("SECRET_KEY")
 DEBUG = env("DEBUG")
 
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
+
+AUTH_MODE = env("AUTH_MODE", default="builtin").strip().lower()
+if AUTH_MODE not in {"builtin", "workos"}:
+    raise ImproperlyConfigured("AUTH_MODE must be either 'builtin' or 'workos'.")
+ENABLE_WORKOS_AUTH = AUTH_MODE == "workos"
 
 # https://docs.djangoproject.com/en/4.0/ref/settings/#csrf-trusted-origins
 CSRF_TRUSTED_ORIGINS = env("CSRF_TRUSTED_ORIGINS")
@@ -203,6 +202,8 @@ STORAGES = {
 
 # Used to extend users field in Django admin, pointing to sql/models.py Users class
 AUTH_USER_MODEL = "sql.Users"
+AUTHENTICATION_BACKENDS = ("django.contrib.auth.backends.ModelBackend",)
+LOGIN_REDIRECT_URL = "/"
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -312,119 +313,38 @@ SIMPLE_JWT = {
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
-# OIDC
-ENABLE_OIDC = env("ENABLE_OIDC", False)
-if ENABLE_OIDC:
-    INSTALLED_APPS += ("mozilla_django_oidc",)
-    OIDC_USER_ATTR_MAP = env("OIDC_USER_ATTR_MAP")
-    AUTHENTICATION_BACKENDS = (
-        "common.authenticate.oidc_auth.OIDCAuthenticationBackend",
-        "django.contrib.auth.backends.ModelBackend",
-    )
-
-    OIDC_RP_WELLKNOWN_URL = env(
-        "OIDC_RP_WELLKNOWN_URL"
-    )  # Example: https://keycloak.example.com/realms/<your realm>/.well-known/openid-configuration
-    OIDC_RP_CLIENT_ID = env("OIDC_RP_CLIENT_ID")
-    OIDC_RP_CLIENT_SECRET = env("OIDC_RP_CLIENT_SECRET")
-
-    response = requests.get(OIDC_RP_WELLKNOWN_URL)
-    response.raise_for_status()
-    config = response.json()
-    OIDC_OP_AUTHORIZATION_ENDPOINT = config["authorization_endpoint"]
-    OIDC_OP_TOKEN_ENDPOINT = config["token_endpoint"]
-    OIDC_OP_USER_ENDPOINT = config["userinfo_endpoint"]
-    OIDC_OP_JWKS_ENDPOINT = config["jwks_uri"]
-    OIDC_OP_LOGOUT_ENDPOINT = config["end_session_endpoint"]
-
-    OIDC_RP_SCOPES = env("OIDC_RP_SCOPES", default="openid profile email")
-    OIDC_RP_SIGN_ALGO = env("OIDC_RP_SIGN_ALGO", default="RS256")
-
-    LOGIN_REDIRECT_URL = "/"
-
-# LDAP
-ENABLE_LDAP = env("ENABLE_LDAP", False)
-if ENABLE_LDAP:
-    import ldap
-    from django_auth_ldap.config import LDAPSearch
-
-    AUTHENTICATION_BACKENDS = (
-        "django_auth_ldap.backend.LDAPBackend",  # Use LDAP authentication first; fallback to later backends only if LDAP fails
-        "django.contrib.auth.backends.ModelBackend",  # Users created in Django can also log in; keep this backend after LDAP
-    )
-
-    AUTH_LDAP_SERVER_URI = env("AUTH_LDAP_SERVER_URI", default="ldap://xxx")
-    AUTH_LDAP_USER_DN_TEMPLATE = env("AUTH_LDAP_USER_DN_TEMPLATE", default=None)
-    if not AUTH_LDAP_USER_DN_TEMPLATE:
-        del AUTH_LDAP_USER_DN_TEMPLATE
-        AUTH_LDAP_BIND_DN = env(
-            "AUTH_LDAP_BIND_DN", default="cn=xxx,ou=xxx,dc=xxx,dc=xxx"
-        )
-        AUTH_LDAP_BIND_PASSWORD = env("AUTH_LDAP_BIND_PASSWORD", default="***********")
-        AUTH_LDAP_USER_SEARCH_BASE = env(
-            "AUTH_LDAP_USER_SEARCH_BASE", default="ou=xxx,dc=xxx,dc=xxx"
-        )
-        AUTH_LDAP_USER_SEARCH_FILTER = env(
-            "AUTH_LDAP_USER_SEARCH_FILTER", default="(cn=%(user)s)"
-        )
-        AUTH_LDAP_USER_SEARCH = LDAPSearch(
-            AUTH_LDAP_USER_SEARCH_BASE, ldap.SCOPE_SUBTREE, AUTH_LDAP_USER_SEARCH_FILTER
-        )
-    AUTH_LDAP_ALWAYS_UPDATE_USER = env(
-        "AUTH_LDAP_ALWAYS_UPDATE_USER", default=True
-    )  # Sync user info from LDAP on each login
-    AUTH_LDAP_USER_ATTR_MAP = env("AUTH_LDAP_USER_ATTR_MAP")
-
-# CAS authentication
-ENABLE_CAS = env("ENABLE_CAS", default=False)
-if ENABLE_CAS:
-    INSTALLED_APPS += ("django_cas_ng",)
-    MIDDLEWARE += ("django_cas_ng.middleware.CASMiddleware",)
-    AUTHENTICATION_BACKENDS = (
-        "django.contrib.auth.backends.ModelBackend",
-        "django_cas_ng.backends.CASBackend",
-    )
-
-    # CAS server URL
-    CAS_SERVER_URL = env("CAS_SERVER_URL")
-    # CAS version
-    CAS_VERSION = env("CAS_VERSION")
-    # Store all user attributes returned by CAS server.
-    CAS_APPLY_ATTRIBUTES_TO_USER = True
-    # Log out when browser closes
-    SESSION_EXPIRE_AT_BROWSER_CLOSE = True
-    # Ignore SSL certificate verification
-    CAS_VERIFY_SSL_CERTIFICATE = env("CAS_VERIFY_SSL_CERTIFICATE", default=False)
-    # Ignore referer validation
-    CAS_IGNORE_REFERER = True
-    # HTTPS request handling
-    CAS_FORCE_SSL_SERVICE_URL = env("CAS_FORCE_SSL_SERVICE_URL", default=False)
-    CAS_RETRY_TIMEOUT = 1
-    CAS_RETRY_LOGIN = True
-    CAS_EXTRA_LOGIN_PARAMS = {"renew": True}
-    CAS_LOGOUT_COMPLETELY = True
-
-SUPPORTED_AUTHENTICATION = [
-    ("LDAP", ENABLE_LDAP),
-    ("OIDC", ENABLE_OIDC),
-    ("CAS", ENABLE_CAS),
+WORKOS_API_KEY = env("WORKOS_API_KEY", default="")
+WORKOS_CLIENT_ID = env("WORKOS_CLIENT_ID", default="")
+WORKOS_ORGANIZATION_ID = env("WORKOS_ORGANIZATION_ID", default="")
+WORKOS_REDIRECT_URI = env("WORKOS_REDIRECT_URI", default="")
+WORKOS_LOGOUT_REDIRECT_URI = env("WORKOS_LOGOUT_REDIRECT_URI", default="")
+WORKOS_STAFF_EMAILS = [
+    email.strip().lower()
+    for email in env("WORKOS_STAFF_EMAILS", default=[])
+    if email.strip()
 ]
-# Count currently enabled external authentication methods
-ENABLE_AUTHENTICATION_COUNT = len(
-    [enabled for (name, enabled) in SUPPORTED_AUTHENTICATION if enabled]
-)
-if ENABLE_AUTHENTICATION_COUNT > 0:
-    if ENABLE_AUTHENTICATION_COUNT > 1:
-        logger.warning(
-            "External authentication currently supports LDAP, OIDC, and CAS. Only one method should be enabled. If multiple are enabled, only one takes effect with priority LDAP > OIDC > CAS."
+WORKOS_SUPERUSER_EMAILS = [
+    email.strip().lower()
+    for email in env("WORKOS_SUPERUSER_EMAILS", default=[])
+    if email.strip()
+]
+
+if ENABLE_WORKOS_AUTH:
+    missing_workos = [
+        key
+        for key, value in (
+            ("WORKOS_API_KEY", WORKOS_API_KEY),
+            ("WORKOS_CLIENT_ID", WORKOS_CLIENT_ID),
+            ("WORKOS_ORGANIZATION_ID", WORKOS_ORGANIZATION_ID),
+            ("WORKOS_REDIRECT_URI", WORKOS_REDIRECT_URI),
+            ("WORKOS_LOGOUT_REDIRECT_URI", WORKOS_LOGOUT_REDIRECT_URI),
         )
-    authentication = ""  # Empty by default
-    for name, enabled in SUPPORTED_AUTHENTICATION:
-        if enabled:
-            authentication = name
-            break
-    logger.info("Current effective external authentication method: " + authentication)
-    logger.info("Authentication backends: " + AUTHENTICATION_BACKENDS.__str__())
+        if not value
+    ]
+    if missing_workos:
+        raise ImproperlyConfigured(
+            "Missing required WorkOS settings: " + ", ".join(missing_workos)
+        )
 
 # Logging configuration
 LOGGING = {
@@ -465,16 +385,6 @@ LOGGING = {
         },
         "django-q": {  # logs for django_q module
             "handlers": ["console", "django-q"],
-            "level": "WARNING",
-            "propagate": False,
-        },
-        "django_auth_ldap": {  # logs for django_auth_ldap module
-            "handlers": ["console", "default"],
-            "level": "WARNING",
-            "propagate": False,
-        },
-        "mozilla_django_oidc": {
-            "handlers": ["console", "default"],
             "level": "WARNING",
             "propagate": False,
         },

@@ -162,7 +162,6 @@ export const systemSettingsSections: SystemSettingsSectionDefinition[] = [
       { key: 'default_chat_model', label: 'Default chat model', input: 'text', defaultValue: 'gpt-3.5-turbo' },
       { key: 'default_query_template', label: 'Default query template', input: 'textarea', rows: 5, defaultValue: DEFAULT_QUERY_TEMPLATE },
       { key: 'my2sql', label: 'my2sql binary path', input: 'text' },
-      { key: 'oidc_btn_name', label: 'OIDC login button text', input: 'text' },
     ],
   },
   {

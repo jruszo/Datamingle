@@ -3,6 +3,7 @@ import logging
 import traceback
 
 import simplejson as json
+from django.conf import settings
 from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.password_validation import validate_password
@@ -128,6 +129,14 @@ class ArcheryAuth(object):
 # AJAX endpoint called by the login page to validate credentials
 def authenticate_entry(request):
     """Receive an HTTP request and validate credentials via `ArcheryAuth`."""
+    if settings.AUTH_MODE == "workos":
+        result = {
+            "status": 1,
+            "msg": "Password login is disabled while WorkOS authentication is active.",
+            "data": None,
+        }
+        return HttpResponse(json.dumps(result), content_type="application/json")
+
     new_auth = ArcheryAuth(request)
     result = new_auth.authenticate()
     if result["status"] == 0:
@@ -167,6 +176,14 @@ def authenticate_entry(request):
 
 # Register user
 def sign_up(request):
+    if settings.AUTH_MODE == "workos":
+        result = {
+            "status": 1,
+            "msg": "Sign-up is disabled while WorkOS authentication is active.",
+            "data": None,
+        }
+        return HttpResponse(json.dumps(result), content_type="application/json")
+
     sign_up_enabled = SysConfig().get("sign_up_enabled", False)
     if not sign_up_enabled:
         result = {

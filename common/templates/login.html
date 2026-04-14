@@ -21,23 +21,9 @@
         <h3 class="text-center">Login To Archery{{ custom_title_suffix }}</h3>
         <form class="login-form fade-in-effect" id="login" method="post" role="form">
             {% csrf_token %}
-            {% if oidc_enabled %}
+            {% if auth_mode == "workos" %}
                 <div class="form-group">
-                    <a class="btn btn-primary btn-block" role="button" href="/oidc/authenticate/">{{ oidc_btn_name }}</a>
-                </div>
-            {% elif cas_enabled %}
-            <div class="form-group">
-                <a class="btn btn-primary btn-block" role="button" href="/cas/authenticate/">Log in with CAS</a>
-            </div>
-            {% endif %}
-            {% if oidc_enabled %}
-                <a data-toggle="collapse" href="#collapseExample" aria-expanded="false" aria-controls="collapseExample">
-                  Show legacy login
-                </a>
-                <div class="collapse" id="collapseExample">
-                  <div>
-                    {% include 'legacy_login_form.html' %}
-                  </div>
+                    <a class="btn btn-primary btn-block" role="button" href="/api/auth/workos/authorize/">Continue with your organization</a>
                 </div>
             {% else %}
                 {% include 'legacy_login_form.html' %}
@@ -156,11 +142,11 @@
         sessionStorage.clear();
     });
 
+    {% if auth_mode == "builtin" %}
     // Submit login form on Enter key
     $(document).ready(function () {
         $(document).keydown(function (event) {
             // keyCode 13 is Enter
-            console.log($("#sign-up").css("display"))
             if (event.keyCode === 13 && $("#sign-up").css("display") === 'none') {
                 $('#btnLogin').addClass('disabled');
                 $('#btnLogin').prop('disabled', true);
@@ -178,7 +164,9 @@
         password = $('#inputPassword').val();
         authenticateUser(username, password);
     });
+    {% endif %}
 
+    {% if sign_up_enabled %}
     $('#btnSign').click(function () {
         $('#btnSign').addClass('disabled');
         $('#btnSign').prop('disabled', true);
@@ -210,7 +198,9 @@
             }
         });
     });
+    {% endif %}
 
+    {% if auth_mode == "builtin" %}
     function authenticateUser(username, password) {
         $.ajax({
             type: "post",
@@ -244,5 +234,6 @@
             }
         });
     };
+    {% endif %}
 </script>
 </html>
