@@ -31,6 +31,7 @@ import SettingsInstanceTagsView from '@/views/SettingsInstanceTagsView.vue'
 import SettingsSystemView from '@/views/SettingsSystemView.vue'
 import SettingsUserDetailView from '@/views/SettingsUserDetailView.vue'
 import SettingsUsersView from '@/views/SettingsUsersView.vue'
+import WorkflowDetailView from '@/views/WorkflowDetailView.vue'
 import WorkflowsView from '@/views/WorkflowsView.vue'
 
 const router = createRouter({
@@ -46,7 +47,7 @@ const router = createRouter({
     { path: '/workflows/ddl/new', name: 'workflow-ddl-new', component: DdlWorkflowCreateView, meta: { title: 'New DDL Request' } },
     { path: '/workflows/dml/new', name: 'workflow-dml-new', component: DmlWorkflowCreateView, meta: { title: 'New DML Request' } },
     { path: '/workflows/export/new', name: 'workflow-export-new', component: ExportWorkflowCreateView, meta: { title: 'New Export Request' } },
-    { path: '/workflows/:workflowId', name: 'workflow-detail', component: WorkflowsView, meta: { title: 'Workflows' } },
+    { path: '/workflows/:workflowId', name: 'workflow-detail', component: WorkflowDetailView, meta: { title: 'Workflow Detail' } },
     { path: '/queries', name: 'queries', component: QueriesView, meta: { title: 'Queries' } },
     { path: '/permission-management', name: 'permission-management', component: PermissionManagementView, meta: { title: 'Permission Management' } },
     { path: '/reports', name: 'reports', component: ReportsView, meta: { title: 'Reports' } },
