@@ -8,12 +8,13 @@ import logging
 logger = logging.getLogger("default")
 
 
-def add_sql_schedule(name, run_date, workflow_id):
+def add_sql_schedule(name, run_date, workflow_id, execution_options=None):
     """Add or update a scheduled SQL task."""
     del_schedule(name)
     schedule(
         "sql.utils.execute_sql.execute",
         workflow_id,
+        execution_options=execution_options or None,
         hook="sql.utils.execute_sql.execute_callback",
         name=name,
         schedule_type="O",

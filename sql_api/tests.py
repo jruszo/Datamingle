@@ -11,6 +11,7 @@ from rest_framework import status
 from common.config import SysConfig
 from sql.utils.workflow_audit import AuditSetting
 from sql.engines import ReviewSet
+from sql.engines.mysql_ddl import MysqlDDLExecutorError
 from sql.engines.models import ReviewResult, ResultSet
 from sql_api.api_settings import DEFAULT_CHAT_MODEL, NOTIFY_PHASE_OPTIONS
 from sql.models import (
@@ -2374,6 +2375,56 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         )
         return login
 
+    def _create_mysql_workflow(self, status="workflow_review_pass"):
+        mysql_instance = Instance.objects.create(
+            instance_name="mysql_ins",
+            type="master",
+            db_type="mysql",
+            host="mysql_host",
+            port=3306,
+            user="mysql_user",
+            password="mysql_password",
+        )
+        mysql_instance.resource_group.add(self.res_group.group_id)
+        mysql_instance.instance_tag.add(self.ins_tag.id)
+        mysql_instance.instance_tag.add(self.read_tag.id)
+        workflow = SqlWorkflow.objects.create(
+            workflow_name="mysql_release",
+            group_id=self.res_group.group_id,
+            group_name=self.res_group.group_name,
+            engineer=self.user.username,
+            engineer_display=self.user.display,
+            audit_auth_groups=str(self.group.id),
+            create_time=self.now - timedelta(days=1),
+            status=status,
+            is_backup=False,
+            instance=mysql_instance,
+            db_name="app",
+            syntax_type=1,
+        )
+        workflow_content = SqlWorkflowContent.objects.create(
+            workflow=workflow,
+            sql_content="ALTER TABLE demo ADD COLUMN note VARCHAR(64);",
+            review_content=json.dumps(
+                [{"id": 1, "sql": "ALTER TABLE demo ADD COLUMN note VARCHAR(64);"}]
+            ),
+        )
+        audit = WorkflowAudit.objects.create(
+            group_id=self.res_group.group_id,
+            group_name=self.res_group.group_name,
+            workflow_id=workflow.id,
+            workflow_type=2,
+            workflow_title="MySQL Apply",
+            workflow_remark="MySQL Apply",
+            audit_auth_groups=str(self.group.id),
+            current_audit="-1",
+            next_audit="-1",
+            current_status=WorkflowStatus.PASSED,
+            create_user=self.user.username,
+            create_user_display=self.user.display,
+        )
+        return mysql_instance, workflow, workflow_content, audit
+
     def test_get_sql_workflow_list(self):
         """Test getting SQL release workflow list."""
         r = self.client.get("/api/v1/workflow/", format="json")
@@ -2757,6 +2808,27 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(payload["sql_content"], self.wfc1.sql_content)
         self.assertTrue(payload["is_can_review"])
         self.assertEqual(payload["review_info"][0]["group_name"], self.group.name)
+
+    @patch("sql_api.api_workflow._get_mysql_ddl_executor_state")
+    def test_mysql_workflow_detail_includes_executor_options(self, mock_executor_state):
+        _, workflow, _, _ = self._create_mysql_workflow()
+        mock_executor_state.return_value = (
+            [
+                {"id": "direct", "label": "Direct", "kind": "direct"},
+                {"id": "gh-ost", "label": "gh-ost", "kind": "online"},
+            ],
+            {"pt-osc": "pt-online-schema-change is not configured."},
+        )
+
+        r = self.client.get(f"/api/v1/workflow/{workflow.id}/", format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(payload["available_executors"][0]["id"], "direct")
+        self.assertEqual(
+            payload["executor_blockers"]["pt-osc"],
+            "pt-online-schema-change is not configured.",
+        )
 
     def test_workflow_content_detail(self):
         self.wfc1.review_content = json.dumps([{"id": 1, "sql": "select 1"}])
@@ -3854,6 +3926,46 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             "Execution started. Please check workflow detail page for results.",
         )
 
+    @patch("sql_api.api_workflow.async_task")
+    @patch("sql_api.api_workflow._resolve_mysql_ddl_executor")
+    def test_execute_workflow_auto_passes_selected_executor(
+        self, mock_resolve_executor, mock_async_task
+    ):
+        _, workflow, _, _ = self._create_mysql_workflow()
+        mock_resolve_executor.return_value = Mock(executor_id="gh-ost")
+
+        r = self.client.post(
+            f"/api/v1/workflow/{workflow.id}/executions/",
+            {"workflow_type": 2, "mode": "auto", "executor": "gh-ost"},
+            format="json",
+        )
+
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            mock_async_task.call_args.kwargs["execution_options"],
+            {"executor": "gh-ost"},
+        )
+
+    @patch(
+        "sql_api.api_workflow._resolve_mysql_ddl_executor",
+        side_effect=MysqlDDLExecutorError(
+            "gh-ost does not support tables with foreign keys."
+        ),
+    )
+    def test_execute_workflow_rejects_incompatible_executor(self, _mock_resolve):
+        _, workflow, _, _ = self._create_mysql_workflow()
+
+        r = self.client.post(
+            f"/api/v1/workflow/{workflow.id}/executions/",
+            {"workflow_type": 2, "mode": "auto", "executor": "gh-ost"},
+            format="json",
+        )
+
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        workflow.refresh_from_db()
+        self.assertEqual(workflow.status, "workflow_review_pass")
+        self.assertIn("foreign keys", r.json()["errors"])
+
     def test_execute_workflow_requires_execute_permission(self):
         self.user.user_permissions.remove(
             Permission.objects.get(codename="sql_execute")
@@ -3986,6 +4098,31 @@ class TestWorkflow(CacheIsolatedAPITestCase):
                 audit_id=self.audit1.audit_id,
                 operation_type=WorkflowAction.EXECUTE_SET_TIME,
             ).exists()
+        )
+
+    @patch("sql_api.api_workflow.add_sql_schedule")
+    @patch("sql_api.api_workflow._resolve_mysql_ddl_executor")
+    def test_schedule_mysql_workflow_persists_executor(
+        self, mock_resolve_executor, mock_add_schedule
+    ):
+        _, workflow, _, _ = self._create_mysql_workflow()
+        mock_resolve_executor.return_value = Mock(executor_id="pt-osc")
+
+        response = self.client.post(
+            f"/api/v1/workflow/{workflow.id}/schedule/",
+            {
+                "run_date": (datetime.now() + timedelta(hours=1)).strftime(
+                    "%Y-%m-%dT%H:%M"
+                ),
+                "executor": "pt-osc",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            mock_add_schedule.call_args.kwargs["execution_options"],
+            {"executor": "pt-osc"},
         )
 
 
@@ -4521,6 +4658,8 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
                 "default_resource_group": [self.resource_group.group_name],
                 "api_user_whitelist": [self.regular_user.id],
                 "openai_api_key": "sk-test",
+                "gh_ost": "/bin/echo",
+                "pt_osc": "/bin/echo",
             }
         )
 
@@ -4551,6 +4690,22 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
         )
         self.assertEqual(config.get("api_user_whitelist"), str(self.regular_user.id))
         self.assertEqual(config.get("openai_api_key"), "sk-test")
+        self.assertEqual(config.get("gh_ost"), "/bin/echo")
+        self.assertEqual(config.get("pt_osc"), "/bin/echo")
+
+    def test_staff_rejects_invalid_osc_binary_path(self):
+        self.authenticate("staff_user", "staff_password")
+        current_settings = response_data(
+            self.client.get("/api/v1/system-settings/", format="json")
+        )["settings"]
+        current_settings["gh_ost"] = "/path/that/does/not/exist"
+
+        response = self.client.put(
+            "/api/v1/system-settings/", current_settings, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("gh-ost binary", response.json()["gh_ost"][0])
 
     @patch("sql_api.api_settings.validate_go_inception_payload")
     def test_staff_can_run_go_inception_connection_test(self, validate_payload):

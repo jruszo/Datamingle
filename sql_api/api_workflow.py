@@ -2,6 +2,7 @@ import datetime
 import json
 import logging
 import re
+import ast
 
 from django.contrib.auth.models import Group
 from django.db import transaction
@@ -17,6 +18,7 @@ from rest_framework.response import Response
 from common.config import SysConfig
 from common.utils.const import Const, WorkflowStatus, WorkflowType, WorkflowAction
 from sql.engines import get_engine
+from sql.engines.mysql_ddl import MysqlDDLExecutorError
 from sql.engines.models import ReviewResult, ReviewSet
 from sql.offlinedownload import OffLineDownLoad, download_export_file
 from sql.models import (
@@ -206,6 +208,11 @@ class WorkflowScheduleSerializer(serializers.Serializer):
             "iso-8601",
         ]
     )
+    executor = serializers.ChoiceField(
+        choices=["direct", "gh-ost", "pt-osc"],
+        required=False,
+        allow_null=True,
+    )
 
 
 class WorkflowExecutionWindowSerializer(serializers.Serializer):
@@ -329,6 +336,79 @@ def _workflow_download_available(workflow):
     )
 
 
+def _is_mysql_ddl_workflow(workflow):
+    return (
+        workflow.instance.db_type == "mysql"
+        and workflow.syntax_type == 1
+        and not workflow.is_offline_export
+    )
+
+
+def _parse_schedule_kwargs(raw_kwargs):
+    if isinstance(raw_kwargs, dict):
+        return raw_kwargs
+    if not raw_kwargs:
+        return {}
+    if isinstance(raw_kwargs, str):
+        for parser in (json.loads, ast.literal_eval):
+            try:
+                parsed = parser(raw_kwargs)
+            except Exception:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+    return {}
+
+
+def _extract_schedule_executor(schedule):
+    if not schedule:
+        return None
+    kwargs = _parse_schedule_kwargs(getattr(schedule, "kwargs", None))
+    execution_options = kwargs.get("execution_options")
+    if isinstance(execution_options, str):
+        execution_options = _parse_schedule_kwargs(execution_options)
+    if isinstance(execution_options, dict):
+        return execution_options.get("executor")
+    if isinstance(kwargs.get("executor"), str):
+        return kwargs.get("executor")
+    return None
+
+
+def _get_mysql_ddl_executor_state(workflow):
+    if not _is_mysql_ddl_workflow(workflow):
+        return [], {}
+    engine = get_engine(instance=workflow.instance)
+    try:
+        inspection = engine.get_ddl_executor_inspection(workflow)
+        return (
+            [
+                {
+                    "id": choice.id,
+                    "label": choice.label,
+                    "kind": choice.kind,
+                }
+                for choice in inspection.available_executors
+            ],
+            inspection.blockers,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to inspect MySQL DDL executors for workflow %s",
+            workflow.id,
+            exc_info=True,
+        )
+        return [], {"direct": str(exc)}
+
+
+def _resolve_mysql_ddl_executor(workflow, executor_id=None, preflight=False):
+    if not _is_mysql_ddl_workflow(workflow):
+        return None
+    engine = get_engine(instance=workflow.instance)
+    if preflight:
+        return engine.preflight_ddl_executor(workflow, executor_id)
+    return engine.resolve_ddl_executor(workflow, executor_id)
+
+
 def _serialize_workflow_detail(workflow, user):
     if not can_view(user, workflow.id):
         raise PermissionDenied("You do not have permission to view this workflow.")
@@ -358,15 +438,22 @@ def _serialize_workflow_detail(workflow, user):
         can_schedule_now = False
         can_cancel_now = False
         can_rollback_now = False
+        can_manual_execute_now = False
     else:
         can_review_now = Audit.can_review(user, workflow.id, WorkflowType.SQL_REVIEW)
         can_execute_now = can_execute(user, workflow.id)
         can_schedule_now = can_timingtask(user, workflow.id)
         can_cancel_now = can_cancel(user, workflow.id)
         can_rollback_now = can_rollback(user, workflow.id)
+        can_manual_execute_now = can_execute_now
 
     schedule = task_info(f"sqlreview-timing-{workflow.id}")
     manual_enabled = bool(SysConfig().get("manual"))
+    scheduled_executor = _extract_schedule_executor(schedule)
+    available_executors, executor_blockers = _get_mysql_ddl_executor_state(workflow)
+    if _is_mysql_ddl_workflow(workflow) and not available_executors:
+        can_execute_now = False
+        can_schedule_now = False
 
     payload = WorkflowSummarySerializer(workflow).data
     payload.update(
@@ -385,6 +472,9 @@ def _serialize_workflow_detail(workflow, user):
             "logs": logs,
             "last_operation_info": last_operation_info,
             "scheduled_run_date": schedule.next_run if schedule else None,
+            "scheduled_executor": scheduled_executor,
+            "available_executors": available_executors,
+            "executor_blockers": executor_blockers,
             "is_can_review": can_review_now,
             "is_can_reject": can_review_now,
             "is_can_execute": can_execute_now,
@@ -392,7 +482,7 @@ def _serialize_workflow_detail(workflow, user):
             "is_can_cancel": can_cancel_now,
             "is_can_abort": can_cancel_now and workflow.engineer == user.username,
             "is_can_rollback": can_rollback_now,
-            "is_can_manual_execute": can_execute_now and manual_enabled,
+            "is_can_manual_execute": can_manual_execute_now and manual_enabled,
             "is_can_edit_execution_window": can_review_now,
             "manual_execution_enabled": manual_enabled,
             "download_available": _workflow_download_available(workflow),
@@ -1287,6 +1377,7 @@ class WorkflowScheduleCreate(views.APIView):
         run_date = _normalize_datetime_for_storage(
             serializer.validated_data["run_date"]
         )
+        selected_executor = None
 
         if run_date < datetime.datetime.now():
             raise serializers.ValidationError(
@@ -1303,17 +1394,38 @@ class WorkflowScheduleCreate(views.APIView):
                 }
             )
 
+        if _is_mysql_ddl_workflow(workflow):
+            try:
+                resolved_executor = _resolve_mysql_ddl_executor(
+                    workflow=workflow,
+                    executor_id=serializer.validated_data.get("executor"),
+                    preflight=True,
+                )
+            except MysqlDDLExecutorError as exc:
+                raise serializers.ValidationError({"errors": str(exc)})
+            selected_executor = resolved_executor.executor_id
+
         schedule_name = f"sqlreview-timing-{workflow_id}"
         with transaction.atomic():
             workflow.status = "workflow_timingtask"
             workflow.save(update_fields=["status"])
-            add_sql_schedule(schedule_name, run_date, workflow_id)
+            add_sql_schedule(
+                schedule_name,
+                run_date,
+                workflow_id,
+                execution_options=(
+                    {"executor": selected_executor} if selected_executor else None
+                ),
+            )
             audit = Audit.detail_by_workflow_id(workflow_id, WorkflowType.SQL_REVIEW)
+            operation_info = f"Scheduled execution time: {run_date}"
+            if selected_executor:
+                operation_info = f"{operation_info} (executor: {selected_executor})"
             Audit.add_log(
                 audit_id=audit.audit_id,
                 operation_type=WorkflowAction.EXECUTE_SET_TIME,
                 operation_type_desc="Scheduled Execution",
-                operation_info=f"Scheduled execution time: {run_date}",
+                operation_info=operation_info,
                 operator=request.user.username,
                 operator_display=request.user.display,
             )
@@ -1518,6 +1630,10 @@ class WorkflowExecutionCreate(views.APIView):
         if workflow_type == 2:
             mode = data["mode"]
             user = request.user
+            workflow = get_object_or_404(
+                SqlWorkflow.objects.select_related("instance", "sqlworkflowcontent"),
+                pk=workflow_id,
+            )
 
             # Validate multiple permissions
             if not (
@@ -1545,9 +1661,20 @@ class WorkflowExecutionCreate(views.APIView):
                 workflow_id=workflow_id,
                 workflow_type=WorkflowType.SQL_REVIEW,
             ).audit_id
+            selected_executor = None
 
             # Execute by system
             if mode == "auto":
+                if _is_mysql_ddl_workflow(workflow):
+                    try:
+                        resolved_executor = _resolve_mysql_ddl_executor(
+                            workflow=workflow,
+                            executor_id=data.get("executor"),
+                            preflight=True,
+                        )
+                    except MysqlDDLExecutorError as exc:
+                        raise serializers.ValidationError({"errors": str(exc)})
+                    selected_executor = resolved_executor.executor_id
                 # Set workflow status to queuing
                 SqlWorkflow(id=workflow_id, status="workflow_queuing").save(
                     update_fields=["status"]
@@ -1560,16 +1687,22 @@ class WorkflowExecutionCreate(views.APIView):
                     "sql.utils.execute_sql.execute",
                     workflow_id,
                     user,
+                    execution_options=(
+                        {"executor": selected_executor} if selected_executor else None
+                    ),
                     hook="sql.utils.execute_sql.execute_callback",
                     timeout=-1,
                     task_name=f"sqlreview-execute-{workflow_id}",
                 )
                 # Add workflow log
+                operation_info = "Workflow queued for execution"
+                if selected_executor:
+                    operation_info = f"{operation_info} (executor: {selected_executor})"
                 Audit.add_log(
                     audit_id=audit_id,
                     operation_type=5,
                     operation_type_desc="Execute Workflow",
-                    operation_info="Workflow queued for execution",
+                    operation_info=operation_info,
                     operator=user.username,
                     operator_display=user.display,
                 )
