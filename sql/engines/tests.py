@@ -10,6 +10,8 @@ from django.test import TestCase
 from common.config import SysConfig
 from sql.engines import EngineBase
 from sql.engines.goinception import GoInceptionEngine
+from sql.engines.mysql_ddl import MysqlDDLExecutorError, MysqlDDLExecutorService
+from sql.engines.mysql import MysqlEngine
 from sql.engines.models import ResultSet, ReviewSet, ReviewResult
 from sql.engines.redis import RedisEngine
 from sql.engines.pgsql import PgSQLEngine
@@ -28,11 +30,117 @@ from sql.models import (
 User = get_user_model()
 
 
+class _FakeMysqlFork:
+    def __init__(self, value="mysql"):
+        self.value = value
+
+
+class _FakeMysqlInstance:
+    charset = "utf8mb4"
+
+
+class _FakeMysqlEngine:
+    host = "127.0.0.1"
+    port = 3306
+    user = "app"
+    password = "secret"
+    instance = _FakeMysqlInstance()
+    server_version = (8, 0, 36)
+    server_fork_type = _FakeMysqlFork()
+
+    def __init__(self, *, outbound_foreign_keys=None):
+        self.outbound_foreign_keys = outbound_foreign_keys or []
+
+    def query(self, db_name=None, sql="", parameters=None, close_conn=True, **kwargs):
+        result = ResultSet(full_sql=sql)
+        normalized_sql = " ".join(sql.split()).lower()
+        if "@@global.read_only" in normalized_sql:
+            result.rows = [(0,)]
+        elif "show variables like 'binlog_format'" in normalized_sql:
+            result.rows = [("binlog_format", "ROW")]
+        elif "show variables like 'binlog_row_image'" in normalized_sql:
+            result.rows = [("binlog_row_image", "FULL")]
+        elif "from information_schema.tables" in normalized_sql:
+            result.rows = [("InnoDB",)]
+        elif "from information_schema.statistics" in normalized_sql:
+            result.rows = [("PRIMARY", 0, "NO")]
+        elif "from information_schema.triggers" in normalized_sql:
+            result.rows = []
+        elif (
+            "from information_schema.key_column_usage" in normalized_sql
+            and "referenced_table_name is not null" in normalized_sql
+        ):
+            result.rows = [(name,) for name in self.outbound_foreign_keys]
+        elif (
+            "from information_schema.key_column_usage" in normalized_sql
+            and "referenced_table_schema" in normalized_sql
+        ):
+            result.rows = []
+        else:
+            result.rows = []
+        return result
+
+    def close(self):
+        return None
+
+
 class TestReviewSet(TestCase):
     def test_review_set(self):
         new_review_set = ReviewSet()
         new_review_set.rows = [{"id": "1679123"}]
         self.assertIn("1679123", new_review_set.json())
+
+
+class TestMysqlDDLExecutorService(TestCase):
+    def setUp(self):
+        self.sys_config = SysConfig()
+        self.sys_config.set("gh_ost", "echo")
+        self.sys_config.set("pt_osc", "echo")
+
+    def tearDown(self):
+        self.sys_config.purge()
+
+    def test_inspect_hides_gh_ost_for_foreign_keys(self):
+        service = MysqlDDLExecutorService(
+            _FakeMysqlEngine(outbound_foreign_keys=["fk_demo"])
+        )
+        workflow = Mock(db_name="app")
+
+        inspection = service.inspect_workflow(
+            workflow, ["ALTER TABLE demo ADD COLUMN note VARCHAR(64)"]
+        )
+
+        self.assertEqual(
+            inspection.available_executor_ids,
+            ["direct", "pt-osc"],
+        )
+        self.assertIn("foreign keys", inspection.blockers["gh-ost"])
+
+    def test_resolve_executor_requires_explicit_choice_when_multiple_available(self):
+        service = MysqlDDLExecutorService(_FakeMysqlEngine())
+        workflow = Mock(db_name="app")
+
+        with self.assertRaises(MysqlDDLExecutorError):
+            service.resolve_executor(
+                workflow,
+                ["ALTER TABLE demo ADD COLUMN note VARCHAR(64)"],
+            )
+
+    def test_mysql_engine_filters_use_statement_for_ddl_executors(self):
+        engine = MysqlEngine.__new__(MysqlEngine)
+        workflow = Mock()
+
+        with patch.object(
+            MysqlEngine,
+            "_direct_workflow_statements",
+            return_value=["use `app`", "ALTER TABLE demo ADD COLUMN note VARCHAR(64)"],
+        ):
+            statements = MysqlEngine._ddl_executor_statements(engine, workflow)
+
+        self.assertEqual(
+            statements,
+            ["ALTER TABLE demo ADD COLUMN note VARCHAR(64)"],
+        )
 
 
 class TestEngineBase(TestCase):

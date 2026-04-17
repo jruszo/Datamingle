@@ -38,6 +38,7 @@ const downloadSubmitting = ref(false)
 const detailError = ref('')
 const feedback = ref('')
 const selectedWorkflow = ref<WorkflowDetailRecord | null>(null)
+const selectedExecutor = ref('')
 
 const reviewForm = reactive({
   auditRemark: '',
@@ -54,6 +55,8 @@ const windowForm = reactive({
 
 const textareaClass =
   'block min-h-[7rem] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-slate-400 disabled:cursor-not-allowed disabled:bg-slate-100'
+const selectClass =
+  'block h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none transition focus:border-slate-400 disabled:cursor-not-allowed disabled:bg-slate-100'
 
 let authInitialized = false
 
@@ -188,6 +191,19 @@ function syncDetailForms(detail: WorkflowDetailRecord | null) {
   scheduleForm.runDate = ''
   windowForm.runDateStart = formatDateTimeLocalValue(detail?.run_date_start ?? null)
   windowForm.runDateEnd = formatDateTimeLocalValue(detail?.run_date_end ?? null)
+  if (!detail) {
+    selectedExecutor.value = ''
+    return
+  }
+  if (detail.scheduled_executor) {
+    selectedExecutor.value = detail.scheduled_executor
+    return
+  }
+  if (detail.available_executors.length === 1) {
+    selectedExecutor.value = detail.available_executors[0]?.id ?? ''
+    return
+  }
+  selectedExecutor.value = ''
 }
 
 function routeParamWorkflowId() {
@@ -199,6 +215,29 @@ function routeParamWorkflowId() {
 const selectedWorkflowId = computed(() => routeParamWorkflowId())
 const reviewResultColumns = computed(() => resultColumns(selectedWorkflow.value?.review_rows ?? []))
 const executeResultColumns = computed(() => resultColumns(selectedWorkflow.value?.execute_rows ?? []))
+const availableExecutors = computed(() => selectedWorkflow.value?.available_executors ?? [])
+const executorBlockerEntries = computed(() => Object.entries(selectedWorkflow.value?.executor_blockers ?? {}))
+const isMysqlDdlWorkflow = computed(() => (
+  selectedWorkflow.value?.syntax_type === 1
+  && selectedWorkflow.value?.instance_db_type === 'mysql'
+  && !selectedWorkflow.value?.is_offline_export
+))
+const requiresExecutorSelection = computed(() => (
+  isMysqlDdlWorkflow.value
+  && availableExecutors.value.length > 1
+  && !selectedExecutor.value
+))
+const noCompatibleExecutors = computed(() => (
+  isMysqlDdlWorkflow.value && availableExecutors.value.length === 0
+))
+
+function executorLabel(executorId: string | null) {
+  if (!executorId) {
+    return 'Not selected'
+  }
+  const executor = availableExecutors.value.find((option) => option.id === executorId)
+  return executor?.label || executorId
+}
 
 const canViewWorkflows = computed(() => (
   hasPermission('sql.menu_sqlworkflow')
@@ -283,6 +322,10 @@ async function executeSelectedWorkflow(mode: 'auto' | 'manual') {
   if (!selectedWorkflowId.value) {
     return
   }
+  if (mode === 'auto' && requiresExecutorSelection.value) {
+    detailError.value = 'Select a compatible DDL executor before starting online execution.'
+    return
+  }
 
   executeSubmitting.value = true
   detailError.value = ''
@@ -294,6 +337,7 @@ async function executeSelectedWorkflow(mode: 'auto' | 'manual') {
       {
         workflow_type: 2,
         mode,
+        executor: mode === 'auto' && selectedExecutor.value ? selectedExecutor.value as 'direct' | 'gh-ost' | 'pt-osc' : undefined,
       },
       requireToken(),
     )
@@ -339,6 +383,10 @@ async function saveSchedule() {
     detailError.value = 'Choose a schedule time first.'
     return
   }
+  if (requiresExecutorSelection.value) {
+    detailError.value = 'Select a compatible DDL executor before scheduling online execution.'
+    return
+  }
 
   scheduleSubmitting.value = true
   detailError.value = ''
@@ -349,6 +397,7 @@ async function saveSchedule() {
       selectedWorkflowId.value,
       {
         run_date: scheduleForm.runDate,
+        executor: selectedExecutor.value ? selectedExecutor.value as 'direct' | 'gh-ost' | 'pt-osc' : undefined,
       },
       requireToken(),
     )
@@ -678,6 +727,63 @@ onMounted(async () => {
                 </p>
 
                 <div
+                  v-if="isMysqlDdlWorkflow"
+                  class="mt-4 space-y-3 rounded-xl border border-slate-200 bg-white px-4 py-3"
+                >
+                  <div>
+                    <p class="text-sm font-medium text-slate-900">DDL executor</p>
+                    <p class="mt-1 text-sm text-slate-500">
+                      Choose how Datamingle should run this MySQL schema change. Only compatible executors are shown.
+                    </p>
+                  </div>
+
+                  <div v-if="availableExecutors.length > 0" class="space-y-2">
+                    <select
+                      v-model="selectedExecutor"
+                      data-testid="workflow-ddl-executor"
+                      :class="selectClass"
+                      :disabled="executeSubmitting || scheduleSubmitting"
+                    >
+                      <option value="">
+                        {{ availableExecutors.length > 1 ? 'Select executor' : 'Auto-selected executor' }}
+                      </option>
+                      <option
+                        v-for="executor in availableExecutors"
+                        :key="executor.id"
+                        :value="executor.id"
+                      >
+                        {{ executor.label }}
+                      </option>
+                    </select>
+                    <p v-if="selectedWorkflow.scheduled_executor" class="text-xs text-slate-500">
+                      Scheduled executor: {{ executorLabel(selectedWorkflow.scheduled_executor) }}
+                    </p>
+                  </div>
+
+                  <div
+                    v-else
+                    class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+                  >
+                    No compatible online executor is currently available for this workflow.
+                  </div>
+
+                  <div
+                    v-if="executorBlockerEntries.length > 0"
+                    class="space-y-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600"
+                  >
+                    <p class="font-medium text-slate-700">Why other executors are unavailable</p>
+                    <ul class="space-y-1">
+                      <li
+                        v-for="[executorId, reason] in executorBlockerEntries"
+                        :key="executorId"
+                      >
+                        {{ executorId }}: {{ reason }}
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div
                   v-if="selectedWorkflow.is_can_review || selectedWorkflow.is_can_cancel"
                   class="mt-4 space-y-2"
                 >
@@ -726,7 +832,7 @@ onMounted(async () => {
                     v-if="selectedWorkflow.is_can_execute"
                     data-testid="workflow-execute-now"
                     type="button"
-                    :disabled="executeSubmitting"
+                    :disabled="executeSubmitting || requiresExecutorSelection"
                     @click="void executeSelectedWorkflow('auto')"
                   >
                     Execute now
@@ -790,13 +896,19 @@ onMounted(async () => {
                 <p class="mt-2 text-sm text-slate-500">
                   Scheduled run: {{ formatDateTime(selectedWorkflow.scheduled_run_date) }}
                 </p>
+                <p
+                  v-if="isMysqlDdlWorkflow && selectedWorkflow.scheduled_executor"
+                  class="mt-1 text-sm text-slate-500"
+                >
+                  Scheduled executor: {{ executorLabel(selectedWorkflow.scheduled_executor) }}
+                </p>
                 <div class="mt-4 grid gap-3">
                   <input
                     v-model="scheduleForm.runDate"
                     class="block h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none transition focus:border-slate-400"
                     type="datetime-local"
                   >
-                  <Button type="button" :disabled="scheduleSubmitting" @click="void saveSchedule()">
+                  <Button type="button" :disabled="scheduleSubmitting || requiresExecutorSelection || noCompatibleExecutors" @click="void saveSchedule()">
                     Save schedule
                   </Button>
                 </div>

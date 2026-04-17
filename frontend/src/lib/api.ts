@@ -964,6 +964,12 @@ export type WorkflowLogRecord = {
 
 export type WorkflowResultRow = Record<string, unknown>
 
+export type WorkflowExecutorOption = {
+  id: string
+  label: string
+  kind: 'online' | 'direct'
+}
+
 export type WorkflowDetailRecord = WorkflowSummaryRecord & {
   sql_content: string
   review_rows: WorkflowResultRow[]
@@ -973,6 +979,9 @@ export type WorkflowDetailRecord = WorkflowSummaryRecord & {
   logs: WorkflowLogRecord[]
   last_operation_info: string
   scheduled_run_date: string | null
+  scheduled_executor: string | null
+  available_executors: WorkflowExecutorOption[]
+  executor_blockers: Record<string, string>
   is_can_review: boolean
   is_can_reject: boolean
   is_can_execute: boolean
@@ -1513,10 +1522,12 @@ export type WorkflowReviewPayload = {
 export type WorkflowExecutionPayload = {
   workflow_type: 2
   mode: WorkflowExecutionMode
+  executor?: 'direct' | 'gh-ost' | 'pt-osc'
 }
 
 export type WorkflowSchedulePayload = {
   run_date: string
+  executor?: 'direct' | 'gh-ost' | 'pt-osc'
 }
 
 export type WorkflowWindowPayload = {

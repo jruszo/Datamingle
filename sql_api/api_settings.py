@@ -11,6 +11,7 @@ from common.check import (
     validate_go_inception_payload,
 )
 from common.config import SysConfig
+from sql.engines.mysql_ddl import validate_binary_path
 from sql.models import InstanceTag, ResourceGroup
 
 from .permissions import IsStaffOrSuperuser
@@ -96,6 +97,8 @@ SYSTEM_SETTINGS_SCHEMA = (
     {"name": "sqladvisor", "kind": "string", "default": ""},
     {"name": "soar", "kind": "string", "default": ""},
     {"name": "soar_test_dsn", "kind": "string", "default": ""},
+    {"name": "gh_ost", "kind": "string", "default": ""},
+    {"name": "pt_osc", "kind": "string", "default": ""},
     {"name": "archery_base_url", "kind": "string", "default": ""},
     {"name": "ddl_notify_auth_group", "kind": "list_string", "default": []},
     {
@@ -333,6 +336,18 @@ class SystemSettingsSerializer(serializers.Serializer):
         if invalid_user_ids:
             raise serializers.ValidationError("Unknown users were provided.")
         return value
+
+    def validate_gh_ost(self, value):
+        try:
+            return validate_binary_path(value, "gh-ost")
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc))
+
+    def validate_pt_osc(self, value):
+        try:
+            return validate_binary_path(value, "pt-online-schema-change")
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc))
 
     @staticmethod
     def _validate_group_names(value):

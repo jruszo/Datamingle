@@ -16,7 +16,7 @@ from sql.offlinedownload import OffLineDownLoad
 logger = logging.getLogger("default")
 
 
-def execute(workflow_id, user=None):
+def execute(workflow_id, user=None, execution_options=None):
     """Execute for delayed/async tasks with workflow ID and executor info."""
     # Use current read to prevent duplicate execution.
     with transaction.atomic():
@@ -33,23 +33,29 @@ def execute(workflow_id, user=None):
     audit_id = Audit.detail_by_workflow_id(
         workflow_id=workflow_id, workflow_type=WorkflowType.SQL_REVIEW
     ).audit_id
+    executor_id = (execution_options or {}).get("executor")
+    operation_info = (
+        "Workflow execution started" if user else "System scheduled workflow execution"
+    )
+    if executor_id:
+        operation_info = f"{operation_info} (executor: {executor_id})"
     Audit.add_log(
         audit_id=audit_id,
         operation_type=5,
         operation_type_desc="Execute workflow",
-        operation_info=(
-            "Workflow execution started"
-            if user
-            else "System scheduled workflow execution"
-        ),
+        operation_info=operation_info,
         operator=user.username if user else "",
         operator_display=user.display if user else "System",
     )
     execute_engine = get_engine(instance=workflow_detail.instance)
     if workflow_detail.is_offline_export:
         return OffLineDownLoad().execute_offline_download(workflow=workflow_detail)
-    else:
-        return execute_engine.execute_workflow(workflow=workflow_detail)
+    if workflow_detail.instance.db_type == "mysql" and workflow_detail.syntax_type == 1:
+        return execute_engine.execute_workflow(
+            workflow=workflow_detail,
+            execution_options=execution_options,
+        )
+    return execute_engine.execute_workflow(workflow=workflow_detail)
 
 
 def execute_callback(task):

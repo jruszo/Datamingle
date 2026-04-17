@@ -146,6 +146,24 @@ export async function closeRoleSessions(...contexts: Array<BrowserContext | unde
 }
 
 export function setBackupSwitchEnabled(enabled: boolean) {
+  setSystemConfigValues({
+    enable_backup_switch: enabled,
+  })
+}
+
+export function setSystemConfigValues(values: Record<string, boolean | number | string>) {
+  const assignments = Object.entries(values)
+    .map(([key, value]) => {
+      if (typeof value === 'boolean') {
+        return `cfg.set(${JSON.stringify(key)}, ${value ? 'True' : 'False'})`
+      }
+      if (typeof value === 'number') {
+        return `cfg.set(${JSON.stringify(key)}, ${value})`
+      }
+      return `cfg.set(${JSON.stringify(key)}, ${JSON.stringify(value)})`
+    })
+    .join('; ')
+
   execFileSync(
     'docker',
     [
@@ -155,7 +173,7 @@ export function setBackupSwitchEnabled(enabled: boolean) {
       'manage.py',
       'shell',
       '-c',
-      `from common.config import SysConfig; SysConfig().set("enable_backup_switch", ${enabled ? 'True' : 'False'})`,
+      `from common.config import SysConfig; cfg = SysConfig(); ${assignments}`,
     ],
     {
       cwd: REPO_ROOT,

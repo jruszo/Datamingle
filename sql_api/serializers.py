@@ -39,6 +39,7 @@ from sql.utils.sql_utils import generate_sql
 logger = logging.getLogger("default")
 LOAD_DATA_PATTERN = re.compile(r"^\s*load\s+data\b", re.IGNORECASE)
 EXPORT_FORMAT_CHOICES = {"csv", "tsv", "sql", "xlsx"}
+DDL_EXECUTOR_CHOICES = ("direct", "gh-ost", "pt-osc")
 
 
 class UserManagementGroupSerializer(serializers.ModelSerializer):
@@ -1563,6 +1564,11 @@ class ExecuteWorkflowSerializer(serializers.Serializer):
         choices=["auto", "manual"],
         label="Execution mode: auto-online execution, manual-already executed manually",
         required=False,
+    )
+    executor = serializers.ChoiceField(
+        choices=DDL_EXECUTOR_CHOICES,
+        required=False,
+        allow_null=True,
     )
 
     def validate(self, attrs):

@@ -18,6 +18,7 @@ from sql.engines.goinception import GoInceptionEngine
 from sql.utils.sql_utils import get_syntax_type, remove_comments
 from . import EngineBase
 from .models import ResultSet, ReviewResult, ReviewSet
+from .mysql_ddl import MysqlDDLExecutorError, MysqlDDLExecutorService
 from sql.utils.data_masking import data_masking
 from common.config import SysConfig
 
@@ -705,7 +706,7 @@ class MysqlEngine(EngineBase):
                     )
         return check_result
 
-    def execute_workflow(self, workflow):
+    def execute_workflow(self, workflow, execution_options=None):
         """Execute workflow, return ReviewSet."""
         # Check whether instance is read-only.
         read_only = self.query(sql="SELECT @@global.read_only;").rows[0][0]
@@ -730,11 +731,112 @@ class MysqlEngine(EngineBase):
             )
             return result
         if workflow.syntax_type == 1:
-            return self.execute_direct_workflow(workflow)
+            return self.execute_ddl_workflow(
+                workflow=workflow, execution_options=execution_options or {}
+            )
         # DML and other workflow types continue through the existing review engine.
         return self.inc_engine.execute(workflow)
 
-    def execute_direct_workflow(self, workflow):
+    def get_ddl_executor_inspection(self, workflow):
+        statements = self._ddl_executor_statements(workflow)
+        service = MysqlDDLExecutorService(self)
+        try:
+            return service.inspect_workflow(workflow, statements)
+        finally:
+            self.close()
+
+    def resolve_ddl_executor(self, workflow, executor_id=None):
+        statements = self._ddl_executor_statements(workflow)
+        service = MysqlDDLExecutorService(self)
+        try:
+            return service.resolve_executor(
+                workflow=workflow,
+                statements=statements,
+                requested_executor=executor_id,
+            )
+        finally:
+            self.close()
+
+    def preflight_ddl_executor(self, workflow, executor_id=None):
+        statements = self._ddl_executor_statements(workflow)
+        service = MysqlDDLExecutorService(self)
+        try:
+            resolved = service.resolve_executor(
+                workflow=workflow,
+                statements=statements,
+                requested_executor=executor_id,
+            )
+            service.preflight(
+                workflow=workflow,
+                statements=statements,
+                resolved_executor=resolved,
+            )
+            return resolved
+        finally:
+            self.close()
+
+    def execute_ddl_workflow(self, workflow, execution_options=None):
+        statements = self._ddl_executor_statements(workflow)
+        executor_id = (execution_options or {}).get("executor")
+        service = MysqlDDLExecutorService(self)
+        try:
+            resolved = service.resolve_executor(
+                workflow=workflow,
+                statements=statements,
+                requested_executor=executor_id,
+            )
+            if resolved.executor_id == "direct":
+                return self.execute_direct_workflow(
+                    workflow=workflow, executor_id=resolved.executor_id
+                )
+            return self.execute_external_ddl_workflow(
+                workflow=workflow,
+                statements=statements,
+                service=service,
+                resolved_executor=resolved,
+            )
+        except MysqlDDLExecutorError as e:
+            execute_result = ReviewSet(full_sql=workflow.sqlworkflowcontent.sql_content)
+            execute_result.error = str(e)
+            execute_result.rows.append(
+                ReviewResult(
+                    id=1,
+                    errlevel=2,
+                    stagestatus="Execute Failed",
+                    errormessage=str(e),
+                    sql=workflow.sqlworkflowcontent.sql_content,
+                    executor=executor_id or "",
+                )
+            )
+            return execute_result
+        finally:
+            self.close()
+
+    def execute_external_ddl_workflow(
+        self, workflow, statements, service, resolved_executor
+    ):
+        execute_result = ReviewSet(full_sql=workflow.sqlworkflowcontent.sql_content)
+        try:
+            execute_result.rows = service.execute(
+                workflow=workflow,
+                statements=statements,
+                resolved_executor=resolved_executor,
+            )
+        except MysqlDDLExecutorError as e:
+            execute_result.error = str(e)
+            execute_result.rows.append(
+                ReviewResult(
+                    id=1,
+                    errlevel=2,
+                    stagestatus="Execute Failed",
+                    errormessage=str(e),
+                    sql=workflow.sqlworkflowcontent.sql_content,
+                    executor=resolved_executor.executor_id,
+                )
+            )
+        return execute_result
+
+    def execute_direct_workflow(self, workflow, executor_id="direct"):
         """Execute DDL statements natively without OSC tooling."""
         sql = workflow.sqlworkflowcontent.sql_content
         execute_result = ReviewSet(full_sql=sql)
@@ -783,6 +885,7 @@ class MysqlEngine(EngineBase):
                         sql=statement,
                         affected_rows=affected_rows,
                         execute_time=timer.cost,
+                        executor=executor_id,
                     )
                 )
         except Exception as e:
@@ -805,6 +908,7 @@ class MysqlEngine(EngineBase):
                     stagestatus="Execute Failed",
                     errormessage=str(e),
                     sql=current_statement,
+                    executor=executor_id,
                 )
             )
         finally:
@@ -850,6 +954,14 @@ class MysqlEngine(EngineBase):
             statement.strip().rstrip(";")
             for statement in sqlparse.split(normalized_sql)
             if statement.strip()
+        ]
+
+    def _ddl_executor_statements(self, workflow):
+        """Drop DB context statements because OSC tools operate on explicit db/table flags."""
+        return [
+            statement
+            for statement in self._direct_workflow_statements(workflow)
+            if not re.match(r"^\s*use\b", statement, re.IGNORECASE)
         ]
 
     def execute(self, db_name=None, sql="", close_conn=True, parameters=None):

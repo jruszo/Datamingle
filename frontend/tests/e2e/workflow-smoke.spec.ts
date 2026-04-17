@@ -12,6 +12,7 @@ import {
   fillSqlEditor,
   openWorkflowDetail,
   setBackupSwitchEnabled,
+  setSystemConfigValues,
   uniqueWorkflowName,
   waitForWorkflowAction,
   waitForWorkflowStatus,
@@ -23,24 +24,57 @@ type RoleSession = Awaited<ReturnType<typeof createRoleSession>>
 test.describe.serial('workflow smoke', () => {
   test.beforeEach(() => {
     setBackupSwitchEnabled(false)
+    setSystemConfigValues({
+      gh_ost: '',
+      pt_osc: '',
+    })
   })
 
   test.afterEach(() => {
     setBackupSwitchEnabled(false)
+    setSystemConfigValues({
+      gh_ost: '',
+      pt_osc: '',
+    })
   })
 
   test('opens workflow detail on a dedicated page and restores filtered list state on return', async ({ browser }) => {
     const requester = await createRoleSession(browser, 'demo_requester')
 
     try {
-      await requester.page.goto('/workflows')
-      await requester.page.getByTestId('workflow-filter-syntax-type').selectOption('3')
-      await requester.page.getByRole('button', { name: 'Apply filters' }).click()
-      await requester.page.waitForURL(/\/workflows\?syntaxType=3$/)
+      const workflowName = uniqueWorkflowName('ddl list smoke')
+      const ddlColumn = `list_${Date.now().toString(36).slice(-8)}`
 
-      const firstWorkflow = requester.page.locator('[data-testid^="workflow-list-item-"]').first()
-      await expect(firstWorkflow).toBeVisible()
-      await firstWorkflow.click()
+      await requester.page.goto('/workflows/ddl/new')
+      await requester.page.getByTestId('workflow-name').fill(workflowName)
+      await requester.page.getByTestId('workflow-group').selectOption({ label: 'Demo Workflow Single Stage' })
+      await requester.page.getByTestId('workflow-instance').selectOption({ label: 'demo-mysql-workflow / MYSQL' })
+      await requester.page.getByTestId('workflow-db').selectOption('demo_orders')
+      await fillSqlEditor(
+        requester.page,
+        'workflow-sql-editor',
+        `ALTER TABLE customers ADD COLUMN ${ddlColumn} VARCHAR(16) NOT NULL DEFAULT 'bronze' COMMENT 'List smoke column';`,
+      )
+
+      await requester.page.getByRole('button', { name: 'SQL check' }).click()
+      await expect(
+        requester.page.getByText('This check is current and the SQL is classified as DDL.'),
+      ).toBeVisible()
+
+      await clickAndAcceptDialogIfPresent(requester.page, () =>
+        requester.page.getByTestId('workflow-submit').click(),
+      )
+      await requester.page.waitForURL(/\/workflows\/\d+$/)
+      const workflowId = workflowIdFromUrl(requester.page)
+
+      await requester.page.goto('/workflows')
+      await requester.page.getByTestId('workflow-filter-syntax-type').selectOption('1')
+      await requester.page.getByRole('button', { name: 'Apply filters' }).click()
+      await requester.page.waitForURL(/\/workflows\?syntaxType=1$/)
+
+      const workflowListItem = requester.page.getByTestId(`workflow-list-item-${workflowId}`)
+      await expect(workflowListItem).toBeVisible()
+      await workflowListItem.click()
 
       await requester.page.waitForURL(/\/workflows\/\d+\?returnTo=/)
       await expect(requester.page.getByTestId('workflow-detail-refresh')).toBeVisible()
@@ -48,9 +82,9 @@ test.describe.serial('workflow smoke', () => {
 
       await requester.page.getByTestId('workflow-detail-back').click()
 
-      await requester.page.waitForURL(/\/workflows\?syntaxType=3$/)
-      await expect(requester.page.getByTestId('workflow-filter-syntax-type')).toHaveValue('3')
-      await expect(firstWorkflow).toBeVisible()
+      await requester.page.waitForURL(/\/workflows\?syntaxType=1$/)
+      await expect(requester.page.getByTestId('workflow-filter-syntax-type')).toHaveValue('1')
+      await expect(requester.page.getByTestId(`workflow-list-item-${workflowId}`)).toBeVisible()
     } finally {
       await closeRoleSessions(requester.context)
     }
@@ -99,6 +133,67 @@ test.describe.serial('workflow smoke', () => {
       await dba.page.getByTestId('workflow-execute-now').click()
       await waitForWorkflowStatus(dba.page, 'Finished')
       await assertExecutionRowsPresent(dba.page)
+    } finally {
+      await closeRoleSessions(requester.context, dba?.context)
+    }
+  })
+
+  test('requires selecting a compatible DDL executor when multiple executors are available', async ({ browser }) => {
+    setSystemConfigValues({
+      gh_ost: '/bin/echo',
+      pt_osc: '/bin/echo',
+    })
+
+    const requester = await createRoleSession(browser, 'demo_requester')
+    let dba: RoleSession | undefined
+
+    try {
+      const workflowName = uniqueWorkflowName('ddl executor smoke')
+      const ddlColumn = `executor_${Date.now().toString(36).slice(-8)}`
+
+      await requester.page.goto('/workflows/ddl/new')
+      await requester.page.getByTestId('workflow-name').fill(workflowName)
+      await requester.page.getByTestId('workflow-group').selectOption({ label: 'Demo Workflow Single Stage' })
+      await requester.page.getByTestId('workflow-instance').selectOption({ label: 'demo-mysql-workflow / MYSQL' })
+      await requester.page.getByTestId('workflow-db').selectOption('demo_orders')
+      await fillSqlEditor(
+        requester.page,
+        'workflow-sql-editor',
+        `ALTER TABLE customers ADD COLUMN ${ddlColumn} VARCHAR(16) NOT NULL DEFAULT 'bronze' COMMENT 'Executor smoke column';`,
+      )
+
+      await requester.page.getByRole('button', { name: 'SQL check' }).click()
+      await expect(
+        requester.page.getByText('This check is current and the SQL is classified as DDL.'),
+      ).toBeVisible()
+
+      await clickAndAcceptDialogIfPresent(requester.page, () =>
+        requester.page.getByTestId('workflow-submit').click(),
+      )
+      await requester.page.waitForURL(/\/workflows\/\d+$/)
+      const workflowId = workflowIdFromUrl(requester.page)
+
+      dba = await createRoleSession(browser, 'demo_dba')
+      await openWorkflowDetail(dba.page, workflowId)
+      await waitForWorkflowAction(dba.page, 'workflow-approve')
+      await dba.page.getByLabel('Remark').fill('Approved for executor smoke test')
+      await dba.page.getByTestId('workflow-approve').click()
+
+      await waitForWorkflowAction(dba.page, 'workflow-execute-now')
+      const executorSelect = dba.page.getByTestId('workflow-ddl-executor')
+      await expect(executorSelect).toBeVisible()
+      await expect(executorSelect.locator('option')).toHaveCount(4)
+      await expect(dba.page.getByTestId('workflow-execute-now')).toBeDisabled()
+
+      await executorSelect.selectOption('gh-ost')
+      await expect(dba.page.getByTestId('workflow-execute-now')).toBeEnabled()
+      await dba.page.getByTestId('workflow-execute-now').click()
+
+      await waitForWorkflowStatus(dba.page, 'Finished')
+      await assertExecutionRowsPresent(dba.page)
+      await expect(
+        dba.page.getByText('Workflow execution started (executor: gh-ost)'),
+      ).toBeVisible()
     } finally {
       await closeRoleSessions(requester.context, dba?.context)
     }
