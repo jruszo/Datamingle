@@ -150,8 +150,8 @@ class MysqlEngine(EngineBase):
                 return int(m.group(1))
             return None
 
-        self.get_connection()
-        version = self.conn.get_server_info()
+        conn = self.get_connection()
+        version = conn.get_server_info()
         self._server_version = tuple([numeric_part(n) for n in version.split(".")[:3]])
         return self._server_version
 
@@ -730,7 +730,7 @@ class MysqlEngine(EngineBase):
                 "Instance read_only=1, executing change statements is forbidden!",
             )
             return result
-        if workflow.syntax_type == 1:
+        if workflow.syntax_type == 1 and self._workflow_contains_only_ddl(workflow):
             return self.execute_ddl_workflow(
                 workflow=workflow, execution_options=execution_options or {}
             )
@@ -776,8 +776,13 @@ class MysqlEngine(EngineBase):
             self.close()
 
     def execute_ddl_workflow(self, workflow, execution_options=None):
-        statements = self._ddl_executor_statements(workflow)
         executor_id = (execution_options or {}).get("executor")
+        if self._should_execute_direct_ddl(workflow, executor_id):
+            return self.execute_direct_workflow(
+                workflow=workflow, executor_id=executor_id or "direct"
+            )
+
+        statements = self._ddl_executor_statements(workflow)
         service = MysqlDDLExecutorService(self)
         try:
             resolved = service.resolve_executor(
@@ -963,6 +968,31 @@ class MysqlEngine(EngineBase):
             for statement in self._direct_workflow_statements(workflow)
             if not re.match(r"^\s*use\b", statement, re.IGNORECASE)
         ]
+
+    def _workflow_contains_only_ddl(self, workflow):
+        statements = self._ddl_executor_statements(workflow)
+        if not statements:
+            return False
+        return all(
+            get_syntax_type(statement, parser=False, db_type="mysql") == "DDL"
+            for statement in statements
+        )
+
+    def _has_configured_online_ddl_executors(self):
+        return bool(
+            self.config.get("gh_ost", "").strip()
+            or self.config.get("pt_osc", "").strip()
+        )
+
+    def _should_execute_direct_ddl(self, workflow, executor_id=None):
+        if executor_id == "direct":
+            return True
+        if executor_id:
+            return False
+        return (
+            self._workflow_contains_only_ddl(workflow)
+            and not self._has_configured_online_ddl_executors()
+        )
 
     def execute(self, db_name=None, sql="", close_conn=True, parameters=None):
         """Execute statements natively."""
