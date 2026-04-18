@@ -87,6 +87,118 @@ class InfoTest(TestCase):
         self.assertIsInstance(r_json["archery"]["version"], str)
 
 
+class SystemSettingsTaskBackendTest(TestCase):
+    def setUp(self):
+        self.superuser = User.objects.create(
+            username="settings_admin", is_superuser=True
+        )
+        self.client.force_login(self.superuser)
+        self.sys_config = SysConfig()
+
+    def tearDown(self):
+        self.sys_config.replace(json.dumps({}))
+        self.superuser.delete()
+
+    def test_get_system_settings_includes_task_backend_options(self):
+        response = self.client.get("/api/v1/system-settings/")
+        payload = response.json()
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(payload["data"]["settings"]["task_backend"], "django_q")
+        self.assertIn(
+            {"value": "django_q", "label": "Django Q"},
+            payload["data"]["options"]["task_backends"],
+        )
+        self.assertIn(
+            {"value": "celery", "label": "Celery"},
+            payload["data"]["options"]["task_backends"],
+        )
+
+    def test_put_system_settings_requires_broker_url_for_celery(self):
+        response = self.client.put(
+            "/api/v1/system-settings/",
+            data=json.dumps({"task_backend": "celery", "celery_broker_url": ""}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("celery_broker_url", response.json())
+
+    def test_put_system_settings_rejects_blank_broker_url_for_celery(self):
+        response = self.client.put(
+            "/api/v1/system-settings/",
+            data=json.dumps({"task_backend": "celery", "celery_broker_url": "   "}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("celery_broker_url", response.json())
+
+    def test_put_system_settings_rejects_invalid_celery_time_limits(self):
+        response = self.client.put(
+            "/api/v1/system-settings/",
+            data=json.dumps(
+                {
+                    "task_backend": "celery",
+                    "celery_broker_url": "redis://example:6379/5",
+                    "celery_task_soft_time_limit": 60,
+                    "celery_task_time_limit": 60,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("celery_task_soft_time_limit", response.json())
+
+    def test_put_system_settings_rejects_non_positive_celery_time_limits(self):
+        response = self.client.put(
+            "/api/v1/system-settings/",
+            data=json.dumps(
+                {
+                    "task_backend": "celery",
+                    "celery_broker_url": "redis://example:6379/5",
+                    "celery_task_soft_time_limit": 0,
+                    "celery_task_time_limit": -1,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("celery_task_soft_time_limit", response.json())
+        self.assertIn("celery_task_time_limit", response.json())
+
+    def test_put_system_settings_saves_celery_backend_config(self):
+        response = self.client.put(
+            "/api/v1/system-settings/",
+            data=json.dumps(
+                {
+                    "task_backend": "celery",
+                    "celery_broker_url": "redis://example:6379/5",
+                    "celery_result_backend": "redis://example:6379/6",
+                    "celery_task_default_queue": "workers",
+                    "celery_task_soft_time_limit": 30,
+                    "celery_task_time_limit": 60,
+                }
+            ),
+            content_type="application/json",
+        )
+        payload = response.json()
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(payload["data"]["settings"]["task_backend"], "celery")
+        self.assertEqual(
+            payload["data"]["settings"]["celery_broker_url"],
+            "redis://example:6379/5",
+        )
+        self.assertEqual(self.sys_config.get("task_backend"), "celery")
+        self.assertEqual(
+            self.sys_config.get("celery_task_default_queue"),
+            "workers",
+        )
+
+
 class TestUser(CacheIsolatedAPITestCase):
     """Test user-related APIs."""
 

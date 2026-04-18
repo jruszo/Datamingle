@@ -1,9 +1,10 @@
-# -*- coding:utf-8 -*-
-from django_q.tasks import schedule
-from django_q.models import Schedule
-from django.conf import settings
-
 import logging
+
+from common.task_queue import (
+    delete_schedule,
+    schedule,
+    task_info as get_task_info,
+)
 
 logger = logging.getLogger("default")
 
@@ -28,7 +29,6 @@ def add_sql_schedule(name, run_date, workflow_id, execution_options=None):
 def add_kill_conn_schedule(name, run_date, instance_id, thread_id):
     """Add or update a scheduled task to terminate database connections."""
     del_schedule(name)
-    cluster_name = settings.Q_CLUSTER.get("name", "archery")
     schedule(
         "sql.query.kill_query_conn",
         instance_id,
@@ -38,24 +38,15 @@ def add_kill_conn_schedule(name, run_date, instance_id, thread_id):
         next_run=run_date,
         repeats=1,
         timeout=-1,
-        cluster=cluster_name,
     )
 
 
 def del_schedule(name):
     """Delete a schedule."""
-    try:
-        sql_schedule = Schedule.objects.get(name=name)
-        Schedule.delete(sql_schedule)
-        logger.debug(f"Deleted schedule: {name}")
-    except Schedule.DoesNotExist:
-        pass
+    delete_schedule(name)
+    logger.debug(f"Deleted schedule: {name}")
 
 
 def task_info(name):
     """Get schedule details."""
-    try:
-        sql_schedule = Schedule.objects.get(name=name)
-        return sql_schedule
-    except Schedule.DoesNotExist:
-        pass
+    return get_task_info(name)

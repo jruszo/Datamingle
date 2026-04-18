@@ -1,32 +1,23 @@
 # -*- coding: UTF-8 -*-
-import django_q
 import platform
 import sys
 import MySQLdb
 from importlib import metadata
 
 from common.config import SysConfig
+from common.task_queue import task_backend_info
 from django.db import connection
 from django_redis import get_redis_connection
 from django.http import JsonResponse
-from django_q.status import Stat
-from django_q.models import Success, Failure
-from django_q.brokers import get_broker
-from django.utils import timezone
 
 from common.utils.permission import superuser_required
 import archery
 
 
 def info(request):
-    # Get django_q information.
-    django_q_version = ".".join(str(i) for i in django_q.VERSION)
-
     system_info = {
         "archery": {"version": archery.display_version},
-        "django_q": {
-            "version": django_q_version,
-        },
+        "task_backend": task_backend_info(full=False),
     }
     return JsonResponse(system_info)
 
@@ -63,52 +54,7 @@ def debug(request):
         redis_info = f"Failed to get Redis info: {e}"
         full_redis_info = redis_info
 
-    # django_q
-    try:
-        django_q_version = ".".join(str(i) for i in django_q.VERSION)
-        broker = get_broker()
-        stats = Stat.get_all(broker=broker)
-        queue_size = broker.queue_size()
-        lock_size = broker.lock_size()
-        if lock_size:
-            queue_size = "{}({})".format(queue_size, lock_size)
-        q_broker_stats = {
-            "info": broker.info(),
-            "Queued": queue_size,
-            "Success": Success.objects.count(),
-            "Failures": Failure.objects.count(),
-        }
-        q_cluster_stats = []
-        for stat in stats:
-            # format uptime
-            uptime = (timezone.now() - stat.tob).total_seconds()
-            hours, remainder = divmod(uptime, 3600)
-            minutes, seconds = divmod(remainder, 60)
-            uptime = "%d:%02d:%02d" % (hours, minutes, seconds)
-            q_cluster_stats.append(
-                {
-                    "host": stat.host,
-                    "cluster_id": stat.cluster_id,
-                    "state": stat.status,
-                    "pool": len(stat.workers),
-                    "tq": stat.task_q_size,
-                    "rq": stat.done_q_size,
-                    "rc": stat.reincarnations,
-                    "up": uptime,
-                }
-            )
-        django_q_info = {
-            "version": django_q_version,
-            "conf": django_q.conf.Conf.conf,
-            "q_cluster_stats": (
-                q_cluster_stats
-                if q_cluster_stats
-                else "No running cluster information found. Check django_q status."
-            ),
-            "q_broker_stats": q_broker_stats,
-        }
-    except Exception as e:
-        django_q_info = f"Failed to get django_q info: {e}"
+    task_backend = task_backend_info(full=bool(full))
 
     # Inception and goInception information.
     go_inception_host = sys_config.get("go_inception_host")
@@ -181,13 +127,15 @@ def debug(request):
         "wx_app_secret",
         "aliyun_access_key_secret",
         "tencent_secret_key",
+        "celery_broker_url",
+        "celery_result_backend",
     ]
     sys_config.update({k: "******" for k in secret_keys})
 
     # Final output.
     system_info = {
         "archery": {"version": archery.display_version},
-        "django_q": django_q_info,
+        "task_backend": task_backend,
         "inception": {
             "goinception_info": full_goinception_info if full else goinception_info,
             "backup_info": backup_info,

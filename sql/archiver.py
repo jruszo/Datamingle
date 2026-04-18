@@ -21,7 +21,7 @@ from django.db.models.functions import Concat
 from django.http import HttpResponse, JsonResponse, HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
-from django_q.tasks import async_task
+from common.task_queue import async_task
 
 from common.utils.const import WorkflowStatus, WorkflowType, WorkflowAction
 from common.utils.extend_json_encoder import ExtendJSONEncoder

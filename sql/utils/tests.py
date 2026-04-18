@@ -13,8 +13,6 @@ from unittest.mock import patch, MagicMock
 from django.conf import settings
 from django.contrib.auth.models import Permission, Group
 from django.test import TestCase, Client
-from django_q.models import Schedule
-
 from common.config import SysConfig
 from sql.engines.models import ReviewResult, ReviewSet
 from sql.models import (
@@ -27,6 +25,7 @@ from sql.models import (
     DataMaskingRules,
     DataMaskingColumns,
     InstanceTag,
+    TaskSchedule,
     TemporaryResourceGroupGrant,
     TemporaryInstanceGrant,
 )
@@ -589,10 +588,15 @@ class TestExecuteSql(TestCase):
 
 class TestTasks(TestCase):
     def setUp(self):
-        self.Schedule = Schedule.objects.create(name="some_name")
+        self.schedule = TaskSchedule.objects.create(
+            name="some_name",
+            task_name="some_name",
+            callable_path="sql.utils.execute_sql.execute",
+            run_at=datetime.datetime.now(),
+        )
 
     def tearDown(self):
-        Schedule.objects.all().delete()
+        TaskSchedule.objects.all().delete()
 
     @patch("sql.utils.tasks.schedule")
     def test_add_sql_schedule(self, _schedule):
@@ -601,18 +605,19 @@ class TestTasks(TestCase):
 
     def test_del_schedule(self):
         del_schedule("some_name")
-        with self.assertRaises(Schedule.DoesNotExist):
-            Schedule.objects.get(name="some_name")
+        self.assertEqual(
+            TaskSchedule.objects.get(name="some_name").status,
+            TaskSchedule.STATUS_CANCELLED,
+        )
 
     def test_del_schedule_not_exists(self):
         del_schedule("some_name1")
 
     def test_task_info(self):
-        task_info("some_name")
+        self.assertIsNotNone(task_info("some_name"))
 
     def test_task_info_not_exists(self):
-        with self.assertRaises(Schedule.DoesNotExist):
-            Schedule.objects.get(name="some_name1")
+        self.assertIsNone(task_info("some_name1"))
 
 
 class TestDataMasking(TestCase):

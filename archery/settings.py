@@ -73,6 +73,12 @@ env = environ.Env(
     CURRENT_AUDITOR=(str, "sql.utils.workflow_audit:AuditV2"),
     PASSWORD_MIXIN_PATH=(str, "sql.plugins.password:DummyMixin"),
     FIELD_ENCRYPTION_KEYS=(str, ""),
+    TASK_BACKEND=(str, "django_q"),
+    CELERY_BROKER_URL=(str, ""),
+    CELERY_RESULT_BACKEND=(str, ""),
+    CELERY_TASK_DEFAULT_QUEUE=(str, "default"),
+    CELERY_TASK_SOFT_TIME_LIMIT=(int, 0),
+    CELERY_TASK_TIME_LIMIT=(int, 0),
 )
 
 # SECURITY WARNING: keep the secret key used in production secret!
@@ -124,6 +130,9 @@ CURRENT_AUDITOR = env("CURRENT_AUDITOR")
 PASSWORD_MIXIN_PATH = env("PASSWORD_MIXIN_PATH")
 
 FIELD_ENCRYPTION_KEYS = env("FIELD_ENCRYPTION_KEYS")
+DEFAULT_TASK_BACKEND = env("TASK_BACKEND", default="django_q").strip().lower()
+if DEFAULT_TASK_BACKEND not in {"django_q", "celery"}:
+    raise ImproperlyConfigured("TASK_BACKEND must be either 'django_q' or 'celery'.")
 
 # Application definition
 INSTALLED_APPS = (
@@ -264,6 +273,26 @@ Q_CLUSTER = {
     "django_redis": "default",
     "sync": env("Q_CLUISTER_SYNC"),  # Set to True for local synchronous debugging
 }
+
+# Celery
+CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="")
+CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default="")
+CELERY_TASK_DEFAULT_QUEUE = env("CELERY_TASK_DEFAULT_QUEUE", default="default")
+CELERY_TASK_SOFT_TIME_LIMIT = env("CELERY_TASK_SOFT_TIME_LIMIT", default=0) or None
+CELERY_TASK_TIME_LIMIT = env("CELERY_TASK_TIME_LIMIT", default=0) or None
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+
+if DEFAULT_TASK_BACKEND == "celery":
+    if not CELERY_BROKER_URL:
+        raise ImproperlyConfigured(
+            "CELERY_BROKER_URL is required when TASK_BACKEND is 'celery'."
+        )
+    if not CELERY_RESULT_BACKEND:
+        raise ImproperlyConfigured(
+            "CELERY_RESULT_BACKEND is required when TASK_BACKEND is 'celery'."
+        )
 
 # Cache settings
 CACHES = {

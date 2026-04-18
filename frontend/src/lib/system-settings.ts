@@ -85,6 +85,47 @@ export const systemSettingsSections: SystemSettingsSectionDefinition[] = [
     ],
   },
   {
+    id: 'background-jobs',
+    title: 'Background Jobs',
+    description: 'Choose the async execution backend and configure optional Celery scale-out settings.',
+    fields: [
+      { key: 'task_backend', label: 'Task backend', input: 'select', optionSource: 'task_backends', defaultValue: 'django_q' },
+      {
+        key: 'celery_broker_url',
+        label: 'Celery broker URL',
+        input: 'password',
+        placeholder: 'redis://host:6379/1',
+        showWhen: { key: 'task_backend', equals: 'celery' },
+      },
+      {
+        key: 'celery_result_backend',
+        label: 'Celery result backend',
+        input: 'password',
+        placeholder: 'redis://host:6379/2',
+        showWhen: { key: 'task_backend', equals: 'celery' },
+      },
+      {
+        key: 'celery_task_default_queue',
+        label: 'Celery default queue',
+        input: 'text',
+        defaultValue: 'default',
+        showWhen: { key: 'task_backend', equals: 'celery' },
+      },
+      {
+        key: 'celery_task_soft_time_limit',
+        label: 'Celery soft time limit (seconds)',
+        input: 'number',
+        showWhen: { key: 'task_backend', equals: 'celery' },
+      },
+      {
+        key: 'celery_task_time_limit',
+        label: 'Celery hard time limit (seconds)',
+        input: 'number',
+        showWhen: { key: 'task_backend', equals: 'celery' },
+      },
+    ],
+  },
+  {
     id: 'storage',
     title: 'Export Storage',
     description: 'Choose where generated export files are stored and test the active storage backend.',
