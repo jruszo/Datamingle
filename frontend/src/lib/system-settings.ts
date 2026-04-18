@@ -93,14 +93,14 @@ export const systemSettingsSections: SystemSettingsSectionDefinition[] = [
       {
         key: 'celery_broker_url',
         label: 'Celery broker URL',
-        input: 'text',
+        input: 'password',
         placeholder: 'redis://host:6379/1',
         showWhen: { key: 'task_backend', equals: 'celery' },
       },
       {
         key: 'celery_result_backend',
         label: 'Celery result backend',
-        input: 'text',
+        input: 'password',
         placeholder: 'redis://host:6379/2',
         showWhen: { key: 'task_backend', equals: 'celery' },
       },

@@ -1,14 +1,17 @@
-import base64
 import datetime
 import importlib
+import json
 import logging
-import pickle
 import traceback
+import uuid
+from decimal import Decimal
 from dataclasses import dataclass
 from typing import Any
 
 from django.conf import settings
+from django.apps import apps
 from django.db import transaction
+from django.db.models import Model
 from django.utils import timezone
 
 from common.config import SysConfig
@@ -390,6 +393,22 @@ class CeleryTaskBackend(BaseTaskBackend):
     ):
         run_at_value = _normalize_run_at(run_at)
         timeout_value = self._normalized_timeout(timeout)
+        with transaction.atomic():
+            TaskSchedule.objects.update_or_create(
+                name=name,
+                defaults={
+                    "backend": self.backend_id,
+                    "task_name": task_name,
+                    "callable_path": callable_path,
+                    "payload": payload,
+                    "run_at": run_at_value,
+                    "status": TaskSchedule.STATUS_SCHEDULED,
+                    "backend_job_id": "",
+                    "last_error": "",
+                    "completed_at": None,
+                    "cancelled_at": None,
+                },
+            )
         task = _celery_execute_task()
         _refresh_celery_runtime_config()
         apply_kwargs = {
@@ -398,22 +417,12 @@ class CeleryTaskBackend(BaseTaskBackend):
         }
         if timeout_value is not None:
             apply_kwargs["time_limit"] = timeout_value
-        result = task.apply_async(args=[payload], **apply_kwargs)
-        TaskSchedule.objects.update_or_create(
-            name=name,
-            defaults={
-                "backend": self.backend_id,
-                "task_name": task_name,
-                "callable_path": callable_path,
-                "payload": payload,
-                "run_at": run_at_value,
-                "status": TaskSchedule.STATUS_SCHEDULED,
-                "backend_job_id": result.id,
-                "last_error": "",
-                "completed_at": None,
-                "cancelled_at": None,
-            },
-        )
+        try:
+            result = task.apply_async(args=[payload], **apply_kwargs)
+        except Exception as exc:
+            _mark_schedule_failed(name, str(exc))
+            raise
+        TaskSchedule.objects.filter(name=name).update(backend_job_id=result.id)
         return task_info(name)
 
     def cancel_scheduled(self, name):
@@ -474,11 +483,97 @@ def _encode_task_payload(func, args, kwargs, hook, task_name, schedule_name):
         "schedule_name": schedule_name,
         "backend_job_id": "",
     }
-    return base64.b64encode(pickle.dumps(payload)).decode("ascii")
+    return json.dumps(_serialize_task_value(payload), separators=(",", ":"))
 
 
 def _decode_task_payload(payload):
-    return pickle.loads(base64.b64decode(payload.encode("ascii")))
+    return _deserialize_task_value(json.loads(payload))
+
+
+def _serialize_task_value(value):
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, tuple):
+        return {
+            "__task_type__": "tuple",
+            "items": [_serialize_task_value(item) for item in value],
+        }
+    if isinstance(value, list):
+        return [_serialize_task_value(item) for item in value]
+    if isinstance(value, dict):
+        if all(isinstance(key, str) for key in value):
+            return {
+                key: _serialize_task_value(item_value)
+                for key, item_value in value.items()
+            }
+        return {
+            "__task_type__": "dict",
+            "items": [
+                [
+                    _serialize_task_value(item_key),
+                    _serialize_task_value(item_value),
+                ]
+                for item_key, item_value in value.items()
+            ],
+        }
+    if isinstance(value, datetime.datetime):
+        return {"__task_type__": "datetime", "value": value.isoformat()}
+    if isinstance(value, datetime.date):
+        return {"__task_type__": "date", "value": value.isoformat()}
+    if isinstance(value, datetime.time):
+        return {"__task_type__": "time", "value": value.isoformat()}
+    if isinstance(value, Decimal):
+        return {"__task_type__": "decimal", "value": str(value)}
+    if isinstance(value, uuid.UUID):
+        return {"__task_type__": "uuid", "value": str(value)}
+    if isinstance(value, Model):
+        if value.pk is None:
+            raise TypeError(
+                f"Cannot serialize unsaved model instance {value.__class__.__name__}."
+            )
+        return {
+            "__task_type__": "model",
+            "label": value._meta.label,
+            "pk": _serialize_task_value(value.pk),
+        }
+    raise TypeError(f"Unsupported task payload type: {type(value)!r}")
+
+
+def _deserialize_task_value(value):
+    if isinstance(value, list):
+        return [_deserialize_task_value(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+
+    task_type = value.get("__task_type__")
+    if not task_type:
+        return {
+            item_key: _deserialize_task_value(item_value)
+            for item_key, item_value in value.items()
+        }
+    if task_type == "tuple":
+        return tuple(_deserialize_task_value(item) for item in value["items"])
+    if task_type == "dict":
+        return {
+            _deserialize_task_value(item_key): _deserialize_task_value(item_value)
+            for item_key, item_value in value["items"]
+        }
+    if task_type == "datetime":
+        return datetime.datetime.fromisoformat(value["value"])
+    if task_type == "date":
+        return datetime.date.fromisoformat(value["value"])
+    if task_type == "time":
+        return datetime.time.fromisoformat(value["value"])
+    if task_type == "decimal":
+        return Decimal(value["value"])
+    if task_type == "uuid":
+        return uuid.UUID(value["value"])
+    if task_type == "model":
+        model = apps.get_model(value["label"])
+        if model is None:
+            raise LookupError(f"Unknown model reference: {value['label']}")
+        return model._default_manager.get(pk=_deserialize_task_value(value["pk"]))
+    raise ValueError(f"Unsupported task payload marker: {task_type}")
 
 
 def _callable_path(value):

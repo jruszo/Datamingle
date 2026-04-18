@@ -698,6 +698,25 @@ class TaskQueueTests(TestCase):
         )
         self.assertEqual(backend.enqueue_payload.call_args.kwargs["timeout"], 8)
 
+    def test_task_payload_round_trips_model_references_with_json(self):
+        user = User.objects.create(username="task-user")
+
+        payload = task_queue._encode_task_payload(
+            sample_task,
+            (user,),
+            {"suffix": "!"},
+            record_task_callback,
+            "demo-task",
+            "",
+        )
+
+        decoded = task_queue._decode_task_payload(payload)
+
+        self.assertTrue(payload.startswith("{"))
+        self.assertEqual(decoded["args"][0].pk, user.pk)
+        self.assertEqual(decoded["args"][0].username, user.username)
+        self.assertEqual(decoded["kwargs"], {"suffix": "!"})
+
     def test_execute_payload_marks_schedule_completed_and_runs_callback(self):
         TaskSchedule.objects.create(
             name="scheduled-task",
@@ -810,6 +829,31 @@ class TaskQueueTests(TestCase):
         self.assertEqual(saved.backend, TaskSchedule.BACKEND_CELERY)
         self.assertEqual(saved.backend_job_id, "celery-task-id")
         mock_celery_execute_task.return_value.apply_async.assert_called_once()
+
+    @patch("common.task_queue._refresh_celery_runtime_config")
+    @patch("common.task_queue._celery_execute_task")
+    def test_celery_backend_schedule_payload_marks_failed_when_enqueue_fails(
+        self, mock_celery_execute_task, mock_refresh
+    ):
+        backend = task_queue.CeleryTaskBackend()
+        mock_refresh.return_value = Mock()
+        mock_celery_execute_task.return_value.apply_async.side_effect = RuntimeError(
+            "broker unavailable"
+        )
+
+        with self.assertRaises(RuntimeError):
+            backend.schedule_payload(
+                name="celery-scheduled",
+                payload="encoded",
+                run_at=datetime.datetime.now(),
+                task_name="celery-scheduled",
+                callable_path="common.tests.sample_task",
+                timeout=45,
+            )
+
+        saved = TaskSchedule.objects.get(name="celery-scheduled")
+        self.assertEqual(saved.status, TaskSchedule.STATUS_FAILED)
+        self.assertIn("broker unavailable", saved.last_error)
 
     @patch("common.task_queue._celery_app")
     def test_celery_backend_cancel_schedule_revokes_task_and_marks_cancelled(

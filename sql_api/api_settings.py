@@ -380,6 +380,20 @@ class SystemSettingsSerializer(serializers.Serializer):
                     "celery_broker_url": "Celery broker URL is required when Celery is enabled."
                 }
             )
+        soft_limit = attrs.get("celery_task_soft_time_limit")
+        hard_limit = attrs.get("celery_task_time_limit")
+        if (
+            soft_limit is not None
+            and hard_limit is not None
+            and soft_limit >= hard_limit
+        ):
+            raise serializers.ValidationError(
+                {
+                    "celery_task_soft_time_limit": (
+                        "Celery soft time limit must be less than the hard time limit."
+                    )
+                }
+            )
         return attrs
 
     @staticmethod

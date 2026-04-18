@@ -1144,6 +1144,7 @@ class TaskSchedule(models.Model):
         db_table = "task_schedule"
         verbose_name = "Scheduled Task"
         verbose_name_plural = "Scheduled Task"
+        indexes = [models.Index(fields=["status", "run_at"], name="idx_status_run_at")]
 
 
 # Cloud service credential configuration

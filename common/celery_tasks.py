@@ -2,7 +2,7 @@ from common.task_queue import execute_payload
 
 try:
     from archery.celery import app
-except Exception:
+except ImportError:
     app = None
 
 

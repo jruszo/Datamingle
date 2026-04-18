@@ -614,7 +614,7 @@ class TestTasks(TestCase):
         del_schedule("some_name1")
 
     def test_task_info(self):
-        task_info("some_name")
+        self.assertIsNotNone(task_info("some_name"))
 
     def test_task_info_not_exists(self):
         self.assertIsNone(task_info("some_name1"))

@@ -24,6 +24,7 @@ logger = logging.getLogger("default")
 
 
 def _has_schedulable_thread_id(thread_id):
+    """Accept int IDs and non-empty string IDs; reject falsy values, with bool following int semantics because bool subclasses int."""
     return isinstance(thread_id, (int, str)) and bool(thread_id)
 
 

@@ -131,6 +131,8 @@ PASSWORD_MIXIN_PATH = env("PASSWORD_MIXIN_PATH")
 
 FIELD_ENCRYPTION_KEYS = env("FIELD_ENCRYPTION_KEYS")
 DEFAULT_TASK_BACKEND = env("TASK_BACKEND", default="django_q").strip().lower()
+if DEFAULT_TASK_BACKEND not in {"django_q", "celery"}:
+    raise ImproperlyConfigured("TASK_BACKEND must be either 'django_q' or 'celery'.")
 
 # Application definition
 INSTALLED_APPS = (
@@ -281,6 +283,16 @@ CELERY_TASK_TIME_LIMIT = env("CELERY_TASK_TIME_LIMIT", default=0) or None
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
+
+if DEFAULT_TASK_BACKEND == "celery":
+    if not CELERY_BROKER_URL:
+        raise ImproperlyConfigured(
+            "CELERY_BROKER_URL is required when TASK_BACKEND is 'celery'."
+        )
+    if not CELERY_RESULT_BACKEND:
+        raise ImproperlyConfigured(
+            "CELERY_RESULT_BACKEND is required when TASK_BACKEND is 'celery'."
+        )
 
 # Cache settings
 CACHES = {

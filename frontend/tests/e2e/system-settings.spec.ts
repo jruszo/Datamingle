@@ -57,6 +57,9 @@ test.describe.serial('system settings', () => {
 
   test('allows demo admin to switch the task backend to Celery and persist Celery settings', async ({ browser }) => {
     const admin = await createRoleSession(browser, 'demo_admin')
+    const brokerUrl = 'redis://127.0.0.1:6379/5'
+    const resultBackend = 'redis://127.0.0.1:6379/6'
+    const queueName = 'celery-e2e-queue'
     let originalTaskBackend = 'django_q'
     let originalBrokerUrl = ''
     let originalResultBackend = ''
@@ -73,30 +76,38 @@ test.describe.serial('system settings', () => {
       await expect(taskBackendField).toBeEnabled()
       originalTaskBackend = await taskBackendField.inputValue()
 
+      const brokerField = admin.page.getByTestId('settings-field-celery_broker_url')
+      const resultBackendField = admin.page.getByTestId('settings-field-celery_result_backend')
+      const queueField = admin.page.getByTestId('settings-field-celery_task_default_queue')
+      const softLimitField = admin.page.getByTestId('settings-field-celery_task_soft_time_limit')
+      const hardLimitField = admin.page.getByTestId('settings-field-celery_task_time_limit')
+
       if (originalTaskBackend === 'celery') {
-        originalBrokerUrl = await admin.page.getByTestId('settings-field-celery_broker_url').inputValue()
-        originalResultBackend = await admin.page.getByTestId('settings-field-celery_result_backend').inputValue()
-        originalQueue = await admin.page.getByTestId('settings-field-celery_task_default_queue').inputValue()
-        originalSoftLimit = await admin.page.getByTestId('settings-field-celery_task_soft_time_limit').inputValue()
-        originalHardLimit = await admin.page.getByTestId('settings-field-celery_task_time_limit').inputValue()
+        originalBrokerUrl = await brokerField.inputValue()
+        originalResultBackend = await resultBackendField.inputValue()
+        originalQueue = await queueField.inputValue()
+        originalSoftLimit = await softLimitField.inputValue()
+        originalHardLimit = await hardLimitField.inputValue()
+      } else {
+        await expect(brokerField).toHaveCount(0)
+        await expect(resultBackendField).toHaveCount(0)
+        await expect(queueField).toHaveCount(0)
+        await expect(softLimitField).toHaveCount(0)
+        await expect(hardLimitField).toHaveCount(0)
       }
 
       await taskBackendField.selectOption('celery')
-      await expect(admin.page.getByTestId('settings-field-celery_broker_url')).toBeVisible()
-      await expect(admin.page.getByTestId('settings-field-celery_result_backend')).toBeVisible()
-      await expect(admin.page.getByTestId('settings-field-celery_task_default_queue')).toBeVisible()
-      await expect(admin.page.getByTestId('settings-field-celery_task_soft_time_limit')).toBeVisible()
-      await expect(admin.page.getByTestId('settings-field-celery_task_time_limit')).toBeVisible()
+      await expect(brokerField).toBeVisible()
+      await expect(resultBackendField).toBeVisible()
+      await expect(queueField).toBeVisible()
+      await expect(softLimitField).toBeVisible()
+      await expect(hardLimitField).toBeVisible()
 
-      const brokerUrl = `redis://127.0.0.1:63${Date.now().toString().slice(-2)}/5`
-      const resultBackend = `redis://127.0.0.1:63${Date.now().toString().slice(-2)}/6`
-      const queueName = `celery-e2e-${Date.now().toString(36)}`
-
-      await admin.page.getByTestId('settings-field-celery_broker_url').fill(brokerUrl)
-      await admin.page.getByTestId('settings-field-celery_result_backend').fill(resultBackend)
-      await admin.page.getByTestId('settings-field-celery_task_default_queue').fill(queueName)
-      await admin.page.getByTestId('settings-field-celery_task_soft_time_limit').fill('30')
-      await admin.page.getByTestId('settings-field-celery_task_time_limit').fill('60')
+      await brokerField.fill(brokerUrl)
+      await resultBackendField.fill(resultBackend)
+      await queueField.fill(queueName)
+      await softLimitField.fill('30')
+      await hardLimitField.fill('60')
       await admin.page.getByTestId('settings-save').click()
 
       await expect(admin.page.getByText('System settings saved.')).toBeVisible()

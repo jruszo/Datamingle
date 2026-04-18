@@ -14,7 +14,7 @@ if Celery is not None:
 
     app = Celery("archery")
     app.config_from_object("django.conf:settings", namespace="CELERY")
-    app.autodiscover_tasks()
+    app.autodiscover_tasks(related_name="celery_tasks")
 
     from common.task_queue import celery_runtime_settings
 
