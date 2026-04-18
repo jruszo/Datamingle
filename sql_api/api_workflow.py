@@ -9,7 +9,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
-from django_q.tasks import async_task
+from common.task_queue import async_task
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 from rest_framework import views, generics, status, serializers, permissions
 from rest_framework.exceptions import PermissionDenied

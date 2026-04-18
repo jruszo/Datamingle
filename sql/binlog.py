@@ -10,7 +10,7 @@ import simplejson as json
 from django.conf import settings
 from django.contrib.auth.decorators import permission_required
 from django.http import HttpResponse, JsonResponse
-from django_q.tasks import async_task
+from common.task_queue import async_task
 
 from common.utils.extend_json_encoder import ExtendJSONEncoder
 from sql.engines import get_engine

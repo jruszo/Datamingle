@@ -1078,6 +1078,74 @@ class Config(models.Model):
         verbose_name_plural = "System Configuration"
 
 
+class TaskSchedule(models.Model):
+    """Backend-agnostic registry for one-off scheduled tasks."""
+
+    BACKEND_DJANGO_Q = "django_q"
+    BACKEND_CELERY = "celery"
+    BACKEND_CHOICES = (
+        (BACKEND_DJANGO_Q, "Django Q"),
+        (BACKEND_CELERY, "Celery"),
+    )
+
+    STATUS_SCHEDULED = "scheduled"
+    STATUS_RUNNING = "running"
+    STATUS_COMPLETED = "completed"
+    STATUS_FAILED = "failed"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = (
+        (STATUS_SCHEDULED, "Scheduled"),
+        (STATUS_RUNNING, "Running"),
+        (STATUS_COMPLETED, "Completed"),
+        (STATUS_FAILED, "Failed"),
+        (STATUS_CANCELLED, "Cancelled"),
+    )
+
+    name = models.CharField("Schedule Name", max_length=200, unique=True)
+    backend = models.CharField(
+        "Task Backend",
+        max_length=20,
+        choices=BACKEND_CHOICES,
+        default=BACKEND_DJANGO_Q,
+    )
+    task_name = models.CharField("Task Name", max_length=255, default="", blank=True)
+    callable_path = models.CharField(
+        "Callable Path", max_length=500, default="", blank=True
+    )
+    payload = models.TextField("Serialized Payload", default="", blank=True)
+    run_at = models.DateTimeField("Scheduled Run Time")
+    status = models.CharField(
+        "Schedule Status",
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_SCHEDULED,
+    )
+    backend_job_id = models.CharField(
+        "Backend Job ID", max_length=255, default="", blank=True
+    )
+    last_error = models.TextField("Last Error", default="", blank=True)
+    completed_at = models.DateTimeField(
+        "Completed At", null=True, blank=True, default=None
+    )
+    cancelled_at = models.DateTimeField(
+        "Cancelled At", null=True, blank=True, default=None
+    )
+    create_time = models.DateTimeField("Created Time", auto_now_add=True)
+    sys_time = models.DateTimeField("System Modified Time", auto_now=True)
+
+    @property
+    def next_run(self):
+        if self.status == self.STATUS_SCHEDULED:
+            return self.run_at
+        return None
+
+    class Meta:
+        managed = True
+        db_table = "task_schedule"
+        verbose_name = "Scheduled Task"
+        verbose_name_plural = "Scheduled Task"
+
+
 # Cloud service credential configuration
 class CloudAccessKey(models.Model):
     cloud_type_choices = (("aliyun", "aliyun"),)

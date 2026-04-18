@@ -37,6 +37,7 @@ AUTO_REVIEW_DB_TYPES = (
 )
 STORAGE_TYPE_OPTIONS = ("local", "sftp", "s3c", "azure")
 SMS_PROVIDER_OPTIONS = ("disabled", "aliyun", "tencent")
+TASK_BACKEND_OPTIONS = ("django_q", "celery")
 
 SYSTEM_SETTINGS_SCHEMA = (
     {"name": "go_inception_host", "kind": "string", "default": ""},
@@ -70,6 +71,21 @@ SYSTEM_SETTINGS_SCHEMA = (
     {"name": "max_execution_time", "kind": "int", "default": None},
     {"name": "admin_query_limit", "kind": "int", "default": None},
     {"name": "max_export_rows", "kind": "int", "default": None},
+    {
+        "name": "task_backend",
+        "kind": "choice",
+        "choices": TASK_BACKEND_OPTIONS,
+        "default": "django_q",
+    },
+    {"name": "celery_broker_url", "kind": "string", "default": ""},
+    {"name": "celery_result_backend", "kind": "string", "default": ""},
+    {
+        "name": "celery_task_default_queue",
+        "kind": "string",
+        "default": "default",
+    },
+    {"name": "celery_task_soft_time_limit", "kind": "int", "default": None},
+    {"name": "celery_task_time_limit", "kind": "int", "default": None},
     {
         "name": "storage_type",
         "kind": "choice",
@@ -262,6 +278,13 @@ def build_system_settings_options():
             {"value": "aliyun", "label": "Aliyun"},
             {"value": "tencent", "label": "Tencent Cloud"},
         ],
+        "task_backends": [
+            {
+                "value": backend,
+                "label": "Django Q" if backend == "django_q" else "Celery",
+            }
+            for backend in TASK_BACKEND_OPTIONS
+        ],
     }
 
 
@@ -348,6 +371,16 @@ class SystemSettingsSerializer(serializers.Serializer):
             return validate_binary_path(value, "pt-online-schema-change")
         except ValueError as exc:
             raise serializers.ValidationError(str(exc))
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if attrs.get("task_backend") == "celery" and not attrs.get("celery_broker_url"):
+            raise serializers.ValidationError(
+                {
+                    "celery_broker_url": "Celery broker URL is required when Celery is enabled."
+                }
+            )
+        return attrs
 
     @staticmethod
     def _validate_group_names(value):

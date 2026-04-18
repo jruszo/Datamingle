@@ -8,7 +8,7 @@ from django.contrib.auth.decorators import permission_required
 from django.db import close_old_connections, connection, transaction
 from django.db.models import Q
 from django.utils.decorators import method_decorator
-from django_q.tasks import async_task
+from common.task_queue import async_task
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 from rest_framework import generics, permissions, serializers, status, views
 from rest_framework.exceptions import PermissionDenied

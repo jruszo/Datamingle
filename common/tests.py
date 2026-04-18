@@ -1,13 +1,14 @@
 import json
 import smtplib
 import psycopg2
-from unittest.mock import patch, ANY
+from unittest.mock import patch, ANY, Mock
 import datetime
 from dateutil.relativedelta import relativedelta
 from django.contrib.auth import get_user_model
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 
 from common.config import SysConfig
+from common import task_queue
 from common.utils.sendmsg import MsgSender
 from sql.engines import EngineBase, ResultSet
 from sql.models import (
@@ -16,6 +17,7 @@ from sql.models import (
     SqlWorkflowContent,
     QueryLog,
     ResourceGroup,
+    TaskSchedule,
     TwoFactorAuthConfig,
 )
 from common.utils.chart_dao import ChartDao
@@ -25,6 +27,19 @@ from common.twofa.totp import TOTP
 from common.utils.extend_json_encoder import ExtendJSONEncoderFTime
 
 User = get_user_model()
+TASK_CALLBACK_RESULTS = []
+
+
+def sample_task(value, suffix=""):
+    return f"{value}{suffix}"
+
+
+def failing_task():
+    raise RuntimeError("task boom")
+
+
+def record_task_callback(task_result):
+    TASK_CALLBACK_RESULTS.append(task_result)
 
 
 class ConfigOpsTests(TestCase):
@@ -611,3 +626,237 @@ class ExtendJSONEncoderFTimeTest(TestCase):
         # Test datetime
         result = ExtendJSONEncoderFTime().default(self.date_time)
         assert self.datetime1.strftime("%Y-%m-%d") in result
+
+
+class TaskQueueTests(TestCase):
+    def setUp(self):
+        TASK_CALLBACK_RESULTS.clear()
+        TaskSchedule.objects.all().delete()
+        self.sys_config = SysConfig()
+        self.sys_config.purge()
+
+    def tearDown(self):
+        TASK_CALLBACK_RESULTS.clear()
+        TaskSchedule.objects.all().delete()
+        self.sys_config.purge()
+
+    @override_settings(DEFAULT_TASK_BACKEND="django_q")
+    def test_current_task_backend_defaults_to_settings(self):
+        self.assertEqual(task_queue.current_task_backend(), "django_q")
+
+    @override_settings(DEFAULT_TASK_BACKEND="django_q")
+    def test_current_task_backend_prefers_sys_config(self):
+        self.sys_config.set("task_backend", "celery")
+        self.assertEqual(task_queue.current_task_backend(), "celery")
+
+    @override_settings(
+        CELERY_BROKER_URL="redis://settings:6379/1",
+        CELERY_RESULT_BACKEND="redis://settings:6379/2",
+        CELERY_TASK_DEFAULT_QUEUE="settings-default",
+        CELERY_TASK_SOFT_TIME_LIMIT=15,
+        CELERY_TASK_TIME_LIMIT=30,
+    )
+    def test_celery_runtime_settings_prefer_db_values(self):
+        self.sys_config.set("celery_broker_url", "redis://db:6379/5")
+        self.sys_config.set("celery_result_backend", "redis://db:6379/6")
+        self.sys_config.set("celery_task_default_queue", "db-queue")
+        self.sys_config.set("celery_task_soft_time_limit", 25)
+        self.sys_config.set("celery_task_time_limit", 50)
+
+        runtime = task_queue.celery_runtime_settings()
+
+        self.assertEqual(runtime["broker_url"], "redis://db:6379/5")
+        self.assertEqual(runtime["result_backend"], "redis://db:6379/6")
+        self.assertEqual(runtime["task_default_queue"], "db-queue")
+        self.assertEqual(runtime["task_soft_time_limit"], 25)
+        self.assertEqual(runtime["task_time_limit"], 50)
+
+    def test_async_task_encodes_payload_and_uses_selected_backend(self):
+        backend = Mock()
+        backend.enqueue_payload.return_value = "queued-id"
+
+        with patch("common.task_queue.get_task_backend", return_value=backend):
+            task_id = task_queue.async_task(
+                sample_task,
+                "hello",
+                suffix="!",
+                hook=record_task_callback,
+                task_name="demo-task",
+                timeout=8,
+            )
+
+        self.assertEqual(task_id, "queued-id")
+        payload = backend.enqueue_payload.call_args.kwargs["payload"]
+        decoded = task_queue._decode_task_payload(payload)
+        self.assertEqual(decoded["callable_path"], "common.tests.sample_task")
+        self.assertEqual(decoded["args"], ("hello",))
+        self.assertEqual(decoded["kwargs"], {"suffix": "!"})
+        self.assertEqual(decoded["callback_path"], "common.tests.record_task_callback")
+        self.assertEqual(decoded["task_name"], "demo-task")
+        self.assertEqual(
+            backend.enqueue_payload.call_args.kwargs["task_name"], "demo-task"
+        )
+        self.assertEqual(backend.enqueue_payload.call_args.kwargs["timeout"], 8)
+
+    def test_execute_payload_marks_schedule_completed_and_runs_callback(self):
+        TaskSchedule.objects.create(
+            name="scheduled-task",
+            task_name="scheduled-task",
+            callable_path="common.tests.sample_task",
+            run_at=datetime.datetime.now(),
+        )
+        payload = task_queue._encode_task_payload(
+            sample_task,
+            ("hello",),
+            {"suffix": "!"},
+            record_task_callback,
+            "scheduled-task",
+            "scheduled-task",
+        )
+
+        result = task_queue.execute_payload(payload)
+
+        self.assertEqual(result, "hello!")
+        schedule = TaskSchedule.objects.get(name="scheduled-task")
+        self.assertEqual(schedule.status, TaskSchedule.STATUS_COMPLETED)
+        self.assertEqual(len(TASK_CALLBACK_RESULTS), 1)
+        self.assertTrue(TASK_CALLBACK_RESULTS[0].success)
+        self.assertEqual(TASK_CALLBACK_RESULTS[0].result, "hello!")
+
+    def test_execute_payload_marks_schedule_failed_and_runs_callback(self):
+        TaskSchedule.objects.create(
+            name="failing-task",
+            task_name="failing-task",
+            callable_path="common.tests.failing_task",
+            run_at=datetime.datetime.now(),
+        )
+        payload = task_queue._encode_task_payload(
+            failing_task,
+            (),
+            {},
+            record_task_callback,
+            "failing-task",
+            "failing-task",
+        )
+
+        with self.assertRaises(RuntimeError):
+            task_queue.execute_payload(payload)
+
+        schedule = TaskSchedule.objects.get(name="failing-task")
+        self.assertEqual(schedule.status, TaskSchedule.STATUS_FAILED)
+        self.assertEqual(len(TASK_CALLBACK_RESULTS), 1)
+        self.assertFalse(TASK_CALLBACK_RESULTS[0].success)
+        self.assertEqual(TASK_CALLBACK_RESULTS[0].error, "task boom")
+
+    @patch("django_q.tasks.async_task")
+    def test_django_q_backend_enqueue_payload_uses_common_executor(
+        self, mock_async_task
+    ):
+        backend = task_queue.DjangoQTaskBackend()
+
+        backend.enqueue_payload("encoded", "demo-task", timeout=12)
+
+        mock_async_task.assert_called_once_with(
+            "common.task_queue.execute_payload",
+            "encoded",
+            task_name="demo-task",
+            timeout=12,
+        )
+
+    @patch("django_q.models.Schedule.objects.filter")
+    @patch("django_q.tasks.schedule")
+    def test_django_q_backend_schedule_payload_creates_registry(
+        self, mock_schedule, mock_schedule_filter
+    ):
+        backend = task_queue.DjangoQTaskBackend()
+        mock_schedule_filter.return_value.delete.return_value = None
+
+        backend.schedule_payload(
+            name="q-scheduled",
+            payload="encoded",
+            run_at=datetime.datetime.now(),
+            task_name="q-scheduled",
+            callable_path="common.tests.sample_task",
+            timeout=-1,
+        )
+
+        saved = TaskSchedule.objects.get(name="q-scheduled")
+        self.assertEqual(saved.backend, TaskSchedule.BACKEND_DJANGO_Q)
+        self.assertEqual(saved.status, TaskSchedule.STATUS_SCHEDULED)
+        mock_schedule.assert_called_once()
+
+    @patch("common.task_queue._refresh_celery_runtime_config")
+    @patch("common.task_queue._celery_execute_task")
+    def test_celery_backend_schedule_payload_creates_registry(
+        self, mock_celery_execute_task, mock_refresh
+    ):
+        backend = task_queue.CeleryTaskBackend()
+        mock_refresh.return_value = Mock()
+        mock_result = Mock()
+        mock_result.id = "celery-task-id"
+        mock_celery_execute_task.return_value.apply_async.return_value = mock_result
+        self.sys_config.set("celery_task_default_queue", "celery-queue")
+
+        backend.schedule_payload(
+            name="celery-scheduled",
+            payload="encoded",
+            run_at=datetime.datetime.now(),
+            task_name="celery-scheduled",
+            callable_path="common.tests.sample_task",
+            timeout=45,
+        )
+
+        saved = TaskSchedule.objects.get(name="celery-scheduled")
+        self.assertEqual(saved.backend, TaskSchedule.BACKEND_CELERY)
+        self.assertEqual(saved.backend_job_id, "celery-task-id")
+        mock_celery_execute_task.return_value.apply_async.assert_called_once()
+
+    @patch("common.task_queue._celery_app")
+    def test_celery_backend_cancel_schedule_revokes_task_and_marks_cancelled(
+        self, mock_celery_app
+    ):
+        backend = task_queue.CeleryTaskBackend()
+        TaskSchedule.objects.create(
+            name="celery-scheduled",
+            backend=TaskSchedule.BACKEND_CELERY,
+            task_name="celery-scheduled",
+            callable_path="common.tests.sample_task",
+            backend_job_id="celery-task-id",
+            run_at=datetime.datetime.now(),
+        )
+        mock_celery_app.return_value.control.revoke.return_value = None
+
+        backend.cancel_scheduled("celery-scheduled")
+
+        saved = TaskSchedule.objects.get(name="celery-scheduled")
+        self.assertEqual(saved.status, TaskSchedule.STATUS_CANCELLED)
+        mock_celery_app.return_value.control.revoke.assert_called_once_with(
+            "celery-task-id"
+        )
+
+    def test_task_backend_info_reports_schedule_counts(self):
+        TaskSchedule.objects.create(
+            name="scheduled-task",
+            task_name="scheduled-task",
+            callable_path="common.tests.sample_task",
+            status=TaskSchedule.STATUS_SCHEDULED,
+            run_at=datetime.datetime.now(),
+        )
+        TaskSchedule.objects.create(
+            name="running-task",
+            task_name="running-task",
+            callable_path="common.tests.sample_task",
+            status=TaskSchedule.STATUS_RUNNING,
+            run_at=datetime.datetime.now(),
+        )
+        backend = Mock()
+        backend.backend_id = "celery"
+        backend.health_snapshot.return_value = {"label": "Celery"}
+
+        with patch("common.task_queue.get_task_backend", return_value=backend):
+            info = task_queue.task_backend_info(full=True)
+
+        self.assertEqual(info["active"], "celery")
+        self.assertEqual(info["scheduled"]["pending"], 1)
+        self.assertEqual(info["scheduled"]["running"], 1)
+        self.assertEqual(info["config"], {"label": "Celery"})

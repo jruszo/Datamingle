@@ -23,6 +23,10 @@ from sql.engines import get_engine
 logger = logging.getLogger("default")
 
 
+def _has_schedulable_thread_id(thread_id):
+    return isinstance(thread_id, (int, str)) and bool(thread_id)
+
+
 @permission_required("sql.query_submit", raise_exception=True)
 def query(request):
     """
@@ -91,7 +95,7 @@ def query(request):
         thread_id = query_engine.thread_id
         max_execution_time = int(config.get("max_execution_time", 60))
         # Execute query and add kill schedule for timeout protection.
-        if thread_id:
+        if _has_schedulable_thread_id(thread_id):
             schedule_name = f"query-{time.time()}"
             run_date = datetime.datetime.now() + datetime.timedelta(
                 seconds=max_execution_time
@@ -110,7 +114,7 @@ def query(request):
             )
         query_result.query_time = t.cost
         # Remove schedule after query returns.
-        if thread_id:
+        if _has_schedulable_thread_id(thread_id):
             del_schedule(schedule_name)
 
         # Query error.

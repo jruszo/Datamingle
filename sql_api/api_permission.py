@@ -3,7 +3,7 @@ import datetime
 from django.contrib.auth.models import Group
 from django.db import transaction
 from django.db.models import Q
-from django_q.tasks import async_task
+from common.task_queue import async_task
 from drf_spectacular.utils import extend_schema
 from rest_framework import permissions, serializers, status, views
 from rest_framework.exceptions import PermissionDenied

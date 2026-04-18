@@ -214,6 +214,7 @@ export type SystemSettingsOptions = {
   auto_review_db_types: SystemSettingsOption[]
   storage_types: SystemSettingsOption[]
   sms_providers: SystemSettingsOption[]
+  task_backends: SystemSettingsOption[]
 }
 
 export type SystemSettingsPayload = {
