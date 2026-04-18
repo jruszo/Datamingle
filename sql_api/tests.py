@@ -124,6 +124,16 @@ class SystemSettingsTaskBackendTest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("celery_broker_url", response.json())
 
+    def test_put_system_settings_rejects_blank_broker_url_for_celery(self):
+        response = self.client.put(
+            "/api/v1/system-settings/",
+            data=json.dumps({"task_backend": "celery", "celery_broker_url": "   "}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("celery_broker_url", response.json())
+
     def test_put_system_settings_rejects_invalid_celery_time_limits(self):
         response = self.client.put(
             "/api/v1/system-settings/",
@@ -140,6 +150,24 @@ class SystemSettingsTaskBackendTest(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("celery_task_soft_time_limit", response.json())
+
+    def test_put_system_settings_rejects_non_positive_celery_time_limits(self):
+        response = self.client.put(
+            "/api/v1/system-settings/",
+            data=json.dumps(
+                {
+                    "task_backend": "celery",
+                    "celery_broker_url": "redis://example:6379/5",
+                    "celery_task_soft_time_limit": 0,
+                    "celery_task_time_limit": -1,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("celery_task_soft_time_limit", response.json())
+        self.assertIn("celery_task_time_limit", response.json())
 
     def test_put_system_settings_saves_celery_backend_config(self):
         response = self.client.put(

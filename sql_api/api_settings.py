@@ -374,26 +374,38 @@ class SystemSettingsSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
-        if attrs.get("task_backend") == "celery" and not attrs.get("celery_broker_url"):
-            raise serializers.ValidationError(
-                {
-                    "celery_broker_url": "Celery broker URL is required when Celery is enabled."
-                }
-            )
-        soft_limit = attrs.get("celery_task_soft_time_limit")
-        hard_limit = attrs.get("celery_task_time_limit")
-        if (
-            soft_limit is not None
-            and hard_limit is not None
-            and soft_limit >= hard_limit
-        ):
-            raise serializers.ValidationError(
-                {
-                    "celery_task_soft_time_limit": (
-                        "Celery soft time limit must be less than the hard time limit."
-                    )
-                }
-            )
+        if attrs.get("task_backend") == "celery":
+            errors = {}
+            broker_url = (attrs.get("celery_broker_url") or "").strip()
+            if not broker_url:
+                errors["celery_broker_url"] = (
+                    "Celery broker URL is required when Celery is enabled."
+                )
+
+            soft_limit = attrs.get("celery_task_soft_time_limit")
+            hard_limit = attrs.get("celery_task_time_limit")
+
+            if soft_limit is not None and soft_limit <= 0:
+                errors["celery_task_soft_time_limit"] = (
+                    "Celery soft time limit must be a positive integer."
+                )
+            if hard_limit is not None and hard_limit <= 0:
+                errors["celery_task_time_limit"] = (
+                    "Celery hard time limit must be a positive integer."
+                )
+            if (
+                soft_limit is not None
+                and hard_limit is not None
+                and soft_limit > 0
+                and hard_limit > 0
+                and soft_limit >= hard_limit
+            ):
+                errors["celery_task_soft_time_limit"] = (
+                    "Celery soft time limit must be less than the hard time limit."
+                )
+
+            if errors:
+                raise serializers.ValidationError(errors)
         return attrs
 
     @staticmethod

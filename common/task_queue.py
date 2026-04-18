@@ -1,4 +1,6 @@
 import datetime
+import hashlib
+import hmac
 import importlib
 import json
 import logging
@@ -108,7 +110,11 @@ def task_info(name):
 
 
 def execute_payload(payload):
-    task_payload = _decode_task_payload(payload)
+    try:
+        task_payload = _decode_task_payload(payload)
+    except Exception:
+        logger.exception("Rejected task payload before execution.")
+        raise
     callable_path = task_payload["callable_path"]
     callback_path = task_payload["callback_path"]
     task_name = task_payload["task_name"]
@@ -123,23 +129,6 @@ def execute_payload(payload):
     try:
         target = _import_from_path(callable_path)
         result = target(*task_payload["args"], **task_payload["kwargs"])
-        task_result = TaskResult(
-            task_name=task_name,
-            callable_path=callable_path,
-            args=tuple(task_payload["args"]),
-            kwargs=task_payload["kwargs"],
-            success=True,
-            result=result,
-            started=started,
-            stopped=_now(),
-            backend=backend,
-            backend_job_id=backend_job_id,
-            schedule_name=schedule_name,
-        )
-        if schedule_name:
-            _mark_schedule_completed(schedule_name)
-        _run_callback(callback_path, task_result)
-        return result
     except Exception as exc:
         task_result = TaskResult(
             task_name=task_name,
@@ -158,11 +147,26 @@ def execute_payload(payload):
         )
         if schedule_name:
             _mark_schedule_failed(schedule_name, str(exc))
-        try:
-            _run_callback(callback_path, task_result)
-        except Exception:
-            logger.exception("Task callback failed for %s", callable_path)
+        _run_callback_safely(callback_path, task_result, callable_path, "failure")
         raise
+
+    task_result = TaskResult(
+        task_name=task_name,
+        callable_path=callable_path,
+        args=tuple(task_payload["args"]),
+        kwargs=task_payload["kwargs"],
+        success=True,
+        result=result,
+        started=started,
+        stopped=_now(),
+        backend=backend,
+        backend_job_id=backend_job_id,
+        schedule_name=schedule_name,
+    )
+    if schedule_name:
+        _mark_schedule_completed(schedule_name)
+    _run_callback_safely(callback_path, task_result, callable_path, "success")
+    return result
 
 
 def task_backend_info(full=False):
@@ -483,11 +487,38 @@ def _encode_task_payload(func, args, kwargs, hook, task_name, schedule_name):
         "schedule_name": schedule_name,
         "backend_job_id": "",
     }
-    return json.dumps(_serialize_task_value(payload), separators=(",", ":"))
+    serialized_payload = _serialize_task_value(payload)
+    envelope = {
+        "payload": serialized_payload,
+        "signature": _sign_task_payload(serialized_payload),
+    }
+    return _payload_json(envelope)
 
 
 def _decode_task_payload(payload):
-    return _deserialize_task_value(json.loads(payload))
+    envelope = json.loads(payload)
+    serialized_payload = envelope["payload"]
+    provided_signature = envelope["signature"]
+    expected_signature = _sign_task_payload(serialized_payload)
+    if not hmac.compare_digest(provided_signature, expected_signature):
+        raise ValueError("Task payload signature verification failed.")
+    return _deserialize_task_value(serialized_payload)
+
+
+def _payload_json(value):
+    return json.dumps(value, separators=(",", ":"), sort_keys=True)
+
+
+def _task_signing_secret():
+    return settings.SECRET_KEY.encode("utf-8")
+
+
+def _sign_task_payload(serialized_payload):
+    return hmac.new(
+        _task_signing_secret(),
+        _payload_json(serialized_payload).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def _serialize_task_value(value):
@@ -501,7 +532,7 @@ def _serialize_task_value(value):
     if isinstance(value, list):
         return [_serialize_task_value(item) for item in value]
     if isinstance(value, dict):
-        if all(isinstance(key, str) for key in value):
+        if all(isinstance(key, str) for key in value) and "__task_type__" not in value:
             return {
                 key: _serialize_task_value(item_value)
                 for key, item_value in value.items()
@@ -597,6 +628,17 @@ def _run_callback(callback_path, task_result):
     callback(task_result)
 
 
+def _run_callback_safely(callback_path, task_result, callable_path, phase):
+    try:
+        _run_callback(callback_path, task_result)
+    except Exception:
+        logger.exception(
+            "Task callback failed for %s during %s handling.",
+            callable_path,
+            phase,
+        )
+
+
 def _normalize_run_at(run_at):
     if timezone.is_aware(run_at):
         return (
@@ -683,6 +725,7 @@ def _refresh_celery_runtime_config():
 
 
 def _celery_execute_task():
+    _celery_app()
     from common.celery_tasks import execute_payload_task
 
     return execute_payload_task

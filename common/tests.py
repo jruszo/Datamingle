@@ -42,6 +42,11 @@ def record_task_callback(task_result):
     TASK_CALLBACK_RESULTS.append(task_result)
 
 
+def failing_task_callback(task_result):
+    TASK_CALLBACK_RESULTS.append(task_result)
+    raise RuntimeError("callback boom")
+
+
 class ConfigOpsTests(TestCase):
     def setUp(self):
         pass
@@ -717,6 +722,39 @@ class TaskQueueTests(TestCase):
         self.assertEqual(decoded["args"][0].username, user.username)
         self.assertEqual(decoded["kwargs"], {"suffix": "!"})
 
+    def test_task_payload_round_trips_marker_dict_without_collision(self):
+        payload = task_queue._encode_task_payload(
+            sample_task,
+            (),
+            {"metadata": {"__task_type__": "custom", "value": "ok"}},
+            record_task_callback,
+            "demo-task",
+            "",
+        )
+
+        decoded = task_queue._decode_task_payload(payload)
+
+        self.assertEqual(
+            decoded["kwargs"]["metadata"],
+            {"__task_type__": "custom", "value": "ok"},
+        )
+
+    def test_execute_payload_rejects_tampered_signature(self):
+        payload = task_queue._encode_task_payload(
+            sample_task,
+            ("hello",),
+            {"suffix": "!"},
+            record_task_callback,
+            "demo-task",
+            "",
+        )
+        envelope = json.loads(payload)
+        envelope["payload"]["task_name"] = "forged-task"
+        forged_payload = json.dumps(envelope, separators=(",", ":"), sort_keys=True)
+
+        with self.assertRaises(ValueError):
+            task_queue.execute_payload(forged_payload)
+
     def test_execute_payload_marks_schedule_completed_and_runs_callback(self):
         TaskSchedule.objects.create(
             name="scheduled-task",
@@ -741,6 +779,30 @@ class TaskQueueTests(TestCase):
         self.assertEqual(len(TASK_CALLBACK_RESULTS), 1)
         self.assertTrue(TASK_CALLBACK_RESULTS[0].success)
         self.assertEqual(TASK_CALLBACK_RESULTS[0].result, "hello!")
+
+    def test_execute_payload_keeps_success_when_callback_fails(self):
+        TaskSchedule.objects.create(
+            name="scheduled-task",
+            task_name="scheduled-task",
+            callable_path="common.tests.sample_task",
+            run_at=datetime.datetime.now(),
+        )
+        payload = task_queue._encode_task_payload(
+            sample_task,
+            ("hello",),
+            {"suffix": "!"},
+            failing_task_callback,
+            "scheduled-task",
+            "scheduled-task",
+        )
+
+        result = task_queue.execute_payload(payload)
+
+        self.assertEqual(result, "hello!")
+        schedule = TaskSchedule.objects.get(name="scheduled-task")
+        self.assertEqual(schedule.status, TaskSchedule.STATUS_COMPLETED)
+        self.assertEqual(len(TASK_CALLBACK_RESULTS), 1)
+        self.assertTrue(TASK_CALLBACK_RESULTS[0].success)
 
     def test_execute_payload_marks_schedule_failed_and_runs_callback(self):
         TaskSchedule.objects.create(
@@ -854,6 +916,13 @@ class TaskQueueTests(TestCase):
         saved = TaskSchedule.objects.get(name="celery-scheduled")
         self.assertEqual(saved.status, TaskSchedule.STATUS_FAILED)
         self.assertIn("broker unavailable", saved.last_error)
+
+    @patch("common.task_queue._celery_app")
+    def test_celery_execute_task_uses_explicit_runtime_error(self, mock_celery_app):
+        mock_celery_app.side_effect = RuntimeError("Celery unavailable")
+
+        with self.assertRaisesRegex(RuntimeError, "Celery unavailable"):
+            task_queue._celery_execute_task()
 
     @patch("common.task_queue._celery_app")
     def test_celery_backend_cancel_schedule_revokes_task_and_marks_cancelled(
