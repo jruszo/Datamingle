@@ -1,3 +1,5 @@
+import logging
+
 from django.conf import settings
 from django.contrib.auth.decorators import permission_required
 from django.db.models import Q
@@ -13,9 +15,9 @@ from sql.models import AliyunRdsConfig, Instance, InstanceTag, ResourceGroup, Tu
 from sql.utils.resource_group import user_instances
 from sql.utils.sql_utils import filter_db_list
 
-from .pagination import CustomizedPagination
-from .response import success_response
-from .serializers import (
+from api_core.pagination import CustomizedPagination
+from api_core.response import success_response
+from api_instances.serializers import (
     AliyunRdsSerializer,
     ChoiceOptionSerializer,
     InstanceConnectionTestResultSerializer,
@@ -35,6 +37,8 @@ from .serializers import (
     TunnelLookupSerializer,
     TunnelSerializer,
 )
+
+logger = logging.getLogger("default")
 
 
 def _require_any_permission(request, *perm_list):
@@ -400,137 +404,6 @@ class InstanceTagDetail(views.APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class InstanceTagList(generics.ListAPIView):
-    """List or create instance tags for inventory management."""
-
-    pagination_class = CustomizedPagination
-    serializer_class = InstanceTagManagementSerializer
-    queryset = InstanceTag.objects.all().order_by("tag_name", "id")
-
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        search = self.request.query_params.get("search", "").strip()
-        ordering = self.request.query_params.get("ordering", "").strip()
-
-        if search:
-            search_filter = Q(tag_code__icontains=search) | Q(
-                tag_name__icontains=search
-            )
-            if search.isdigit():
-                search_filter |= Q(id=int(search))
-            queryset = queryset.filter(search_filter)
-
-        if ordering in {
-            "id",
-            "-id",
-            "tag_code",
-            "-tag_code",
-            "tag_name",
-            "-tag_name",
-            "active",
-            "-active",
-        }:
-            queryset = queryset.order_by(ordering, "id")
-
-        return queryset
-
-    @extend_schema(
-        summary="Instance Tag List",
-        responses={200: InstanceTagManagementSerializer},
-        parameters=[
-            OpenApiParameter(
-                name="search",
-                type=OpenApiTypes.STR,
-                location=OpenApiParameter.QUERY,
-                description="Match tag ID, code, or name.",
-            ),
-            OpenApiParameter(
-                name="ordering",
-                type=OpenApiTypes.STR,
-                location=OpenApiParameter.QUERY,
-                description="Ordering key, e.g. tag_name or -active.",
-            ),
-        ],
-        description="List instance tags for SPA management.",
-    )
-    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
-    def get(self, request):
-        tags = self.filter_queryset(self.get_queryset())
-        page_tags = self.paginate_queryset(queryset=tags)
-        serializer_obj = self.get_serializer(page_tags, many=True)
-        return self.get_paginated_response(serializer_obj.data)
-
-    @extend_schema(
-        summary="Create Instance Tag",
-        request=InstanceTagCreateSerializer,
-        responses={201: InstanceTagManagementSerializer},
-        description="Create an instance tag for inventory and query access flows.",
-    )
-    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
-    def post(self, request):
-        serializer = InstanceTagCreateSerializer(data=request.data)
-        if serializer.is_valid():
-            tag = serializer.save()
-            return success_response(
-                data=InstanceTagManagementSerializer(tag).data,
-                detail="Instance tag created successfully.",
-                status_code=status.HTTP_201_CREATED,
-            )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class InstanceTagDetail(views.APIView):
-    """Get or update an instance tag."""
-
-    serializer_class = InstanceTagManagementSerializer
-
-    def get_object(self, pk):
-        try:
-            return InstanceTag.objects.get(pk=pk)
-        except InstanceTag.DoesNotExist:
-            raise Http404
-
-    @extend_schema(
-        summary="Instance Tag Detail",
-        responses={200: InstanceTagManagementSerializer},
-        description="Get a single instance tag for SPA editing.",
-    )
-    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
-    def get(self, request, pk):
-        tag = self.get_object(pk)
-        return success_response(data=InstanceTagManagementSerializer(tag).data)
-
-    @extend_schema(
-        summary="Update Instance Tag",
-        request=InstanceTagUpdateSerializer,
-        responses={200: InstanceTagManagementSerializer},
-        description="Update an instance tag.",
-    )
-    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
-    def put(self, request, pk):
-        tag = self.get_object(pk)
-        serializer = InstanceTagUpdateSerializer(tag, data=request.data)
-        if serializer.is_valid():
-            if (
-                serializer.validated_data.get("active") is False
-                and tag.instance_set.exists()
-            ):
-                raise serializers.ValidationError(
-                    {
-                        "active": (
-                            "Assigned tags cannot be deactivated. Remove the tag "
-                            "from all instances first."
-                        )
-                    }
-                )
-            serializer.save()
-            return success_response(
-                data=InstanceTagManagementSerializer(tag).data,
-                detail="Instance tag updated successfully.",
-            )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
 class InstanceConnectionTest(views.APIView):
     """Check whether a configured instance is reachable."""
 
@@ -551,14 +424,17 @@ class InstanceConnectionTest(views.APIView):
         try:
             query_engine = get_engine(instance=instance)
             test_result = query_engine.test_connection()
-        except Exception as exc:
+        except serializers.ValidationError:
+            raise
+        except Exception:
+            logger.exception("Failed instance connection test for instance_id=%s", pk)
             raise serializers.ValidationError(
-                {"errors": f"Unable to connect to instance. {str(exc)}"}
+                {"errors": "Unable to connect to instance. Check configuration."}
             )
 
         if test_result.error:
             raise serializers.ValidationError(
-                {"errors": f"Unable to connect to instance. {test_result.error}"}
+                {"errors": "Unable to connect to instance. Check configuration."}
             )
 
         payload = InstanceConnectionTestResultSerializer(
@@ -585,14 +461,17 @@ class InstanceDraftConnectionTest(views.APIView):
         try:
             query_engine = get_engine(instance=instance)
             test_result = query_engine.test_connection()
-        except Exception as exc:
+        except serializers.ValidationError:
+            raise
+        except Exception:
+            logger.exception("Failed draft instance connection test")
             raise serializers.ValidationError(
-                {"errors": f"Unable to connect to instance. {str(exc)}"}
+                {"errors": "Unable to connect to instance. Check configuration."}
             )
 
         if test_result.error:
             raise serializers.ValidationError(
-                {"errors": f"Unable to connect to instance. {test_result.error}"}
+                {"errors": "Unable to connect to instance. Check configuration."}
             )
 
         payload = InstanceConnectionTestResultSerializer(

@@ -41,9 +41,9 @@ from sql.utils.resource_group import (
 from sql.utils.tasks import add_kill_conn_schedule, del_schedule
 from sql.utils.workflow_audit import AuditException, get_auditor
 
-from .pagination import CustomizedPagination
-from .response import success_response
-from .serializers import (
+from api_core.pagination import CustomizedPagination
+from api_core.response import success_response
+from api_queries.serializers import (
     QueryDescribeResponseSerializer,
     QueryDescribeSerializer,
     QueryExecuteResponseSerializer,

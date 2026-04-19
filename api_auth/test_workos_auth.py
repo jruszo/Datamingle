@@ -52,8 +52,8 @@ class WorkOSAuthApiTests(APITestCase):
         ResourceGroup.objects.all().delete()
         Group.objects.all().delete()
 
-    @patch("sql_api.api_auth.get_redis_connection")
-    @patch("sql_api.api_auth.WorkOSAuthClient")
+    @patch("api_auth.views.get_redis_connection")
+    @patch("api_auth.views.WorkOSAuthClient")
     def test_authorize_redirects_to_workos(
         self, mock_client_class, mock_redis_connection
     ):
@@ -68,8 +68,8 @@ class WorkOSAuthApiTests(APITestCase):
         self.assertEqual(response.url, "https://workos.example/authorize")
         self.assertIn("datamingle_workos_state", response.cookies)
 
-    @patch("sql_api.api_auth.get_redis_connection")
-    @patch("sql_api.api_auth.WorkOSAuthClient")
+    @patch("api_auth.views.get_redis_connection")
+    @patch("api_auth.views.WorkOSAuthClient")
     def test_callback_jit_provisions_user_and_exchange_returns_local_tokens(
         self, mock_client_class, mock_redis_connection
     ):
@@ -126,8 +126,8 @@ class WorkOSAuthApiTests(APITestCase):
         self.assertIn("refresh", payload)
         self.assertIsNone(self.redis.get(f"workos-exchange-code:{exchange_code}"))
 
-    @patch("sql_api.api_auth.get_redis_connection")
-    @patch("sql_api.api_auth.WorkOSAuthClient")
+    @patch("api_auth.views.get_redis_connection")
+    @patch("api_auth.views.WorkOSAuthClient")
     def test_exchange_rejects_invalid_code(
         self, mock_client_class, mock_redis_connection
     ):
@@ -166,7 +166,7 @@ class WorkOSAuthApiTests(APITestCase):
         finally:
             user.delete()
 
-    @patch("sql_api.api_auth.WorkOSAuthClient")
+    @patch("api_auth.views.WorkOSAuthClient")
     def test_logout_redirects_through_workos_when_session_cookie_present(
         self, mock_client_class
     ):
@@ -279,8 +279,8 @@ class WorkOSAuthApiTests(APITestCase):
             ["Ops"],
         )
 
-    @patch("sql_api.api_auth.get_redis_connection")
-    @patch("sql_api.api_auth.WorkOSAuthClient")
+    @patch("api_auth.views.get_redis_connection")
+    @patch("api_auth.views.WorkOSAuthClient")
     def test_callback_rejects_unexpected_organization(
         self, mock_client_class, mock_redis_connection
     ):

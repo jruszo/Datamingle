@@ -145,11 +145,22 @@ INSTALLED_APPS = (
     "django_q",
     "sql",
     "sql_api",
+    "api_core",
+    "api_auth",
+    "api_users",
+    "api_instances",
+    "api_workflows",
+    "api_archives",
+    "api_queries",
+    "api_access",
+    "api_admin",
     "common",
     "rest_framework",
     "django_filters",
     "drf_spectacular",
 )
+
+DATAMINGLE_API_EXTENSION_APPS = []
 
 MIDDLEWARE = (
     "django.contrib.sessions.middleware.SessionMiddleware",

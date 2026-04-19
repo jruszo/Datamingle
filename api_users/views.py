@@ -4,7 +4,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from drf_spectacular.utils import extend_schema
 from django.conf import settings
 from django.db.models import Count, Q
-from .serializers import (
+from api_users.serializers import (
     UserManagementReadSerializer,
     UserManagementCreateSerializer,
     UserManagementUpdateSerializer,
@@ -22,9 +22,9 @@ from .serializers import (
     TwoFAVerifySerializer,
     TwoFASaveSerializer,
 )
-from .pagination import CustomizedPagination
-from .filters import UserFilter
-from .response import success_response
+from api_core.pagination import CustomizedPagination
+from api_users.filters import UserFilter
+from api_core.response import success_response
 from django_redis import get_redis_connection
 from django.contrib.auth.models import Group, Permission
 from django.contrib.auth import authenticate

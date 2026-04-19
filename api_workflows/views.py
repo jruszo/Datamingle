@@ -54,10 +54,10 @@ from sql.utils.sql_review import (
 )
 from sql.utils.tasks import add_sql_schedule, del_schedule, task_info
 from sql.utils.workflow_audit import Audit, AuditV2, get_auditor, AuditException
-from .filters import WorkflowAuditFilter
-from .pagination import CustomizedPagination
-from .response import success_response
-from .serializers import (
+from api_workflows.filters import WorkflowAuditFilter
+from api_core.pagination import CustomizedPagination
+from api_core.response import success_response
+from api_workflows.serializers import (
     ExecuteCheckResultSerializer,
     ExecuteCheckSerializer,
     WorkflowParseResultSerializer,
@@ -802,8 +802,11 @@ class ExecuteCheck(views.APIView):
             check_result = check_engine.execute_check(db_name=db_name, sql=full_sql)
         except serializers.ValidationError:
             raise
-        except Exception as e:
-            raise serializers.ValidationError({"errors": f"{e}"})
+        except Exception:
+            logger.exception(
+                "Workflow SQL check failed for instance_id=%s", instance.id
+            )
+            raise serializers.ValidationError({"errors": "Internal Server Error"})
         has_group_write_access = user_has_group_instance_access(
             request.user, instance, tag_codes=["can_write"]
         )
@@ -868,8 +871,11 @@ class WorkflowExportCheck(views.APIView):
             check_result = OffLineDownLoad().pre_count_check(workflow=export_probe)
         except serializers.ValidationError:
             raise
-        except Exception as e:
-            raise serializers.ValidationError({"errors": f"{e}"})
+        except Exception:
+            logger.exception(
+                "Workflow export SQL check failed for instance_id=%s", instance.id
+            )
+            raise serializers.ValidationError({"errors": "Internal Server Error"})
         check_result.rows = check_result.to_dict()
         serializer_obj = ExecuteCheckResultSerializer(check_result)
         return success_response(data=serializer_obj.data)

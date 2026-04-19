@@ -13,7 +13,7 @@ from sql.utils.workflow_audit import AuditException, AuditSetting
 from sql.engines import ReviewSet
 from sql.engines.mysql_ddl import MysqlDDLExecutorError
 from sql.engines.models import ReviewResult, ResultSet
-from sql_api.api_settings import DEFAULT_CHAT_MODEL, NOTIFY_PHASE_OPTIONS
+from api_admin.settings import DEFAULT_CHAT_MODEL, NOTIFY_PHASE_OPTIONS
 from sql.models import (
     ResourceGroup,
     Instance,
@@ -752,7 +752,7 @@ class TestUser(CacheIsolatedAPITestCase):
     def test_2fa_verify(self):
         """Test 2FA code verification."""
         json_data = {
-            "otp": 123456,
+            "otp": "123456",
             "key": "ZUGRIJZP6H7LIOAL4LH5JA4GSXXT3WOK",
             "auth_type": "totp",
         }
@@ -894,8 +894,8 @@ class TestTokenAuth2FA(CacheIsolatedAPITestCase):
             r.json()["errors"], "SMS 2FA is not configured for this account."
         )
 
-    @patch("sql_api.api_auth.get_redis_connection")
-    @patch("sql_api.api_auth.get_authenticator")
+    @patch("api_auth.views.get_redis_connection")
+    @patch("api_auth.views.get_authenticator")
     def test_request_sms_login_otp_success(
         self, mock_get_authenticator, mock_get_redis
     ):
@@ -979,8 +979,8 @@ class TestQueryAPI(CacheIsolatedAPITestCase):
         Group.objects.all().delete()
         SysConfig().purge()
 
-    @patch("sql_api.api_query.query_priv_check")
-    @patch("sql_api.api_query.get_engine")
+    @patch("api_queries.views.query_priv_check")
+    @patch("api_queries.views.get_engine")
     def test_query_execute_success(self, mock_get_engine, mock_query_priv_check):
         SysConfig().set("data_masking", False)
         SysConfig().set("disable_star", False)
@@ -1042,7 +1042,7 @@ class TestQueryAPI(CacheIsolatedAPITestCase):
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]["instance_name"], self.ins.instance_name)
 
-    @patch("sql_api.api_query.get_engine")
+    @patch("api_queries.views.get_engine")
     def test_query_describe_success(self, mock_get_engine):
         mock_engine = Mock()
         mock_engine.escape_string.side_effect = lambda value: value
@@ -1246,9 +1246,9 @@ class TestQueryAPI(CacheIsolatedAPITestCase):
         self.assertEqual(audit_data["count"], 2)
         self.assertEqual(len(audit_data["results"]), 2)
 
-    @patch("sql_api.api_query.async_task")
-    @patch("sql_api.api_query._query_apply_audit_call_back")
-    @patch("sql_api.api_query.get_auditor")
+    @patch("api_queries.views.async_task")
+    @patch("api_queries.views._query_apply_audit_call_back")
+    @patch("api_queries.views.get_auditor")
     def test_query_privilege_apply_create(
         self, mock_get_auditor, mock_callback, mock_async_task
     ):
@@ -1407,9 +1407,9 @@ class TestQueryAPI(CacheIsolatedAPITestCase):
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("Invalid audit_status parameter", r.json()["errors"])
 
-    @patch("sql_api.api_query.async_task")
-    @patch("sql_api.api_query._query_apply_audit_call_back")
-    @patch("sql_api.api_query.get_auditor")
+    @patch("api_queries.views.async_task")
+    @patch("api_queries.views._query_apply_audit_call_back")
+    @patch("api_queries.views.get_auditor")
     def test_query_privilege_audit(
         self, mock_get_auditor, mock_callback, mock_async_task
     ):
@@ -1793,6 +1793,13 @@ class TestInstance(CacheIsolatedAPITestCase):
         )
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("active", r.json())
+        self.assertEqual(
+            str(r.json()["active"]),
+            (
+                "This tag is assigned to one or more instances. "
+                "Remove it from those instances before deactivating it."
+            ),
+        )
 
     def test_instance_tag_management_requires_inventory_access(self):
         """Tag management follows inventory-admin permissions."""
@@ -1892,7 +1899,7 @@ class TestInstance(CacheIsolatedAPITestCase):
             [tag.id],
         )
 
-    @patch("sql_api.api_instance.get_engine")
+    @patch("api_instances.views.get_engine")
     def test_test_draft_instance_connection(self, mock_get_engine):
         """Draft connection testing should validate unsaved form data."""
         mock_engine = Mock()
@@ -1936,9 +1943,10 @@ class TestInstance(CacheIsolatedAPITestCase):
         self.assertEqual(instance.port, 3306)
         self.assertEqual(instance.tunnel_id, self.tunnel.id)
 
-    @patch("sql_api.api_instance.get_engine")
+    @patch("api_instances.views.logger")
+    @patch("api_instances.views.get_engine")
     def test_test_draft_instance_connection_returns_validation_error(
-        self, mock_get_engine
+        self, mock_get_engine, mock_logger
     ):
         """Draft connection testing should surface engine failures without saving."""
         mock_engine = Mock()
@@ -1958,12 +1966,13 @@ class TestInstance(CacheIsolatedAPITestCase):
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn(
-            "Unable to connect to instance. access denied", r.json()["errors"]
+        self.assertEqual(
+            r.json()["errors"], "Unable to connect to instance. Check configuration."
         )
         self.assertEqual(
             Instance.objects.filter(instance_name="draft_mysql").count(), 0
         )
+        mock_logger.exception.assert_not_called()
 
     def test_update_instance(self):
         """Test updating instance."""
@@ -2121,7 +2130,7 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
         token = response_data(r)["access"]
         self.client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
 
-    @patch("sql_api.api_permission.async_task")
+    @patch("api_access.views.async_task")
     def test_create_instance_request(self, _async_task):
         self._login(self.requester)
 
@@ -2147,7 +2156,7 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
         self.assertEqual(request_obj.resource_group_id, self.resource_group.group_id)
         self.assertEqual(request_obj.instance_id, self.instance.id)
 
-    @patch("sql_api.api_permission.async_task")
+    @patch("api_access.views.async_task")
     def test_reviewer_sees_pending_request(self, _async_task):
         self._login(self.requester)
         create_response = self.client.post(
@@ -2169,7 +2178,7 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
         self.assertEqual(list_response.status_code, status.HTTP_200_OK)
         self.assertEqual(response_data(list_response)["count"], 1)
 
-    @patch("sql_api.api_permission.async_task")
+    @patch("api_access.views.async_task")
     def test_approving_instance_request_creates_instance_grant(self, _async_task):
         self._login(self.requester)
         create_response = self.client.post(
@@ -2197,7 +2206,7 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
             TemporaryInstanceGrant.objects.filter(source_request_id=request_id).exists()
         )
 
-    @patch("sql_api.api_permission.async_task")
+    @patch("api_access.views.async_task")
     def test_approving_group_request_creates_group_grant(self, _async_task):
         self._login(self.requester)
         create_response = self.client.post(
@@ -2307,7 +2316,7 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
         )
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
 
-    @patch("sql_api.api_instance.get_engine")
+    @patch("api_instances.views.get_engine")
     def test_test_instance_connection(self, mock_get_engine):
         """Superusers can run the SPA connection test action."""
         self.user.is_superuser = True
@@ -2327,7 +2336,7 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
         self.assertEqual(payload["success"], True)
         self.assertEqual(payload["message"], "Connection successful.")
 
-    @patch("sql_api.api_instance.get_engine")
+    @patch("api_instances.views.get_engine")
     def test_get_instance_resource(self, mock_get_engine):
         """Test querying instance resources."""
         group = ResourceGroup.objects.create(group_name="instance_resource_test")
@@ -2923,7 +2932,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertTrue(payload["is_can_review"])
         self.assertEqual(payload["review_info"][0]["group_name"], self.group.name)
 
-    @patch("sql_api.api_workflow._get_mysql_ddl_executor_state")
+    @patch("api_workflows.views._get_mysql_ddl_executor_state")
     def test_mysql_workflow_detail_includes_executor_options(self, mock_executor_state):
         _, workflow, _, _ = self._create_mysql_workflow()
         mock_executor_state.return_value = (
@@ -2953,7 +2962,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(payload["source"], "review")
         self.assertEqual(payload["rows"][0]["sql"], "select 1")
 
-    @patch("sql_api.api_workflow.get_engine")
+    @patch("api_workflows.views.get_engine")
     def test_workflow_rollback_detail(self, mock_get_engine):
         self.wf1.status = "workflow_finish"
         self.wf1.is_backup = True
@@ -3156,8 +3165,9 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         r = self.client.post("/api/v1/workflow/sqlcheck/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
 
-    @patch("sql_api.api_workflow.get_engine")
-    def test_check_inception_Exception(self, _get_engine):
+    @patch("api_workflows.views.get_engine")
+    @patch("api_workflows.views.logger")
+    def test_check_inception_Exception(self, mock_logger, _get_engine):
         """Test workflow SQL check when inception raises an error."""
         json_data = {
             "full_sql": "use mysql",
@@ -3166,10 +3176,11 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         }
         _get_engine.side_effect = RuntimeError("RuntimeError")
         r = self.client.post("/api/v1/workflow/sqlcheck/", json_data, format="json")
-        print(json.loads(r.content))
-        self.assertDictEqual(json.loads(r.content), {"errors": "RuntimeError"})
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertDictEqual(json.loads(r.content), {"errors": "Internal Server Error"})
+        mock_logger.exception.assert_called_once()
 
-    @patch("sql_api.api_workflow.get_engine")
+    @patch("api_workflows.views.get_engine")
     def test_check(self, _get_engine):
         """Test workflow SQL check with normal return."""
         json_data = {
@@ -3233,7 +3244,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         )
         self.assertListEqual(list(sqlcheck_data["rows"][0].keys()), column_list)
 
-    @patch("sql_api.api_workflow.get_engine")
+    @patch("api_workflows.views.get_engine")
     def test_sqlcheck_uses_unified_success_envelope(self, _get_engine):
         json_data = {
             "full_sql": "use mysql",
@@ -3251,7 +3262,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         data = assert_success_envelope(self, r)
         self.assertIn("rows", data)
 
-    @patch("sql_api.api_workflow.get_engine")
+    @patch("api_workflows.views.get_engine")
     def test_sqlcheck_ignores_schema_name_for_engine_execute_check(self, _get_engine):
         json_data = {
             "full_sql": "select 1",
@@ -3275,8 +3286,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             db_name="escaped_db", sql="select 1"
         )
 
-    @patch("sql_api.api_workflow.get_engine")
-    @patch("sql_api.api_workflow.OffLineDownLoad.pre_count_check")
+    @patch("api_workflows.views.get_engine")
+    @patch("api_workflows.views.OffLineDownLoad.pre_count_check")
     def test_export_sqlcheck(self, mock_pre_count_check, mock_get_engine):
         review_set = ReviewSet(
             rows=[
@@ -3319,10 +3330,11 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             mock_pre_count_check.call_args.kwargs["workflow"].schema_name, "analytics"
         )
 
-    @patch("sql_api.api_workflow.get_engine")
-    @patch("sql_api.api_workflow.OffLineDownLoad.pre_count_check")
+    @patch("api_workflows.views.get_engine")
+    @patch("api_workflows.views.OffLineDownLoad.pre_count_check")
+    @patch("api_workflows.views.logger")
     def test_export_sqlcheck_returns_validation_error_for_count_failures(
-        self, mock_pre_count_check, mock_get_engine
+        self, mock_logger, mock_pre_count_check, mock_get_engine
     ):
         mock_engine = Mock()
         mock_engine.escape_string.return_value = "escaped_test_db"
@@ -3340,7 +3352,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         )
 
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(r.json()["errors"], "COUNT(*) failed")
+        self.assertEqual(r.json()["errors"], "Internal Server Error")
+        mock_logger.exception.assert_called_once()
 
     def test_export_sqlcheck_requires_export_submit_permission(self):
         self.user.user_permissions.remove(
@@ -3358,7 +3371,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         )
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
 
-    @patch("sql_api.api_workflow.OffLineDownLoad.pre_count_check")
+    @patch("api_workflows.views.OffLineDownLoad.pre_count_check")
     def test_export_sqlcheck_requires_read_access_to_instance(
         self, mock_pre_count_check
     ):
@@ -3409,7 +3422,45 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(r_data["workflow"]["engineer"], self.user.username)
         self.assertEqual(r_data["workflow"]["engineer_display"], self.user.display)
 
-    @patch("sql_api.serializers.get_engine")
+    @patch("api_workflows.serializers.get_engine")
+    def test_submit_workflow_uses_model_backup_default_when_omitted(
+        self, mock_get_engine
+    ):
+        review_set = ReviewSet(
+            rows=[
+                ReviewResult(
+                    errlevel=0,
+                    stagestatus="Audit completed",
+                    errormessage="None",
+                    sql="alter table abc add column note varchar(64);",
+                )
+            ]
+        )
+        review_set.syntax_type = 2
+        review_set.error_count = 0
+        review_set.warning_count = 0
+        mock_get_engine.return_value.auto_backup = True
+        mock_get_engine.return_value.execute_check.return_value = review_set
+
+        json_data = {
+            "workflow": {
+                "workflow_name": "Release Workflow Default Backup",
+                "demand_url": "test",
+                "group_id": 1,
+                "db_name": "test_db",
+                "instance": self.ins.id,
+                "is_offline_export": 0,
+            },
+            "sql_content": "alter table abc add column note varchar(64);",
+        }
+        r = self.client.post("/api/v1/workflow/", json_data, format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        workflow_id = response_data(r)["workflow"]["id"]
+        workflow = SqlWorkflow.objects.get(id=workflow_id)
+        self.assertTrue(workflow.is_backup)
+
+    @patch("api_workflows.serializers.get_engine")
     def test_submit_workflow_does_not_force_backup_when_toggle_disabled(
         self, mock_get_engine
     ):
@@ -3452,7 +3503,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         finally:
             sys_config.purge()
 
-    @patch("sql_api.serializers.get_engine")
+    @patch("api_workflows.serializers.get_engine")
     def test_submit_workflow_preserves_backup_when_toggle_enabled(
         self, mock_get_engine
     ):
@@ -3495,8 +3546,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         finally:
             sys_config.purge()
 
-    @patch("sql_api.serializers.OffLineDownLoad.pre_count_check")
-    @patch("sql_api.serializers.get_engine")
+    @patch("api_workflows.serializers.OffLineDownLoad.pre_count_check")
+    @patch("api_workflows.serializers.get_engine")
     def test_submit_export_workflow(self, mock_get_engine, mock_pre_count_check):
         mock_get_engine.return_value.auto_backup = False
         review_set = ReviewSet(
@@ -3539,7 +3590,216 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(workflow.schema_name, "analytics")
         self.assertFalse(workflow.is_backup)
 
-    @patch("sql_api.serializers.get_engine")
+    @patch("api_workflows.serializers.get_engine")
+    def test_submit_workflow_rejects_resource_group_not_attached_to_instance(
+        self, mock_get_engine
+    ):
+        review_set = ReviewSet(
+            rows=[
+                ReviewResult(
+                    errlevel=0,
+                    stagestatus="Audit completed",
+                    errormessage="None",
+                    sql="alter table abc add column note varchar(64);",
+                )
+            ]
+        )
+        review_set.syntax_type = 2
+        review_set.error_count = 0
+        review_set.warning_count = 0
+        mock_get_engine.return_value.auto_backup = True
+        mock_get_engine.return_value.execute_check.return_value = review_set
+        other_group = ResourceGroup.objects.create(group_name="other-group")
+
+        json_data = {
+            "workflow": {
+                "workflow_name": "Release Workflow Wrong Group",
+                "group_id": other_group.group_id,
+                "db_name": "test_db",
+                "instance": self.ins.id,
+                "is_offline_export": 0,
+            },
+            "sql_content": "alter table abc add column note varchar(64);",
+        }
+        r = self.client.post("/api/v1/workflow/", json_data, format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            r.json()["errors"],
+            "Selected resource group does not belong to this instance.",
+        )
+
+    @patch("api_workflows.serializers.get_engine")
+    @patch(
+        "api_workflows.serializers.user_has_group_instance_access", return_value=True
+    )
+    @patch("api_workflows.serializers.user_has_instance_workflow_access")
+    def test_submit_workflow_allows_temporary_write_access_even_with_group_access(
+        self, mock_temporary_access, _mock_group_access, mock_get_engine
+    ):
+        review_set = ReviewSet(
+            rows=[
+                ReviewResult(
+                    errlevel=0,
+                    stagestatus="Audit completed",
+                    errormessage="None",
+                    sql="alter table abc add column note varchar(64);",
+                )
+            ]
+        )
+        review_set.syntax_type = 2
+        review_set.error_count = 0
+        review_set.warning_count = 0
+        mock_get_engine.return_value.auto_backup = True
+        mock_get_engine.return_value.execute_check.return_value = review_set
+        mock_temporary_access.return_value = True
+
+        limited_user = User.objects.create(
+            username="temporary_submitter",
+            display="Temporary Submitter",
+            is_active=True,
+        )
+        limited_user.set_password("test_password")
+        limited_user.save()
+        limited_user.resource_group.add(self.res_group.group_id)
+        self._login_as_user(limited_user.username)
+
+        json_data = {
+            "workflow": {
+                "workflow_name": "Release Workflow Temporary Access",
+                "group_id": 1,
+                "db_name": "test_db",
+                "instance": self.ins.id,
+                "is_offline_export": 0,
+            },
+            "sql_content": "alter table abc add column note varchar(64);",
+        }
+        r = self.client.post("/api/v1/workflow/", json_data, format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        workflow = SqlWorkflow.objects.get(id=response_data(r)["workflow"]["id"])
+        self.assertEqual(workflow.engineer, limited_user.username)
+
+    @patch("api_workflows.serializers.get_engine")
+    def test_submit_workflow_hides_engine_exception_details(self, mock_get_engine):
+        mock_get_engine.return_value.execute_check.side_effect = Exception(
+            "sensitive engine failure"
+        )
+
+        json_data = {
+            "workflow": {
+                "workflow_name": "Release Workflow Engine Failure",
+                "group_id": 1,
+                "db_name": "test_db",
+                "instance": self.ins.id,
+                "is_offline_export": 0,
+            },
+            "sql_content": "alter table abc add column note varchar(64);",
+        }
+        r = self.client.post("/api/v1/workflow/", json_data, format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(r.json()["errors"], "An internal validation error occurred.")
+
+    @patch("api_workflows.serializers.get_auditor")
+    @patch("api_workflows.serializers.get_engine")
+    def test_submit_workflow_hides_save_exception_details(
+        self, mock_get_engine, mock_get_auditor
+    ):
+        review_set = ReviewSet(
+            rows=[
+                ReviewResult(
+                    errlevel=0,
+                    stagestatus="Audit completed",
+                    errormessage="None",
+                    sql="alter table abc add column note varchar(64);",
+                )
+            ]
+        )
+        review_set.syntax_type = 2
+        review_set.error_count = 0
+        review_set.warning_count = 0
+        mock_get_engine.return_value.auto_backup = True
+        mock_get_engine.return_value.execute_check.return_value = review_set
+
+        class BrokenAuditor:
+            def create_audit(self):
+                raise Exception("hidden audit failure")
+
+        mock_get_auditor.return_value = BrokenAuditor()
+
+        json_data = {
+            "workflow": {
+                "workflow_name": "Release Workflow Save Failure",
+                "group_id": 1,
+                "db_name": "test_db",
+                "instance": self.ins.id,
+                "is_offline_export": 0,
+            },
+            "sql_content": "alter table abc add column note varchar(64);",
+        }
+        r = self.client.post("/api/v1/workflow/", json_data, format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(r.json()["errors"], "An internal validation error occurred.")
+
+    @patch("api_workflows.serializers.get_engine")
+    def test_submit_workflow_rolls_back_when_status_update_save_fails(
+        self, mock_get_engine
+    ):
+        review_set = ReviewSet(
+            rows=[
+                ReviewResult(
+                    errlevel=0,
+                    stagestatus="Audit completed",
+                    errormessage="None",
+                    sql="alter table abc add column note varchar(64);",
+                )
+            ]
+        )
+        review_set.syntax_type = 2
+        review_set.error_count = 0
+        review_set.warning_count = 0
+        mock_get_engine.return_value.auto_backup = True
+        mock_get_engine.return_value.execute_check.return_value = review_set
+
+        original_save = SqlWorkflow.save
+        save_calls = {"count": 0}
+
+        def flaky_save(instance, *args, **kwargs):
+            save_calls["count"] += 1
+            if save_calls["count"] == 2:
+                raise RuntimeError("status save failed")
+            return original_save(instance, *args, **kwargs)
+
+        json_data = {
+            "workflow": {
+                "workflow_name": "Release Workflow Atomic Save",
+                "group_id": 1,
+                "db_name": "test_db",
+                "instance": self.ins.id,
+                "is_offline_export": 0,
+            },
+            "sql_content": "alter table abc add column note varchar(64);",
+        }
+
+        baseline_workflow_count = SqlWorkflow.objects.count()
+        baseline_audit_count = WorkflowAudit.objects.count()
+
+        with patch.object(SqlWorkflow, "save", autospec=True, side_effect=flaky_save):
+            r = self.client.post("/api/v1/workflow/", json_data, format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(r.json()["errors"], "An internal validation error occurred.")
+        self.assertEqual(SqlWorkflow.objects.count(), baseline_workflow_count)
+        self.assertEqual(WorkflowAudit.objects.count(), baseline_audit_count)
+        self.assertFalse(
+            SqlWorkflow.objects.filter(
+                workflow_name="Release Workflow Atomic Save"
+            ).exists()
+        )
+
+    @patch("api_workflows.serializers.get_engine")
     def test_submit_export_workflow_rejects_invalid_format(self, mock_get_engine):
         mock_get_engine.return_value.auto_backup = False
         json_data = {
@@ -3560,8 +3820,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             json.dumps(r.json()),
         )
 
-    @patch("sql_api.serializers.OffLineDownLoad.pre_count_check")
-    @patch("sql_api.serializers.get_engine")
+    @patch("api_workflows.serializers.OffLineDownLoad.pre_count_check")
+    @patch("api_workflows.serializers.get_engine")
     def test_submit_export_workflow_requires_export_submit_permission(
         self, mock_get_engine, mock_pre_count_check
     ):
@@ -3674,7 +3934,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(payload["schema_name"], "analytics")
         self.assertTrue(payload["download_available"])
 
-    @patch("sql_api.api_workflow.download_export_file")
+    @patch("api_workflows.views.download_export_file")
     def test_download_export_workflow(self, mock_download_export_file):
         export_workflow = SqlWorkflow.objects.create(
             workflow_name="export_ready",
@@ -4040,8 +4300,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             "Execution started. Please check workflow detail page for results.",
         )
 
-    @patch("sql_api.api_workflow.async_task")
-    @patch("sql_api.api_workflow._resolve_mysql_ddl_executor")
+    @patch("api_workflows.views.async_task")
+    @patch("api_workflows.views._resolve_mysql_ddl_executor")
     def test_execute_workflow_auto_passes_selected_executor(
         self, mock_resolve_executor, mock_async_task
     ):
@@ -4061,7 +4321,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         )
 
     @patch(
-        "sql_api.api_workflow._resolve_mysql_ddl_executor",
+        "api_workflows.views._resolve_mysql_ddl_executor",
         side_effect=MysqlDDLExecutorError(
             "gh-ost does not support tables with foreign keys."
         ),
@@ -4097,7 +4357,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             r.json()["errors"], "You do not have permission to execute this workflow."
         )
 
-    @patch("sql_api.api_workflow.can_execute", return_value=False)
+    @patch("api_workflows.views.can_execute", return_value=False)
     def test_execute_workflow_denied_by_resource_scope(self, _can_execute):
         r = self.client.post(
             f"/api/v1/workflow/{self.wf1.id}/executions/",
@@ -4182,7 +4442,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             self.wf1.run_date_end.strftime("%Y-%m-%d %H:%M"), "2030-01-02 05:04"
         )
 
-    @patch("sql_api.api_workflow.add_sql_schedule")
+    @patch("api_workflows.views.add_sql_schedule")
     def test_schedule_workflow(self, mock_add_schedule):
         self.client.post(
             f"/api/v1/workflow/{self.wf1.id}/reviews/",
@@ -4214,8 +4474,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             ).exists()
         )
 
-    @patch("sql_api.api_workflow.add_sql_schedule")
-    @patch("sql_api.api_workflow._resolve_mysql_ddl_executor")
+    @patch("api_workflows.views.add_sql_schedule")
+    @patch("api_workflows.views._resolve_mysql_ddl_executor")
     def test_schedule_mysql_workflow_persists_executor(
         self, mock_resolve_executor, mock_add_schedule
     ):
@@ -4321,9 +4581,9 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
             ]
         ).delete()
 
-    @patch("sql_api.api_permission.async_task")
-    @patch("sql_api.api_permission._permission_request_audit_callback")
-    @patch("sql_api.api_permission.get_auditor")
+    @patch("api_access.views.async_task")
+    @patch("api_access.views._permission_request_audit_callback")
+    @patch("api_access.views.get_auditor")
     def test_create_instance_permission_request(
         self, mock_get_auditor, mock_callback, mock_async_task
     ):
@@ -4821,7 +5081,7 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("gh-ost binary", response.json()["gh_ost"][0])
 
-    @patch("sql_api.api_settings.validate_go_inception_payload")
+    @patch("api_admin.settings.validate_go_inception_payload")
     def test_staff_can_run_go_inception_connection_test(self, validate_payload):
         validate_payload.return_value = {"status": 0, "msg": "ok", "data": []}
         self.authenticate("staff_user", "staff_password")
@@ -4840,7 +5100,7 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn("connection test succeeded", response.json()["detail"].lower())
 
-    @patch("sql_api.api_settings.validate_email_payload")
+    @patch("api_admin.settings.validate_email_payload")
     def test_staff_can_run_email_test(self, validate_payload):
         validate_payload.return_value = {"status": 0, "msg": "ok", "data": []}
         self.authenticate("staff_user", "staff_password")
@@ -4861,7 +5121,7 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         validate_payload.assert_called_once()
 
-    @patch("sql_api.api_settings.validate_file_storage_payload")
+    @patch("api_admin.settings.validate_file_storage_payload")
     def test_staff_can_run_storage_test(self, validate_payload):
         validate_payload.return_value = {"status": 0, "msg": "ok", "data": []}
         self.authenticate("staff_user", "staff_password")
@@ -5001,7 +5261,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
 
     def create_pending_archive(self, **overrides):
         self.authenticate(self.requester)
-        with patch("sql_api.api_archive.async_task"):
+        with patch("api_archives.views.async_task"):
             response = self.client.post(
                 "/api/v1/archive/",
                 self.archive_payload(**overrides),
@@ -5075,7 +5335,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
     def test_create_one_time_archive_request(self):
         self.authenticate(self.requester)
 
-        with patch("sql_api.api_archive.async_task"):
+        with patch("api_archives.views.async_task"):
             response = self.client.post(
                 "/api/v1/archive/",
                 self.archive_payload(),
@@ -5092,7 +5352,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
         self.assertEqual(archive.status, WorkflowStatus.WAITING)
         self.assertFalse(archive.state)
 
-    @patch("sql_api.api_archive.get_auditor")
+    @patch("api_archives.views.get_auditor")
     def test_create_archive_hides_internal_audit_errors(self, get_auditor_mock):
         self.authenticate(self.requester)
         audit_handler = Mock()
@@ -5114,7 +5374,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
     def test_create_archive_rejects_unowned_group_on_shared_instance(self):
         self.authenticate(self.requester)
 
-        with patch("sql_api.api_archive.async_task"):
+        with patch("api_archives.views.async_task"):
             response = self.client.post(
                 "/api/v1/archive/",
                 self.archive_payload(group_id=self.other_resource_group.group_id),
@@ -5126,7 +5386,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
     def test_create_scheduled_daily_archive_request(self):
         self.authenticate(self.requester)
 
-        with patch("sql_api.api_archive.async_task"):
+        with patch("api_archives.views.async_task"):
             response = self.client.post(
                 "/api/v1/archive/",
                 self.archive_payload(
@@ -5149,7 +5409,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
     def test_create_scheduled_weekly_archive_request(self):
         self.authenticate(self.requester)
 
-        with patch("sql_api.api_archive.async_task"):
+        with patch("api_archives.views.async_task"):
             response = self.client.post(
                 "/api/v1/archive/",
                 self.archive_payload(
@@ -5172,7 +5432,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
     def test_create_archive_rejects_pt_archiver_for_non_mysql(self):
         self.authenticate(self.requester)
 
-        with patch("sql_api.api_archive.async_task"):
+        with patch("api_archives.views.async_task"):
             response = self.client.post(
                 "/api/v1/archive/",
                 self.archive_payload(
@@ -5188,7 +5448,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
     def test_create_archive_requires_schedule_fields(self):
         self.authenticate(self.requester)
 
-        with patch("sql_api.api_archive.async_task"):
+        with patch("api_archives.views.async_task"):
             response = self.client.post(
                 "/api/v1/archive/",
                 self.archive_payload(
@@ -5212,11 +5472,9 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
         next_run = datetime.now() + timedelta(days=1)
 
         with patch(
-            "sql_api.api_archive.calculate_next_archive_run", return_value=next_run
-        ), patch(
-            "sql_api.api_archive.schedule_archive"
-        ) as schedule_archive_mock, patch(
-            "sql_api.api_archive.async_task"
+            "api_archives.views.calculate_next_archive_run", return_value=next_run
+        ), patch("api_archives.views.schedule_archive") as schedule_archive_mock, patch(
+            "api_archives.views.async_task"
         ):
             response = self.client.post(
                 f"/api/v1/archive/{archive.id}/reviews/",
@@ -5242,8 +5500,8 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
         )
         self.authenticate(self.reviewer)
 
-        with patch("sql_api.api_archive.cancel_archive_schedule") as cancel_mock, patch(
-            "sql_api.api_archive.async_task"
+        with patch("api_archives.views.cancel_archive_schedule") as cancel_mock, patch(
+            "api_archives.views.async_task"
         ):
             reject_response = self.client.post(
                 f"/api/v1/archive/{reject_archive.id}/reviews/",
@@ -5260,8 +5518,8 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
 
         cancel_archive = self.create_pending_archive(title="Cancel me")
         self.authenticate(self.requester)
-        with patch("sql_api.api_archive.cancel_archive_schedule") as cancel_mock, patch(
-            "sql_api.api_archive.async_task"
+        with patch("api_archives.views.cancel_archive_schedule") as cancel_mock, patch(
+            "api_archives.views.async_task"
         ):
             cancel_response = self.client.post(
                 f"/api/v1/archive/{cancel_archive.id}/reviews/",
@@ -5292,7 +5550,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
 
         self.authenticate(self.reviewer)
 
-        with patch("sql_api.api_archive.async_task") as async_task_mock:
+        with patch("api_archives.views.async_task") as async_task_mock:
             response = self.client.post(
                 f"/api/v1/archive/{archive.id}/run/",
                 {},
@@ -5319,7 +5577,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
         archive.save(update_fields=["status", "state", "execution_state"])
         self.authenticate(self.reviewer)
 
-        with patch("sql_api.api_archive.async_task") as async_task_mock:
+        with patch("api_archives.views.async_task") as async_task_mock:
             response = self.client.post(
                 f"/api/v1/archive/{archive.id}/run/",
                 {},
@@ -5351,7 +5609,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
         )
         self.authenticate(self.reviewer)
 
-        with patch("sql_api.api_archive.async_task") as async_task_mock:
+        with patch("api_archives.views.async_task") as async_task_mock:
             response = self.client.post(
                 f"/api/v1/archive/{archive.id}/run/",
                 {},
@@ -5374,7 +5632,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
 
         self.authenticate(self.reviewer)
 
-        with patch("sql_api.api_archive.cancel_archive_schedule") as cancel_mock:
+        with patch("api_archives.views.cancel_archive_schedule") as cancel_mock:
             response = self.client.post(
                 f"/api/v1/archive/{archive.id}/state/",
                 {"enabled": False},
@@ -5412,7 +5670,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
         )
         self.authenticate(self.reviewer)
 
-        with patch("sql_api.api_archive.cancel_archive_schedule") as cancel_mock:
+        with patch("api_archives.views.cancel_archive_schedule") as cancel_mock:
             response = self.client.post(
                 f"/api/v1/archive/{archive.id}/state/",
                 {"enabled": False},
