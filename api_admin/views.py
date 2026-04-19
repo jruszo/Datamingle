@@ -8,8 +8,8 @@ from api_admin.settings import (
 
 __all__ = [
     "DashboardOverview",
-    "SystemSettingsView",
-    "SystemSettingsGoInceptionTestView",
     "SystemSettingsEmailTestView",
+    "SystemSettingsGoInceptionTestView",
     "SystemSettingsStorageTestView",
+    "SystemSettingsView",
 ]

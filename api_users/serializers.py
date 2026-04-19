@@ -49,6 +49,7 @@ class UserManagementCreateSerializer(serializers.ModelSerializer):
         source="groups", queryset=Group.objects.all(), many=True, required=False
     )
     email = serializers.EmailField(required=False, allow_blank=True)
+    password = serializers.CharField(write_only=True, trim_whitespace=False)
 
     def validate_display(self, value):
         display = value.strip()
@@ -84,7 +85,6 @@ class UserManagementCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Users
         fields = ("username", "display", "email", "password", "group_ids")
-        extra_kwargs = {"password": {"write_only": True}}
 
 
 class UserManagementUpdateSerializer(serializers.ModelSerializer):
@@ -272,7 +272,7 @@ class ResourceGroupInstanceLookupSerializer(serializers.ModelSerializer):
 
 
 class UserAuthSerializer(serializers.Serializer):
-    password = serializers.CharField(label="Password")
+    password = serializers.CharField(label="Password", trim_whitespace=False)
 
 
 class CurrentUserGroupSerializer(serializers.Serializer):
@@ -312,9 +312,9 @@ class CurrentUserProfileUpdateSerializer(serializers.Serializer):
 
 
 class CurrentUserPasswordChangeSerializer(serializers.Serializer):
-    current_password = serializers.CharField(write_only=True)
-    new_password = serializers.CharField(write_only=True)
-    new_password_confirm = serializers.CharField(write_only=True)
+    current_password = serializers.CharField(write_only=True, trim_whitespace=False)
+    new_password = serializers.CharField(write_only=True, trim_whitespace=False)
+    new_password_confirm = serializers.CharField(write_only=True, trim_whitespace=False)
 
     def validate_current_password(self, value):
         user = self.context["request"].user
@@ -392,10 +392,14 @@ class TwoFASaveSerializer(serializers.Serializer):
 
 
 class TwoFAVerifySerializer(serializers.Serializer):
-    otp = serializers.IntegerField(label="One-time password / code")
+    otp = serializers.RegexField(
+        r"^\d{6}$", label="One-time password / code", max_length=6
+    )
     key = serializers.CharField(required=False, label="Secret key")
     phone = serializers.CharField(required=False, label="Phone number")
-    auth_type = serializers.CharField(label="Verification method")
+    auth_type = serializers.ChoiceField(
+        choices=["totp", "sms"], label="Verification method"
+    )
 
     def validate(self, attrs):
         auth_type = attrs.get("auth_type")

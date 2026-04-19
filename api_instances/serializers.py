@@ -383,7 +383,11 @@ class TunnelSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tunnel
         fields = "__all__"
-        write_only_fields = ["password", "pkey", "pkey_password"]
+        extra_kwargs = {
+            "password": {"write_only": True},
+            "pkey": {"write_only": True},
+            "pkey_password": {"write_only": True},
+        }
 
 
 class CloudAccessKeySerializer(serializers.ModelSerializer):
@@ -406,9 +410,11 @@ class AliyunRdsSerializer(serializers.ModelSerializer):
             with transaction.atomic():
                 ak = CloudAccessKey.objects.create(**rds_data)
                 rds = AliyunRdsConfig.objects.create(ak=ak, **validated_data)
-        except Exception as exc:
+        except Exception:
             logger.error("Error creating AliyunRds: %s", traceback.format_exc())
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError(
+                {"errors": "Unable to create Aliyun RDS configuration."}
+            )
         return rds
 
     class Meta:

@@ -140,6 +140,22 @@ class WorkflowSerializer(serializers.ModelSerializer):
 class WorkflowContentSerializer(serializers.ModelSerializer):
     workflow = WorkflowSerializer()
 
+    @staticmethod
+    def _validate_group_for_instance(instance, group_id):
+        try:
+            group = ResourceGroup.objects.get(pk=group_id)
+        except ResourceGroup.DoesNotExist:
+            raise serializers.ValidationError(
+                {"errors": f"Resource group does not exist: {group_id}"}
+            )
+
+        if not instance.resource_group.filter(pk=group.pk).exists():
+            raise serializers.ValidationError(
+                {"errors": "Selected resource group does not belong to this instance."}
+            )
+
+        return group
+
     def create(self, validated_data):
         actor = self.context["request"].user
         workflow_data = validated_data.pop("workflow")
@@ -155,7 +171,7 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                         )
                     }
                 )
-        group = ResourceGroup.objects.get(pk=workflow_data["group_id"])
+        group = self._validate_group_for_instance(instance, workflow_data["group_id"])
         engineer = workflow_data.get("engineer")
 
         if actor.is_superuser and engineer:
@@ -196,8 +212,11 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                 )
         except serializers.ValidationError:
             raise
-        except Exception as exc:
-            raise serializers.ValidationError({"errors": str(exc)})
+        except Exception:
+            logger.exception("Unexpected error while validating workflow submission.")
+            raise serializers.ValidationError(
+                {"errors": "An internal validation error occurred."}
+            )
 
         has_group_write_access = user_has_group_instance_access(
             actor, instance, tag_codes=["can_write"]
@@ -225,7 +244,7 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
         elif not (
             actor.is_superuser
             or (has_group_write_access and actor.has_perm("sql.sql_submit"))
-            or (has_temporary_write_access and not has_group_write_access)
+            or has_temporary_write_access
         ):
             raise serializers.ValidationError(
                 {
@@ -233,9 +252,10 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                 }
             )
 
-        is_backup = (
-            workflow_data["is_backup"] if "is_backup" in workflow_data.keys() else False
-        )
+        if "is_backup" in workflow_data:
+            is_backup = workflow_data["is_backup"]
+        else:
+            is_backup = SqlWorkflow._meta.get_field("is_backup").get_default()
         if is_offline_export:
             is_backup = False
 
@@ -259,14 +279,16 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                 )
                 auditor = get_auditor(workflow=workflow)
                 auditor.create_audit()
-        except Exception as exc:
+                if auditor.audit.current_status == WorkflowStatus.REJECTED:
+                    auditor.workflow.status = "workflow_autoreviewwrong"
+                elif auditor.audit.current_status == WorkflowStatus.PASSED:
+                    auditor.workflow.status = "workflow_review_pass"
+                auditor.workflow.save()
+        except Exception:
             logger.error("Error submitting workflow: %s", traceback.format_exc())
-            raise serializers.ValidationError({"errors": str(exc)})
-        if auditor.audit.current_status == WorkflowStatus.REJECTED:
-            auditor.workflow.status = "workflow_autoreviewwrong"
-        elif auditor.audit.current_status == WorkflowStatus.PASSED:
-            auditor.workflow.status = "workflow_review_pass"
-        auditor.workflow.save()
+            raise serializers.ValidationError(
+                {"errors": "An internal validation error occurred."}
+            )
         return workflow_content
 
     class Meta:

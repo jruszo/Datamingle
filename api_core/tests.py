@@ -1,8 +1,11 @@
+from django.urls import clear_url_caches
 from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from api_core.extensions import get_extension_urlpatterns
 from api_core.legacy_tests import InfoTest
+import sql_api.urls as sql_api_urls
 
 
 @override_settings(
@@ -35,7 +38,17 @@ from api_core.legacy_tests import InfoTest
 )
 class ApiExtensionRoutingTests(APITestCase):
     def test_extension_routes_are_loaded_from_settings(self):
-        response = self.client.get("/api/extensions/ping/")
+        original_urlpatterns = list(sql_api_urls.urlpatterns)
+        try:
+            sql_api_urls.urlpatterns = (
+                original_urlpatterns + get_extension_urlpatterns()
+            )
+            clear_url_caches()
+            response = self.client.get("/api/extensions/ping/")
+        finally:
+            sql_api_urls.urlpatterns = original_urlpatterns
+            clear_url_caches()
+
         self.assertEqual(response.status_code, status.HTTP_302_FOUND)
         self.assertIn("/login", response.url)
 

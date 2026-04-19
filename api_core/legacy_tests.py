@@ -752,7 +752,7 @@ class TestUser(CacheIsolatedAPITestCase):
     def test_2fa_verify(self):
         """Test 2FA code verification."""
         json_data = {
-            "otp": 123456,
+            "otp": "123456",
             "key": "ZUGRIJZP6H7LIOAL4LH5JA4GSXXT3WOK",
             "auth_type": "totp",
         }
@@ -1793,6 +1793,13 @@ class TestInstance(CacheIsolatedAPITestCase):
         )
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("active", r.json())
+        self.assertEqual(
+            str(r.json()["active"]),
+            (
+                "This tag is assigned to one or more instances. "
+                "Remove it from those instances before deactivating it."
+            ),
+        )
 
     def test_instance_tag_management_requires_inventory_access(self):
         """Tag management follows inventory-admin permissions."""
@@ -3410,6 +3417,44 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(r_data["workflow"]["engineer_display"], self.user.display)
 
     @patch("api_workflows.serializers.get_engine")
+    def test_submit_workflow_uses_model_backup_default_when_omitted(
+        self, mock_get_engine
+    ):
+        review_set = ReviewSet(
+            rows=[
+                ReviewResult(
+                    errlevel=0,
+                    stagestatus="Audit completed",
+                    errormessage="None",
+                    sql="alter table abc add column note varchar(64);",
+                )
+            ]
+        )
+        review_set.syntax_type = 2
+        review_set.error_count = 0
+        review_set.warning_count = 0
+        mock_get_engine.return_value.auto_backup = True
+        mock_get_engine.return_value.execute_check.return_value = review_set
+
+        json_data = {
+            "workflow": {
+                "workflow_name": "Release Workflow Default Backup",
+                "demand_url": "test",
+                "group_id": 1,
+                "db_name": "test_db",
+                "instance": self.ins.id,
+                "is_offline_export": 0,
+            },
+            "sql_content": "alter table abc add column note varchar(64);",
+        }
+        r = self.client.post("/api/v1/workflow/", json_data, format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        workflow_id = response_data(r)["workflow"]["id"]
+        workflow = SqlWorkflow.objects.get(id=workflow_id)
+        self.assertTrue(workflow.is_backup)
+
+    @patch("api_workflows.serializers.get_engine")
     def test_submit_workflow_does_not_force_backup_when_toggle_disabled(
         self, mock_get_engine
     ):
@@ -3538,6 +3583,215 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(workflow.export_format, "tsv")
         self.assertEqual(workflow.schema_name, "analytics")
         self.assertFalse(workflow.is_backup)
+
+    @patch("api_workflows.serializers.get_engine")
+    def test_submit_workflow_rejects_resource_group_not_attached_to_instance(
+        self, mock_get_engine
+    ):
+        review_set = ReviewSet(
+            rows=[
+                ReviewResult(
+                    errlevel=0,
+                    stagestatus="Audit completed",
+                    errormessage="None",
+                    sql="alter table abc add column note varchar(64);",
+                )
+            ]
+        )
+        review_set.syntax_type = 2
+        review_set.error_count = 0
+        review_set.warning_count = 0
+        mock_get_engine.return_value.auto_backup = True
+        mock_get_engine.return_value.execute_check.return_value = review_set
+        other_group = ResourceGroup.objects.create(group_name="other-group")
+
+        json_data = {
+            "workflow": {
+                "workflow_name": "Release Workflow Wrong Group",
+                "group_id": other_group.group_id,
+                "db_name": "test_db",
+                "instance": self.ins.id,
+                "is_offline_export": 0,
+            },
+            "sql_content": "alter table abc add column note varchar(64);",
+        }
+        r = self.client.post("/api/v1/workflow/", json_data, format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            r.json()["errors"],
+            "Selected resource group does not belong to this instance.",
+        )
+
+    @patch("api_workflows.serializers.get_engine")
+    @patch(
+        "api_workflows.serializers.user_has_group_instance_access", return_value=True
+    )
+    @patch("api_workflows.serializers.user_has_instance_workflow_access")
+    def test_submit_workflow_allows_temporary_write_access_even_with_group_access(
+        self, mock_temporary_access, _mock_group_access, mock_get_engine
+    ):
+        review_set = ReviewSet(
+            rows=[
+                ReviewResult(
+                    errlevel=0,
+                    stagestatus="Audit completed",
+                    errormessage="None",
+                    sql="alter table abc add column note varchar(64);",
+                )
+            ]
+        )
+        review_set.syntax_type = 2
+        review_set.error_count = 0
+        review_set.warning_count = 0
+        mock_get_engine.return_value.auto_backup = True
+        mock_get_engine.return_value.execute_check.return_value = review_set
+        mock_temporary_access.return_value = True
+
+        limited_user = User.objects.create(
+            username="temporary_submitter",
+            display="Temporary Submitter",
+            is_active=True,
+        )
+        limited_user.set_password("test_password")
+        limited_user.save()
+        limited_user.resource_group.add(self.res_group.group_id)
+        self._login_as_user(limited_user.username)
+
+        json_data = {
+            "workflow": {
+                "workflow_name": "Release Workflow Temporary Access",
+                "group_id": 1,
+                "db_name": "test_db",
+                "instance": self.ins.id,
+                "is_offline_export": 0,
+            },
+            "sql_content": "alter table abc add column note varchar(64);",
+        }
+        r = self.client.post("/api/v1/workflow/", json_data, format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        workflow = SqlWorkflow.objects.get(id=response_data(r)["workflow"]["id"])
+        self.assertEqual(workflow.engineer, limited_user.username)
+
+    @patch("api_workflows.serializers.get_engine")
+    def test_submit_workflow_hides_engine_exception_details(self, mock_get_engine):
+        mock_get_engine.return_value.execute_check.side_effect = Exception(
+            "sensitive engine failure"
+        )
+
+        json_data = {
+            "workflow": {
+                "workflow_name": "Release Workflow Engine Failure",
+                "group_id": 1,
+                "db_name": "test_db",
+                "instance": self.ins.id,
+                "is_offline_export": 0,
+            },
+            "sql_content": "alter table abc add column note varchar(64);",
+        }
+        r = self.client.post("/api/v1/workflow/", json_data, format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(r.json()["errors"], "An internal validation error occurred.")
+
+    @patch("api_workflows.serializers.get_auditor")
+    @patch("api_workflows.serializers.get_engine")
+    def test_submit_workflow_hides_save_exception_details(
+        self, mock_get_engine, mock_get_auditor
+    ):
+        review_set = ReviewSet(
+            rows=[
+                ReviewResult(
+                    errlevel=0,
+                    stagestatus="Audit completed",
+                    errormessage="None",
+                    sql="alter table abc add column note varchar(64);",
+                )
+            ]
+        )
+        review_set.syntax_type = 2
+        review_set.error_count = 0
+        review_set.warning_count = 0
+        mock_get_engine.return_value.auto_backup = True
+        mock_get_engine.return_value.execute_check.return_value = review_set
+
+        class BrokenAuditor:
+            def create_audit(self):
+                raise Exception("hidden audit failure")
+
+        mock_get_auditor.return_value = BrokenAuditor()
+
+        json_data = {
+            "workflow": {
+                "workflow_name": "Release Workflow Save Failure",
+                "group_id": 1,
+                "db_name": "test_db",
+                "instance": self.ins.id,
+                "is_offline_export": 0,
+            },
+            "sql_content": "alter table abc add column note varchar(64);",
+        }
+        r = self.client.post("/api/v1/workflow/", json_data, format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(r.json()["errors"], "An internal validation error occurred.")
+
+    @patch("api_workflows.serializers.get_engine")
+    def test_submit_workflow_rolls_back_when_status_update_save_fails(
+        self, mock_get_engine
+    ):
+        review_set = ReviewSet(
+            rows=[
+                ReviewResult(
+                    errlevel=0,
+                    stagestatus="Audit completed",
+                    errormessage="None",
+                    sql="alter table abc add column note varchar(64);",
+                )
+            ]
+        )
+        review_set.syntax_type = 2
+        review_set.error_count = 0
+        review_set.warning_count = 0
+        mock_get_engine.return_value.auto_backup = True
+        mock_get_engine.return_value.execute_check.return_value = review_set
+
+        original_save = SqlWorkflow.save
+        save_calls = {"count": 0}
+
+        def flaky_save(instance, *args, **kwargs):
+            save_calls["count"] += 1
+            if save_calls["count"] == 2:
+                raise RuntimeError("status save failed")
+            return original_save(instance, *args, **kwargs)
+
+        json_data = {
+            "workflow": {
+                "workflow_name": "Release Workflow Atomic Save",
+                "group_id": 1,
+                "db_name": "test_db",
+                "instance": self.ins.id,
+                "is_offline_export": 0,
+            },
+            "sql_content": "alter table abc add column note varchar(64);",
+        }
+
+        baseline_workflow_count = SqlWorkflow.objects.count()
+        baseline_audit_count = WorkflowAudit.objects.count()
+
+        with patch.object(SqlWorkflow, "save", autospec=True, side_effect=flaky_save):
+            r = self.client.post("/api/v1/workflow/", json_data, format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(r.json()["errors"], "An internal validation error occurred.")
+        self.assertEqual(SqlWorkflow.objects.count(), baseline_workflow_count)
+        self.assertEqual(WorkflowAudit.objects.count(), baseline_audit_count)
+        self.assertFalse(
+            SqlWorkflow.objects.filter(
+                workflow_name="Release Workflow Atomic Save"
+            ).exists()
+        )
 
     @patch("api_workflows.serializers.get_engine")
     def test_submit_export_workflow_rejects_invalid_format(self, mock_get_engine):

@@ -11,7 +11,8 @@ urlpatterns = [
     path("v1/user/group/<int:pk>/", views.GroupDetail.as_view()),
     path("v1/user/permission/", views.PermissionList.as_view()),
     path(
-        "v1/user/resourcegroup/users/lookup/", views.ResourceGroupUserLookup.as_view()
+        "v1/user/resourcegroup/users/lookup/",
+        views.ResourceGroupUserLookup.as_view(),
     ),
     path(
         "v1/user/resourcegroup/instances/lookup/",
