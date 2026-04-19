@@ -64,7 +64,7 @@ class UserManagementCreateSerializer(serializers.ModelSerializer):
         try:
             validate_password(password)
         except ValidationError as msg:
-            raise serializers.ValidationError(msg.messages)
+            raise serializers.ValidationError(msg.messages) from msg
         return password
 
     def create(self, validated_data):
@@ -134,7 +134,7 @@ class UserManagementUpdateSerializer(serializers.ModelSerializer):
             try:
                 validate_password(password, user=self.instance)
             except ValidationError as msg:
-                raise serializers.ValidationError({"password": msg.messages})
+                raise serializers.ValidationError({"password": msg.messages}) from msg
 
         return attrs
 
@@ -340,7 +340,7 @@ class CurrentUserPasswordChangeSerializer(serializers.Serializer):
         try:
             validate_password(attrs["new_password"], user=self.context["request"].user)
         except ValidationError as msg:
-            raise serializers.ValidationError({"new_password": msg.messages})
+            raise serializers.ValidationError({"new_password": msg.messages}) from msg
 
         return attrs
 
@@ -406,5 +406,7 @@ class TwoFAVerifySerializer(serializers.Serializer):
 
         if auth_type == "sms" and not attrs.get("phone"):
             raise serializers.ValidationError({"errors": "Missing phone."})
+        if auth_type == "totp" and not attrs.get("key"):
+            raise serializers.ValidationError({"errors": "Missing key."})
 
         return attrs

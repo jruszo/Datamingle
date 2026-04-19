@@ -184,10 +184,36 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
         else:
             user = self.context["request"].user
 
+        has_group_write_access = user_has_group_instance_access(
+            actor, instance, tag_codes=["can_write"]
+        )
+        has_group_read_access = user_has_group_instance_access(
+            actor, instance, tag_codes=["can_read"]
+        )
+        has_temporary_read_access = user_has_instance_query_access(actor, instance)
+
+        if is_offline_export:
+            if not (actor.is_superuser or actor.has_perm("sql.sqlexport_submit")):
+                raise serializers.ValidationError(
+                    {"errors": "You do not have permission to submit export workflows."}
+                )
+            if not (has_group_read_access or has_temporary_read_access):
+                raise serializers.ValidationError(
+                    {
+                        "errors": (
+                            "You do not have permission to submit export workflows for this instance."
+                        )
+                    }
+                )
+        elif actor.is_superuser or (
+            has_group_write_access and actor.has_perm("sql.sql_submit")
+        ):
+            pass
+
         try:
             check_engine = get_engine(instance=instance)
-            sql_export = OffLineDownLoad()
             if is_offline_export:
+                sql_export = OffLineDownLoad()
                 export_format = (
                     (workflow_data.get("export_format") or "").lower().strip()
                 )
@@ -218,30 +244,10 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                 {"errors": "An internal validation error occurred."}
             )
 
-        has_group_write_access = user_has_group_instance_access(
-            actor, instance, tag_codes=["can_write"]
-        )
-        has_group_read_access = user_has_group_instance_access(
-            actor, instance, tag_codes=["can_read"]
-        )
         has_temporary_write_access = user_has_instance_workflow_access(
             actor, instance, check_result.syntax_type
         )
-        has_temporary_read_access = user_has_instance_query_access(actor, instance)
-        if is_offline_export:
-            if not (actor.is_superuser or actor.has_perm("sql.sqlexport_submit")):
-                raise serializers.ValidationError(
-                    {"errors": "You do not have permission to submit export workflows."}
-                )
-            if not (has_group_read_access or has_temporary_read_access):
-                raise serializers.ValidationError(
-                    {
-                        "errors": (
-                            "You do not have permission to submit export workflows for this instance."
-                        )
-                    }
-                )
-        elif not (
+        if not (
             actor.is_superuser
             or (has_group_write_access and actor.has_perm("sql.sql_submit"))
             or has_temporary_write_access

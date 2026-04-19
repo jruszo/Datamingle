@@ -1943,9 +1943,10 @@ class TestInstance(CacheIsolatedAPITestCase):
         self.assertEqual(instance.port, 3306)
         self.assertEqual(instance.tunnel_id, self.tunnel.id)
 
+    @patch("api_instances.views.logger")
     @patch("api_instances.views.get_engine")
     def test_test_draft_instance_connection_returns_validation_error(
-        self, mock_get_engine
+        self, mock_get_engine, mock_logger
     ):
         """Draft connection testing should surface engine failures without saving."""
         mock_engine = Mock()
@@ -1965,12 +1966,13 @@ class TestInstance(CacheIsolatedAPITestCase):
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn(
-            "Unable to connect to instance. access denied", r.json()["errors"]
+        self.assertEqual(
+            r.json()["errors"], "Unable to connect to instance. Check configuration."
         )
         self.assertEqual(
             Instance.objects.filter(instance_name="draft_mysql").count(), 0
         )
+        mock_logger.exception.assert_not_called()
 
     def test_update_instance(self):
         """Test updating instance."""
@@ -3164,7 +3166,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
 
     @patch("api_workflows.views.get_engine")
-    def test_check_inception_Exception(self, _get_engine):
+    @patch("api_workflows.views.logger")
+    def test_check_inception_Exception(self, mock_logger, _get_engine):
         """Test workflow SQL check when inception raises an error."""
         json_data = {
             "full_sql": "use mysql",
@@ -3173,8 +3176,9 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         }
         _get_engine.side_effect = RuntimeError("RuntimeError")
         r = self.client.post("/api/v1/workflow/sqlcheck/", json_data, format="json")
-        print(json.loads(r.content))
-        self.assertDictEqual(json.loads(r.content), {"errors": "RuntimeError"})
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertDictEqual(json.loads(r.content), {"errors": "Internal Server Error"})
+        mock_logger.exception.assert_called_once()
 
     @patch("api_workflows.views.get_engine")
     def test_check(self, _get_engine):
@@ -3328,8 +3332,9 @@ class TestWorkflow(CacheIsolatedAPITestCase):
 
     @patch("api_workflows.views.get_engine")
     @patch("api_workflows.views.OffLineDownLoad.pre_count_check")
+    @patch("api_workflows.views.logger")
     def test_export_sqlcheck_returns_validation_error_for_count_failures(
-        self, mock_pre_count_check, mock_get_engine
+        self, mock_logger, mock_pre_count_check, mock_get_engine
     ):
         mock_engine = Mock()
         mock_engine.escape_string.return_value = "escaped_test_db"
@@ -3347,7 +3352,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         )
 
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(r.json()["errors"], "COUNT(*) failed")
+        self.assertEqual(r.json()["errors"], "Internal Server Error")
+        mock_logger.exception.assert_called_once()
 
     def test_export_sqlcheck_requires_export_submit_permission(self):
         self.user.user_permissions.remove(

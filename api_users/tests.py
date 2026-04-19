@@ -41,3 +41,9 @@ class UserSerializerTests(SimpleTestCase):
 
         self.assertFalse(serializer.is_valid())
         self.assertIn("auth_type", serializer.errors)
+
+    def test_two_fa_verify_requires_key_for_totp(self):
+        serializer = TwoFAVerifySerializer(data={"otp": "000123", "auth_type": "totp"})
+
+        self.assertFalse(serializer.is_valid())
+        self.assertEqual(serializer.errors["errors"][0], "Missing key.")

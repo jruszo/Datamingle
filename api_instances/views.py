@@ -1,3 +1,5 @@
+import logging
+
 from django.conf import settings
 from django.contrib.auth.decorators import permission_required
 from django.db.models import Q
@@ -35,6 +37,8 @@ from api_instances.serializers import (
     TunnelLookupSerializer,
     TunnelSerializer,
 )
+
+logger = logging.getLogger("default")
 
 
 def _require_any_permission(request, *perm_list):
@@ -420,14 +424,17 @@ class InstanceConnectionTest(views.APIView):
         try:
             query_engine = get_engine(instance=instance)
             test_result = query_engine.test_connection()
-        except Exception as exc:
+        except serializers.ValidationError:
+            raise
+        except Exception:
+            logger.exception("Failed instance connection test for instance_id=%s", pk)
             raise serializers.ValidationError(
-                {"errors": f"Unable to connect to instance. {str(exc)}"}
+                {"errors": "Unable to connect to instance. Check configuration."}
             )
 
         if test_result.error:
             raise serializers.ValidationError(
-                {"errors": f"Unable to connect to instance. {test_result.error}"}
+                {"errors": "Unable to connect to instance. Check configuration."}
             )
 
         payload = InstanceConnectionTestResultSerializer(
@@ -454,14 +461,17 @@ class InstanceDraftConnectionTest(views.APIView):
         try:
             query_engine = get_engine(instance=instance)
             test_result = query_engine.test_connection()
-        except Exception as exc:
+        except serializers.ValidationError:
+            raise
+        except Exception:
+            logger.exception("Failed draft instance connection test")
             raise serializers.ValidationError(
-                {"errors": f"Unable to connect to instance. {str(exc)}"}
+                {"errors": "Unable to connect to instance. Check configuration."}
             )
 
         if test_result.error:
             raise serializers.ValidationError(
-                {"errors": f"Unable to connect to instance. {test_result.error}"}
+                {"errors": "Unable to connect to instance. Check configuration."}
             )
 
         payload = InstanceConnectionTestResultSerializer(

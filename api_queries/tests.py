@@ -1,4 +1,3 @@
-from api_core.legacy_tests import TestQueryAPI
 from django.test import SimpleTestCase
 
 from api_queries.serializers import (

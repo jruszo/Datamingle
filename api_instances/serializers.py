@@ -121,6 +121,37 @@ class InstanceCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Instance name cannot be blank.")
         return instance_name
 
+    def validate_host(self, value):
+        host = value.strip()
+        if not host:
+            raise serializers.ValidationError("Host cannot be blank.")
+        return host
+
+    def validate_user(self, value):
+        return value.strip()
+
+    def validate_db_name(self, value):
+        return value.strip()
+
+    def validate_show_db_name_regex(self, value):
+        return value.strip()
+
+    def validate_denied_db_name_regex(self, value):
+        return value.strip()
+
+    def validate_charset(self, value):
+        return value.strip()
+
+    def validate_service_name(self, value):
+        if value is None:
+            return value
+        return value.strip()
+
+    def validate_sid(self, value):
+        if value is None:
+            return value
+        return value.strip()
+
     def create(self, validated_data):
         resource_groups = validated_data.pop("resource_group", [])
         instance_tags = validated_data.pop("instance_tag", [])
@@ -520,18 +551,17 @@ class InstanceResourceSerializer(serializers.Serializer):
     resource_type = serializers.ChoiceField(
         choices=["database", "schema", "table", "column"], label="Resource type"
     )
-    db_name = serializers.CharField(required=False, label="Database name")
-    schema_name = serializers.CharField(required=False, label="Schema name")
-    tb_name = serializers.CharField(required=False, label="Table name")
+    db_name = serializers.CharField(
+        required=False, allow_blank=True, label="Database name"
+    )
+    schema_name = serializers.CharField(
+        required=False, allow_blank=True, label="Schema name"
+    )
+    tb_name = serializers.CharField(
+        required=False, allow_blank=True, label="Table name"
+    )
 
     def validate(self, attrs):
-        instance_id = attrs.get("instance_id")
-
-        try:
-            Instance.objects.get(id=instance_id)
-        except Instance.DoesNotExist:
-            raise serializers.ValidationError({"errors": "Instance does not exist."})
-
         return attrs
 
 
