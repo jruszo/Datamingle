@@ -14,8 +14,8 @@ from common.config import SysConfig
 from sql.engines.mysql_ddl import validate_binary_path
 from sql.models import InstanceTag, ResourceGroup
 
-from .permissions import IsStaffOrSuperuser
-from .response import success_response
+from api_core.permissions import IsStaffOrSuperuser
+from api_core.response import success_response
 
 User = get_user_model()
 

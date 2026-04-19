@@ -1,5 +1,5 @@
 from django.apps import AppConfig
 
 
-class SqlApi2Config(AppConfig):
+class SqlApiConfig(AppConfig):
     name = "sql_api"

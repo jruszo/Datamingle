@@ -9,7 +9,7 @@ from rest_framework import permissions, serializers, views
 from common.utils.chart_dao import ChartDao
 from sql.models import Instance, QueryPrivilegesApply, SqlWorkflow, Users
 
-from .response import success_response
+from api_core.response import success_response
 
 logger = logging.getLogger("default")
 

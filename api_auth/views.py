@@ -25,7 +25,7 @@ from common.authenticate.workos import WorkOSAuthClient
 from common.config import SysConfig
 from common.twofa import get_authenticator
 from sql.models import TwoFactorAuthConfig, Users
-from .response import success_response
+from api_core.response import success_response
 
 WORKOS_STATE_COOKIE_NAME = "datamingle_workos_state"
 WORKOS_SESSION_COOKIE_NAME = "datamingle_workos_session_id"

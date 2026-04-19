@@ -13,9 +13,9 @@ from sql.models import AliyunRdsConfig, Instance, InstanceTag, ResourceGroup, Tu
 from sql.utils.resource_group import user_instances
 from sql.utils.sql_utils import filter_db_list
 
-from .pagination import CustomizedPagination
-from .response import success_response
-from .serializers import (
+from api_core.pagination import CustomizedPagination
+from api_core.response import success_response
+from api_instances.serializers import (
     AliyunRdsSerializer,
     ChoiceOptionSerializer,
     InstanceConnectionTestResultSerializer,

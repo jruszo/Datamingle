@@ -42,8 +42,8 @@ from sql.utils.resource_group import (
 )
 from sql.utils.workflow_audit import Audit, AuditException, AuditV2, get_auditor
 
-from .pagination import CustomizedPagination
-from .response import success_response
+from api_core.pagination import CustomizedPagination
+from api_core.response import success_response
 from common.task_queue import async_task
 
 logger = logging.getLogger("default")

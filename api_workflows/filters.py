@@ -1,25 +1,6 @@
 from django_filters import rest_framework as filters
-from sql.models import Users, Instance, SqlWorkflowContent, WorkflowAudit
 
-
-class UserFilter(filters.FilterSet):
-    class Meta:
-        model = Users
-        fields = {
-            "id": ["exact"],
-            "username": ["exact"],
-        }
-
-
-class InstanceFilter(filters.FilterSet):
-    class Meta:
-        model = Instance
-        fields = {
-            "id": ["exact"],
-            "instance_name": ["icontains"],
-            "db_type": ["exact"],
-            "host": ["exact"],
-        }
+from sql.models import SqlWorkflowContent, WorkflowAudit
 
 
 class WorkflowFilter(filters.FilterSet):

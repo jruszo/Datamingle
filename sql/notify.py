@@ -27,12 +27,12 @@ from sql.models import (
 )
 from sql.utils.resource_group import auth_group_users
 from sql.utils.workflow_audit import Audit, AuditV2
-from sql_api.serializers import (
-    WorkflowContentSerializer,
+from api_archives.serializers import ArchiveConfigSerializer
+from api_instances.serializers import InstanceSerializer
+from api_queries.serializers import QueryPrivilegesApplySerializer
+from api_workflows.serializers import (
     WorkflowAuditListSerializer,
-    QueryPrivilegesApplySerializer,
-    ArchiveConfigSerializer,
-    InstanceSerializer,
+    WorkflowContentSerializer,
 )
 
 logger = logging.getLogger("default")
