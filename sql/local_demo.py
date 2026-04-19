@@ -401,3 +401,18 @@ def _seed_workflow_settings(auth_groups, resource_groups, log):
                 " -> ".join(config["approval_groups"]),
             )
         )
+        _, archive_created = WorkflowAuditSetting.objects.update_or_create(
+            group_id=resource_group.group_id,
+            workflow_type=WorkflowType.ARCHIVE,
+            defaults={
+                "group_name": resource_group.group_name,
+                "audit_auth_groups": audit_auth_groups,
+            },
+        )
+        log(
+            "Archive setting {}: {} -> {}".format(
+                "created" if archive_created else "updated",
+                resource_group.group_name,
+                " -> ".join(config["approval_groups"]),
+            )
+        )

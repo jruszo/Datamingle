@@ -970,6 +970,24 @@ class ArchiveConfig(models.Model, WorkflowAuditMixin):
     Archive configuration table.
     """
 
+    ARCHIVE_METHOD_CHOICES = (
+        ("dml", "Rendered DML Delete"),
+        ("pt_archiver", "pt-archiver"),
+    )
+    EXECUTION_MODE_CHOICES = (
+        ("one_time", "One Time"),
+        ("scheduled", "Scheduled"),
+    )
+    SCHEDULE_FREQUENCY_CHOICES = (
+        ("daily", "Daily"),
+        ("weekly", "Weekly"),
+    )
+    EXECUTION_STATE_CHOICES = (
+        ("idle", "Idle"),
+        ("queued", "Queued"),
+        ("running", "Running"),
+    )
+
     title = models.CharField("Archive Configuration Title", max_length=50)
     resource_group = models.ForeignKey(ResourceGroup, on_delete=models.CASCADE)
     audit_auth_groups = models.CharField(
@@ -1005,10 +1023,58 @@ class ArchiveConfig(models.Model, WorkflowAuditMixin):
     )
     no_delete = models.BooleanField("Retain Source Data")
     sleep = models.IntegerField("Sleep Seconds After Each Limited Batch", default=1)
+    archive_method = models.CharField(
+        "Archive Method",
+        max_length=20,
+        choices=ARCHIVE_METHOD_CHOICES,
+        default="pt_archiver",
+    )
+    execution_mode = models.CharField(
+        "Execution Mode",
+        max_length=20,
+        choices=EXECUTION_MODE_CHOICES,
+        default="one_time",
+    )
+    schedule_frequency = models.CharField(
+        "Schedule Frequency",
+        max_length=20,
+        choices=SCHEDULE_FREQUENCY_CHOICES,
+        blank=True,
+        null=True,
+        default=None,
+    )
+    schedule_time = models.TimeField(
+        "Schedule Time",
+        blank=True,
+        null=True,
+        default=None,
+    )
+    schedule_weekdays = models.CharField(
+        "Schedule Weekdays",
+        max_length=32,
+        blank=True,
+        default="",
+    )
+    next_run_at = models.DateTimeField(
+        "Next Run Time",
+        blank=True,
+        null=True,
+        default=None,
+    )
     status = models.IntegerField(
         "Audit Status", choices=WorkflowStatus.choices, blank=True, default=1
     )
     state = models.BooleanField("Archive Enabled", default=True)
+    execution_state = models.CharField(
+        "Execution State",
+        max_length=20,
+        choices=EXECUTION_STATE_CHOICES,
+        default="idle",
+    )
+    consecutive_failures = models.IntegerField(
+        "Consecutive Scheduled Failures",
+        default=0,
+    )
     user_name = models.CharField("Requester", max_length=30, blank=True, default="")
     user_display = models.CharField(
         "Requester Display Name", max_length=50, blank=True, default=""
@@ -1032,6 +1098,12 @@ class ArchiveLog(models.Model):
     archive = models.ForeignKey(ArchiveConfig, on_delete=models.CASCADE)
     cmd = models.CharField("Archive Command", max_length=2000)
     condition = models.CharField("Archive Condition (WHERE clause)", max_length=1000)
+    archive_method = models.CharField(
+        "Archive Method",
+        max_length=20,
+        choices=ArchiveConfig.ARCHIVE_METHOD_CHOICES,
+        default="pt_archiver",
+    )
     mode = models.CharField(
         "Archive Mode",
         max_length=10,

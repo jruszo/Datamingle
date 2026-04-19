@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Database,
   FileText,
+  Archive,
   LayoutGrid,
   ShieldCheck,
   LogOut,
@@ -33,6 +34,7 @@ const primaryNavigation = [
   { to: '/', label: 'Dashboard', icon: LayoutGrid, isVisible: () => true },
   { to: '/inventory', label: 'Inventory', icon: Server, isVisible: () => canSeeInventory.value },
   { to: '/workflows', label: 'Workflows', icon: FileText, isVisible: () => true },
+  { to: '/archives', label: 'Archives', icon: Archive, isVisible: () => canSeeArchives.value },
   { to: '/queries', label: 'Queries', icon: Database, isVisible: () => true },
   { to: '/permission-management', label: 'Permission Management', icon: ShieldCheck, isVisible: () => canSeePermissionManagement.value },
   { to: '/reports', label: 'Reports', icon: ChartNoAxesCombined, isVisible: () => true },
@@ -61,6 +63,7 @@ const canSeeRuntimeSettings = computed(
   () => authStore.currentUser?.is_superuser || authStore.currentUser?.is_staff || false,
 )
 const canSeeInventory = computed(() => hasPermission('sql.menu_instance'))
+const canSeeArchives = computed(() => hasPermission('sql.menu_archive'))
 const canSeePermissionManagement = computed(() => hasPermission('sql.menu_queryapplylist'))
 const canSeeInstanceTagManagement = computed(() => hasPermission('sql.menu_instance'))
 const canSeeUserManagement = computed(() => authStore.currentUser?.is_superuser ?? false)

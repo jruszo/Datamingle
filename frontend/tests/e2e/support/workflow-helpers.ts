@@ -35,6 +35,17 @@ export function uniqueWorkflowName(prefix: string) {
   return `${prefix} ${suffix}`
 }
 
+export function seedLocalDemo() {
+  execFileSync(
+    'docker',
+    ['exec', 'datamingle-app', 'python', 'manage.py', 'seed_local_demo'],
+    {
+      cwd: REPO_ROOT,
+      stdio: 'pipe',
+    },
+  )
+}
+
 export async function fillSqlEditor(page: Page, testId: string, sql: string) {
   const editor = page.locator(`[data-testid="${testId}"] .cm-content`).first()
   await editor.click()
@@ -69,9 +80,23 @@ export function workflowIdFromUrl(page: Page) {
   return Number(match[1])
 }
 
+export function archiveIdFromUrl(page: Page) {
+  const match = page.url().match(/\/archives\/(\d+)/)
+  if (!match) {
+    throw new Error(`Could not determine archive id from URL: ${page.url()}`)
+  }
+
+  return Number(match[1])
+}
+
 export async function openWorkflowDetail(page: Page, workflowId: number) {
   await page.goto(`/workflows/${workflowId}`)
   await expect(page.getByTestId('workflow-detail-refresh')).toBeVisible()
+}
+
+export async function openArchiveDetail(page: Page, archiveId: number) {
+  await page.goto(`/archives/${archiveId}`)
+  await expect(page.getByTestId('archive-detail-refresh')).toBeVisible()
 }
 
 export async function expectWorkflowBackupFlag(page: Page, workflowId: number, expected: boolean) {
@@ -110,6 +135,18 @@ export async function waitForWorkflowAction(page: Page, testId: string, timeoutM
   )
 }
 
+export async function waitForArchiveAction(page: Page, testId: string, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  await pollArchiveDetail(
+    page,
+    async () => {
+      const action = page.getByTestId(testId)
+      return (await action.count()) > 0 && await action.isVisible()
+    },
+    timeoutMs,
+    `action "${testId}"`,
+  )
+}
+
 export async function waitForWorkflowStatus(page: Page, expectedStatus: string, timeoutMs = DEFAULT_TIMEOUT_MS) {
   const expected = expectedStatus.toLowerCase()
   await pollWorkflowDetail(
@@ -123,6 +160,37 @@ export async function waitForWorkflowStatus(page: Page, expectedStatus: string, 
 export async function readWorkflowStatus(page: Page) {
   const text = await page.getByTestId('workflow-detail-status').textContent()
   return text?.trim() ?? ''
+}
+
+export async function readArchiveStatus(page: Page) {
+  const text = await page.getByTestId('archive-detail-status').textContent()
+  return text?.trim() ?? ''
+}
+
+export async function waitForArchiveExecutionState(
+  page: Page,
+  expectedText: string,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+) {
+  const expected = expectedText.toLowerCase()
+  await pollArchiveDetail(
+    page,
+    async () => {
+      const text = await page.getByTestId('archive-execution-state').textContent()
+      return text?.toLowerCase().includes(expected) ?? false
+    },
+    timeoutMs,
+    `archive state "${expectedText}"`,
+  )
+}
+
+export async function waitForArchiveLogRows(page: Page, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  await pollArchiveDetail(
+    page,
+    async () => await page.locator('[data-testid^="archive-log-item-"]').count() > 0,
+    timeoutMs,
+    'archive log rows',
+  )
 }
 
 export async function assertExecutionRowsPresent(page: Page) {
@@ -198,6 +266,28 @@ async function pollWorkflowDetail(
 
     lastStatus = await readWorkflowStatus(page)
     await page.getByTestId('workflow-detail-refresh').click()
+    await page.waitForTimeout(POLL_INTERVAL_MS)
+  }
+
+  throw new Error(`Timed out waiting for ${description}. Last visible status: ${lastStatus || 'unknown'}`)
+}
+
+async function pollArchiveDetail(
+  page: Page,
+  condition: () => Promise<boolean>,
+  timeoutMs: number,
+  description: string,
+) {
+  const deadline = Date.now() + timeoutMs
+  let lastStatus = ''
+
+  while (Date.now() < deadline) {
+    if (await condition()) {
+      return
+    }
+
+    lastStatus = await readArchiveStatus(page)
+    await page.getByTestId('archive-detail-refresh').click()
     await page.waitForTimeout(POLL_INTERVAL_MS)
   }
 
