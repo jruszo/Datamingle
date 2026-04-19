@@ -15,6 +15,7 @@ from . import (
     api_dashboard,
     api_permission,
     api_settings,
+    api_archive,
 )
 
 router = routers.DefaultRouter()
@@ -181,6 +182,29 @@ urlpatterns = [
         api_workflow.WorkflowExecutionCreate.as_view(),
     ),
     path("v1/workflow/log/", api_workflow.WorkflowLogList.as_view()),
+    path("v1/archive/metadata/", api_archive.ArchiveMetadata.as_view()),
+    path(
+        "v1/archive/approval-preview/",
+        api_archive.ArchiveApprovalPreview.as_view(),
+    ),
+    path("v1/archive/", api_archive.ArchiveListCreate.as_view()),
+    path("v1/archive/<int:archive_id>/", api_archive.ArchiveDetail.as_view()),
+    path(
+        "v1/archive/<int:archive_id>/reviews/",
+        api_archive.ArchiveReviewCreate.as_view(),
+    ),
+    path(
+        "v1/archive/<int:archive_id>/run/",
+        api_archive.ArchiveRunNow.as_view(),
+    ),
+    path(
+        "v1/archive/<int:archive_id>/state/",
+        api_archive.ArchiveStateUpdate.as_view(),
+    ),
+    path(
+        "v1/archive/<int:archive_id>/logs/",
+        api_archive.ArchiveLogList.as_view(),
+    ),
     path("v1/query/instance/", api_query.QueryInstanceList.as_view()),
     path("v1/query/describe/", api_query.QueryDescribe.as_view()),
     path("v1/query/", api_query.QueryExecute.as_view()),

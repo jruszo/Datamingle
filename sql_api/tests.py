@@ -34,6 +34,8 @@ from sql.models import (
     PermissionRequest,
     TemporaryInstanceGrant,
     TemporaryResourceGroupGrant,
+    ArchiveConfig,
+    ArchiveLog,
 )
 from common.utils.const import WorkflowAction, WorkflowStatus, WorkflowType
 import json
@@ -4872,3 +4874,575 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         validate_payload.assert_called_once()
+
+
+class ArchiveApiTests(CacheIsolatedAPITestCase):
+    def setUp(self):
+        self.password = "archive_password"
+        self.can_write_tag, _ = InstanceTag.objects.get_or_create(
+            tag_code="can_write",
+            defaults={
+                "tag_name": "Can Write",
+                "active": True,
+            },
+        )
+
+        self.resource_group = ResourceGroup.objects.create(group_name="Archive Group")
+        self.other_resource_group = ResourceGroup.objects.create(
+            group_name="Other Archive Group"
+        )
+
+        self.mysql_instance = Instance.objects.create(
+            instance_name="archive-mysql",
+            type="master",
+            db_type="mysql",
+            host="127.0.0.1",
+            port=3306,
+            user="root",
+            password="pwd",
+        )
+        self.mysql_instance.resource_group.add(self.resource_group)
+        self.mysql_instance.resource_group.add(self.other_resource_group)
+        self.mysql_instance.instance_tag.add(self.can_write_tag)
+
+        self.pg_instance = Instance.objects.create(
+            instance_name="archive-pg",
+            type="master",
+            db_type="pgsql",
+            host="127.0.0.1",
+            port=5432,
+            user="postgres",
+            password="pwd",
+            db_name="workflow_pg",
+        )
+        self.pg_instance.resource_group.add(self.resource_group)
+        self.pg_instance.instance_tag.add(self.can_write_tag)
+
+        self.reviewer_auth_group = Group.objects.create(name="Archive DBA")
+
+        self.requester = self._create_user(
+            "archive_requester",
+            "Archive Requester",
+            permissions=("menu_archive", "archive_apply"),
+            resource_groups=(self.resource_group,),
+        )
+        self.reviewer = self._create_user(
+            "archive_reviewer",
+            "Archive Reviewer",
+            permissions=("menu_archive", "archive_review", "archive_mgt"),
+            auth_groups=(self.reviewer_auth_group,),
+            resource_groups=(self.resource_group,),
+        )
+        self.outsider = self._create_user(
+            "archive_outsider",
+            "Archive Outsider",
+        )
+
+        WorkflowAuditSetting.objects.create(
+            workflow_type=WorkflowType.ARCHIVE,
+            group_id=self.resource_group.group_id,
+            group_name=self.resource_group.group_name,
+            audit_auth_groups=str(self.reviewer_auth_group.id),
+        )
+        WorkflowAuditSetting.objects.create(
+            workflow_type=WorkflowType.ARCHIVE,
+            group_id=self.other_resource_group.group_id,
+            group_name=self.other_resource_group.group_name,
+            audit_auth_groups=str(self.reviewer_auth_group.id),
+        )
+
+    def _create_user(
+        self,
+        username,
+        display,
+        permissions=(),
+        auth_groups=(),
+        resource_groups=(),
+    ):
+        user = User.objects.create(
+            username=username,
+            display=display,
+            is_active=True,
+        )
+        user.set_password(self.password)
+        user.save()
+        for permission in permissions:
+            user.user_permissions.add(Permission.objects.get(codename=permission))
+        for auth_group in auth_groups:
+            user.groups.add(auth_group)
+        for resource_group in resource_groups:
+            user.resource_group.add(resource_group)
+        return user
+
+    def authenticate(self, user):
+        response = self.client.post(
+            "/api/auth/token/",
+            {"username": user.username, "password": self.password},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        token = response_data(response)["access"]
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
+        return token
+
+    def archive_payload(self, **overrides):
+        payload = {
+            "title": "Delete expired rows",
+            "group_id": self.resource_group.group_id,
+            "instance_id": self.mysql_instance.id,
+            "db_name": "demo_orders",
+            "table_name": "orders",
+            "condition": "created_at < {{ today }}",
+            "archive_method": "dml",
+            "execution_mode": "one_time",
+        }
+        payload.update(overrides)
+        return payload
+
+    def create_pending_archive(self, **overrides):
+        self.authenticate(self.requester)
+        with patch("sql_api.api_archive.async_task"):
+            response = self.client.post(
+                "/api/v1/archive/",
+                self.archive_payload(**overrides),
+                format="json",
+            )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        archive_id = assert_success_envelope(self, response)["id"]
+        return ArchiveConfig.objects.get(id=archive_id)
+
+    def test_archive_metadata_requires_archive_permission(self):
+        self.authenticate(self.outsider)
+
+        response = self.client.get("/api/v1/archive/metadata/", format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_archive_metadata_lists_archive_methods_by_engine(self):
+        self.authenticate(self.requester)
+
+        response = self.client.get("/api/v1/archive/metadata/", format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = assert_success_envelope(self, response)
+        mysql_record = next(
+            item
+            for item in payload["instances"]
+            if item["id"] == self.mysql_instance.id
+        )
+        pg_record = next(
+            item for item in payload["instances"] if item["id"] == self.pg_instance.id
+        )
+        self.assertEqual(
+            mysql_record["available_archive_methods"], ["dml", "pt_archiver"]
+        )
+        self.assertEqual(pg_record["available_archive_methods"], ["dml"])
+
+    def test_archive_metadata_hides_unowned_groups_on_shared_instances(self):
+        self.authenticate(self.requester)
+
+        response = self.client.get("/api/v1/archive/metadata/", format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = assert_success_envelope(self, response)
+        mysql_record = next(
+            item
+            for item in payload["instances"]
+            if item["id"] == self.mysql_instance.id
+        )
+        resource_group_ids = {group["group_id"] for group in payload["resource_groups"]}
+        self.assertEqual(mysql_record["group_ids"], [self.resource_group.group_id])
+        self.assertEqual(resource_group_ids, {self.resource_group.group_id})
+
+    def test_archive_approval_preview_checks_group_access(self):
+        self.authenticate(self.requester)
+
+        response = self.client.get(
+            f"/api/v1/archive/approval-preview/?group_id={self.resource_group.group_id}",
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = assert_success_envelope(self, response)
+        self.assertEqual(payload["display"], "Archive DBA")
+
+        forbidden_response = self.client.get(
+            f"/api/v1/archive/approval-preview/?group_id={self.other_resource_group.group_id}",
+            format="json",
+        )
+        self.assertEqual(forbidden_response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_create_one_time_archive_request(self):
+        self.authenticate(self.requester)
+
+        with patch("sql_api.api_archive.async_task"):
+            response = self.client.post(
+                "/api/v1/archive/",
+                self.archive_payload(),
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        archive_id = assert_success_envelope(self, response)["id"]
+        archive = ArchiveConfig.objects.get(id=archive_id)
+        self.assertEqual(archive.mode, "purge")
+        self.assertFalse(archive.no_delete)
+        self.assertEqual(archive.archive_method, "dml")
+        self.assertEqual(archive.execution_mode, "one_time")
+        self.assertEqual(archive.status, WorkflowStatus.WAITING)
+        self.assertFalse(archive.state)
+
+    def test_create_archive_rejects_unowned_group_on_shared_instance(self):
+        self.authenticate(self.requester)
+
+        with patch("sql_api.api_archive.async_task"):
+            response = self.client.post(
+                "/api/v1/archive/",
+                self.archive_payload(group_id=self.other_resource_group.group_id),
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_create_scheduled_daily_archive_request(self):
+        self.authenticate(self.requester)
+
+        with patch("sql_api.api_archive.async_task"):
+            response = self.client.post(
+                "/api/v1/archive/",
+                self.archive_payload(
+                    execution_mode="scheduled",
+                    schedule_frequency="daily",
+                    schedule_time="02:15",
+                ),
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        archive = ArchiveConfig.objects.get(
+            id=assert_success_envelope(self, response)["id"]
+        )
+        self.assertEqual(archive.execution_mode, "scheduled")
+        self.assertEqual(archive.schedule_frequency, "daily")
+        self.assertEqual(archive.schedule_time.strftime("%H:%M"), "02:15")
+        self.assertEqual(archive.schedule_weekdays, "")
+
+    def test_create_scheduled_weekly_archive_request(self):
+        self.authenticate(self.requester)
+
+        with patch("sql_api.api_archive.async_task"):
+            response = self.client.post(
+                "/api/v1/archive/",
+                self.archive_payload(
+                    execution_mode="scheduled",
+                    schedule_frequency="weekly",
+                    schedule_time="03:30",
+                    schedule_weekdays=["mon", "fri"],
+                ),
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        archive = ArchiveConfig.objects.get(
+            id=assert_success_envelope(self, response)["id"]
+        )
+        self.assertEqual(archive.schedule_frequency, "weekly")
+        self.assertEqual(archive.schedule_time.strftime("%H:%M"), "03:30")
+        self.assertEqual(archive.schedule_weekdays, "mon,fri")
+
+    def test_create_archive_rejects_pt_archiver_for_non_mysql(self):
+        self.authenticate(self.requester)
+
+        with patch("sql_api.api_archive.async_task"):
+            response = self.client.post(
+                "/api/v1/archive/",
+                self.archive_payload(
+                    instance_id=self.pg_instance.id,
+                    archive_method="pt_archiver",
+                ),
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("pt-archiver", " ".join(response.json()["errors"]))
+
+    def test_create_archive_requires_schedule_fields(self):
+        self.authenticate(self.requester)
+
+        with patch("sql_api.api_archive.async_task"):
+            response = self.client.post(
+                "/api/v1/archive/",
+                self.archive_payload(
+                    execution_mode="scheduled",
+                    schedule_frequency="weekly",
+                    schedule_weekdays=[],
+                ),
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("schedule_frequency", " ".join(response.json()["errors"]))
+
+    def test_review_pass_for_scheduled_archive_arms_next_run(self):
+        archive = self.create_pending_archive(
+            execution_mode="scheduled",
+            schedule_frequency="daily",
+            schedule_time="02:00",
+        )
+        self.authenticate(self.reviewer)
+        next_run = datetime.now() + timedelta(days=1)
+
+        with patch(
+            "sql_api.api_archive.calculate_next_archive_run", return_value=next_run
+        ), patch(
+            "sql_api.api_archive.schedule_archive"
+        ) as schedule_archive_mock, patch(
+            "sql_api.api_archive.async_task"
+        ):
+            response = self.client.post(
+                f"/api/v1/archive/{archive.id}/reviews/",
+                {"audit_type": "pass", "audit_remark": "Looks good"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        archive.refresh_from_db()
+        self.assertEqual(archive.status, WorkflowStatus.PASSED)
+        self.assertTrue(archive.state)
+        self.assertEqual(
+            archive.next_run_at.replace(tzinfo=None), next_run.replace(tzinfo=None)
+        )
+        schedule_archive_mock.assert_called_once()
+
+    def test_review_reject_and_cancel_archive_workflows(self):
+        reject_archive = self.create_pending_archive(
+            title="Reject me",
+            execution_mode="scheduled",
+            schedule_frequency="daily",
+            schedule_time="01:00",
+        )
+        self.authenticate(self.reviewer)
+
+        with patch("sql_api.api_archive.cancel_archive_schedule") as cancel_mock, patch(
+            "sql_api.api_archive.async_task"
+        ):
+            reject_response = self.client.post(
+                f"/api/v1/archive/{reject_archive.id}/reviews/",
+                {"audit_type": "reject", "audit_remark": "No"},
+                format="json",
+            )
+
+        self.assertEqual(reject_response.status_code, status.HTTP_200_OK)
+        reject_archive.refresh_from_db()
+        self.assertEqual(reject_archive.status, WorkflowStatus.REJECTED)
+        self.assertFalse(reject_archive.state)
+        self.assertIsNone(reject_archive.next_run_at)
+        cancel_mock.assert_called_once_with(reject_archive.id)
+
+        cancel_archive = self.create_pending_archive(title="Cancel me")
+        self.authenticate(self.requester)
+        with patch("sql_api.api_archive.cancel_archive_schedule") as cancel_mock, patch(
+            "sql_api.api_archive.async_task"
+        ):
+            cancel_response = self.client.post(
+                f"/api/v1/archive/{cancel_archive.id}/reviews/",
+                {"audit_type": "cancel", "audit_remark": "Stop this"},
+                format="json",
+            )
+
+        self.assertEqual(cancel_response.status_code, status.HTTP_200_OK)
+        cancel_archive.refresh_from_db()
+        self.assertEqual(cancel_archive.status, WorkflowStatus.ABORTED)
+        self.assertFalse(cancel_archive.state)
+        self.assertIsNone(cancel_archive.next_run_at)
+        cancel_mock.assert_called_once_with(cancel_archive.id)
+
+    def test_run_now_queues_execution_for_approved_archive(self):
+        archive = self.create_pending_archive()
+        archive.status = WorkflowStatus.PASSED
+        archive.state = True
+        archive.save(update_fields=["status", "state"])
+        audit = WorkflowAudit.objects.get(
+            workflow_type=WorkflowType.ARCHIVE,
+            workflow_id=archive.id,
+        )
+        audit.current_status = WorkflowStatus.PASSED
+        audit.current_audit = ""
+        audit.next_audit = ""
+        audit.save(update_fields=["current_status", "current_audit", "next_audit"])
+
+        self.authenticate(self.reviewer)
+
+        with patch("sql_api.api_archive.queue_archive_execution") as queue_mock:
+            response = self.client.post(
+                f"/api/v1/archive/{archive.id}/run/",
+                {},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        queue_mock.assert_called_once_with(archive.id, trigger="manual")
+
+    def test_run_now_requires_manager_group_scope(self):
+        archive = ArchiveConfig.objects.create(
+            title="Other group archive",
+            resource_group=self.other_resource_group,
+            audit_auth_groups="",
+            src_instance=self.mysql_instance,
+            src_db_name="demo_orders",
+            src_table_name="orders",
+            condition="id = 1",
+            mode="purge",
+            no_delete=False,
+            sleep=1,
+            archive_method="dml",
+            execution_mode="one_time",
+            status=WorkflowStatus.PASSED,
+            state=True,
+            user_name=self.requester.username,
+            user_display=self.requester.display,
+        )
+        self.authenticate(self.reviewer)
+
+        with patch("sql_api.api_archive.queue_archive_execution") as queue_mock:
+            response = self.client.post(
+                f"/api/v1/archive/{archive.id}/run/",
+                {},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        queue_mock.assert_not_called()
+
+    def test_disable_scheduled_archive_cancels_current_schedule(self):
+        archive = self.create_pending_archive(
+            execution_mode="scheduled",
+            schedule_frequency="daily",
+            schedule_time="04:00",
+        )
+        archive.status = WorkflowStatus.PASSED
+        archive.state = True
+        archive.next_run_at = datetime.now() + timedelta(days=1)
+        archive.save(update_fields=["status", "state", "next_run_at"])
+
+        self.authenticate(self.reviewer)
+
+        with patch("sql_api.api_archive.cancel_archive_schedule") as cancel_mock:
+            response = self.client.post(
+                f"/api/v1/archive/{archive.id}/state/",
+                {"enabled": False},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        archive.refresh_from_db()
+        self.assertFalse(archive.state)
+        self.assertIsNone(archive.next_run_at)
+        cancel_mock.assert_called_once_with(archive.id)
+
+    def test_state_update_requires_manager_group_scope(self):
+        archive = ArchiveConfig.objects.create(
+            title="Other group scheduled archive",
+            resource_group=self.other_resource_group,
+            audit_auth_groups="",
+            src_instance=self.mysql_instance,
+            src_db_name="demo_orders",
+            src_table_name="orders",
+            condition="id = 1",
+            mode="purge",
+            no_delete=False,
+            sleep=1,
+            archive_method="dml",
+            execution_mode="scheduled",
+            schedule_frequency="daily",
+            schedule_time=datetime.now().time().replace(second=0, microsecond=0),
+            schedule_weekdays="",
+            next_run_at=datetime.now() + timedelta(days=1),
+            status=WorkflowStatus.PASSED,
+            state=True,
+            user_name=self.requester.username,
+            user_display=self.requester.display,
+        )
+        self.authenticate(self.reviewer)
+
+        with patch("sql_api.api_archive.cancel_archive_schedule") as cancel_mock:
+            response = self.client.post(
+                f"/api/v1/archive/{archive.id}/state/",
+                {"enabled": False},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        cancel_mock.assert_not_called()
+
+    def test_archive_detail_flags_and_log_endpoint(self):
+        archive = self.create_pending_archive(
+            execution_mode="scheduled",
+            schedule_frequency="weekly",
+            schedule_time="05:30",
+            schedule_weekdays=["mon"],
+        )
+        archive.status = WorkflowStatus.PASSED
+        archive.state = True
+        archive.next_run_at = datetime.now() + timedelta(days=3)
+        archive.save(update_fields=["status", "state", "next_run_at"])
+
+        audit = WorkflowAudit.objects.get(
+            workflow_type=WorkflowType.ARCHIVE,
+            workflow_id=archive.id,
+        )
+        audit.current_status = WorkflowStatus.PASSED
+        audit.current_audit = ""
+        audit.next_audit = ""
+        audit.save(update_fields=["current_status", "current_audit", "next_audit"])
+
+        WorkflowLog.objects.create(
+            audit_id=audit.audit_id,
+            operation_type=WorkflowAction.SUBMIT,
+            operation_type_desc="Archive Submitted",
+            operation_info="Archive workflow created",
+            operator=self.requester.username,
+            operator_display=self.requester.display,
+        )
+        ArchiveLog.objects.create(
+            archive=archive,
+            cmd="DELETE FROM orders WHERE created_at < '2026-04-18'",
+            condition="created_at < '2026-04-18'",
+            archive_method="dml",
+            mode="purge",
+            no_delete=False,
+            sleep=1,
+            select_cnt=5,
+            insert_cnt=0,
+            delete_cnt=5,
+            statistics="deleted=5",
+            success=True,
+            error_info="",
+            start_time=datetime.now(),
+            end_time=datetime.now(),
+        )
+
+        self.authenticate(self.reviewer)
+
+        detail_response = self.client.get(
+            f"/api/v1/archive/{archive.id}/",
+            format="json",
+        )
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+        detail_payload = assert_success_envelope(self, detail_response)
+        self.assertTrue(detail_payload["is_can_run_now"])
+        self.assertFalse(detail_payload["is_can_enable"])
+        self.assertTrue(detail_payload["is_can_disable"])
+        self.assertEqual(len(detail_payload["archive_logs"]), 1)
+        self.assertEqual(
+            detail_payload["logs"][0]["operation_type_desc"], "Archive Submitted"
+        )
+
+        log_response = self.client.get(
+            f"/api/v1/archive/{archive.id}/logs/",
+            format="json",
+        )
+        self.assertEqual(log_response.status_code, status.HTTP_200_OK)
+        log_payload = assert_success_envelope(self, log_response)
+        self.assertEqual(log_payload["count"], 1)
+        self.assertEqual(log_payload["results"][0]["delete_cnt"], 5)

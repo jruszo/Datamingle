@@ -1536,6 +1536,163 @@ export type WorkflowWindowPayload = {
   run_date_end?: string | null
 }
 
+export type ArchiveMethod = 'dml' | 'pt_archiver'
+export type ArchiveExecutionMode = 'one_time' | 'scheduled'
+export type ArchiveScheduleFrequency = 'daily' | 'weekly'
+export type ArchiveWeekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+
+export type ArchiveResourceGroupRecord = {
+  group_id: number
+  group_name: string
+  label: string
+}
+
+export type ArchiveInstanceRecord = {
+  id: number
+  instance_name: string
+  db_type: string
+  type: string
+  label: string
+  group_ids: number[]
+  group_names: string[]
+  available_archive_methods: ArchiveMethod[]
+}
+
+export type ArchiveMetadataRecord = {
+  resource_groups: ArchiveResourceGroupRecord[]
+  instances: ArchiveInstanceRecord[]
+  schedule_frequencies: Array<{ value: ArchiveScheduleFrequency; label: string }>
+  weekdays: Array<{ value: ArchiveWeekday; label: string }>
+}
+
+export type ArchiveApprovalPreview = {
+  group_id: number
+  group_name: string
+  audit_auth_groups: string
+  display: string
+  review_info: Array<{
+    group_name: string
+    is_auto_pass: boolean
+    is_current_node: boolean
+    is_passed_node: boolean
+  }>
+}
+
+export type ArchiveListRecord = {
+  id: number
+  title: string
+  status: number
+  status_label: string
+  archive_method: ArchiveMethod
+  execution_mode: ArchiveExecutionMode
+  schedule_frequency: ArchiveScheduleFrequency | null
+  state: boolean
+  src_instance_name: string
+  src_db_name: string
+  src_table_name: string
+  resource_group_name: string
+  user_display: string
+  create_time: string
+  last_archive_time: string | null
+  next_run_at: string | null
+}
+
+export type ArchiveLogRecord = {
+  id: number
+  cmd: string
+  condition: string
+  archive_method: ArchiveMethod
+  mode: string
+  success: boolean
+  error_info: string
+  select_cnt: number
+  insert_cnt: number
+  delete_cnt: number
+  start_time: string
+  end_time: string
+  statistics: string
+}
+
+export type ArchiveDetailRecord = {
+  id: number
+  title: string
+  status: number
+  status_label: string
+  execution_state_label: string
+  archive_method: ArchiveMethod
+  execution_mode: ArchiveExecutionMode
+  schedule_frequency: ArchiveScheduleFrequency | null
+  schedule_time: string | null
+  schedule_weekdays: ArchiveWeekday[]
+  next_run_at: string | null
+  last_archive_time: string | null
+  state: boolean
+  resource_group: {
+    group_id: number
+    group_name: string
+  }
+  src_instance: {
+    id: number
+    instance_name: string
+    db_type: string
+  }
+  src_db_name: string
+  src_table_name: string
+  condition: string
+  sleep: number
+  create_time: string
+  user_name: string
+  user_display: string
+  review_info: Array<{
+    group_name: string
+    is_current_node: boolean
+    is_passed_node: boolean
+  }>
+  current_reviewers: WorkflowCurrentReviewer[]
+  logs: WorkflowLogRecord[]
+  archive_logs: ArchiveLogRecord[]
+  last_operation_info: string
+  is_can_review: boolean
+  is_can_cancel: boolean
+  is_can_run_now: boolean
+  is_can_enable: boolean
+  is_can_disable: boolean
+}
+
+export type ArchiveCreatePayload = {
+  title: string
+  group_id: number
+  instance_id: number
+  db_name: string
+  table_name: string
+  condition: string
+  archive_method: ArchiveMethod
+  execution_mode: ArchiveExecutionMode
+  schedule_frequency?: ArchiveScheduleFrequency | null
+  schedule_time?: string | null
+  schedule_weekdays?: ArchiveWeekday[]
+  sleep?: number
+}
+
+export type ArchiveReviewPayload = {
+  audit_type: 'pass' | 'reject' | 'cancel'
+  audit_remark: string
+}
+
+export type ArchiveStatePayload = {
+  enabled: boolean
+}
+
+export type ArchiveListFilters = {
+  page?: number
+  size?: number
+  search?: string
+  status?: number | ''
+  execution_mode?: ArchiveExecutionMode | ''
+  instance_id?: number | ''
+  group_id?: number | ''
+}
+
 function buildWorkflowListQueryString(filters: WorkflowListFilters) {
   const params = new URLSearchParams()
 
@@ -1568,6 +1725,34 @@ function buildWorkflowListQueryString(filters: WorkflowListFilters) {
   }
   if (filters.end_date?.trim()) {
     params.set('end_date', filters.end_date.trim())
+  }
+
+  return params.toString()
+}
+
+function buildArchiveListQueryString(filters: ArchiveListFilters) {
+  const params = new URLSearchParams()
+
+  if (filters.page) {
+    params.set('page', `${filters.page}`)
+  }
+  if (filters.size) {
+    params.set('size', `${filters.size}`)
+  }
+  if (filters.search?.trim()) {
+    params.set('search', filters.search.trim())
+  }
+  if (filters.status !== undefined && filters.status !== '') {
+    params.set('status', `${filters.status}`)
+  }
+  if (filters.execution_mode) {
+    params.set('execution_mode', filters.execution_mode)
+  }
+  if (filters.instance_id) {
+    params.set('instance_id', `${filters.instance_id}`)
+  }
+  if (filters.group_id) {
+    params.set('group_id', `${filters.group_id}`)
   }
 
   return params.toString()
@@ -1755,6 +1940,70 @@ export function scheduleWorkflow(
 ) {
   return apiPost<unknown>(`/v1/workflow/${workflowId}/schedule/`, payload, { token }).then(
     (responsePayload) => extractDetail(responsePayload, 'Workflow scheduled for execution.'),
+  )
+}
+
+export function fetchArchiveMetadata(token: string) {
+  return apiGet<unknown>('/v1/archive/metadata/', { token }).then((payload) =>
+    extractData<ArchiveMetadataRecord>(payload),
+  )
+}
+
+export function fetchArchiveApprovalPreview(groupId: number, token: string) {
+  return apiGet<unknown>(`/v1/archive/approval-preview/?group_id=${groupId}`, { token }).then(
+    (payload) => extractData<ArchiveApprovalPreview>(payload),
+  )
+}
+
+export function fetchArchives(token: string, filters: ArchiveListFilters = {}) {
+  const queryString = buildArchiveListQueryString(filters)
+  const path = queryString ? `/v1/archive/?${queryString}` : '/v1/archive/'
+  return apiGet<unknown>(path, { token }).then((payload) =>
+    extractData<PaginatedResponse<ArchiveListRecord>>(payload),
+  )
+}
+
+export function createArchive(payload: ArchiveCreatePayload, token: string) {
+  return apiPost<unknown>('/v1/archive/', payload, { token }).then((responsePayload) =>
+    extractData<{ id: number }>(responsePayload),
+  )
+}
+
+export function fetchArchiveDetail(archiveId: number, token: string) {
+  return apiGet<unknown>(`/v1/archive/${archiveId}/`, { token }).then((payload) =>
+    extractData<ArchiveDetailRecord>(payload),
+  )
+}
+
+export function reviewArchive(
+  archiveId: number,
+  payload: ArchiveReviewPayload,
+  token: string,
+) {
+  return apiPost<unknown>(`/v1/archive/${archiveId}/reviews/`, payload, { token }).then(
+    (responsePayload) => extractDetail(responsePayload, 'Archive workflow reviewed successfully.'),
+  )
+}
+
+export function runArchiveNow(archiveId: number, token: string) {
+  return apiPost<unknown>(`/v1/archive/${archiveId}/run/`, {}, { token }).then(
+    (responsePayload) => extractDetail(responsePayload, 'Archive execution queued.'),
+  )
+}
+
+export function updateArchiveState(
+  archiveId: number,
+  payload: ArchiveStatePayload,
+  token: string,
+) {
+  return apiPost<unknown>(`/v1/archive/${archiveId}/state/`, payload, { token }).then(
+    (responsePayload) => extractDetail(responsePayload, 'Archive schedule updated.'),
+  )
+}
+
+export function fetchArchiveLogs(archiveId: number, token: string, page = 1, size = 20) {
+  return apiGet<unknown>(`/v1/archive/${archiveId}/logs/?page=${page}&size=${size}`, { token }).then(
+    (payload) => extractData<PaginatedResponse<ArchiveLogRecord>>(payload),
   )
 }
 

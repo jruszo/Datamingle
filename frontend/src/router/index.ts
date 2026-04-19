@@ -12,6 +12,9 @@ import { useAuthStore } from '@/stores/auth'
 import DdlWorkflowCreateView from '@/views/DdlWorkflowCreateView.vue'
 import DmlWorkflowCreateView from '@/views/DmlWorkflowCreateView.vue'
 import ExportWorkflowCreateView from '@/views/ExportWorkflowCreateView.vue'
+import ArchiveCreateView from '@/views/ArchiveCreateView.vue'
+import ArchiveDetailView from '@/views/ArchiveDetailView.vue'
+import ArchivesView from '@/views/ArchivesView.vue'
 import HomeView from '@/views/HomeView.vue'
 import InventoryCreateView from '@/views/InventoryCreateView.vue'
 import InventoryView from '@/views/InventoryView.vue'
@@ -48,6 +51,9 @@ const router = createRouter({
     { path: '/workflows/dml/new', name: 'workflow-dml-new', component: DmlWorkflowCreateView, meta: { title: 'New DML Request' } },
     { path: '/workflows/export/new', name: 'workflow-export-new', component: ExportWorkflowCreateView, meta: { title: 'New Export Request' } },
     { path: '/workflows/:workflowId', name: 'workflow-detail', component: WorkflowDetailView, meta: { title: 'Workflow Detail' } },
+    { path: '/archives', name: 'archives', component: ArchivesView, meta: { title: 'Archives' } },
+    { path: '/archives/new', name: 'archive-new', component: ArchiveCreateView, meta: { title: 'New Archive' } },
+    { path: '/archives/:archiveId', name: 'archive-detail', component: ArchiveDetailView, meta: { title: 'Archive Detail' } },
     { path: '/queries', name: 'queries', component: QueriesView, meta: { title: 'Queries' } },
     { path: '/permission-management', name: 'permission-management', component: PermissionManagementView, meta: { title: 'Permission Management' } },
     { path: '/reports', name: 'reports', component: ReportsView, meta: { title: 'Reports' } },
