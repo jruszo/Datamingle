@@ -175,8 +175,10 @@ export async function waitForArchiveExecutionState(
   const expected = expectedText.toLowerCase()
   await pollArchiveDetail(
     page,
-    async () =>
-      (await page.locator('body').textContent())?.toLowerCase().includes(expected) ?? false,
+    async () => {
+      const text = await page.getByTestId('archive-execution-state').textContent()
+      return text?.toLowerCase().includes(expected) ?? false
+    },
     timeoutMs,
     `archive state "${expectedText}"`,
   )

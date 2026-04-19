@@ -45,6 +45,9 @@ ARCHIVE_METHOD_DML = "dml"
 ARCHIVE_METHOD_PT_ARCHIVER = "pt_archiver"
 ARCHIVE_EXECUTION_ONE_TIME = "one_time"
 ARCHIVE_EXECUTION_SCHEDULED = "scheduled"
+ARCHIVE_EXECUTION_STATE_IDLE = "idle"
+ARCHIVE_EXECUTION_STATE_QUEUED = "queued"
+ARCHIVE_EXECUTION_STATE_RUNNING = "running"
 ARCHIVE_SCHEDULE_DAILY = "daily"
 ARCHIVE_SCHEDULE_WEEKLY = "weekly"
 ARCHIVE_WEEKDAY_ORDER = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -54,6 +57,7 @@ ARCHIVE_WEEKDAY_INDEX = {
 ARCHIVE_SCHEDULE_PREFIX = "archive-timing"
 ARCHIVE_CONDITION_PATTERN = re.compile(r"\{\{\s*([a-z_]+)\s*\}\}")
 ARCHIVE_SAFE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9_$]+$")
+ARCHIVE_MAX_CONSECUTIVE_FAILURES = 3
 
 
 def archive_schedule_name(archive_id):
@@ -447,20 +451,33 @@ def _execute_dml_archive(archive_info):
 
 
 def queue_archive_execution(archive_id, trigger="manual"):
-    async_task(
-        "sql.archiver.archive",
-        archive_id,
-        trigger,
-        hook="sql.archiver.archive_task_callback",
-        timeout=-1,
-        task_name=f"archive-{archive_id}",
-    )
+    with transaction.atomic():
+        archive_info = ArchiveConfig.objects.select_for_update().get(id=archive_id)
+        if archive_info.execution_state != ARCHIVE_EXECUTION_STATE_IDLE:
+            return False
+        archive_info.execution_state = ARCHIVE_EXECUTION_STATE_QUEUED
+        archive_info.save(update_fields=["execution_state"])
+        async_task(
+            "sql.archiver.archive",
+            archive_id,
+            trigger,
+            hook="sql.archiver.archive_task_callback",
+            timeout=-1,
+            task_name=f"archive-{archive_id}",
+        )
+    return True
 
 
 def archive_task_callback(task):
     archive_id = task.args[0]
     trigger = task.args[1] if len(task.args) > 1 else "manual"
-    archive_info = ArchiveConfig.objects.get(id=archive_id)
+    try:
+        archive_info = ArchiveConfig.objects.get(id=archive_id)
+    except ArchiveConfig.DoesNotExist:
+        logger.warning(
+            "Skipping archive task callback for deleted archive id=%s", archive_id
+        )
+        return
     audit = Audit.detail_by_workflow_id(archive_id, WorkflowType.ARCHIVE)
 
     if audit:
@@ -482,6 +499,7 @@ def archive_task_callback(task):
             ArchiveConfig.objects.filter(id=archive_id).update(
                 state=False,
                 next_run_at=None,
+                consecutive_failures=0,
             )
         return
 
@@ -489,7 +507,36 @@ def archive_task_callback(task):
         ArchiveConfig.objects.filter(id=archive_id).update(next_run_at=None)
         return
 
+    if trigger != "scheduled":
+        if task.success:
+            ArchiveConfig.objects.filter(id=archive_id).update(consecutive_failures=0)
+        return
+
+    if not task.success:
+        failure_count = archive_info.consecutive_failures + 1
+        update_kwargs = {
+            "next_run_at": None,
+            "consecutive_failures": failure_count,
+        }
+        if failure_count >= ARCHIVE_MAX_CONSECUTIVE_FAILURES:
+            update_kwargs["state"] = False
+        ArchiveConfig.objects.filter(id=archive_id).update(**update_kwargs)
+        if audit and failure_count >= ARCHIVE_MAX_CONSECUTIVE_FAILURES:
+            Audit.add_log(
+                audit_id=audit.audit_id,
+                operation_type=WorkflowAction.EXECUTE_SET_TIME,
+                operation_type_desc="Archive Schedule Disabled",
+                operation_info=(
+                    "Archive schedule disabled after "
+                    f"{failure_count} consecutive execution failures."
+                ),
+                operator="",
+                operator_display="System",
+            )
+        return
+
     next_run = calculate_next_archive_run(archive_info, from_time=timezone.now())
+    ArchiveConfig.objects.filter(id=archive_id).update(consecutive_failures=0)
     schedule_archive(archive_info, run_at=next_run)
 
 
@@ -805,8 +852,14 @@ def archive(archive_id, trigger="manual"):
     Execute database archive.
     :return:
     """
+    archive_info = None
+    queued_state_seen = False
+    marked_running = False
     with transaction.atomic():
         archive_info = ArchiveConfig.objects.select_for_update().get(id=archive_id)
+        queued_state_seen = (
+            archive_info.execution_state == ARCHIVE_EXECUTION_STATE_QUEUED
+        )
         if archive_info.status != WorkflowStatus.PASSED:
             raise RuntimeError("Archive workflow is not approved.")
         if (
@@ -820,29 +873,52 @@ def archive(archive_id, trigger="manual"):
             and archive_info.last_archive_time is not None
         ):
             raise RuntimeError("One-time archive has already completed.")
+        if archive_info.execution_state == ARCHIVE_EXECUTION_STATE_RUNNING:
+            raise RuntimeError("Archive execution is already running.")
+        if (
+            trigger == "scheduled"
+            and archive_info.execution_state != ARCHIVE_EXECUTION_STATE_IDLE
+        ):
+            raise RuntimeError("Archive execution is already queued or running.")
+        if trigger != "scheduled" and archive_info.execution_state not in (
+            ARCHIVE_EXECUTION_STATE_IDLE,
+            ARCHIVE_EXECUTION_STATE_QUEUED,
+        ):
+            raise RuntimeError("Archive execution is already queued or running.")
+        archive_info.execution_state = ARCHIVE_EXECUTION_STATE_RUNNING
+        archive_info.save(update_fields=["execution_state"])
+        marked_running = True
 
-    audit = Audit.detail_by_workflow_id(archive_id, WorkflowType.ARCHIVE)
-    if audit:
-        operation_info = (
-            "System scheduled archive execution"
-            if trigger == "scheduled"
-            else "Archive execution started"
-        )
-        Audit.add_log(
-            audit_id=audit.audit_id,
-            operation_type=WorkflowAction.EXECUTE_START,
-            operation_type_desc="Archive Execution Started",
-            operation_info=operation_info,
-            operator="",
-            operator_display="System" if trigger == "scheduled" else "Archive Manager",
-        )
+    try:
+        audit = Audit.detail_by_workflow_id(archive_id, WorkflowType.ARCHIVE)
+        if audit:
+            operation_info = (
+                "System scheduled archive execution"
+                if trigger == "scheduled"
+                else "Archive execution started"
+            )
+            Audit.add_log(
+                audit_id=audit.audit_id,
+                operation_type=WorkflowAction.EXECUTE_START,
+                operation_type_desc="Archive Execution Started",
+                operation_info=operation_info,
+                operator="",
+                operator_display=(
+                    "System" if trigger == "scheduled" else "Archive Manager"
+                ),
+            )
 
-    if (
-        archive_info.mode in ("file", "dest")
-        or archive_info.archive_method == ARCHIVE_METHOD_PT_ARCHIVER
-    ):
-        return _execute_pt_archiver_archive(archive_info)
-    return _execute_dml_archive(archive_info)
+        if (
+            archive_info.mode in ("file", "dest")
+            or archive_info.archive_method == ARCHIVE_METHOD_PT_ARCHIVER
+        ):
+            return _execute_pt_archiver_archive(archive_info)
+        return _execute_dml_archive(archive_info)
+    finally:
+        if marked_running or (trigger != "scheduled" and queued_state_seen):
+            ArchiveConfig.objects.filter(id=archive_id).update(
+                execution_state=ARCHIVE_EXECUTION_STATE_IDLE
+            )
 
 
 @permission_required("sql.menu_archive", raise_exception=True)

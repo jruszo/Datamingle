@@ -128,7 +128,7 @@ function executionStateBadgeClass(value: string) {
   if (value === 'Enabled' || value === 'Ready' || value === 'Completed') {
     return 'border-emerald-200 bg-emerald-50 text-emerald-700'
   }
-  if (value === 'Pending') {
+  if (value === 'Pending' || value === 'Queued' || value === 'Running') {
     return 'border-amber-200 bg-amber-50 text-amber-700'
   }
   return 'border-slate-200 bg-slate-100 text-slate-600'
@@ -368,7 +368,11 @@ onMounted(async () => {
           <Badge variant="outline" data-testid="archive-detail-status" :class="statusBadgeClass(archiveDetail.status)">
             {{ archiveDetail.status_label }}
           </Badge>
-          <Badge variant="outline" :class="executionStateBadgeClass(archiveDetail.execution_state_label)">
+          <Badge
+            variant="outline"
+            data-testid="archive-execution-state"
+            :class="executionStateBadgeClass(archiveDetail.execution_state_label)"
+          >
             {{ archiveDetail.execution_state_label }}
           </Badge>
         </div>

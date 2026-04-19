@@ -15,6 +15,8 @@ from sql.utils.workflow_audit import AuditSetting, AuditV2
 from sql.archiver import (
     ARCHIVE_EXECUTION_ONE_TIME,
     ARCHIVE_EXECUTION_SCHEDULED,
+    ARCHIVE_EXECUTION_STATE_IDLE,
+    ARCHIVE_EXECUTION_STATE_QUEUED,
     ARCHIVE_METHOD_PT_ARCHIVER,
     ARCHIVE_SCHEDULE_DAILY,
     ARCHIVE_SCHEDULE_WEEKLY,
@@ -23,6 +25,7 @@ from sql.archiver import (
     archive_task_callback,
     build_archive_delete_sql,
     calculate_next_archive_run,
+    queue_archive_execution,
     render_archive_condition,
     _build_pt_archiver_args,
 )
@@ -449,7 +452,7 @@ class ArchiveExecutionHelpersTest(TestCase):
 
     def test_archive_task_callback_disables_completed_one_time_archives(self):
         task = SimpleNamespace(
-            args=(self.archive.id,),
+            args=(self.archive.id, "scheduled"),
             success=True,
             result="done",
             error="",
@@ -462,7 +465,7 @@ class ArchiveExecutionHelpersTest(TestCase):
         self.assertIsNone(self.archive.next_run_at)
 
     @patch("sql.archiver.calculate_next_archive_run")
-    def test_archive_task_callback_rearms_scheduled_archives_after_failure(
+    def test_archive_task_callback_rearms_scheduled_archives_after_success(
         self, calculate_next_archive_run_mock
     ):
         next_run = datetime.now() + timedelta(days=2)
@@ -484,10 +487,10 @@ class ArchiveExecutionHelpersTest(TestCase):
             ArchiveConfig.objects.filter(id=archive_info.id).update(next_run_at=run_at)
 
         task = SimpleNamespace(
-            args=(self.archive.id,),
-            success=False,
-            result="",
-            error="boom",
+            args=(self.archive.id, "scheduled"),
+            success=True,
+            result="done",
+            error="",
         )
 
         with patch(
@@ -501,3 +504,96 @@ class ArchiveExecutionHelpersTest(TestCase):
             next_run.replace(tzinfo=None),
         )
         schedule_archive_mock.assert_called_once()
+
+    def test_archive_task_callback_stops_rescheduling_after_scheduled_failure(self):
+        self.archive.execution_mode = ARCHIVE_EXECUTION_SCHEDULED
+        self.archive.schedule_frequency = ARCHIVE_SCHEDULE_DAILY
+        self.archive.schedule_time = time(2, 0)
+        self.archive.next_run_at = datetime.now() + timedelta(days=1)
+        self.archive.save(
+            update_fields=[
+                "execution_mode",
+                "schedule_frequency",
+                "schedule_time",
+                "next_run_at",
+            ]
+        )
+
+        task = SimpleNamespace(
+            args=(self.archive.id, "scheduled"),
+            success=False,
+            result="",
+            error="boom",
+        )
+
+        with patch("sql.archiver.schedule_archive") as schedule_archive_mock:
+            archive_task_callback(task)
+
+        self.archive.refresh_from_db()
+        self.assertEqual(self.archive.consecutive_failures, 1)
+        self.assertTrue(self.archive.state)
+        self.assertIsNone(self.archive.next_run_at)
+        schedule_archive_mock.assert_not_called()
+
+    def test_archive_task_callback_disables_after_repeated_scheduled_failures(self):
+        self.archive.execution_mode = ARCHIVE_EXECUTION_SCHEDULED
+        self.archive.schedule_frequency = ARCHIVE_SCHEDULE_DAILY
+        self.archive.schedule_time = time(2, 0)
+        self.archive.consecutive_failures = 2
+        self.archive.save(
+            update_fields=[
+                "execution_mode",
+                "schedule_frequency",
+                "schedule_time",
+                "consecutive_failures",
+            ]
+        )
+
+        task = SimpleNamespace(
+            args=(self.archive.id, "scheduled"),
+            success=False,
+            result="",
+            error="boom",
+        )
+
+        archive_task_callback(task)
+
+        self.archive.refresh_from_db()
+        self.assertEqual(self.archive.consecutive_failures, 3)
+        self.assertFalse(self.archive.state)
+        self.assertIsNone(self.archive.next_run_at)
+
+    @patch("sql.archiver.logger")
+    def test_archive_task_callback_ignores_missing_archive(self, logger_mock):
+        task = SimpleNamespace(
+            args=(999999, "scheduled"),
+            success=False,
+            result="",
+            error="boom",
+        )
+
+        archive_task_callback(task)
+
+        logger_mock.warning.assert_called_once()
+
+    @patch("sql.archiver.async_task")
+    def test_queue_archive_execution_skips_duplicate_queueing(self, async_task_mock):
+        self.assertTrue(queue_archive_execution(self.archive.id, trigger="manual"))
+        self.assertFalse(queue_archive_execution(self.archive.id, trigger="manual"))
+
+        self.archive.refresh_from_db()
+        self.assertEqual(
+            self.archive.execution_state,
+            ARCHIVE_EXECUTION_STATE_QUEUED,
+        )
+        async_task_mock.assert_called_once()
+
+    @patch("sql.archiver._execute_dml_archive", return_value={"success": True})
+    def test_archive_resets_execution_state_after_running(self, _execute_dml_archive):
+        self.archive.execution_state = ARCHIVE_EXECUTION_STATE_QUEUED
+        self.archive.save(update_fields=["execution_state"])
+
+        archive(self.archive.id, trigger="manual")
+
+        self.archive.refresh_from_db()
+        self.assertEqual(self.archive.execution_state, ARCHIVE_EXECUTION_STATE_IDLE)

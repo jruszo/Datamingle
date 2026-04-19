@@ -9,7 +9,7 @@ from django.http import HttpResponse
 from rest_framework.test import APITestCase, APIClient
 from rest_framework import status
 from common.config import SysConfig
-from sql.utils.workflow_audit import AuditSetting
+from sql.utils.workflow_audit import AuditException, AuditSetting
 from sql.engines import ReviewSet
 from sql.engines.mysql_ddl import MysqlDDLExecutorError
 from sql.engines.models import ReviewResult, ResultSet
@@ -5092,6 +5092,25 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
         self.assertEqual(archive.status, WorkflowStatus.WAITING)
         self.assertFalse(archive.state)
 
+    @patch("sql_api.api_archive.get_auditor")
+    def test_create_archive_hides_internal_audit_errors(self, get_auditor_mock):
+        self.authenticate(self.requester)
+        audit_handler = Mock()
+        audit_handler.create_audit.side_effect = AuditException("db connection failed")
+        get_auditor_mock.return_value = audit_handler
+
+        response = self.client.post(
+            "/api/v1/archive/",
+            self.archive_payload(),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.json()["errors"],
+            "Failed to create approval flow. Contact admin.",
+        )
+
     def test_create_archive_rejects_unowned_group_on_shared_instance(self):
         self.authenticate(self.requester)
 
@@ -5273,7 +5292,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
 
         self.authenticate(self.reviewer)
 
-        with patch("sql_api.api_archive.queue_archive_execution") as queue_mock:
+        with patch("sql_api.api_archive.async_task") as async_task_mock:
             response = self.client.post(
                 f"/api/v1/archive/{archive.id}/run/",
                 {},
@@ -5281,7 +5300,35 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
             )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        queue_mock.assert_called_once_with(archive.id, trigger="manual")
+        archive.refresh_from_db()
+        self.assertEqual(archive.execution_state, "queued")
+        async_task_mock.assert_called_once_with(
+            "sql.archiver.archive",
+            archive.id,
+            "manual",
+            hook="sql.archiver.archive_task_callback",
+            timeout=-1,
+            task_name=f"archive-{archive.id}",
+        )
+
+    def test_run_now_rejects_already_queued_archive(self):
+        archive = self.create_pending_archive()
+        archive.status = WorkflowStatus.PASSED
+        archive.state = True
+        archive.execution_state = "queued"
+        archive.save(update_fields=["status", "state", "execution_state"])
+        self.authenticate(self.reviewer)
+
+        with patch("sql_api.api_archive.async_task") as async_task_mock:
+            response = self.client.post(
+                f"/api/v1/archive/{archive.id}/run/",
+                {},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("already queued or running", response.json()["errors"])
+        async_task_mock.assert_not_called()
 
     def test_run_now_requires_manager_group_scope(self):
         archive = ArchiveConfig.objects.create(
@@ -5304,7 +5351,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
         )
         self.authenticate(self.reviewer)
 
-        with patch("sql_api.api_archive.queue_archive_execution") as queue_mock:
+        with patch("sql_api.api_archive.async_task") as async_task_mock:
             response = self.client.post(
                 f"/api/v1/archive/{archive.id}/run/",
                 {},
@@ -5312,7 +5359,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
             )
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-        queue_mock.assert_not_called()
+        async_task_mock.assert_not_called()
 
     def test_disable_scheduled_archive_cancels_current_schedule(self):
         archive = self.create_pending_archive(

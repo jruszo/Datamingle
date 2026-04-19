@@ -982,6 +982,11 @@ class ArchiveConfig(models.Model, WorkflowAuditMixin):
         ("daily", "Daily"),
         ("weekly", "Weekly"),
     )
+    EXECUTION_STATE_CHOICES = (
+        ("idle", "Idle"),
+        ("queued", "Queued"),
+        ("running", "Running"),
+    )
 
     title = models.CharField("Archive Configuration Title", max_length=50)
     resource_group = models.ForeignKey(ResourceGroup, on_delete=models.CASCADE)
@@ -1060,6 +1065,16 @@ class ArchiveConfig(models.Model, WorkflowAuditMixin):
         "Audit Status", choices=WorkflowStatus.choices, blank=True, default=1
     )
     state = models.BooleanField("Archive Enabled", default=True)
+    execution_state = models.CharField(
+        "Execution State",
+        max_length=20,
+        choices=EXECUTION_STATE_CHOICES,
+        default="idle",
+    )
+    consecutive_failures = models.IntegerField(
+        "Consecutive Scheduled Failures",
+        default=0,
+    )
     user_name = models.CharField("Requester", max_length=30, blank=True, default="")
     user_display = models.CharField(
         "Requester Display Name", max_length=50, blank=True, default=""

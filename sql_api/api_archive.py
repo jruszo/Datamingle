@@ -1,6 +1,7 @@
 # -*- coding: UTF-8 -*-
 
 import datetime
+import logging
 
 from django.contrib.auth.models import Group
 from django.db import transaction
@@ -12,6 +13,9 @@ from rest_framework.exceptions import PermissionDenied
 
 from common.utils.const import WorkflowAction, WorkflowStatus, WorkflowType
 from sql.archiver import (
+    ARCHIVE_EXECUTION_STATE_IDLE,
+    ARCHIVE_EXECUTION_STATE_QUEUED,
+    ARCHIVE_EXECUTION_STATE_RUNNING,
     ARCHIVE_EXECUTION_ONE_TIME,
     ARCHIVE_EXECUTION_SCHEDULED,
     ARCHIVE_METHOD_DML,
@@ -23,7 +27,6 @@ from sql.archiver import (
     cancel_archive_schedule,
     get_archive_schedule,
     normalize_archive_weekdays,
-    queue_archive_execution,
     schedule_archive,
     serialize_archive_weekdays,
 )
@@ -42,6 +45,8 @@ from sql.utils.workflow_audit import Audit, AuditException, AuditV2, get_auditor
 from .pagination import CustomizedPagination
 from .response import success_response
 from common.task_queue import async_task
+
+logger = logging.getLogger("default")
 
 ARCHIVE_SUPPORTED_DB_TYPES = (
     "mysql",
@@ -277,6 +282,10 @@ def _serialize_archive_current_reviewers(archive_config):
 
 
 def _archive_execution_state_label(archive_config):
+    if archive_config.execution_state == ARCHIVE_EXECUTION_STATE_QUEUED:
+        return "Queued"
+    if archive_config.execution_state == ARCHIVE_EXECUTION_STATE_RUNNING:
+        return "Running"
     if archive_config.execution_mode == ARCHIVE_EXECUTION_ONE_TIME:
         if archive_config.last_archive_time and not archive_config.state:
             return "Completed"
@@ -345,7 +354,10 @@ def _serialize_archive_detail(archive_config, user):
         and current_status == WorkflowStatus.WAITING
     )
     can_run_now = (
-        is_manager and current_status == WorkflowStatus.PASSED and archive_config.state
+        is_manager
+        and current_status == WorkflowStatus.PASSED
+        and archive_config.state
+        and archive_config.execution_state == ARCHIVE_EXECUTION_STATE_IDLE
     )
     can_enable = (
         is_manager
@@ -691,10 +703,7 @@ class ArchiveListCreate(generics.ListAPIView):
     )
     def get(self, request):
         _require_archive_module_access(request.user)
-        queryset = self.filter_queryset(self.get_queryset())
-        page = self.paginate_queryset(queryset)
-        serializer = self.get_serializer(page, many=True)
-        return self.get_paginated_response(serializer.data)
+        return super().get(request)
 
     @extend_schema(
         summary="Create Archive Workflow",
@@ -776,9 +785,10 @@ class ArchiveListCreate(generics.ListAPIView):
             try:
                 audit_handler.create_audit()
             except AuditException as exc:
+                logger.exception("Failed to create archive approval flow")
                 raise serializers.ValidationError(
-                    {"errors": f"Failed to create approval flow. {str(exc)}"}
-                )
+                    {"errors": "Failed to create approval flow. Contact admin."}
+                ) from exc
 
             audit_handler.workflow.status = audit_handler.audit.current_status
             if audit_handler.audit.current_status == WorkflowStatus.PASSED:
@@ -900,32 +910,50 @@ class ArchiveRunNow(views.APIView):
         description="Queue an approved archive workflow for immediate execution.",
     )
     def post(self, request, archive_id):
-        archive_config = get_object_or_404(ArchiveConfig, pk=archive_id)
-        if not _archive_can_manage(request.user, archive_config):
-            raise PermissionDenied(
-                "You do not have permission to execute archive workflows."
+        with transaction.atomic():
+            archive_config = get_object_or_404(
+                ArchiveConfig.objects.select_for_update(),
+                pk=archive_id,
             )
-        if archive_config.status != WorkflowStatus.PASSED:
-            raise serializers.ValidationError(
-                {"errors": "Archive workflow is not approved."}
-            )
-        if not archive_config.state:
-            raise serializers.ValidationError(
-                {"errors": "Archive workflow is disabled."}
-            )
+            if not _archive_can_manage(request.user, archive_config):
+                raise PermissionDenied(
+                    "You do not have permission to execute archive workflows."
+                )
+            if archive_config.status != WorkflowStatus.PASSED:
+                raise serializers.ValidationError(
+                    {"errors": "Archive workflow is not approved."}
+                )
+            if not archive_config.state:
+                raise serializers.ValidationError(
+                    {"errors": "Archive workflow is disabled."}
+                )
+            if archive_config.execution_state != ARCHIVE_EXECUTION_STATE_IDLE:
+                raise serializers.ValidationError(
+                    {"errors": "Archive execution is already queued or running."}
+                )
 
-        audit = Audit.detail_by_workflow_id(archive_id, WorkflowType.ARCHIVE)
-        if audit:
-            Audit.add_log(
-                audit_id=audit.audit_id,
-                operation_type=WorkflowAction.EXECUTE_START,
-                operation_type_desc="Archive Queued",
-                operation_info="Archive workflow queued for execution",
-                operator=request.user.username,
-                operator_display=request.user.display,
-            )
+            archive_config.execution_state = ARCHIVE_EXECUTION_STATE_QUEUED
+            archive_config.save(update_fields=["execution_state"])
 
-        queue_archive_execution(archive_id, trigger="manual")
+            audit = Audit.detail_by_workflow_id(archive_id, WorkflowType.ARCHIVE)
+            if audit:
+                Audit.add_log(
+                    audit_id=audit.audit_id,
+                    operation_type=WorkflowAction.EXECUTE_START,
+                    operation_type_desc="Archive Queued",
+                    operation_info="Archive workflow queued for execution",
+                    operator=request.user.username,
+                    operator_display=request.user.display,
+                )
+
+            async_task(
+                "sql.archiver.archive",
+                archive_id,
+                "manual",
+                hook="sql.archiver.archive_task_callback",
+                timeout=-1,
+                task_name=f"archive-{archive_id}",
+            )
         return success_response(detail="Archive execution queued.")
 
 
@@ -1004,7 +1032,4 @@ class ArchiveLogList(generics.ListAPIView):
     )
     def get(self, request, archive_id):
         _require_archive_module_access(request.user)
-        queryset = self.get_queryset()
-        page = self.paginate_queryset(queryset)
-        serializer = self.get_serializer(page, many=True)
-        return self.get_paginated_response(serializer.data)
+        return super().get(request)

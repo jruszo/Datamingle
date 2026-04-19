@@ -1,6 +1,7 @@
 from django.core.management import call_command
 from django.test import TestCase
 
+from common.utils.const import WorkflowType
 from sql.local_demo import (
     DEMO_APP_PASSWORD,
     managed_demo_instance_names,
@@ -33,7 +34,18 @@ class TestLocalDemoSeed(TestCase):
         )
         self.assertEqual(InstanceTag.objects.filter(tag_code="can_read").count(), 1)
         self.assertEqual(InstanceTag.objects.filter(tag_code="can_write").count(), 1)
-        self.assertEqual(WorkflowAuditSetting.objects.count(), 2)
+        self.assertEqual(
+            WorkflowAuditSetting.objects.filter(
+                workflow_type=WorkflowType.SQL_REVIEW
+            ).count(),
+            len(managed_demo_resource_group_names()),
+        )
+        self.assertEqual(
+            WorkflowAuditSetting.objects.filter(
+                workflow_type=WorkflowType.ARCHIVE
+            ).count(),
+            len(managed_demo_resource_group_names()),
+        )
 
         requester = Users.objects.get(username="demo_requester")
         self.assertTrue(requester.check_password(DEMO_APP_PASSWORD))
