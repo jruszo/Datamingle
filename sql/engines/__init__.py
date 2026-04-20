@@ -4,7 +4,6 @@ import importlib
 import re
 from sql.engines.models import ResultSet, ReviewSet
 from sql.models import Instance
-from sql.utils.ssh_tunnel import SSHConnection
 from django.conf import settings
 
 
@@ -28,49 +27,15 @@ class EngineBase:
             self.db_name = instance.db_name
             self.mode = instance.mode
 
-            # If tunnel is configured, connect through SSH tunnel (tested with MySQL).
-            if self.instance.tunnel:
-                self.ssh = SSHConnection(
-                    self.host,
-                    self.port,
-                    instance.tunnel.host,
-                    instance.tunnel.port,
-                    instance.tunnel.user,
-                    instance.tunnel.password,
-                    instance.tunnel.pkey,
-                    instance.tunnel.pkey_password,
-                )
-                self.host, self.port = self.ssh.get_ssh()
-
     def __del__(self):
-        if hasattr(self, "ssh"):
-            del self.ssh
-        if hasattr(self, "remotessh"):
-            del self.remotessh
+        pass
 
     def remote_instance_conn(self, instance=None):
         user, password = instance.get_username_password()
-        # If tunnel is configured, connect through SSH tunnel.
-        if not hasattr(self, "remotessh") and instance.tunnel:
-            self.remotessh = SSHConnection(
-                instance.host,
-                instance.port,
-                instance.tunnel.host,
-                instance.tunnel.port,
-                instance.tunnel.user,
-                instance.tunnel.password,
-                instance.tunnel.pkey,
-                instance.tunnel.pkey_password,
-            )
-            self.remote_host, self.remote_port = self.remotessh.get_ssh()
-            user, password = instance.get_username_password()
-            self.remote_user = user
-            self.remote_password = password
-        elif not instance.tunnel:
-            self.remote_host = instance.host
-            self.remote_port = instance.port
-            self.remote_user = user
-            self.remote_password = password
+        self.remote_host = instance.host
+        self.remote_port = instance.port
+        self.remote_user = user
+        self.remote_password = password
         return (
             self.remote_host,
             self.remote_port,
@@ -232,13 +197,6 @@ engine_map = get_engine_map()
 
 def get_engine(instance=None):  # pragma: no cover
     """Get database operation engine."""
-    if instance.db_type == "mysql":
-        from sql.models import AliyunRdsConfig
-
-        if AliyunRdsConfig.objects.filter(instance=instance, is_enable=True).exists():
-            from .cloud.aliyun_rds import AliyunRDS
-
-            return AliyunRDS(instance=instance)
     engine = engine_map.get(instance.db_type)
     if not engine:
         raise ValueError(

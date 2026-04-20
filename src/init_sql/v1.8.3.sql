@@ -14,8 +14,7 @@ CREATE TABLE `audit_log` (
 set @content_type_id=(select id from django_content_type where app_label='sql' and model='permission');
 INSERT INTO auth_permission (name, content_type_id, codename) VALUES ('Menu My2SQL', @content_type_id, 'menu_my2sql');
 
--- SSH tunnel feature update
-ALTER TABLE `ssh_tunnel` ADD COLUMN pkey longtext NULL AFTER password;
+-- Retired legacy connectivity objects removed.
 
 -- Audit feature enhancements
 alter table audit_log change `ip` `extra_info` longtext DEFAULT NULL COMMENT 'Additional info'; 

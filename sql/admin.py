@@ -13,8 +13,6 @@ from .models import (
     QueryLog,
     DataMaskingColumns,
     DataMaskingRules,
-    AliyunRdsConfig,
-    CloudAccessKey,
     ResourceGroup,
     QueryPrivilegesApply,
     QueryPrivileges,
@@ -26,12 +24,11 @@ from .models import (
     ParamTemplate,
     ParamHistory,
     InstanceTag,
-    Tunnel,
     AuditEntry,
     TwoFactorAuthConfig,
 )
 
-from sql.form import TunnelForm, InstanceForm
+from sql.form import InstanceForm
 
 
 # User management
@@ -180,64 +177,11 @@ class InstanceAdmin(admin.ModelAdmin):
             kwargs["widget"] = PasswordInput(render_value=True)
         return super(InstanceAdmin, self).formfield_for_dbfield(db_field, **kwargs)
 
-    # Aliyun instance relation config
-    class AliRdsConfigInline(admin.TabularInline):
-        model = AliyunRdsConfig
-
     # Instance-resource-group relation config
     filter_horizontal = (
         "resource_group",
         "instance_tag",
     )
-
-    inlines = [AliRdsConfigInline]
-
-
-# SSH tunnel
-@admin.register(Tunnel)
-class TunnelAdmin(admin.ModelAdmin):
-    list_display = ("id", "tunnel_name", "host", "port", "create_time")
-    list_display_links = (
-        "id",
-        "tunnel_name",
-    )
-    search_fields = ("id", "tunnel_name")
-    fieldsets = (
-        (
-            None,
-            {
-                "fields": (
-                    "tunnel_name",
-                    "host",
-                    "port",
-                    "user",
-                    "password",
-                    "pkey_path",
-                    "pkey_password",
-                    "pkey",
-                ),
-            },
-        ),
-    )
-    ordering = ("id",)
-    # Fields shown on add page
-    add_fieldsets = (
-        ("Tunnel Info", {"fields": ("tunnel_name", "host", "port")}),
-        (
-            "Connection Info",
-            {"fields": ("user", "password", "pkey_path", "pkey_password", "pkey")},
-        ),
-    )
-    form = TunnelForm
-
-    def formfield_for_dbfield(self, db_field, **kwargs):
-        if db_field.name in ["password", "pkey_password"]:
-            kwargs["widget"] = PasswordInput(render_value=True)
-        return super(TunnelAdmin, self).formfield_for_dbfield(db_field, **kwargs)
-
-    # ID is read-only after creation.
-    def get_readonly_fields(self, request, obj=None):
-        return ("id",) if obj else ()
 
 
 # SQL workflow content
@@ -505,13 +449,6 @@ class ArchiveConfigAdmin(admin.ModelAdmin):
         "user_name",
         "user_display",
     )
-
-
-# Cloud access key configuration
-@admin.register(CloudAccessKey)
-class CloudAccessKeyAdmin(admin.ModelAdmin):
-    list_display = ("type", "key_id", "key_secret", "remark")
-
 
 # Login audit log
 @admin.register(AuditEntry)

@@ -15,7 +15,7 @@ from common.test_fixtures import (
     LEGACY_MIRAGE_CIPHERTEXTS,
     LEGACY_MIRAGE_SECRET_KEY,
 )
-from sql.models import CloudAccessKey, Instance
+from sql.models import Instance
 
 
 def _encrypt_legacy_mirage(value, secret_key):
@@ -40,29 +40,16 @@ class ReencryptSensitiveFieldsCommandTest(TestCase):
             user="root",
             password="plain-password",
         )
-        self.access_key = CloudAccessKey.objects.create(
-            type="aliyun",
-            key_id="plain-ak",
-            key_secret="plain-sk",
-        )
 
         legacy_user = _encrypt_legacy_mirage("legacy-root", LEGACY_MIRAGE_SECRET_KEY)
         legacy_password = _encrypt_legacy_mirage(
             "legacy-password", LEGACY_MIRAGE_SECRET_KEY
-        )
-        legacy_key_id = _encrypt_legacy_mirage("legacy-ak", LEGACY_MIRAGE_SECRET_KEY)
-        legacy_key_secret = _encrypt_legacy_mirage(
-            "legacy-sk", LEGACY_MIRAGE_SECRET_KEY
         )
 
         with connection.cursor() as cursor:
             cursor.execute(
                 "UPDATE sql_instance SET user=%s, password=%s WHERE id=%s",
                 [legacy_user, legacy_password, self.instance.id],
-            )
-            cursor.execute(
-                "UPDATE cloud_access_key SET key_id=%s, key_secret=%s WHERE id=%s",
-                [legacy_key_id, legacy_key_secret, self.access_key.id],
             )
 
     def tearDown(self):
@@ -77,24 +64,14 @@ class ReencryptSensitiveFieldsCommandTest(TestCase):
                 [self.instance.id],
             )
             raw_user, raw_password = cursor.fetchone()
-            cursor.execute(
-                "SELECT key_id, key_secret FROM cloud_access_key WHERE id=%s",
-                [self.access_key.id],
-            )
-            raw_key_id, raw_key_secret = cursor.fetchone()
 
         self.assertTrue(raw_user.startswith(ENCRYPTED_VALUE_PREFIX))
         self.assertTrue(raw_password.startswith(ENCRYPTED_VALUE_PREFIX))
-        self.assertTrue(raw_key_id.startswith(ENCRYPTED_VALUE_PREFIX))
-        self.assertTrue(raw_key_secret.startswith(ENCRYPTED_VALUE_PREFIX))
 
         self.instance.refresh_from_db()
-        self.access_key.refresh_from_db()
 
         self.assertEqual(self.instance.user, "legacy-root")
         self.assertEqual(self.instance.password, "legacy-password")
-        self.assertEqual(self.access_key.key_id, "legacy-ak")
-        self.assertEqual(self.access_key.key_secret, "legacy-sk")
 
 
 MIGRATION_0003 = importlib.import_module(

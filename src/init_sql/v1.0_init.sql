@@ -41,31 +41,6 @@ LOCK TABLES `aliyun_access_key` WRITE;
 /*!40000 ALTER TABLE `aliyun_access_key` ENABLE KEYS */;
 UNLOCK TABLES;
 
---
--- Table structure for table `aliyun_rds_config`
---
-
-DROP TABLE IF EXISTS `aliyun_rds_config`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `aliyun_rds_config` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `rds_dbinstanceid` varchar(100) NOT NULL,
-  `cluster_name` varchar(50) NOT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `rds_dbinstanceid` (`rds_dbinstanceid`),
-  UNIQUE KEY `cluster_name` (`cluster_name`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Dumping data for table `aliyun_rds_config`
---
-
-LOCK TABLES `aliyun_rds_config` WRITE;
-/*!40000 ALTER TABLE `aliyun_rds_config` DISABLE KEYS */;
-/*!40000 ALTER TABLE `aliyun_rds_config` ENABLE KEYS */;
-UNLOCK TABLES;
 
 --
 -- Table structure for table `auth_group`

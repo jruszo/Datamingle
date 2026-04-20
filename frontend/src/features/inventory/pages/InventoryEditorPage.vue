@@ -67,7 +67,6 @@ const form = reactive({
   charset: '',
   service_name: '',
   sid: '',
-  tunnel_id: '',
   resource_group_ids: [] as number[],
   instance_tag_ids: [] as number[],
 })
@@ -88,7 +87,6 @@ function resetForm() {
   form.charset = ''
   form.service_name = ''
   form.sid = ''
-  form.tunnel_id = ''
   form.resource_group_ids = []
   form.instance_tag_ids = []
 }
@@ -109,7 +107,6 @@ function applyInstance(instance: InstanceEditorRecord) {
   form.charset = instance.charset
   form.service_name = instance.service_name ?? ''
   form.sid = instance.sid ?? ''
-  form.tunnel_id = instance.tunnel_id ? `${instance.tunnel_id}` : ''
   form.resource_group_ids = [...instance.resource_group_ids]
   form.instance_tag_ids = [...instance.instance_tag_ids]
 }
@@ -259,7 +256,6 @@ function buildInstancePayload(): InstanceCreatePayload | null {
     charset: form.charset.trim(),
     service_name: form.service_name.trim(),
     sid: form.sid.trim(),
-    tunnel_id: form.tunnel_id ? Number(form.tunnel_id) : null,
     resource_group_ids: [...form.resource_group_ids],
     instance_tag_ids: [...form.instance_tag_ids],
   }
@@ -392,8 +388,8 @@ watch(form, () => {
         <CardDescription>
           {{
             isCreateMode
-              ? 'Fill in the core connection details first, then optionally attach tags, resource groups, and a tunnel.'
-              : 'Update the core connection details, then optionally adjust tags, resource groups, and the tunnel.'
+              ? 'Fill in the core connection details first, then optionally attach tags and resource groups.'
+              : 'Update the core connection details, then optionally adjust tags and resource groups.'
           }}
         </CardDescription>
       </CardHeader>
@@ -459,21 +455,6 @@ watch(form, () => {
                 <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Port</span>
                 <Input v-model.number="form.port" type="number" min="1" step="1" />
               </div>
-
-              <div class="grid min-w-0 gap-2">
-                <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Tunnel</span>
-                <select v-model="form.tunnel_id" :class="selectClass">
-                  <option value="">No tunnel</option>
-                  <option
-                    v-for="item in metadata?.tunnels ?? []"
-                    :key="item.id"
-                    :value="`${item.id}`"
-                  >
-                    {{ item.label }}
-                  </option>
-                </select>
-              </div>
-
               <div class="grid min-w-0 gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">User</span>
                 <Input v-model="form.user" placeholder="readonly_user" />
@@ -598,8 +579,8 @@ watch(form, () => {
       <CardFooter class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200">
         <p class="text-sm text-slate-500">
           {{ isCreateMode
-            ? 'Create keeps advanced cloud/RDS configuration out of scope; manage those relations separately if needed.'
-            : 'Editing keeps advanced cloud/RDS configuration out of scope; manage those relations separately if needed.' }}
+            ? 'Create saves the direct connection details used by Datamingle inventory and workflow access.'
+            : 'Editing updates the direct connection details used by Datamingle inventory and workflow access.' }}
         </p>
         <div class="flex flex-wrap items-center gap-3">
           <Button

@@ -29,10 +29,7 @@ UPDATE aliyun_access_key SET is_enable=0 WHERE is_enable=2;
 ALTER TABLE aliyun_access_key
   MODIFY is_enable TINYINT NOT NULL DEFAULT 1 COMMENT 'Whether enabled';
 
--- aliyun_rds_config.is_enable
-UPDATE aliyun_rds_config SET is_enable=0 WHERE is_enable=2;
-ALTER TABLE aliyun_rds_config
-  MODIFY is_enable TINYINT NOT NULL DEFAULT 1 COMMENT 'Whether enabled';
+-- Retired legacy connectivity objects removed.
 
 -- Add default values for username and password
 ALTER TABLE sql_instance

@@ -69,7 +69,6 @@ insert into param_template (db_type, variable_name, default_value, editable, val
 ('goinception','osc_print_sql','false',1,'bool','Corresponds to parameter --print','2019-05-27 15:25:11.000000','2019-05-27 15:25:11.000000'),
 ('goinception','osc_recursion_method','processlist',1,'string','Corresponds to parameter recursion_method','2019-05-27 15:25:11.000000','2019-05-27 15:25:11.000000'),
 ('goinception','ghost_on','false',1,'bool','gh-ost switch','2019-05-27 15:25:11.000000','2019-05-27 15:25:11.000000'),
-('goinception','ghost_aliyun_rds','false',1,'bool','Alibaba Cloud RDS flag','2019-05-27 15:25:11.000000','2019-05-27 15:25:11.000000'),
 ('goinception','ghost_allow_master_master','false',1,'bool','Allow gh-ost to run in master-master replication, usually with -assume-master-host','2019-05-27 15:25:11.000000','2019-05-27 15:25:11.000000'),
 ('goinception','ghost_allow_nullable_unique_key','false',1,'bool','Allow nullable unique keys for gh-ost migrate dependency. Use with caution due to potential data inconsistency','2019-05-27 15:25:11.000000','2019-05-27 15:25:11.000000'),
 ('goinception','ghost_allow_on_master','true',1,'bool','Allow gh-ost to run directly on primary database','2019-05-27 15:25:11.000000','2019-05-27 15:25:11.000000'),

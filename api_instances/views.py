@@ -11,15 +11,13 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from sql.engines import engine_map, get_engine
-from sql.models import AliyunRdsConfig, Instance, InstanceTag, ResourceGroup, Tunnel
+from sql.models import Instance, InstanceTag, ResourceGroup
 from sql.utils.resource_group import user_instances
 from sql.utils.sql_utils import filter_db_list
 
 from api_core.pagination import CustomizedPagination
 from api_core.response import success_response
 from api_instances.serializers import (
-    AliyunRdsSerializer,
-    ChoiceOptionSerializer,
     InstanceConnectionTestResultSerializer,
     InstanceConnectionTestRequestSerializer,
     InstanceCreateSerializer,
@@ -31,11 +29,7 @@ from api_instances.serializers import (
     InstanceResourceSerializer,
     InstanceTagCreateSerializer,
     InstanceTagManagementSerializer,
-    InstanceTagLookupSerializer,
     InstanceTagUpdateSerializer,
-    ResourceGroupLookupSerializer,
-    TunnelLookupSerializer,
-    TunnelSerializer,
 )
 
 logger = logging.getLogger("default")
@@ -58,7 +52,7 @@ class InstanceList(generics.ListAPIView):
 
     pagination_class = CustomizedPagination
     serializer_class = InstanceListSerializer
-    queryset = Instance.objects.all().select_related("tunnel").order_by("id")
+    queryset = Instance.objects.all().order_by("id")
 
     def get_queryset(self):
         queryset = (
@@ -239,7 +233,7 @@ class InstanceMetadata(views.APIView):
     @extend_schema(
         summary="Instance Inventory Metadata",
         responses={200: InstanceMetadataSerializer},
-        description="List available instance types, enabled database types, active tags, tunnels, and resource groups.",
+        description="List available instance types, enabled database types, active tags, and resource groups.",
     )
     def get(self, request):
         _require_any_permission(request, "sql.menu_instance", "sql.menu_instance_list")
@@ -259,7 +253,6 @@ class InstanceMetadata(views.APIView):
             "instance_types": instance_types,
             "db_types": db_types,
             "tags": InstanceTag.objects.filter(active=True).order_by("tag_name", "id"),
-            "tunnels": Tunnel.objects.all().order_by("tunnel_name", "id"),
             "resource_groups": ResourceGroup.objects.filter(is_deleted=0).order_by(
                 "group_name", "group_id"
             ),
@@ -478,84 +471,6 @@ class InstanceDraftConnectionTest(views.APIView):
             {"success": True, "message": "Connection successful."}
         ).data
         return success_response(data=payload, detail="Connection successful.")
-
-
-class TunnelList(generics.ListAPIView):
-    """
-    List all tunnels or create a new tunnel configuration.
-    """
-
-    pagination_class = CustomizedPagination
-    serializer_class = TunnelSerializer
-    queryset = Tunnel.objects.all().order_by("id")
-
-    @extend_schema(
-        summary="Tunnel List",
-        request=TunnelSerializer,
-        responses={200: TunnelSerializer},
-        description="List all tunnels (filtering, pagination).",
-    )
-    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
-    def get(self, request):
-        tunnels = self.filter_queryset(self.queryset)
-        page_tunnels = self.paginate_queryset(queryset=tunnels)
-        serializer_obj = self.get_serializer(page_tunnels, many=True)
-        return self.get_paginated_response(serializer_obj.data)
-
-    @extend_schema(
-        summary="Create Tunnel",
-        request=TunnelSerializer,
-        responses={201: TunnelSerializer},
-        description="Create a tunnel configuration.",
-    )
-    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
-    def post(self, request):
-        serializer = TunnelSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return success_response(
-                data=serializer.data, status_code=status.HTTP_201_CREATED
-            )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class AliyunRdsList(generics.ListAPIView):
-    """
-    List all Aliyun RDS configs or create a new one.
-    """
-
-    pagination_class = CustomizedPagination
-    serializer_class = AliyunRdsSerializer
-    queryset = AliyunRdsConfig.objects.all().select_related("ak").order_by("id")
-
-    @extend_schema(
-        summary="Aliyun RDS List",
-        request=AliyunRdsSerializer,
-        responses={200: AliyunRdsSerializer},
-        description="List all Aliyun RDS configs (filtering, pagination).",
-    )
-    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
-    def get(self, request):
-        aliyunrds = self.filter_queryset(self.queryset)
-        page_rds = self.paginate_queryset(queryset=aliyunrds)
-        serializer_obj = self.get_serializer(page_rds, many=True)
-        return self.get_paginated_response(serializer_obj.data)
-
-    @extend_schema(
-        summary="Create Aliyun RDS",
-        request=AliyunRdsSerializer,
-        responses={201: AliyunRdsSerializer},
-        description="Create an Aliyun RDS configuration (including a CloudAccessKey).",
-    )
-    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
-    def post(self, request):
-        serializer = AliyunRdsSerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save()
-            return success_response(
-                data=serializer.data, status_code=status.HTTP_201_CREATED
-            )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class InstanceResource(views.APIView):

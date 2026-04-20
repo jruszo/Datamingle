@@ -163,46 +163,6 @@ DB_TYPE_CHOICES = (
 )
 
 
-class Tunnel(models.Model):
-    """
-    SSH tunnel configuration.
-    """
-
-    tunnel_name = models.CharField("Tunnel Name", max_length=50, unique=True)
-    host = models.CharField("Tunnel Host", max_length=200)
-    port = models.IntegerField("Port", default=0)
-    user = EncryptedCharField(
-        verbose_name="Username", max_length=200, default="", blank=True, null=True
-    )
-    password = EncryptedCharField(
-        verbose_name="Password", max_length=300, default="", blank=True, null=True
-    )
-    pkey = EncryptedTextField(verbose_name="Private Key", blank=True, null=True)
-    pkey_path = models.FileField(
-        verbose_name="Key File Path", blank=True, null=True, upload_to="keys/"
-    )
-    pkey_password = EncryptedCharField(
-        verbose_name="Key Passphrase", max_length=300, default="", blank=True, null=True
-    )
-    create_time = models.DateTimeField("Created Time", auto_now_add=True)
-    update_time = models.DateTimeField("Updated Time", auto_now=True)
-
-    def __str__(self):
-        return self.tunnel_name
-
-    def short_pkey(self):
-        if len(str(self.pkey)) > 20:
-            return "{}...".format(str(self.pkey)[0:19])
-        else:
-            return str(self.pkey)
-
-    class Meta:
-        managed = True
-        db_table = "ssh_tunnel"
-        verbose_name = "Tunnel Configuration"
-        verbose_name_plural = "Tunnel Configuration"
-
-
 class Instance(models.Model, PasswordMixin):
     """
     Production instance configuration.
@@ -258,14 +218,6 @@ class Instance(models.Model, PasswordMixin):
     )
     instance_tag = models.ManyToManyField(
         InstanceTag, verbose_name="Instance Tag", blank=True
-    )
-    tunnel = models.ForeignKey(
-        Tunnel,
-        verbose_name="Connection Tunnel",
-        blank=True,
-        null=True,
-        on_delete=models.CASCADE,
-        default=None,
     )
     create_time = models.DateTimeField("Created Time", auto_now_add=True)
     update_time = models.DateTimeField("Updated Time", auto_now=True)
@@ -1217,59 +1169,6 @@ class TaskSchedule(models.Model):
         verbose_name = "Scheduled Task"
         verbose_name_plural = "Scheduled Task"
         indexes = [models.Index(fields=["status", "run_at"], name="idx_status_run_at")]
-
-
-# Cloud service credential configuration
-class CloudAccessKey(models.Model):
-    cloud_type_choices = (("aliyun", "aliyun"),)
-
-    type = models.CharField(max_length=20, default="", choices=cloud_type_choices)
-    key_id = EncryptedCharField(max_length=200)
-    key_secret = EncryptedCharField(max_length=200)
-    remark = models.CharField(max_length=50, default="", blank=True)
-
-    @property
-    def raw_key_id(self):
-        """Return key ID in plaintext."""
-        return self.key_id
-
-    @property
-    def raw_key_secret(self):
-        """Return key secret in plaintext."""
-        return self.key_secret
-
-    def __str__(self):
-        return f"{self.type}({self.remark})"
-
-    class Meta:
-        managed = True
-        db_table = "cloud_access_key"
-        verbose_name = "Cloud Credential Configuration"
-        verbose_name_plural = "Cloud Credential Configuration"
-
-
-class AliyunRdsConfig(models.Model):
-    """
-    Alibaba Cloud RDS configuration.
-    """
-
-    instance = models.OneToOneField(Instance, on_delete=models.CASCADE)
-    rds_dbinstanceid = models.CharField("Alibaba Cloud RDS Instance ID", max_length=100)
-    ak = models.ForeignKey(
-        CloudAccessKey,
-        verbose_name="RDS Access Key Configuration",
-        on_delete=models.CASCADE,
-    )
-    is_enable = models.BooleanField("Enabled", default=False)
-
-    def __int__(self):
-        return self.rds_dbinstanceid
-
-    class Meta:
-        managed = True
-        db_table = "aliyun_rds_config"
-        verbose_name = "Alibaba Cloud RDS Configuration"
-        verbose_name_plural = "Alibaba Cloud RDS Configuration"
 
 
 class Permission(models.Model):

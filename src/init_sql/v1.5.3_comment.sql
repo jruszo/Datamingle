@@ -6,14 +6,6 @@ ALTER TABLE
     MODIFY  `is_enable` TINYINT (4) NOT NULL COMMENT 'Whether enabled',
     MODIFY  `remark` VARCHAR (50) NOT NULL COMMENT 'Remark';
 
-
-ALTER TABLE
-  aliyun_rds_config COMMENT 'Alibaba Cloud RDS configuration',
-    MODIFY  `instance_id` INT (11) NOT NULL COMMENT 'Instance ID',
-    MODIFY  `rds_dbinstanceid` VARCHAR (100) NOT NULL COMMENT 'Mapped Alibaba Cloud RDS instance ID',
-    MODIFY  `is_enable` TINYINT (4) NOT NULL COMMENT 'Whether enabled';
-
-
 ALTER TABLE
   auth_group COMMENT 'Permission group',
     MODIFY  `name` VARCHAR (80) NOT NULL COMMENT 'Group';
