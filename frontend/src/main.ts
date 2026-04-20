@@ -1,9 +1,9 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 
-import { installAuthSessionHandling } from '@/lib/auth-session'
+import { installAuthSessionHandling } from '@/app/install-auth-session'
 import App from './App.vue'
-import router from './router'
+import router from '@/app/router'
 import './assets/main.css'
 
 const app = createApp(App)

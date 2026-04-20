@@ -13,6 +13,9 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),
+        '@enterprise-feature-modules': fileURLToPath(
+          new URL('./src/extensions/enterprise-feature-modules.ts', import.meta.url),
+        ),
       },
     },
     server: {
