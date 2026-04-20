@@ -18,8 +18,8 @@ const metrics = [
 
     <Card>
       <CardHeader>
-        <CardTitle>Operational Reports</CardTitle>
-        <CardDescription>Platform-level overview for audit, review, and execution performance.</CardDescription>
+        <CardTitle>Snapshot Metrics</CardTitle>
+        <CardDescription>Sample KPI tiles for the reports workspace.</CardDescription>
       </CardHeader>
       <CardContent>
         <div class="grid gap-3 sm:grid-cols-3">

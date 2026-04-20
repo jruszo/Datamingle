@@ -62,5 +62,5 @@ export function matchesNavigationItem(
     return currentPath === '/'
   }
 
-  return currentPath.startsWith(targetPath)
+  return currentPath === targetPath || currentPath.startsWith(`${targetPath}/`)
 }

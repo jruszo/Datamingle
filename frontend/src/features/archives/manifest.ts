@@ -8,9 +8,9 @@ import ArchivesPage from '@/features/archives/pages/ArchivesPage.vue'
 const archivesModule: FeatureModule = {
   id: 'archives',
   routes: [
-    { path: '/archives', name: 'archives', component: ArchivesPage, meta: { title: 'Archives' } },
-    { path: '/archives/new', name: 'archive-new', component: ArchiveCreatePage, meta: { title: 'New Archive' } },
-    { path: '/archives/:archiveId', name: 'archive-detail', component: ArchiveDetailPage, meta: { title: 'Archive Detail' } },
+    { path: '/archives', name: 'archives', component: ArchivesPage, meta: { title: 'Archives', access: { anyPermissions: ['sql.menu_archive'] } } },
+    { path: '/archives/new', name: 'archive-new', component: ArchiveCreatePage, meta: { title: 'New Archive', access: { anyPermissions: ['sql.menu_archive'] } } },
+    { path: '/archives/:archiveId', name: 'archive-detail', component: ArchiveDetailPage, meta: { title: 'Archive Detail', access: { anyPermissions: ['sql.menu_archive'] } } },
   ],
   navigation: [
     {

@@ -22,6 +22,7 @@ const route = useRoute()
 const showAppShell = computed(() => authStore.isAuthenticated)
 const isSidebarCollapsed = ref(false)
 const isSettingsMenuOpen = ref(route.path.startsWith('/settings'))
+const settingsSubmenuId = 'settings-submenu'
 
 const visiblePrimaryNavigation = computed(() =>
   getVisibleNavigationItems('primary', authStore.currentUser),
@@ -42,16 +43,7 @@ function navigationItemClass(isActive: boolean) {
 }
 
 function isNavigationItemActive(to: string, matchPrefix?: string) {
-  if (matchPrefix === '/') {
-    return route.path === '/'
-  }
-
-  const targetPath = matchPrefix ?? to
-  if (targetPath === '/') {
-    return route.path === '/'
-  }
-
-  return route.path.startsWith(targetPath)
+  return matchesNavigationItem({ to, matchPrefix, label: '', section: 'primary' }, route.path)
 }
 
 const pageTitle = computed(() => {
@@ -118,17 +110,28 @@ function toggleSettingsMenu() {
 }
 
 async function logout() {
-  try {
-    await authStore.loadAuthConfig()
-  } catch {
-    // Fall back to local sign-out if auth config cannot be loaded.
-  }
-
-  const authMode = authStore.authMode
   authStore.clearTokens()
-  if (authMode === 'workos') {
+
+  const cachedAuthMode = authStore.authMode
+  if (cachedAuthMode === 'workos') {
     window.location.assign(publicApiUrl('/auth/workos/logout/'))
     return
+  }
+
+  try {
+    const resolvedAuthMode = await Promise.race([
+      authStore.loadAuthConfig(),
+      new Promise<typeof cachedAuthMode>((resolve) => {
+        window.setTimeout(() => resolve(cachedAuthMode), 400)
+      }),
+    ])
+
+    if (resolvedAuthMode === 'workos') {
+      window.location.assign(publicApiUrl('/auth/workos/logout/'))
+      return
+    }
+  } catch {
+    // Fall back to local sign-out if auth config cannot be loaded quickly.
   }
 
   await router.push('/login')
@@ -191,6 +194,8 @@ watch(
 
           <div v-if="hasSettingsNavigation" class="space-y-1">
             <button
+              :aria-controls="settingsSubmenuId"
+              :aria-expanded="isSettingsMenuOpen"
               :class="
                 isSettingsRouteActive
                   ? 'bg-slate-100 text-slate-900'
@@ -209,7 +214,13 @@ watch(
               </template>
             </button>
 
-            <div v-if="!isSidebarCollapsed && isSettingsMenuOpen" class="space-y-1 pl-10">
+            <div
+              v-if="!isSidebarCollapsed && isSettingsMenuOpen"
+              :id="settingsSubmenuId"
+              aria-label="Settings submenu"
+              class="space-y-1 pl-10"
+              role="region"
+            >
               <RouterLink
                 v-for="item in visibleSettingsNavigation"
                 :key="item.to"

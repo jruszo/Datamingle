@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeft, RefreshCw, ShieldCheck } from 'lucide-vue-next'
 
-import SqlCodeEditor from '@/features/queries/components/SqlCodeEditor.vue'
+import { SqlCodeEditor } from '@/features/queries/components'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'

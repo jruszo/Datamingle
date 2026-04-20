@@ -1,11 +1,13 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+
 const props = defineProps<{
   error?: string
   success?: string
 }>()
 
-const hasError = Boolean(props.error)
-const hasSuccess = !hasError && Boolean(props.success)
+const hasError = computed(() => Boolean(props.error))
+const hasSuccess = computed(() => !hasError.value && Boolean(props.success))
 </script>
 
 <template>

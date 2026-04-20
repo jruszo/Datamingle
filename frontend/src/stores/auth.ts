@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
-import { fetchAuthConfig, fetchCurrentUserContext, type AuthMode, type CurrentUserContext } from '@/features/auth/api'
+import { fetchAuthConfig, fetchCurrentUserContext, type AuthMode, type CurrentUserContext } from '@/shared/auth/api'
 import { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, setStoredTokens } from '@/shared/auth/auth'
 
 export const useAuthStore = defineStore('auth', () => {

@@ -3,49 +3,14 @@ export const REFRESH_TOKEN_KEY = 'archery.refresh_token'
 export const AUTH_UNAUTHORIZED_EVENT = 'archery:auth-unauthorized'
 export const AUTH_TOKENS_UPDATED_EVENT = 'archery:auth-tokens-updated'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
+import {
+  buildUrl,
+  flattenErrorMessage,
+  isRecord,
+  parseResponseMessage,
+} from '@/shared/api/http-helpers'
 
 let refreshRequest: Promise<string> | null = null
-
-function buildUrl(path: string): string {
-  return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function flattenErrorMessage(value: unknown): string {
-  if (typeof value === 'string') {
-    return value
-  }
-
-  if (Array.isArray(value)) {
-    return value.map(flattenErrorMessage).filter(Boolean).join(', ')
-  }
-
-  if (isRecord(value)) {
-    if (typeof value.errors === 'string') {
-      return value.errors
-    }
-
-    if (typeof value.detail === 'string') {
-      return value.detail
-    }
-
-    return Object.values(value).map(flattenErrorMessage).filter(Boolean).join(', ')
-  }
-
-  return ''
-}
-
-function parseResponseMessage(body: string): string {
-  try {
-    return flattenErrorMessage(JSON.parse(body)) || body
-  } catch {
-    return body
-  }
-}
 
 export class AuthSessionExpiredError extends Error {}
 
@@ -136,7 +101,7 @@ function extractRefreshTokens(payload: unknown, fallbackRefresh: string) {
 export async function refreshAccessToken(): Promise<string> {
   const refreshToken = getStoredRefreshToken()
 
-  if (!refreshToken || isAccessTokenExpired(refreshToken)) {
+  if (!refreshToken) {
     throw new AuthSessionExpiredError('Your session expired. Sign in again.')
   }
 

@@ -32,6 +32,15 @@ describe('access helpers', () => {
     ).toBe(true)
   })
 
+  it('returns false for missing permissions on non-superusers', () => {
+    expect(
+      hasPermission(
+        buildUser({ is_superuser: false }),
+        'some.missing_permission',
+      ),
+    ).toBe(false)
+  })
+
   it('requires all required permissions and one matching any-permission', () => {
     const user = buildUser({
       permissions: ['sql.menu_system', 'auth.view_group'],
@@ -49,6 +58,43 @@ describe('access helpers', () => {
         requiredPermissions: ['sql.menu_system', 'sql.view_resourcegroup'],
       }),
     ).toBe(false)
+  })
+
+  it('allows requiresSuperuser routes only for superusers', () => {
+    expect(
+      canAccessRequirement(buildUser({ is_superuser: true }), {
+        requiresSuperuser: true,
+      }),
+    ).toBe(true)
+
+    expect(
+      canAccessRequirement(buildUser(), {
+        requiresSuperuser: true,
+      }),
+    ).toBe(false)
+  })
+
+  it('supports anyPermissions without requiredPermissions', () => {
+    expect(
+      canAccessRequirement(
+        buildUser({ permissions: ['sql.menu_archive'] }),
+        { anyPermissions: ['sql.menu_archive', 'sql.menu_instance'] },
+      ),
+    ).toBe(true)
+
+    expect(
+      canAccessRequirement(
+        buildUser({ permissions: ['sql.menu_query'] }),
+        { anyPermissions: ['sql.menu_archive', 'sql.menu_instance'] },
+      ),
+    ).toBe(false)
+  })
+
+  it('allows empty or undefined access requirements', () => {
+    const user = buildUser()
+
+    expect(canAccessRequirement(user, undefined)).toBe(true)
+    expect(canAccessRequirement(user, {})).toBe(true)
   })
 
   it('allows staff-admin routes only for staff admins or superusers', () => {

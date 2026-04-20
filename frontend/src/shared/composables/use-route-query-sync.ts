@@ -23,11 +23,28 @@ export function compactRouteQuery(query: LocationQueryRaw): LocationQueryRaw {
   return compacted
 }
 
+function deepSortKeys(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => deepSortKeys(entry))
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.keys(value)
+      .sort()
+      .reduce<Record<string, unknown>>((sorted, key) => {
+        sorted[key] = deepSortKeys((value as Record<string, unknown>)[key])
+        return sorted
+      }, {})
+  }
+
+  return value
+}
+
 export function routeQueriesMatch(
   routeQuery: LocationQuery,
   currentQuery: LocationQueryRaw,
 ) {
-  const normalizedRouteQuery = compactRouteQuery(routeQuery as LocationQueryRaw)
-  const normalizedCurrentQuery = compactRouteQuery(currentQuery)
+  const normalizedRouteQuery = deepSortKeys(compactRouteQuery(routeQuery as LocationQueryRaw))
+  const normalizedCurrentQuery = deepSortKeys(compactRouteQuery(currentQuery))
   return JSON.stringify(normalizedRouteQuery) === JSON.stringify(normalizedCurrentQuery)
 }

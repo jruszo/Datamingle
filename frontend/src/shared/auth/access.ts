@@ -16,7 +16,11 @@ export function hasPermission(
     return true
   }
 
-  return currentUser?.permissions.includes(permission) ?? false
+  if (!Array.isArray(currentUser?.permissions)) {
+    return false
+  }
+
+  return currentUser.permissions.includes(permission)
 }
 
 export function hasAllPermissions(

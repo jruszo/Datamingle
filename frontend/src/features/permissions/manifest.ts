@@ -6,7 +6,7 @@ import PermissionManagementPage from '@/features/permissions/pages/PermissionMan
 const permissionsModule: FeatureModule = {
   id: 'permissions',
   routes: [
-    { path: '/permission-management', name: 'permission-management', component: PermissionManagementPage, meta: { title: 'Permission Management' } },
+    { path: '/permission-management', name: 'permission-management', component: PermissionManagementPage, meta: { title: 'Permission Management', access: { anyPermissions: ['sql.menu_queryapplylist'] } } },
   ],
   navigation: [
     {
