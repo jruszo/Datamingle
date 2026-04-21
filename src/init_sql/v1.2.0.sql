@@ -42,7 +42,7 @@ alter table query_privileges_apply change cluster_name instance_name varchar(50)
 alter table query_privileges change cluster_name instance_name varchar(50) NOT NULL ;
 alter table query_log change cluster_name instance_name varchar(50) NOT NULL ;
 alter table data_masking_columns change cluster_name instance_name varchar(50) NOT NULL ;
-alter table aliyun_rds_config change cluster_name instance_name varchar(50) NOT NULL ;
+-- Retired legacy connectivity objects removed.
 
 
 

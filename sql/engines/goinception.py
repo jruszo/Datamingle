@@ -9,7 +9,6 @@ import simplejson as json
 from pymysql.converters import escape_string as pymysql_escape_string
 
 from common.config import SysConfig
-from sql.models import AliyunRdsConfig
 from sql.utils.sql_utils import get_syntax_type
 from . import EngineBase
 from .models import ResultSet, ReviewSet, ReviewResult
@@ -402,14 +401,6 @@ def get_session_variables(instance):
     """Build goInception session vars dynamically from target instance."""
     variables = {}
     set_session_sql = ""
-    if AliyunRdsConfig.objects.filter(instance=instance, is_enable=True).exists():
-        variables.update(
-            {
-                "ghost_aliyun_rds": "on",
-                "ghost_allow_on_master": "true",
-                "ghost_assume_rbr": "true",
-            }
-        )
     # Convert to SQL statements.
     for k, v in variables.items():
         set_session_sql += f"inception set session {k} = '{v}';\n"

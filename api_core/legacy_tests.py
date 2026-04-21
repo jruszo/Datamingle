@@ -18,9 +18,6 @@ from sql.models import (
     ResourceGroup,
     Instance,
     InstanceAccessLevel,
-    AliyunRdsConfig,
-    CloudAccessKey,
-    Tunnel,
     SqlWorkflow,
     SqlWorkflowContent,
     WorkflowAudit,
@@ -1465,15 +1462,6 @@ class TestInstance(CacheIsolatedAPITestCase):
             user="ins_user",
             password="some_str",
         )
-        self.ak = CloudAccessKey.objects.create(
-            type="aliyun", key_id="abc", key_secret="abc"
-        )
-        self.rds = AliyunRdsConfig.objects.create(
-            rds_dbinstanceid="abc", ak_id=self.ak.id, instance=self.ins
-        )
-        self.tunnel = Tunnel.objects.create(
-            tunnel_name="one_tunnel", host="one_host", port=22
-        )
         r = self.client.post(
             "/api/auth/token/",
             {"username": "test_user", "password": "test_password"},
@@ -1487,9 +1475,6 @@ class TestInstance(CacheIsolatedAPITestCase):
         Instance.objects.all().delete()
         ResourceGroup.objects.all().delete()
         InstanceTag.objects.all().delete()
-        AliyunRdsConfig.objects.all().delete()
-        CloudAccessKey.objects.all().delete()
-        Tunnel.objects.all().delete()
         SysConfig().purge()
 
     def test_get_instance_list(self):
@@ -1567,7 +1552,6 @@ class TestInstance(CacheIsolatedAPITestCase):
         )
         self.assertTrue(any(item["value"] == "mysql" for item in payload["db_types"]))
         self.assertEqual(payload["tags"][0]["id"], active_tag.id)
-        self.assertEqual(payload["tunnels"][0]["id"], self.tunnel.id)
         self.assertEqual(
             payload["resource_groups"][0]["group_id"], visible_group.group_id
         )
@@ -1832,13 +1816,11 @@ class TestInstance(CacheIsolatedAPITestCase):
         self.ins.show_db_name_regex = "^detail_.*$"
         self.ins.denied_db_name_regex = "^mysql$"
         self.ins.charset = "utf8mb4"
-        self.ins.tunnel = self.tunnel
         self.ins.save(
             update_fields=[
                 "show_db_name_regex",
                 "denied_db_name_regex",
                 "charset",
-                "tunnel",
             ]
         )
 
@@ -1851,7 +1833,6 @@ class TestInstance(CacheIsolatedAPITestCase):
         self.assertEqual(payload["show_db_name_regex"], "^detail_.*$")
         self.assertEqual(payload["denied_db_name_regex"], "^mysql$")
         self.assertEqual(payload["charset"], "utf8mb4")
-        self.assertEqual(payload["tunnel_id"], self.tunnel.id)
         self.assertEqual(payload["resource_group_ids"], [resource_group.group_id])
         self.assertEqual(payload["instance_tag_ids"], [tag.id])
 
@@ -1875,7 +1856,6 @@ class TestInstance(CacheIsolatedAPITestCase):
             "charset": "utf8mb4",
             "show_db_name_regex": "^inventory_.*$",
             "denied_db_name_regex": "^mysql$",
-            "tunnel_id": self.tunnel.id,
             "resource_group_ids": [resource_group.group_id],
             "instance_tag_ids": [tag.id],
         }
@@ -1884,12 +1864,10 @@ class TestInstance(CacheIsolatedAPITestCase):
 
         payload = response_data(r)
         self.assertEqual(payload["instance_name"], "inventory_ins")
-        self.assertEqual(payload["tunnel_id"], self.tunnel.id)
         self.assertEqual(payload["resource_group_ids"], [resource_group.group_id])
         self.assertEqual(payload["instance_tag_ids"], [tag.id])
 
         instance = Instance.objects.get(instance_name="inventory_ins")
-        self.assertEqual(instance.tunnel_id, self.tunnel.id)
         self.assertEqual(
             list(instance.resource_group.values_list("group_id", flat=True)),
             [resource_group.group_id],
@@ -1921,7 +1899,6 @@ class TestInstance(CacheIsolatedAPITestCase):
             "charset": "utf8mb4",
             "show_db_name_regex": "^draft_.*$",
             "denied_db_name_regex": "^mysql$",
-            "tunnel_id": self.tunnel.id,
         }
         r = self.client.post(
             "/api/v1/instance/test-connection/",
@@ -1941,7 +1918,6 @@ class TestInstance(CacheIsolatedAPITestCase):
         self.assertEqual(instance.instance_name, "draft_mysql")
         self.assertEqual(instance.host, "draft-host")
         self.assertEqual(instance.port, 3306)
-        self.assertEqual(instance.tunnel_id, self.tunnel.id)
 
     @patch("api_instances.views.logger")
     @patch("api_instances.views.get_engine")
@@ -2006,7 +1982,6 @@ class TestInstance(CacheIsolatedAPITestCase):
             "charset": "utf8mb4",
             "service_name": "",
             "sid": "",
-            "tunnel_id": self.tunnel.id,
             "resource_group_ids": [resource_group.group_id],
             "instance_tag_ids": [tag.id],
         }
@@ -2020,7 +1995,6 @@ class TestInstance(CacheIsolatedAPITestCase):
         self.assertEqual(self.ins.instance_name, "Updated Instance Name")
         self.assertEqual(self.ins.host, "updated-host")
         self.assertEqual(self.ins.port, 3307)
-        self.assertEqual(self.ins.tunnel_id, self.tunnel.id)
         self.assertEqual(
             list(self.ins.resource_group.values_list("group_id", flat=True)),
             [resource_group.group_id],
@@ -2037,12 +2011,6 @@ class TestInstance(CacheIsolatedAPITestCase):
         r = self.client.delete(f"/api/v1/instance/{self.ins.id}/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(Instance.objects.filter(instance_name="some_ins").count(), 0)
-
-    def test_get_aliyunrds_list(self):
-        """Test getting Aliyun RDS list."""
-        r = self.client.get("/api/v1/instance/rds/", format="json")
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(response_data(r)["count"], 1)
 
 
 class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
@@ -2270,43 +2238,6 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
         payload = response_data(r)
         self.assertEqual(len(payload), 1)
         self.assertEqual(payload[0]["instance_name"], self.instance.instance_name)
-
-    def test_create_aliyunrds(self):
-        """Test creating Aliyun RDS config."""
-        ins = Instance.objects.create(
-            instance_name="another_ins",
-            type="slave",
-            db_type="mysql",
-            host="another_host",
-            port=3306,
-        )
-        json_data = {
-            "rds_dbinstanceid": "bbc",
-            "is_enable": True,
-            "instance": ins.id,
-            "ak": {
-                "type": "aliyun",
-                "key_id": "bbc",
-                "key_secret": "bbc",
-                "remark": "bbc",
-            },
-        }
-        r = self.client.post("/api/v1/instance/rds/", json_data, format="json")
-        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response_data(r)["rds_dbinstanceid"], "bbc")
-
-    def test_get_tunnel_list(self):
-        """Test getting tunnel list."""
-        r = self.client.get("/api/v1/instance/tunnel/", format="json")
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(response_data(r)["count"], 1)
-
-    def test_create_tunnel(self):
-        """Test creating tunnel."""
-        json_data = {"tunnel_name": "tunnel_test", "host": "one_host", "port": 22}
-        r = self.client.post("/api/v1/instance/tunnel/", json_data, format="json")
-        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response_data(r)["tunnel_name"], "tunnel_test")
 
     def test_test_instance_connection_requires_superuser(self):
         """Connection testing stays restricted to superusers."""

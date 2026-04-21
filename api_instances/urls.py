@@ -14,6 +14,4 @@ urlpatterns = [
     ),
     path("v1/instance/<int:pk>/", views.InstanceDetail.as_view()),
     path("v1/instance/resource/", views.InstanceResource.as_view()),
-    path("v1/instance/tunnel/", views.TunnelList.as_view()),
-    path("v1/instance/rds/", views.AliyunRdsList.as_view()),
 ]

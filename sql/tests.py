@@ -2124,7 +2124,7 @@ class TestDataDictionary(TestCase):
                 {
                     "TABLE_CATALOG": "def",
                     "TABLE_SCHEMA": "archer",
-                    "TABLE_NAME": "aliyun_rds_config",
+                    "TABLE_NAME": "sql_instance",
                     "TABLE_TYPE": "BASE TABLE",
                     "ENGINE": "InnoDB",
                     "VERSION": 10,
@@ -2206,7 +2206,7 @@ class TestDataDictionary(TestCase):
                 {
                     "TABLE_CATALOG": "def",
                     "TABLE_SCHEMA": "archer",
-                    "TABLE_NAME": "aliyun_rds_config",
+                    "TABLE_NAME": "sql_instance",
                     "TABLE_TYPE": "BASE TABLE",
                     "ENGINE": "InnoDB",
                     "VERSION": 10,
@@ -2286,7 +2286,7 @@ class TestDataDictionary(TestCase):
         _get_engine.return_value.query.return_value = ResultSet(
             rows=(
                 {
-                    "TABLE_NAME": "aliyun_rds_config",
+                    "TABLE_NAME": "sql_instance",
                     "TABLE_COMMENTS": "TABLE",
                     "COLUMN_NAME": "t1",
                     "data_type": "varcher2(20)",

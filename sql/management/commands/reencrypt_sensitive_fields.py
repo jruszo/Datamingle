@@ -1,21 +1,17 @@
 from django.core.management.base import BaseCommand
 
 from sql.models import (
-    CloudAccessKey,
     Config,
     Instance,
     InstanceAccount,
-    Tunnel,
     TwoFactorAuthConfig,
 )
 
 MODEL_FIELDS = (
     (Instance, ("user", "password")),
-    (Tunnel, ("user", "password", "pkey", "pkey_password")),
     (InstanceAccount, ("password",)),
     (Config, ("value",)),
     (TwoFactorAuthConfig, ("phone", "secret_key")),
-    (CloudAccessKey, ("key_id", "key_secret")),
 )
 
 

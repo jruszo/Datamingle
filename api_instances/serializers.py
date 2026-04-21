@@ -1,30 +1,18 @@
-import logging
-import re
-import traceback
-
 from django.db import transaction
 from rest_framework import serializers
 
 from sql.models import (
-    AliyunRdsConfig,
-    CloudAccessKey,
     Instance,
     InstanceTag,
     QueryPrivilegesApply,
     ResourceGroup,
-    Tunnel,
 )
-
-logger = logging.getLogger("default")
-
-
 class ChoiceOptionSerializer(serializers.Serializer):
     value = serializers.CharField()
     label = serializers.CharField()
 
 
 class InstanceListSerializer(serializers.ModelSerializer):
-    tunnel_id = serializers.IntegerField(read_only=True)
     resource_group_ids = serializers.SerializerMethodField()
     instance_tag_ids = serializers.SerializerMethodField()
 
@@ -52,14 +40,12 @@ class InstanceListSerializer(serializers.ModelSerializer):
             "charset",
             "service_name",
             "sid",
-            "tunnel_id",
             "resource_group_ids",
             "instance_tag_ids",
         )
 
 
 class InstanceEditorSerializer(serializers.ModelSerializer):
-    tunnel_id = serializers.IntegerField(read_only=True)
     resource_group_ids = serializers.SerializerMethodField()
     instance_tag_ids = serializers.SerializerMethodField()
 
@@ -89,19 +75,12 @@ class InstanceEditorSerializer(serializers.ModelSerializer):
             "charset",
             "service_name",
             "sid",
-            "tunnel_id",
             "resource_group_ids",
             "instance_tag_ids",
         )
 
 
 class InstanceCreateSerializer(serializers.ModelSerializer):
-    tunnel_id = serializers.PrimaryKeyRelatedField(
-        source="tunnel",
-        queryset=Tunnel.objects.all(),
-        allow_null=True,
-        required=False,
-    )
     resource_group_ids = serializers.PrimaryKeyRelatedField(
         source="resource_group",
         queryset=ResourceGroup.objects.filter(is_deleted=0),
@@ -179,7 +158,6 @@ class InstanceCreateSerializer(serializers.ModelSerializer):
             "charset",
             "service_name",
             "sid",
-            "tunnel_id",
             "resource_group_ids",
             "instance_tag_ids",
         )
@@ -219,12 +197,6 @@ class InstanceConnectionTestRequestSerializer(serializers.Serializer):
     )
     sid = serializers.CharField(
         max_length=50, required=False, allow_blank=True, allow_null=True
-    )
-    tunnel_id = serializers.PrimaryKeyRelatedField(
-        source="tunnel",
-        queryset=Tunnel.objects.all(),
-        allow_null=True,
-        required=False,
     )
 
     def validate_instance_name(self, value):
@@ -279,7 +251,6 @@ class InstanceConnectionTestRequestSerializer(serializers.Serializer):
             charset=validated_data.get("charset", ""),
             service_name=validated_data.get("service_name"),
             sid=validated_data.get("sid"),
-            tunnel=validated_data.get("tunnel"),
         )
 
 
@@ -291,12 +262,6 @@ class InstanceSerializer(serializers.ModelSerializer):
 
 
 class InstanceDetailSerializer(serializers.ModelSerializer):
-    tunnel_id = serializers.PrimaryKeyRelatedField(
-        source="tunnel",
-        queryset=Tunnel.objects.all(),
-        allow_null=True,
-        required=False,
-    )
     resource_group_ids = serializers.PrimaryKeyRelatedField(
         source="resource_group",
         queryset=ResourceGroup.objects.filter(is_deleted=0),
@@ -387,7 +352,6 @@ class InstanceDetailSerializer(serializers.ModelSerializer):
             "charset",
             "service_name",
             "sid",
-            "tunnel_id",
             "resource_group_ids",
             "instance_tag_ids",
         )
@@ -408,49 +372,6 @@ class InstanceDetailSerializer(serializers.ModelSerializer):
             "service_name": {"required": False},
             "sid": {"required": False},
         }
-
-
-class TunnelSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Tunnel
-        fields = "__all__"
-        extra_kwargs = {
-            "password": {"write_only": True},
-            "pkey": {"write_only": True},
-            "pkey_password": {"write_only": True},
-        }
-
-
-class CloudAccessKeySerializer(serializers.ModelSerializer):
-    class Meta:
-        model = CloudAccessKey
-        fields = "__all__"
-        extra_kwargs = {
-            "key_id": {"write_only": True},
-            "key_secret": {"write_only": True},
-        }
-
-
-class AliyunRdsSerializer(serializers.ModelSerializer):
-    ak = CloudAccessKeySerializer()
-
-    def create(self, validated_data):
-        rds_data = validated_data.pop("ak")
-
-        try:
-            with transaction.atomic():
-                ak = CloudAccessKey.objects.create(**rds_data)
-                rds = AliyunRdsConfig.objects.create(ak=ak, **validated_data)
-        except Exception:
-            logger.error("Error creating AliyunRds: %s", traceback.format_exc())
-            raise serializers.ValidationError(
-                {"errors": "Unable to create Aliyun RDS configuration."}
-            )
-        return rds
-
-    class Meta:
-        model = AliyunRdsConfig
-        fields = ("id", "rds_dbinstanceid", "is_enable", "instance", "ak")
 
 
 class QueryPrivilegesApplySerializer(serializers.ModelSerializer):
@@ -510,18 +431,6 @@ class InstanceTagUpdateSerializer(serializers.ModelSerializer):
         model = InstanceTag
         fields = ("tag_name", "active")
 
-
-class TunnelLookupSerializer(serializers.ModelSerializer):
-    label = serializers.SerializerMethodField()
-
-    def get_label(self, obj):
-        return f"{obj.tunnel_name} | {obj.host}:{obj.port}"
-
-    class Meta:
-        model = Tunnel
-        fields = ("id", "tunnel_name", "host", "port", "label")
-
-
 class ResourceGroupLookupSerializer(serializers.ModelSerializer):
     label = serializers.SerializerMethodField()
 
@@ -537,7 +446,6 @@ class InstanceMetadataSerializer(serializers.Serializer):
     instance_types = ChoiceOptionSerializer(many=True)
     db_types = ChoiceOptionSerializer(many=True)
     tags = InstanceTagLookupSerializer(many=True)
-    tunnels = TunnelLookupSerializer(many=True)
     resource_groups = ResourceGroupLookupSerializer(many=True)
 
 

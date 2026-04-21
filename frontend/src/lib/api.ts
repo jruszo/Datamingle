@@ -197,7 +197,6 @@ export type InstanceInventoryRecord = {
   charset: string
   service_name: string | null
   sid: string | null
-  tunnel_id: number | null
   resource_group_ids: number[]
   instance_tag_ids: number[]
 }
@@ -214,14 +213,6 @@ export type InstanceTagOptionRecord = {
   label: string
 }
 
-export type TunnelOptionRecord = {
-  id: number
-  tunnel_name: string
-  host: string
-  port: number
-  label: string
-}
-
 export type ResourceGroupOptionRecord = {
   group_id: number
   group_name: string
@@ -232,7 +223,6 @@ export type InstanceInventoryMetadata = {
   instance_types: InstanceOptionRecord[]
   db_types: InstanceOptionRecord[]
   tags: InstanceTagOptionRecord[]
-  tunnels: TunnelOptionRecord[]
   resource_groups: ResourceGroupOptionRecord[]
 }
 
@@ -262,7 +252,6 @@ export type InstanceCreatePayload = {
   charset: string
   service_name: string
   sid: string
-  tunnel_id: number | null
   resource_group_ids: number[]
   instance_tag_ids: number[]
 }
