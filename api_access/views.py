@@ -1,7 +1,8 @@
 import datetime
+import logging
 
 from django.contrib.auth.models import Group
-from django.db import transaction
+from django.db import DatabaseError, IntegrityError, transaction
 from django.db.models import Q
 from common.task_queue import async_task
 from drf_spectacular.utils import extend_schema
@@ -33,6 +34,8 @@ from sql.utils.workflow_audit import AuditException, get_auditor
 
 from api_core.pagination import CustomizedPagination
 from api_core.response import success_response
+
+logger = logging.getLogger("default")
 
 
 def _require_permission(request, permission):
@@ -490,19 +493,32 @@ class PermissionRequestListCreate(views.APIView):
                     auditor.workflow.request_id, auditor.audit.current_status
                 )
                 sync_approval_notifications(auditor.workflow)
-                async_task(
-                    notify_for_audit,
-                    workflow_audit=auditor.audit,
-                    timeout=60,
-                    task_name=f"permission-request-{auditor.workflow.request_id}",
+                transaction.on_commit(
+                    lambda workflow_audit=auditor.audit, request_id=auditor.workflow.request_id: async_task(
+                        notify_for_audit,
+                        workflow_audit=workflow_audit,
+                        timeout=60,
+                        task_name=f"permission-request-{request_id}",
+                    )
                 )
         except AuditException:
             raise serializers.ValidationError(
                 {"errors": "Failed to create approval flow, please contact admin."}
             )
-        except Exception as exc:
+        except serializers.ValidationError:
+            raise
+        except (DatabaseError, IntegrityError, ValueError) as exc:
             raise serializers.ValidationError(
                 {"errors": f"Failed to create approval flow, {str(exc)}"}
+            ) from exc
+        except Exception as exc:
+            logger.exception(
+                "Unexpected error while creating permission request approval flow "
+                "for request_id=%s",
+                getattr(permission_request, "request_id", None),
+            )
+            raise serializers.ValidationError(
+                {"errors": "Failed to create approval flow, please contact admin."}
             ) from exc
         return success_response(
             data={"request_id": auditor.workflow.request_id},

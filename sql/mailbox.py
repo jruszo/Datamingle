@@ -18,6 +18,8 @@ from sql.models import (
 from sql.utils.resource_group import user_groups, user_member_groups
 from sql.utils.sql_review import can_execute
 
+MAILBOX_BACKFILL_BATCH_SIZE = 1000
+
 
 def _source_type_for(source):
     if isinstance(source, SqlWorkflow):
@@ -450,24 +452,45 @@ def preview_mailbox_items(user, limit=5):
     )
 
 
-def backfill_mailbox_notifications():
-    with transaction.atomic():
-        for workflow in SqlWorkflow.objects.select_related("instance").all():
-            sync_approval_notifications(workflow, reload=False)
-            sync_execution_needed_notifications(workflow, reload=False)
+def _backfill_sources_in_batches(queryset, *sync_handlers, batch_size=None):
+    batch_size = batch_size or MAILBOX_BACKFILL_BATCH_SIZE
+    last_pk = 0
+    ordered_queryset = queryset.order_by("pk")
 
-        for archive in ArchiveConfig.objects.select_related(
+    while True:
+        batch = list(ordered_queryset.filter(pk__gt=last_pk)[:batch_size])
+        if not batch:
+            return
+
+        with transaction.atomic():
+            for source in batch:
+                for sync_handler in sync_handlers:
+                    sync_handler(source, reload=False)
+
+        last_pk = batch[-1].pk
+
+
+def backfill_mailbox_notifications():
+    _backfill_sources_in_batches(
+        SqlWorkflow.objects.select_related("instance"),
+        sync_approval_notifications,
+        sync_execution_needed_notifications,
+    )
+    _backfill_sources_in_batches(
+        ArchiveConfig.objects.select_related(
             "resource_group",
             "src_instance",
-        ).all():
-            sync_approval_notifications(archive, reload=False)
-            sync_execution_needed_notifications(archive, reload=False)
-
-        for permission_request in PermissionRequest.objects.select_related(
+        ),
+        sync_approval_notifications,
+        sync_execution_needed_notifications,
+    )
+    _backfill_sources_in_batches(
+        PermissionRequest.objects.select_related(
             "resource_group",
             "instance",
-        ).all():
-            sync_approval_notifications(permission_request, reload=False)
+        ),
+        sync_approval_notifications,
+    )
 
 
 def _reload_source(source):

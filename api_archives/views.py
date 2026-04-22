@@ -87,6 +87,18 @@ def _sync_archive_execution_mailbox_notifications_safe(workflow):
         )
 
 
+def _resolve_archive_mailbox_items_safe(workflow):
+    try:
+        resolve_mailbox_items(workflow, category="execution_needed")
+    except Exception:
+        logger.exception(
+            "Archive execution-needed mailbox resolution failed for archive_id=%s "
+            "while calling resolve_mailbox_items(workflow, "
+            "category='execution_needed')",
+            workflow.id,
+        )
+
+
 def _require_archive_module_access(user):
     if user.is_superuser or user.has_perm("sql.menu_archive"):
         return
@@ -976,7 +988,7 @@ class ArchiveRunNow(views.APIView):
                     operator=request.user.username,
                     operator_display=request.user.display,
                 )
-            resolve_mailbox_items(archive_config, category="execution_needed")
+            _resolve_archive_mailbox_items_safe(archive_config)
 
             async_task(
                 "sql.archiver.archive",

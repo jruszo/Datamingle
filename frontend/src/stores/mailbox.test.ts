@@ -28,9 +28,15 @@ Object.defineProperty(globalThis, 'localStorage', {
   configurable: true,
 })
 
+Object.defineProperty(globalThis, 'window', {
+  value: globalThis,
+  configurable: true,
+})
+
 describe('useMailboxStore', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.useRealTimers()
     setActivePinia(createPinia())
   })
 
@@ -118,5 +124,50 @@ describe('useMailboxStore', () => {
     expect(markAllMailboxItemsRead).toHaveBeenCalledWith('access-token')
     expect(mailboxStore.itemsPage.results).toEqual([])
     expect(mailboxStore.itemsPage.count).toBe(0)
+  })
+
+  it('keeps existing filters when loading items fails', async () => {
+    vi.mocked(fetchMailboxItems)
+      .mockResolvedValueOnce({
+        count: 1,
+        next: null,
+        previous: null,
+        results: [],
+      })
+      .mockRejectedValueOnce(new Error('load failed'))
+
+    const authStore = useAuthStore()
+    authStore.syncTokens('access-token', 'refresh-token')
+
+    const mailboxStore = useMailboxStore()
+    await mailboxStore.loadItems({ state: 'unread', page: 2 })
+
+    await expect(mailboxStore.loadItems({ state: 'read' })).rejects.toThrow(
+      'load failed',
+    )
+    expect(mailboxStore.listFilters.state).toBe('unread')
+    expect(mailboxStore.listFilters.page).toBe(2)
+  })
+
+  it('reset stops polling', async () => {
+    vi.useFakeTimers()
+    vi.mocked(fetchMailboxSummary).mockResolvedValue({
+      unread_count: 1,
+      items: [],
+    })
+
+    const clearIntervalSpy = vi.spyOn(window, 'clearInterval')
+    const authStore = useAuthStore()
+    authStore.syncTokens('access-token', 'refresh-token')
+
+    const mailboxStore = useMailboxStore()
+    mailboxStore.startPolling()
+    await Promise.resolve()
+
+    mailboxStore.reset()
+
+    expect(clearIntervalSpy).toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(fetchMailboxSummary).toHaveBeenCalledTimes(1)
   })
 })

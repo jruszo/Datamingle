@@ -66,7 +66,8 @@ def _archive_mailbox_dedupe_suffix(archive_info, callback_time=None):
         return archive_info.last_archive_time.strftime("%Y%m%d%H%M%S%f")
     if callback_time:
         return callback_time.strftime("%Y%m%d%H%M%S%f")
-    return f"archive-{archive_info.id}"
+    unique_timestamp = datetime.datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+    return f"archive-{archive_info.id}-{unique_timestamp}"
 
 
 def archive_schedule_name(archive_id):
@@ -927,9 +928,15 @@ def archive(archive_id, trigger="manual"):
         archive_info.execution_state = ARCHIVE_EXECUTION_STATE_RUNNING
         archive_info.save(update_fields=["execution_state"])
         marked_running = True
-    resolve_mailbox_items(archive_info, category="execution_needed")
-
     try:
+        try:
+            resolve_mailbox_items(archive_info, category="execution_needed")
+        except Exception:
+            logger.exception(
+                "Failed to resolve execution-needed mailbox items for archive_id=%s",
+                archive_id,
+            )
+
         audit = Audit.detail_by_workflow_id(archive_id, WorkflowType.ARCHIVE)
         if audit:
             operation_info = (

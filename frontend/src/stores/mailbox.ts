@@ -62,6 +62,7 @@ export const useMailboxStore = defineStore('mailbox', () => {
   let pollingHandle: number | null = null
 
   function reset() {
+    stopPolling()
     summary.value = emptySummary()
     itemsPage.value = emptyPage()
     listFilters.value = {
@@ -101,13 +102,14 @@ export const useMailboxStore = defineStore('mailbox', () => {
       return itemsPage.value
     }
 
-    listFilters.value = {
+    const mergedFilters = {
       ...listFilters.value,
       ...overrides,
     }
     itemsLoading.value = true
     try {
-      itemsPage.value = await fetchMailboxItems(requireToken(), listFilters.value)
+      itemsPage.value = await fetchMailboxItems(requireToken(), mergedFilters)
+      listFilters.value = mergedFilters
       return itemsPage.value
     } finally {
       itemsLoading.value = false
