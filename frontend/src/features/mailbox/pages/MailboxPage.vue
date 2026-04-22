@@ -175,6 +175,7 @@ onMounted(async () => {
             class="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
             @click="void openItem(item)"
             @keydown.enter.prevent="void openItem(item)"
+            @keydown.space.prevent="void openItem(item)"
           >
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div class="space-y-2">

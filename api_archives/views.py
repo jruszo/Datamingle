@@ -988,8 +988,6 @@ class ArchiveRunNow(views.APIView):
                     operator=request.user.username,
                     operator_display=request.user.display,
                 )
-            _resolve_archive_mailbox_items_safe(archive_config)
-
             async_task(
                 "sql.archiver.archive",
                 archive_id,
@@ -998,6 +996,7 @@ class ArchiveRunNow(views.APIView):
                 timeout=-1,
                 task_name=f"archive-{archive_id}",
             )
+        _resolve_archive_mailbox_items_safe(archive_config)
         return success_response(detail="Archive execution queued.")
 
 
