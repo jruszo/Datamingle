@@ -127,9 +127,21 @@ export const useMailboxStore = defineStore('mailbox', () => {
     }
   }
 
+  function removeReadItemsFromUnreadPage() {
+    const readItemCount = itemsPage.value.results.filter((item) => !item.is_unread).length
+    itemsPage.value = {
+      ...itemsPage.value,
+      count: Math.max(0, itemsPage.value.count - readItemCount),
+      results: itemsPage.value.results.filter((item) => item.is_unread),
+    }
+  }
+
   async function markRead(itemId: number) {
     const updatedItem = await markMailboxItemRead(itemId, requireToken())
     updatePageItem(updatedItem)
+    if (listFilters.value.state === 'unread') {
+      removeReadItemsFromUnreadPage()
+    }
     await refreshSummary()
     return updatedItem
   }
@@ -143,6 +155,9 @@ export const useMailboxStore = defineStore('mailbox', () => {
         is_unread: false,
         read_at: item.read_at || new Date().toISOString(),
       })),
+    }
+    if (listFilters.value.state === 'unread') {
+      removeReadItemsFromUnreadPage()
     }
     await refreshSummary()
   }

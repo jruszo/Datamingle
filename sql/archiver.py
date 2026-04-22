@@ -61,9 +61,11 @@ ARCHIVE_SAFE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9_$]+$")
 ARCHIVE_MAX_CONSECUTIVE_FAILURES = 3
 
 
-def _archive_mailbox_dedupe_suffix(archive_info):
+def _archive_mailbox_dedupe_suffix(archive_info, callback_time=None):
     if archive_info.last_archive_time:
         return archive_info.last_archive_time.strftime("%Y%m%d%H%M%S%f")
+    if callback_time:
+        return callback_time.strftime("%Y%m%d%H%M%S%f")
     return f"archive-{archive_info.id}"
 
 
@@ -501,7 +503,10 @@ def archive_task_callback(task):
             operator_display="System" if trigger == "scheduled" else "Archive Manager",
         )
     mailbox_outcome = "success" if task.success else "failure"
-    mailbox_suffix = _archive_mailbox_dedupe_suffix(archive_info)
+    mailbox_suffix = _archive_mailbox_dedupe_suffix(
+        archive_info,
+        callback_time=getattr(task, "stopped", None),
+    )
 
     if archive_info.execution_mode == ARCHIVE_EXECUTION_ONE_TIME:
         if task.success:

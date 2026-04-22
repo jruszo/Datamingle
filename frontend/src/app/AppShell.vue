@@ -156,10 +156,12 @@ async function openMailboxItem(
   itemId: number,
   isUnread: boolean,
 ) {
-  if (isUnread) {
-    await mailboxStore.markRead(itemId)
-  }
   isMailboxMenuOpen.value = false
+  if (isUnread) {
+    void mailboxStore.markRead(itemId).catch((error) => {
+      console.error('Failed to mark mailbox item as read.', error)
+    })
+  }
   await router.push(actionPath)
 }
 

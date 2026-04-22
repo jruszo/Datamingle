@@ -1,6 +1,6 @@
 from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema
 from django.shortcuts import get_object_or_404
-from rest_framework import permissions, views
+from rest_framework import permissions, serializers, views
 from rest_framework.generics import ListAPIView
 
 from api_core.pagination import CustomizedPagination
@@ -78,6 +78,12 @@ class MailboxItemListView(ListAPIView):
         state = self.request.query_params.get("state", "all").strip().lower()
         category = self.request.query_params.get("category", "").strip()
         source_type = self.request.query_params.get("source_type", "").strip()
+        allowed_states = {"all", "read", "unread"}
+
+        if state not in allowed_states:
+            raise serializers.ValidationError(
+                {"state": ("Unsupported state filter. Use one of: all, read, unread.")}
+            )
 
         if state == "unread":
             queryset = queryset.filter(is_unread=True)

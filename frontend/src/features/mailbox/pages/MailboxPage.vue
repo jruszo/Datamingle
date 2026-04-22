@@ -71,7 +71,11 @@ async function loadPage(page = 1) {
 
 async function openItem(item: MailboxItem) {
   if (item.is_unread) {
-    await mailboxStore.markRead(item.id)
+    try {
+      await mailboxStore.markRead(item.id)
+    } catch (errorValue) {
+      console.error('Failed to mark mailbox item as read.', errorValue)
+    }
   }
   await router.push(item.action_path)
 }
@@ -80,7 +84,11 @@ async function markItemRead(item: MailboxItem) {
   if (!item.is_unread) {
     return
   }
-  await mailboxStore.markRead(item.id)
+  try {
+    await mailboxStore.markRead(item.id)
+  } catch (errorValue) {
+    console.error('Failed to mark mailbox item as read.', errorValue)
+  }
 }
 
 watch([stateFilter, categoryFilter, sourceTypeFilter], () => {
@@ -159,12 +167,14 @@ onMounted(async () => {
         </div>
 
         <div v-else class="grid gap-3">
-          <button
+          <article
             v-for="item in items"
             :key="item.id"
-            type="button"
+            role="button"
+            tabindex="0"
             class="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
             @click="void openItem(item)"
+            @keydown.enter.prevent="void openItem(item)"
           >
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div class="space-y-2">
@@ -197,7 +207,7 @@ onMounted(async () => {
               <span v-if="item.read_at">Read {{ formatDateTime(item.read_at) }}</span>
               <span v-else-if="item.resolved_at">Resolved {{ formatDateTime(item.resolved_at) }}</span>
             </div>
-          </button>
+          </article>
         </div>
 
         <div class="flex items-center justify-between gap-3">

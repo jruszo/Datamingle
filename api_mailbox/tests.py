@@ -3,6 +3,7 @@ import datetime
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from common.utils.const import WorkflowStatus, WorkflowType
@@ -212,7 +213,7 @@ class MailboxApiTests(TestCase):
     def test_archive_and_sql_emit_execution_finished_notifications(self):
         workflow = self._create_sql_workflow(status="workflow_finish")
         workflow.status = "workflow_finish"
-        workflow.finish_time = datetime.datetime.now()
+        workflow.finish_time = timezone.now()
         workflow.save(update_fields=["status", "finish_time"])
 
         emit_execution_finished_notifications(

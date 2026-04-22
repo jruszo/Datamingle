@@ -201,6 +201,14 @@ async function refreshArchiveDetail() {
   await Promise.all([loadArchiveDetail(), loadArchiveLogs(logPage.value)])
 }
 
+async function refreshMailboxSummaryBestEffort() {
+  try {
+    await mailboxStore.refreshSummary()
+  } catch (errorValue) {
+    console.error('Failed to refresh mailbox summary.', errorValue)
+  }
+}
+
 async function submitReviewAction(auditType: 'pass' | 'reject' | 'cancel') {
   if (!selectedArchiveId.value) {
     return
@@ -225,10 +233,8 @@ async function submitReviewAction(auditType: 'pass' | 'reject' | 'cancel') {
         ? 'Archive rejected.'
         : 'Archive canceled.'
     reviewForm.auditRemark = ''
-    await Promise.all([
-      refreshArchiveDetail(),
-      mailboxStore.refreshSummary(),
-    ])
+    await refreshArchiveDetail()
+    await refreshMailboxSummaryBestEffort()
   } catch (errorValue) {
     detailError.value = toUserFacingMessage(errorValue, 'Failed to submit the archive review action.')
   } finally {
@@ -247,10 +253,8 @@ async function queueArchiveRunNow() {
 
   try {
     feedback.value = await runArchiveNow(selectedArchiveId.value, requireToken())
-    await Promise.all([
-      refreshArchiveDetail(),
-      mailboxStore.refreshSummary(),
-    ])
+    await refreshArchiveDetail()
+    await refreshMailboxSummaryBestEffort()
   } catch (errorValue) {
     detailError.value = toUserFacingMessage(errorValue, 'Failed to queue archive execution.')
   } finally {
@@ -273,10 +277,8 @@ async function setArchiveEnabled(enabled: boolean) {
       { enabled },
       requireToken(),
     )
-    await Promise.all([
-      refreshArchiveDetail(),
-      mailboxStore.refreshSummary(),
-    ])
+    await refreshArchiveDetail()
+    await refreshMailboxSummaryBestEffort()
   } catch (errorValue) {
     detailError.value = toUserFacingMessage(
       errorValue,

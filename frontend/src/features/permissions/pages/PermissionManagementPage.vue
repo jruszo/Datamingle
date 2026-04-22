@@ -627,7 +627,7 @@ watch(
     }
     const requestId = typeof value === 'string' ? Number(value) : Number.NaN
     if (!Number.isInteger(requestId) || requestId <= 0) {
-      if (!value && isDetailDialogOpen.value) {
+      if (isDetailDialogOpen.value) {
         isDetailDialogOpen.value = false
         selectedRequestDetail.value = null
       }

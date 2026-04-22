@@ -486,21 +486,24 @@ class PermissionRequestListCreate(views.APIView):
         try:
             with transaction.atomic():
                 auditor.create_audit()
+                _permission_request_audit_callback(
+                    auditor.workflow.request_id, auditor.audit.current_status
+                )
+                sync_approval_notifications(auditor.workflow)
+                async_task(
+                    notify_for_audit,
+                    workflow_audit=auditor.audit,
+                    timeout=60,
+                    task_name=f"permission-request-{auditor.workflow.request_id}",
+                )
         except AuditException:
             raise serializers.ValidationError(
                 {"errors": "Failed to create approval flow, please contact admin."}
             )
-
-        _permission_request_audit_callback(
-            auditor.workflow.request_id, auditor.audit.current_status
-        )
-        sync_approval_notifications(auditor.workflow)
-        async_task(
-            notify_for_audit,
-            workflow_audit=auditor.audit,
-            timeout=60,
-            task_name=f"permission-request-{auditor.workflow.request_id}",
-        )
+        except Exception as exc:
+            raise serializers.ValidationError(
+                {"errors": f"Failed to create approval flow, {str(exc)}"}
+            ) from exc
         return success_response(
             data={"request_id": auditor.workflow.request_id},
             status_code=status.HTTP_201_CREATED,

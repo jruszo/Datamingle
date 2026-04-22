@@ -116,12 +116,10 @@ def _active_user_by_username(username):
     return Users.objects.filter(username=username, is_active=True).first()
 
 
-def _is_self_audit_blocked(user, source):
+def _is_self_audit_blocked(user, source, ban_self_audit):
     if user.is_superuser:
         return False
-    return user.username == _requester_username(source) and bool(
-        SysConfig().get("ban_self_audit")
-    )
+    return user.username == _requester_username(source) and bool(ban_self_audit)
 
 
 def _approval_permission_codename(source):
@@ -149,6 +147,7 @@ def _current_reviewers(source):
         return []
 
     required_permission = _approval_permission_codename(source)
+    ban_self_audit = SysConfig().get("ban_self_audit")
     reviewers = []
     seen_usernames = set()
     for user in current_group.user_set.filter(is_active=True):
@@ -159,7 +158,9 @@ def _current_reviewers(source):
             in_scope = source.resource_group_id in member_group_ids
         if not in_scope:
             continue
-        if user.username in seen_usernames or _is_self_audit_blocked(user, source):
+        if user.username in seen_usernames or _is_self_audit_blocked(
+            user, source, ban_self_audit
+        ):
             continue
         if not (user.is_superuser or user.has_perm(f"sql.{required_permission}")):
             continue
@@ -332,8 +333,9 @@ def _sync_action_items(source, category, recipients, title, body, metadata):
     queryset.update(resolved_at=now, sys_time=now)
 
 
-def sync_approval_notifications(source):
-    source = _reload_source(source)
+def sync_approval_notifications(source, reload=True):
+    if reload:
+        source = _reload_source(source)
     reviewers = _current_reviewers(source)
     title = f"Approval needed: {_source_title(source)}"
     body = f"{_requester_display(source)} is waiting for review."
@@ -349,8 +351,9 @@ def sync_approval_notifications(source):
     )
 
 
-def sync_execution_needed_notifications(source):
-    source = _reload_source(source)
+def sync_execution_needed_notifications(source, reload=True):
+    if reload:
+        source = _reload_source(source)
     recipients = _execution_needed_recipients(source)
     if isinstance(source, SqlWorkflow):
         body = "This workflow is approved and ready for execution."
@@ -370,9 +373,7 @@ def sync_execution_needed_notifications(source):
     )
 
 
-def emit_execution_finished_notifications(
-    source, outcome, actor=None, dedupe_suffix=None
-):
+def emit_execution_finished_notifications(source, outcome, dedupe_suffix, actor=None):
     source = _reload_source(source)
     recipients = _execution_finished_recipients(source, actor=actor)
     if not recipients:
@@ -386,7 +387,6 @@ def emit_execution_finished_notifications(
     )
     metadata = _base_metadata_for(source)
     metadata["outcome"] = normalized_outcome
-    suffix = dedupe_suffix or timezone.now().strftime("%Y%m%d%H%M%S%f")
     created_items = []
     for recipient in recipients:
         created_items.append(
@@ -394,7 +394,7 @@ def emit_execution_finished_notifications(
                 recipient=recipient,
                 dedupe_key=(
                     f"{MailboxCategory.EXECUTION_FINISHED}:"
-                    f"{_source_type_for(source)}:{_source_id_for(source)}:{suffix}"
+                    f"{_source_type_for(source)}:{_source_id_for(source)}:{dedupe_suffix}"
                 ),
                 defaults={
                     "category": MailboxCategory.EXECUTION_FINISHED,
@@ -453,21 +453,21 @@ def preview_mailbox_items(user, limit=5):
 def backfill_mailbox_notifications():
     with transaction.atomic():
         for workflow in SqlWorkflow.objects.select_related("instance").all():
-            sync_approval_notifications(workflow)
-            sync_execution_needed_notifications(workflow)
+            sync_approval_notifications(workflow, reload=False)
+            sync_execution_needed_notifications(workflow, reload=False)
 
         for archive in ArchiveConfig.objects.select_related(
             "resource_group",
             "src_instance",
         ).all():
-            sync_approval_notifications(archive)
-            sync_execution_needed_notifications(archive)
+            sync_approval_notifications(archive, reload=False)
+            sync_execution_needed_notifications(archive, reload=False)
 
         for permission_request in PermissionRequest.objects.select_related(
             "resource_group",
             "instance",
         ).all():
-            sync_approval_notifications(permission_request)
+            sync_approval_notifications(permission_request, reload=False)
 
 
 def _reload_source(source):

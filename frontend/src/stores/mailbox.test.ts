@@ -116,6 +116,7 @@ describe('useMailboxStore', () => {
     })
     expect(markMailboxItemRead).toHaveBeenCalledWith(1, 'access-token')
     expect(markAllMailboxItemsRead).toHaveBeenCalledWith('access-token')
-    expect(mailboxStore.itemsPage.results[0]?.is_unread).toBe(false)
+    expect(mailboxStore.itemsPage.results).toEqual([])
+    expect(mailboxStore.itemsPage.count).toBe(0)
   })
 })

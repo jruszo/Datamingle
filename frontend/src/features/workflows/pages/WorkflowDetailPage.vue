@@ -285,6 +285,14 @@ async function refreshSelectedWorkflow() {
   await loadWorkflowDetail()
 }
 
+async function refreshMailboxSummaryBestEffort() {
+  try {
+    await mailboxStore.refreshSummary()
+  } catch (errorValue) {
+    console.error('Failed to refresh mailbox summary.', errorValue)
+  }
+}
+
 async function submitReviewAction(auditType: 'pass' | 'reject' | 'cancel') {
   if (!selectedWorkflowId.value) {
     return
@@ -312,10 +320,8 @@ async function submitReviewAction(auditType: 'pass' | 'reject' | 'cancel') {
       feedback.value = 'Workflow canceled.'
     }
     reviewForm.auditRemark = ''
-    await Promise.all([
-      refreshSelectedWorkflow(),
-      mailboxStore.refreshSummary(),
-    ])
+    await refreshSelectedWorkflow()
+    await refreshMailboxSummaryBestEffort()
   } catch (errorValue) {
     detailError.value = toUserFacingMessage(errorValue, 'Failed to submit the workflow review action.')
   } finally {
@@ -346,10 +352,8 @@ async function executeSelectedWorkflow(mode: 'auto' | 'manual') {
       },
       requireToken(),
     )
-    await Promise.all([
-      refreshSelectedWorkflow(),
-      mailboxStore.refreshSummary(),
-    ])
+    await refreshSelectedWorkflow()
+    await refreshMailboxSummaryBestEffort()
   } catch (errorValue) {
     detailError.value = toUserFacingMessage(errorValue, 'Failed to start workflow execution.')
   } finally {
