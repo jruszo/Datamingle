@@ -20,6 +20,12 @@ from common.utils.const import Const, WorkflowStatus, WorkflowType, WorkflowActi
 from sql.engines import get_engine
 from sql.engines.mysql_ddl import MysqlDDLExecutorError
 from sql.engines.models import ReviewResult, ReviewSet
+from sql.mailbox import (
+    emit_execution_finished_notifications,
+    resolve_mailbox_items,
+    sync_approval_notifications,
+    sync_execution_needed_notifications,
+)
 from sql.offlinedownload import OffLineDownLoad, download_export_file
 from sql.models import (
     Instance,
@@ -1035,6 +1041,8 @@ class WorkflowList(generics.ListAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         workflow_content = serializer.save()
+        sync_approval_notifications(workflow_content.workflow)
+        sync_execution_needed_notifications(workflow_content.workflow)
         sys_config = SysConfig()
         is_notified = (
             "Apply" in sys_config.get("notify_phase_control").split(",")
@@ -1584,6 +1592,8 @@ class WorkflowReviewCreate(views.APIView):
                     # Mark workflow as manually terminated
                 auditor.workflow.status = "workflow_abort"
                 auditor.workflow.save(update_fields=["status"])
+            sync_approval_notifications(auditor.workflow)
+            sync_execution_needed_notifications(auditor.workflow)
         elif auditor.workflow_type == WorkflowType.ARCHIVE:
             auditor.workflow.status = auditor.audit.current_status
             if auditor.audit.current_status == WorkflowStatus.PASSED:
@@ -1591,6 +1601,8 @@ class WorkflowReviewCreate(views.APIView):
             else:
                 auditor.workflow.state = False
             auditor.workflow.save(update_fields=["status", "state"])
+            sync_approval_notifications(auditor.workflow)
+            sync_execution_needed_notifications(auditor.workflow)
 
         # Send notification
         is_notified = (
@@ -1685,6 +1697,7 @@ class WorkflowExecutionCreate(views.APIView):
                 SqlWorkflow(id=workflow_id, status="workflow_queuing").save(
                     update_fields=["status"]
                 )
+                resolve_mailbox_items(workflow, category="execution_needed")
                 # Delete scheduled execution task
                 schedule_name = f"sqlreview-timing-{workflow_id}"
                 del_schedule(schedule_name)
@@ -1721,6 +1734,10 @@ class WorkflowExecutionCreate(views.APIView):
                     status="workflow_finish",
                     finish_time=datetime.datetime.now(),
                 ).save(update_fields=["status", "finish_time"])
+                workflow = SqlWorkflow.objects.select_related("instance").get(
+                    id=workflow_id
+                )
+                resolve_mailbox_items(workflow, category="execution_needed")
                 del_schedule(f"sqlreview-timing-{workflow_id}")
                 # Add workflow log
                 Audit.add_log(
@@ -1740,8 +1757,18 @@ class WorkflowExecutionCreate(views.APIView):
                 )
                 if is_notified:
                     notify_for_execute(
-                        workflow=SqlWorkflow.objects.get(id=workflow_id),
+                        workflow=workflow,
                     )
+                emit_execution_finished_notifications(
+                    workflow,
+                    outcome="success",
+                    actor=user,
+                    dedupe_suffix=(
+                        f"manual-{workflow.finish_time.strftime('%Y%m%d%H%M%S%f')}"
+                        if workflow.finish_time
+                        else f"manual-{workflow.id}"
+                    ),
+                )
         # Execute data archive workflow
         elif workflow_type == 3:
             if not request.user.has_perm("sql.archive_mgt"):

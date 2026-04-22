@@ -7,6 +7,7 @@ from django_redis import get_redis_connection
 from common.utils.const import WorkflowStatus, WorkflowType
 from common.config import SysConfig
 from sql.engines.models import ReviewResult, ReviewSet
+from sql.mailbox import emit_execution_finished_notifications, resolve_mailbox_items
 from sql.models import SqlWorkflow
 from sql.notify import notify_for_execute, EventType
 from sql.utils.workflow_audit import Audit
@@ -29,6 +30,10 @@ def execute(workflow_id, user=None, execution_options=None):
             SqlWorkflow(id=workflow_id, status="workflow_executing").save(
                 update_fields=["status"]
             )
+    workflow_for_mailbox = SqlWorkflow.objects.select_related("instance").get(
+        id=workflow_id
+    )
+    resolve_mailbox_items(workflow_for_mailbox, category="execution_needed")
     # Add execution log.
     audit_id = Audit.detail_by_workflow_id(
         workflow_id=workflow_id, workflow_type=WorkflowType.SQL_REVIEW
@@ -145,3 +150,17 @@ def execute_callback(task):
     )
     if is_notified:
         notify_for_execute(workflow)
+    emit_execution_finished_notifications(
+        workflow,
+        outcome="success" if workflow.status == "workflow_finish" else "failure",
+        actor=(
+            task.args[1]
+            if len(task.args) > 1 and hasattr(task.args[1], "username")
+            else None
+        ),
+        dedupe_suffix=(
+            workflow.finish_time.strftime("%Y%m%d%H%M%S%f")
+            if workflow.finish_time
+            else f"workflow-{workflow.id}"
+        ),
+    )

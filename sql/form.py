@@ -11,6 +11,8 @@
 
 from django.forms import ModelForm
 from sql.models import Instance
+
+
 class InstanceForm(ModelForm):
     class Media:
         model = Instance

@@ -9,6 +9,7 @@ from rest_framework import permissions, serializers, status, views
 from rest_framework.exceptions import PermissionDenied
 
 from common.utils.const import WorkflowAction, WorkflowStatus, WorkflowType
+from sql.mailbox import sync_approval_notifications
 from sql.models import (
     Instance,
     PermissionRequest,
@@ -493,6 +494,7 @@ class PermissionRequestListCreate(views.APIView):
         _permission_request_audit_callback(
             auditor.workflow.request_id, auditor.audit.current_status
         )
+        sync_approval_notifications(auditor.workflow)
         async_task(
             notify_for_audit,
             workflow_audit=auditor.audit,
@@ -558,6 +560,7 @@ class PermissionRequestReviewCreate(views.APIView):
             _permission_request_audit_callback(
                 auditor.audit.workflow_id, auditor.audit.current_status
             )
+            sync_approval_notifications(auditor.workflow)
 
         async_task(
             notify_for_audit,

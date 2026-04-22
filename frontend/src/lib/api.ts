@@ -739,6 +739,41 @@ export type PaginatedResponse<T> = {
   results: T[]
 }
 
+export type MailboxCategory = 'approval_needed' | 'execution_needed' | 'execution_finished'
+export type MailboxSourceType = 'sql_workflow' | 'archive' | 'permission_request'
+export type MailboxReadState = 'all' | 'unread' | 'read'
+
+export type MailboxItem = {
+  id: number
+  category: MailboxCategory
+  category_label: string
+  source_type: MailboxSourceType
+  source_type_label: string
+  source_id: number
+  title: string
+  body: string
+  action_path: string
+  is_unread: boolean
+  read_at: string | null
+  resolved_at: string | null
+  metadata: Record<string, unknown>
+  create_time: string
+  sys_time: string
+}
+
+export type MailboxSummary = {
+  unread_count: number
+  items: MailboxItem[]
+}
+
+export type MailboxListFilters = {
+  page?: number
+  size?: number
+  state?: MailboxReadState
+  category?: MailboxCategory | ''
+  source_type?: MailboxSourceType | ''
+}
+
 export type WorkflowSyntaxType = 0 | 1 | 2 | 3
 
 export type WorkflowResourceGroupLookupRecord = {
@@ -1149,6 +1184,54 @@ function buildListQueryString(filters: { page?: number; size?: number; search?: 
   }
 
   return params.toString()
+}
+
+function buildMailboxQueryString(filters: MailboxListFilters) {
+  const params = new URLSearchParams()
+
+  if (filters.page) {
+    params.set('page', `${filters.page}`)
+  }
+  if (filters.size) {
+    params.set('size', `${filters.size}`)
+  }
+  if (filters.state && filters.state !== 'all') {
+    params.set('state', filters.state)
+  }
+  if (filters.category) {
+    params.set('category', filters.category)
+  }
+  if (filters.source_type) {
+    params.set('source_type', filters.source_type)
+  }
+
+  return params.toString()
+}
+
+export function fetchMailboxSummary(token: string) {
+  return apiGet<unknown>('/v1/mailbox/summary/', { token }).then((payload) =>
+    extractData<MailboxSummary>(payload),
+  )
+}
+
+export function fetchMailboxItems(token: string, filters: MailboxListFilters = {}) {
+  const queryString = buildMailboxQueryString(filters)
+  const path = queryString ? `/v1/mailbox/items/?${queryString}` : '/v1/mailbox/items/'
+  return apiGet<unknown>(path, { token }).then((payload) =>
+    extractData<PaginatedResponse<MailboxItem>>(payload),
+  )
+}
+
+export function markMailboxItemRead(itemId: number, token: string) {
+  return apiPost<unknown>(`/v1/mailbox/items/${itemId}/read/`, {}, { token }).then((payload) =>
+    extractData<MailboxItem>(payload),
+  )
+}
+
+export function markAllMailboxItemsRead(token: string) {
+  return apiPost<unknown>('/v1/mailbox/items/read-all/', {}, { token }).then((payload) =>
+    extractData<{ updated: number }>(payload),
+  )
 }
 
 export function fetchPermissionResourceGroupsLookup(token: string) {

@@ -237,6 +237,18 @@ class PermissionRequestTarget(models.TextChoices):
     INSTANCE = "instance", "Instance"
 
 
+class MailboxCategory(models.TextChoices):
+    APPROVAL_NEEDED = "approval_needed", "Approval needed"
+    EXECUTION_NEEDED = "execution_needed", "Execution needed"
+    EXECUTION_FINISHED = "execution_finished", "Execution finished"
+
+
+class MailboxSourceType(models.TextChoices):
+    SQL_WORKFLOW = "sql_workflow", "SQL Workflow"
+    ARCHIVE = "archive", "Archive"
+    PERMISSION_REQUEST = "permission_request", "Permission Request"
+
+
 class InstanceAccessLevel(models.TextChoices):
     QUERY = "query", "Query"
     QUERY_DML = "query_dml", "Query + DML"
@@ -516,6 +528,58 @@ class WorkflowLog(models.Model):
         db_table = "workflow_log"
         verbose_name = "Workflow Log"
         verbose_name_plural = "Workflow Log"
+
+
+class MailboxItem(models.Model):
+    recipient = models.ForeignKey(
+        Users,
+        on_delete=models.CASCADE,
+        related_name="mailbox_items",
+    )
+    category = models.CharField(
+        "Mailbox Category",
+        max_length=32,
+        choices=MailboxCategory.choices,
+    )
+    source_type = models.CharField(
+        "Mailbox Source Type",
+        max_length=32,
+        choices=MailboxSourceType.choices,
+    )
+    source_id = models.BigIntegerField("Mailbox Source ID")
+    title = models.CharField("Mailbox Title", max_length=255)
+    body = models.TextField("Mailbox Body", blank=True, default="")
+    action_path = models.CharField("Mailbox Action Path", max_length=500, blank=True)
+    is_unread = models.BooleanField("Unread", default=True)
+    read_at = models.DateTimeField("Read At", blank=True, null=True)
+    resolved_at = models.DateTimeField("Resolved At", blank=True, null=True)
+    dedupe_key = models.CharField("Dedupe Key", max_length=255)
+    metadata = models.JSONField("Metadata", default=dict, blank=True)
+    create_time = models.DateTimeField("Created Time", auto_now_add=True)
+    sys_time = models.DateTimeField("System Modified Time", auto_now=True)
+
+    class Meta:
+        managed = True
+        db_table = "mailbox_item"
+        verbose_name = "Mailbox Item"
+        verbose_name_plural = "Mailbox Items"
+        ordering = ["-create_time", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["recipient", "dedupe_key"],
+                name="mailbox_item_recipient_dedupe_uniq",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["recipient", "is_unread", "create_time"],
+                name="mailbox_item_unread_idx",
+            ),
+            models.Index(
+                fields=["source_type", "source_id", "category"],
+                name="mailbox_item_source_idx",
+            ),
+        ]
 
 
 class QueryPrivilegesApply(models.Model, WorkflowAuditMixin):

@@ -450,6 +450,7 @@ class ArchiveConfigAdmin(admin.ModelAdmin):
         "user_display",
     )
 
+
 # Login audit log
 @admin.register(AuditEntry)
 class AuditEntryAdmin(admin.ModelAdmin):

@@ -32,6 +32,7 @@ from common.utils.extend_json_encoder import ExtendJSONEncoder
 from common.utils.timer import FuncTimer
 from sql.engines import get_engine
 from sql.engines.models import ReviewSet, ReviewResult
+from sql.mailbox import emit_execution_finished_notifications, resolve_mailbox_items
 from sql.notify import notify_for_audit
 from sql.plugins.pt_archiver import PtArchiver
 from sql.utils.resource_group import user_instances, user_groups
@@ -58,6 +59,12 @@ ARCHIVE_SCHEDULE_PREFIX = "archive-timing"
 ARCHIVE_CONDITION_PATTERN = re.compile(r"\{\{\s*([a-z_]+)\s*\}\}")
 ARCHIVE_SAFE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9_$]+$")
 ARCHIVE_MAX_CONSECUTIVE_FAILURES = 3
+
+
+def _archive_mailbox_dedupe_suffix(archive_info):
+    if archive_info.last_archive_time:
+        return archive_info.last_archive_time.strftime("%Y%m%d%H%M%S%f")
+    return f"archive-{archive_info.id}"
 
 
 def archive_schedule_name(archive_id):
@@ -493,6 +500,8 @@ def archive_task_callback(task):
             operator="",
             operator_display="System" if trigger == "scheduled" else "Archive Manager",
         )
+    mailbox_outcome = "success" if task.success else "failure"
+    mailbox_suffix = _archive_mailbox_dedupe_suffix(archive_info)
 
     if archive_info.execution_mode == ARCHIVE_EXECUTION_ONE_TIME:
         if task.success:
@@ -501,15 +510,30 @@ def archive_task_callback(task):
                 next_run_at=None,
                 consecutive_failures=0,
             )
+        emit_execution_finished_notifications(
+            archive_info,
+            outcome=mailbox_outcome,
+            dedupe_suffix=mailbox_suffix,
+        )
         return
 
     if not archive_info.state or archive_info.status != WorkflowStatus.PASSED:
         ArchiveConfig.objects.filter(id=archive_id).update(next_run_at=None)
+        emit_execution_finished_notifications(
+            archive_info,
+            outcome=mailbox_outcome,
+            dedupe_suffix=mailbox_suffix,
+        )
         return
 
     if trigger != "scheduled":
         if task.success:
             ArchiveConfig.objects.filter(id=archive_id).update(consecutive_failures=0)
+        emit_execution_finished_notifications(
+            archive_info,
+            outcome=mailbox_outcome,
+            dedupe_suffix=mailbox_suffix,
+        )
         return
 
     if not task.success:
@@ -533,11 +557,21 @@ def archive_task_callback(task):
                 operator="",
                 operator_display="System",
             )
+        emit_execution_finished_notifications(
+            archive_info,
+            outcome="failure",
+            dedupe_suffix=mailbox_suffix,
+        )
         return
 
     next_run = calculate_next_archive_run(archive_info, from_time=timezone.now())
     ArchiveConfig.objects.filter(id=archive_id).update(consecutive_failures=0)
     schedule_archive(archive_info, run_at=next_run)
+    emit_execution_finished_notifications(
+        archive_info,
+        outcome="success",
+        dedupe_suffix=mailbox_suffix,
+    )
 
 
 def _archive_enabled_queryset(archive_ids=None):
@@ -888,6 +922,7 @@ def archive(archive_id, trigger="manual"):
         archive_info.execution_state = ARCHIVE_EXECUTION_STATE_RUNNING
         archive_info.save(update_fields=["execution_state"])
         marked_running = True
+    resolve_mailbox_items(archive_info, category="execution_needed")
 
     try:
         audit = Audit.detail_by_workflow_id(archive_id, WorkflowType.ARCHIVE)

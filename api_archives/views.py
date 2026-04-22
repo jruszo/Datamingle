@@ -30,6 +30,11 @@ from sql.archiver import (
     schedule_archive,
     serialize_archive_weekdays,
 )
+from sql.mailbox import (
+    resolve_mailbox_items,
+    sync_approval_notifications,
+    sync_execution_needed_notifications,
+)
 from sql.models import ArchiveConfig, ArchiveLog, Instance, ResourceGroup, WorkflowLog
 from sql.notify import notify_for_audit
 from sql.utils.resource_group import (
@@ -803,6 +808,8 @@ class ArchiveListCreate(generics.ListAPIView):
                 and audit_handler.audit.current_status == WorkflowStatus.PASSED
             ):
                 schedule_archive(audit_handler.workflow, run_at=next_run_at)
+        sync_approval_notifications(audit_handler.workflow)
+        sync_execution_needed_notifications(audit_handler.workflow)
 
         async_task(
             notify_for_audit,
@@ -890,6 +897,8 @@ class ArchiveReviewCreate(views.APIView):
                 and auditor.audit.current_status == WorkflowStatus.PASSED
             ):
                 schedule_archive(auditor.workflow, run_at=auditor.workflow.next_run_at)
+        sync_approval_notifications(auditor.workflow)
+        sync_execution_needed_notifications(auditor.workflow)
 
         async_task(
             notify_for_audit,
@@ -945,6 +954,7 @@ class ArchiveRunNow(views.APIView):
                     operator=request.user.username,
                     operator_display=request.user.display,
                 )
+            resolve_mailbox_items(archive_config, category="execution_needed")
 
             async_task(
                 "sql.archiver.archive",
@@ -995,6 +1005,7 @@ class ArchiveStateUpdate(views.APIView):
                 archive_config.next_run_at = None
                 archive_config.save(update_fields=["state", "next_run_at"])
                 cancel_archive_schedule(archive_id)
+        sync_execution_needed_notifications(archive_config)
 
         audit = Audit.detail_by_workflow_id(archive_id, WorkflowType.ARCHIVE)
         if audit:

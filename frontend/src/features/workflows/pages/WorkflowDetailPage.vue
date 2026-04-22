@@ -23,8 +23,10 @@ import {
   type WorkflowResultRow,
 } from '../api'
 import { useAuthStore } from '@/stores/auth'
+import { useMailboxStore } from '@/stores/mailbox'
 
 const authStore = useAuthStore()
+const mailboxStore = useMailboxStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -310,7 +312,10 @@ async function submitReviewAction(auditType: 'pass' | 'reject' | 'cancel') {
       feedback.value = 'Workflow canceled.'
     }
     reviewForm.auditRemark = ''
-    await refreshSelectedWorkflow()
+    await Promise.all([
+      refreshSelectedWorkflow(),
+      mailboxStore.refreshSummary(),
+    ])
   } catch (errorValue) {
     detailError.value = toUserFacingMessage(errorValue, 'Failed to submit the workflow review action.')
   } finally {
@@ -341,7 +346,10 @@ async function executeSelectedWorkflow(mode: 'auto' | 'manual') {
       },
       requireToken(),
     )
-    await refreshSelectedWorkflow()
+    await Promise.all([
+      refreshSelectedWorkflow(),
+      mailboxStore.refreshSummary(),
+    ])
   } catch (errorValue) {
     detailError.value = toUserFacingMessage(errorValue, 'Failed to start workflow execution.')
   } finally {

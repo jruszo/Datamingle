@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
+import { useRoute, useRouter } from 'vue-router'
 import {
   CheckCircle2,
   Clock3,
@@ -37,12 +38,16 @@ import {
   type PermissionResourceGroupLookupRecord,
 } from '../api'
 import { useAuthStore } from '@/stores/auth'
+import { useMailboxStore } from '@/stores/mailbox'
 
 const REQUEST_PAGE_SIZE = 8
 const GRANT_PAGE_SIZE = 10
 const UNLIMITED_VALID_DATE = '2099-12-31'
 
 const authStore = useAuthStore()
+const mailboxStore = useMailboxStore()
+const route = useRoute()
+const router = useRouter()
 
 const activeSection = ref<'requests' | 'grants'>('requests')
 
@@ -251,6 +256,10 @@ function closeDetailDialog() {
   isDetailDialogOpen.value = false
   detailError.value = ''
   reviewForm.audit_remark = ''
+  selectedRequestDetail.value = null
+  const nextQuery = { ...route.query }
+  delete nextQuery.requestId
+  void router.replace({ query: nextQuery })
 }
 
 const canViewPermissionManagement = computed(() => hasPermission('sql.menu_queryapplylist'))
@@ -333,6 +342,15 @@ async function loadRequestDetail(requestId: number) {
   detailLoading.value = true
   detailError.value = ''
   isDetailDialogOpen.value = true
+  activeSection.value = 'requests'
+  if (route.query.requestId !== `${requestId}`) {
+    void router.replace({
+      query: {
+        ...route.query,
+        requestId: `${requestId}`,
+      },
+    })
+  }
 
   try {
     const detail = await fetchPermissionRequestDetail(requestId, requireToken())
@@ -391,6 +409,9 @@ async function loadRequests(options: { focusRequestId?: number; openDetail?: boo
       selectedRequestId.value = null
       selectedRequestDetail.value = null
       isDetailDialogOpen.value = false
+      const nextQuery = { ...route.query }
+      delete nextQuery.requestId
+      void router.replace({ query: nextQuery })
     }
   } catch (errorValue) {
     if (loadId !== requestLoadCounter) {
@@ -523,6 +544,7 @@ async function submitReview(auditStatus: 1 | 2) {
       loadRequests({ focusRequestId: selectedRequestId.value }),
       loadRequestDetail(selectedRequestId.value),
       loadGrants(),
+      mailboxStore.refreshSummary(),
     ])
   } catch (errorValue) {
     detailError.value = toUserFacingMessage(errorValue, 'Failed to submit the review action.')
@@ -597,6 +619,27 @@ watch(activeSection, (section) => {
   }
 })
 
+watch(
+  () => route.query.requestId,
+  (value) => {
+    if (!canViewPermissionManagement.value) {
+      return
+    }
+    const requestId = typeof value === 'string' ? Number(value) : Number.NaN
+    if (!Number.isInteger(requestId) || requestId <= 0) {
+      if (!value && isDetailDialogOpen.value) {
+        isDetailDialogOpen.value = false
+        selectedRequestDetail.value = null
+      }
+      return
+    }
+    if (selectedRequestId.value === requestId && isDetailDialogOpen.value) {
+      return
+    }
+    void loadRequestDetail(requestId)
+  },
+)
+
 onMounted(async () => {
   await authStore.loadCurrentUser()
 
@@ -609,6 +652,13 @@ onMounted(async () => {
     loadGrants(),
     loadLookups(),
   ])
+
+  const initialRequestId = typeof route.query.requestId === 'string'
+    ? Number(route.query.requestId)
+    : Number.NaN
+  if (Number.isInteger(initialRequestId) && initialRequestId > 0) {
+    await loadRequestDetail(initialRequestId)
+  }
 })
 </script>
 

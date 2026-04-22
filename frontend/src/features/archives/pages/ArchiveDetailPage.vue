@@ -24,8 +24,10 @@ import {
   type PaginatedResponse,
 } from '../api'
 import { useAuthStore } from '@/stores/auth'
+import { useMailboxStore } from '@/stores/mailbox'
 
 const authStore = useAuthStore()
+const mailboxStore = useMailboxStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -223,7 +225,10 @@ async function submitReviewAction(auditType: 'pass' | 'reject' | 'cancel') {
         ? 'Archive rejected.'
         : 'Archive canceled.'
     reviewForm.auditRemark = ''
-    await refreshArchiveDetail()
+    await Promise.all([
+      refreshArchiveDetail(),
+      mailboxStore.refreshSummary(),
+    ])
   } catch (errorValue) {
     detailError.value = toUserFacingMessage(errorValue, 'Failed to submit the archive review action.')
   } finally {
@@ -242,7 +247,10 @@ async function queueArchiveRunNow() {
 
   try {
     feedback.value = await runArchiveNow(selectedArchiveId.value, requireToken())
-    await refreshArchiveDetail()
+    await Promise.all([
+      refreshArchiveDetail(),
+      mailboxStore.refreshSummary(),
+    ])
   } catch (errorValue) {
     detailError.value = toUserFacingMessage(errorValue, 'Failed to queue archive execution.')
   } finally {
@@ -265,7 +273,10 @@ async function setArchiveEnabled(enabled: boolean) {
       { enabled },
       requireToken(),
     )
-    await refreshArchiveDetail()
+    await Promise.all([
+      refreshArchiveDetail(),
+      mailboxStore.refreshSummary(),
+    ])
   } catch (errorValue) {
     detailError.value = toUserFacingMessage(
       errorValue,

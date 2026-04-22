@@ -40,6 +40,7 @@ describe('feature registry', () => {
       'archives',
       'queries',
       'permissions',
+      'mailbox',
       'settings',
     ])
   })
