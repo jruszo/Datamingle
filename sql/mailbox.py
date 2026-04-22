@@ -308,31 +308,32 @@ def _upsert_action_item(
 
 
 def _sync_action_items(source, category, recipients, title, body, metadata):
-    recipient_ids = {recipient.id for recipient in recipients}
-    dedupe_key = f"{category}:{_source_type_for(source)}:{_source_id_for(source)}"
-    now = timezone.now()
+    with transaction.atomic():
+        recipient_ids = {recipient.id for recipient in recipients}
+        dedupe_key = f"{category}:{_source_type_for(source)}:{_source_id_for(source)}"
+        now = timezone.now()
 
-    for recipient in recipients:
-        _upsert_action_item(
-            recipient=recipient,
+        for recipient in recipients:
+            _upsert_action_item(
+                recipient=recipient,
+                category=category,
+                source=source,
+                title=title,
+                body=body,
+                metadata=metadata,
+                dedupe_key=dedupe_key,
+            )
+
+        queryset = MailboxItem.objects.filter(
+            source_type=_source_type_for(source),
+            source_id=_source_id_for(source),
             category=category,
-            source=source,
-            title=title,
-            body=body,
-            metadata=metadata,
             dedupe_key=dedupe_key,
+            resolved_at__isnull=True,
         )
-
-    queryset = MailboxItem.objects.filter(
-        source_type=_source_type_for(source),
-        source_id=_source_id_for(source),
-        category=category,
-        dedupe_key=dedupe_key,
-        resolved_at__isnull=True,
-    )
-    if recipient_ids:
-        queryset = queryset.exclude(recipient_id__in=recipient_ids)
-    queryset.update(resolved_at=now, sys_time=now)
+        if recipient_ids:
+            queryset = queryset.exclude(recipient_id__in=recipient_ids)
+        queryset.update(resolved_at=now, sys_time=now)
 
 
 def sync_approval_notifications(source, reload=True):

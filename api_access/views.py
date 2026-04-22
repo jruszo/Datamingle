@@ -508,8 +508,13 @@ class PermissionRequestListCreate(views.APIView):
         except serializers.ValidationError:
             raise
         except (DatabaseError, IntegrityError, ValueError) as exc:
+            logger.exception(
+                "Error while creating permission request approval flow "
+                "for request_id=%s",
+                getattr(permission_request, "request_id", None),
+            )
             raise serializers.ValidationError(
-                {"errors": f"Failed to create approval flow, {str(exc)}"}
+                {"errors": "Failed to create approval flow, please contact admin."}
             ) from exc
         except Exception as exc:
             logger.exception(

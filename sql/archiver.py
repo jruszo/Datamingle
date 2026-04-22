@@ -66,8 +66,7 @@ def _archive_mailbox_dedupe_suffix(archive_info, callback_time=None):
         return archive_info.last_archive_time.strftime("%Y%m%d%H%M%S%f")
     if callback_time:
         return callback_time.strftime("%Y%m%d%H%M%S%f")
-    unique_timestamp = datetime.datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
-    return f"archive-{archive_info.id}-{unique_timestamp}"
+    return datetime.datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
 
 
 def archive_schedule_name(archive_id):
