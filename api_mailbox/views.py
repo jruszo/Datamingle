@@ -82,7 +82,7 @@ class MailboxItemListView(ListAPIView):
 
         if state not in allowed_states:
             raise serializers.ValidationError(
-                {"state": ("Unsupported state filter. Use one of: all, read, unread.")}
+                {"state": "Unsupported state filter. Use one of: all, read, unread."}
             )
 
         if state == "unread":

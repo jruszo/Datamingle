@@ -1694,9 +1694,8 @@ class WorkflowExecutionCreate(views.APIView):
                         raise serializers.ValidationError({"errors": str(exc)})
                     selected_executor = resolved_executor.executor_id
                 # Set workflow status to queuing
-                SqlWorkflow(id=workflow_id, status="workflow_queuing").save(
-                    update_fields=["status"]
-                )
+                workflow.status = "workflow_queuing"
+                workflow.save(update_fields=["status"])
                 resolve_mailbox_items(workflow, category="execution_needed")
                 # Delete scheduled execution task
                 schedule_name = f"sqlreview-timing-{workflow_id}"

@@ -108,7 +108,7 @@ onMounted(async () => {
     <Card>
       <CardHeader class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div class="space-y-1">
-          <CardTitle>Mailbox</CardTitle>
+          <CardTitle data-testid="mailbox-page-title">Mailbox</CardTitle>
           <CardDescription>
             Review approval requests, execution actions, and execution results in one place.
           </CardDescription>
@@ -138,18 +138,18 @@ onMounted(async () => {
       </CardHeader>
       <CardContent class="grid gap-4">
         <div class="flex flex-wrap items-center gap-3">
-          <select v-model="stateFilter" :class="selectClass">
+          <select v-model="stateFilter" data-testid="mailbox-filter-state" :class="selectClass">
             <option value="all">All items</option>
             <option value="unread">Unread only</option>
             <option value="read">Read only</option>
           </select>
-          <select v-model="categoryFilter" :class="selectClass">
+          <select v-model="categoryFilter" data-testid="mailbox-filter-category" :class="selectClass">
             <option value="">All categories</option>
             <option value="approval_needed">Approval needed</option>
             <option value="execution_needed">Execution needed</option>
             <option value="execution_finished">Execution finished</option>
           </select>
-          <select v-model="sourceTypeFilter" :class="selectClass">
+          <select v-model="sourceTypeFilter" data-testid="mailbox-filter-source-type" :class="selectClass">
             <option value="">All sources</option>
             <option value="sql_workflow">SQL workflows</option>
             <option value="archive">Archives</option>
@@ -172,6 +172,7 @@ onMounted(async () => {
             :key="item.id"
             role="button"
             tabindex="0"
+            :data-testid="`mailbox-item-${item.id}`"
             class="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
             @click="void openItem(item)"
             @keydown.enter.prevent="void openItem(item)"
@@ -195,6 +196,7 @@ onMounted(async () => {
                   v-if="item.is_unread"
                   variant="ghost"
                   type="button"
+                  :data-testid="`mailbox-item-read-${item.id}`"
                   class="h-8 px-3 text-xs"
                   @click.stop="void markItemRead(item)"
                 >

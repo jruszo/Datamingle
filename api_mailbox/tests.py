@@ -212,9 +212,8 @@ class MailboxApiTests(TestCase):
 
     def test_archive_and_sql_emit_execution_finished_notifications(self):
         workflow = self._create_sql_workflow(status="workflow_finish")
-        workflow.status = "workflow_finish"
         workflow.finish_time = timezone.now()
-        workflow.save(update_fields=["status", "finish_time"])
+        workflow.save(update_fields=["finish_time"])
 
         emit_execution_finished_notifications(
             workflow,
@@ -296,6 +295,26 @@ class MailboxApiTests(TestCase):
         self.assertEqual(read_all_response.status_code, 200)
         second_item.refresh_from_db()
         self.assertFalse(second_item.is_unread)
+
+    def test_mailbox_list_rejects_invalid_state_filter(self):
+        workflow = self._create_sql_workflow()
+        sync_approval_notifications(workflow)
+
+        self.client.force_authenticate(self.reviewer)
+
+        response = self.client.get(
+            "/api/v1/mailbox/items/?state=unred",
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        error_value = response.json()["state"]
+        if isinstance(error_value, list):
+            error_value = error_value[0]
+        self.assertEqual(
+            error_value,
+            "Unsupported state filter. Use one of: all, read, unread.",
+        )
 
     def test_backfill_is_idempotent_for_active_items(self):
         workflow = self._create_sql_workflow()

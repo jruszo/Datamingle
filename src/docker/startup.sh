@@ -38,8 +38,11 @@ echo Start Django Q cluster
 supervisord -c /etc/supervisord.conf
 
 echo Start services
-gunicorn -w 4 -b 127.0.0.1:8888 --timeout 600 archery.wsgi:application
-
+GUNICORN_RELOAD_ARGS=""
+if [[ "${GUNICORN_RELOAD:-0}" == "1" ]]; then
+    GUNICORN_RELOAD_ARGS="--reload"
+fi
+gunicorn -w 4 -b 127.0.0.1:8888 --timeout 600 ${GUNICORN_RELOAD_ARGS} archery.wsgi:application
 
 
 

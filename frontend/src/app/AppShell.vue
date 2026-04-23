@@ -340,12 +340,14 @@ watch(
                 variant="ghost"
                 size="icon"
                 title="Mailbox"
+                data-testid="app-mailbox-button"
                 class="relative"
                 @click="void toggleMailboxMenu()"
               >
                 <Bell class="h-4 w-4" />
                 <span
                   v-if="mailboxUnreadCount > 0"
+                  data-testid="app-mailbox-badge"
                   class="absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-semibold text-white"
                 >
                   {{ mailboxUnreadBadge }}
@@ -354,6 +356,7 @@ watch(
 
               <div
                 v-if="isMailboxMenuOpen"
+                data-testid="app-mailbox-menu"
                 class="absolute right-0 top-12 z-30 w-[24rem] rounded-2xl border border-slate-200 bg-white p-3 shadow-xl"
               >
                 <div class="flex items-center justify-between gap-3 border-b border-slate-100 px-1 pb-3">
@@ -367,8 +370,15 @@ watch(
                     v-if="mailboxUnreadCount > 0"
                     variant="ghost"
                     type="button"
+                    data-testid="app-mailbox-mark-all-read"
                     class="h-8 px-2 text-xs"
-                    @click="void mailboxStore.markAllRead()"
+                    @click="
+                      void mailboxStore
+                        .markAllRead()
+                        .catch((error) =>
+                          console.error('Failed to mark all mailbox items as read.', error),
+                        )
+                    "
                   >
                     <CheckCheck class="mr-1 h-3.5 w-3.5" />
                     Mark all read
@@ -384,6 +394,7 @@ watch(
                     v-for="item in mailboxPreviewItems"
                     :key="item.id"
                     type="button"
+                    :data-testid="`app-mailbox-preview-item-${item.id}`"
                     class="grid w-full gap-2 rounded-xl border border-slate-200 px-3 py-3 text-left transition hover:border-slate-300 hover:bg-slate-50"
                     @click="void openMailboxItem(item.action_path, item.id, item.is_unread)"
                   >
@@ -413,7 +424,13 @@ watch(
                 </div>
 
                 <div class="border-t border-slate-100 px-1 pt-3">
-                  <Button variant="outline" type="button" class="w-full justify-between" @click="void openMailboxPage()">
+                  <Button
+                    variant="outline"
+                    type="button"
+                    data-testid="app-mailbox-view-all"
+                    class="w-full justify-between"
+                    @click="void openMailboxPage()"
+                  >
                     View full mailbox
                     <ExternalLink class="h-4 w-4" />
                   </Button>
