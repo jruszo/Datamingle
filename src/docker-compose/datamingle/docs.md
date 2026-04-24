@@ -31,9 +31,10 @@ scripts/docker/migrate-archery-db-to-datamingle.sh
 ```
 
 The migration helper creates a timestamped SQL backup in `/tmp`, creates the
-target database if needed, and imports the source data into `datamingle`. If you
-are using the non-ARM compose file where the MySQL container is named `mysql`,
-run:
+target database if needed, and imports the source data into `datamingle`. Set
+`BACKUP_PATH` if `/tmp` is small, tmpfs-backed, or unsuitable for a large
+database dump. If you are using the non-ARM compose file where the MySQL
+container is named `mysql`, run:
 
 ```bash
 MYSQL_CONTAINER=mysql scripts/docker/migrate-archery-db-to-datamingle.sh

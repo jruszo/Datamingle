@@ -53,6 +53,14 @@ into the new `datamingle` database before starting the renamed stack:
 scripts/docker/migrate-archery-db-to-datamingle.sh
 ```
 
+The script defaults to the local ARM MySQL container, `datamingle-mysql`. If you
+are using `src/docker-compose/docker-compose.yml`, where the MySQL container is
+named `mysql`, override the container name:
+
+```bash
+MYSQL_CONTAINER=mysql scripts/docker/migrate-archery-db-to-datamingle.sh
+```
+
 ### Local Demo Users
 The local ARM compose setup can seed demo users, resource groups, and demo database instances for manual UX testing.
 

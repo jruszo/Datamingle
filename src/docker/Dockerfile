@@ -1,3 +1,5 @@
+# Datamingle intentionally inherits the pinned upstream Archery base image while
+# the Docker build migrates /opt/venv4a* to /opt/venv4datamingle below.
 ARG BASE_IMAGE="hhyo/archery-base:sha-d8159f4"
 FROM ${BASE_IMAGE}
 SHELL ["/bin/bash", "-c"]
