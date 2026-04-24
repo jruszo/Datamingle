@@ -48,6 +48,16 @@ def _today():
     return datetime.date.today()
 
 
+def _sync_permission_request_approval_notifications(permission_request):
+    if not isinstance(permission_request, PermissionRequest):
+        logger.warning(
+            "Skipping permission request mailbox sync for unsupported workflow type %s",
+            type(permission_request).__name__,
+        )
+        return
+    sync_approval_notifications(permission_request)
+
+
 def _user_auth_group_ids(user):
     if user.is_superuser:
         return list(Group.objects.values_list("id", flat=True))
@@ -492,7 +502,7 @@ class PermissionRequestListCreate(views.APIView):
                 _permission_request_audit_callback(
                     auditor.workflow.request_id, auditor.audit.current_status
                 )
-                sync_approval_notifications(auditor.workflow)
+                _sync_permission_request_approval_notifications(auditor.workflow)
                 transaction.on_commit(
                     lambda workflow_audit=auditor.audit, request_id=auditor.workflow.request_id: async_task(
                         notify_for_audit,
@@ -584,7 +594,7 @@ class PermissionRequestReviewCreate(views.APIView):
             _permission_request_audit_callback(
                 auditor.audit.workflow_id, auditor.audit.current_status
             )
-            sync_approval_notifications(auditor.workflow)
+            _sync_permission_request_approval_notifications(auditor.workflow)
 
         async_task(
             notify_for_audit,
