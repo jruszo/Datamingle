@@ -2,9 +2,15 @@ import logging
 from django.core.files.storage import FileSystemStorage
 from storages.backends.s3boto3 import S3Boto3Storage
 from storages.backends.azure_storage import AzureStorage
-from storages.backends.sftpstorage import SFTPStorage
 from common.config import SysConfig
 import json
+
+try:
+    from storages.backends.sftpstorage import SFTPStorage
+except ModuleNotFoundError as exc:
+    if exc.name != "paramiko":
+        raise
+    SFTPStorage = None
 
 logger = logging.getLogger("default")
 
@@ -86,6 +92,11 @@ class DynamicStorage:
         return FileSystemStorage(**local_params)
 
     def _init_sftp_storage(self):
+        if SFTPStorage is None:
+            raise ImportError(
+                "SFTP storage requires the optional 'paramiko' dependency."
+            )
+
         # Base parameters.
         sftp_params = {
             "host": self.sftp_host,

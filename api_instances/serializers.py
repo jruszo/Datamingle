@@ -7,6 +7,8 @@ from sql.models import (
     QueryPrivilegesApply,
     ResourceGroup,
 )
+
+
 class ChoiceOptionSerializer(serializers.Serializer):
     value = serializers.CharField()
     label = serializers.CharField()
@@ -430,6 +432,7 @@ class InstanceTagUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = InstanceTag
         fields = ("tag_name", "active")
+
 
 class ResourceGroupLookupSerializer(serializers.ModelSerializer):
     label = serializers.SerializerMethodField()

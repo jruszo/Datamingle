@@ -153,6 +153,7 @@ INSTALLED_APPS = (
     "api_archives",
     "api_queries",
     "api_access",
+    "api_mailbox",
     "api_admin",
     "common",
     "rest_framework",

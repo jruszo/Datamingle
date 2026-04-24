@@ -1,7 +1,8 @@
 import datetime
+import logging
 
 from django.contrib.auth.models import Group
-from django.db import transaction
+from django.db import DatabaseError, IntegrityError, transaction
 from django.db.models import Q
 from common.task_queue import async_task
 from drf_spectacular.utils import extend_schema
@@ -9,6 +10,7 @@ from rest_framework import permissions, serializers, status, views
 from rest_framework.exceptions import PermissionDenied
 
 from common.utils.const import WorkflowAction, WorkflowStatus, WorkflowType
+from sql.mailbox import sync_approval_notifications
 from sql.models import (
     Instance,
     PermissionRequest,
@@ -33,6 +35,8 @@ from sql.utils.workflow_audit import AuditException, get_auditor
 from api_core.pagination import CustomizedPagination
 from api_core.response import success_response
 
+logger = logging.getLogger("default")
+
 
 def _require_permission(request, permission):
     if request.user.is_superuser or request.user.has_perm(permission):
@@ -42,6 +46,16 @@ def _require_permission(request, permission):
 
 def _today():
     return datetime.date.today()
+
+
+def _sync_permission_request_approval_notifications(permission_request):
+    if not isinstance(permission_request, PermissionRequest):
+        logger.warning(
+            "Skipping permission request mailbox sync for unsupported workflow type %s",
+            type(permission_request).__name__,
+        )
+        return
+    sync_approval_notifications(permission_request)
 
 
 def _user_auth_group_ids(user):
@@ -485,20 +499,42 @@ class PermissionRequestListCreate(views.APIView):
         try:
             with transaction.atomic():
                 auditor.create_audit()
+                _permission_request_audit_callback(
+                    auditor.workflow.request_id, auditor.audit.current_status
+                )
+                _sync_permission_request_approval_notifications(auditor.workflow)
+                transaction.on_commit(
+                    lambda workflow_audit=auditor.audit, request_id=auditor.workflow.request_id: async_task(
+                        notify_for_audit,
+                        workflow_audit=workflow_audit,
+                        timeout=60,
+                        task_name=f"permission-request-{request_id}",
+                    )
+                )
         except AuditException:
             raise serializers.ValidationError(
                 {"errors": "Failed to create approval flow, please contact admin."}
             )
-
-        _permission_request_audit_callback(
-            auditor.workflow.request_id, auditor.audit.current_status
-        )
-        async_task(
-            notify_for_audit,
-            workflow_audit=auditor.audit,
-            timeout=60,
-            task_name=f"permission-request-{auditor.workflow.request_id}",
-        )
+        except serializers.ValidationError:
+            raise
+        except (DatabaseError, IntegrityError, ValueError) as exc:
+            logger.exception(
+                "Error while creating permission request approval flow "
+                "for request_id=%s",
+                getattr(permission_request, "request_id", None),
+            )
+            raise serializers.ValidationError(
+                {"errors": "Failed to create approval flow, please contact admin."}
+            ) from exc
+        except Exception as exc:
+            logger.exception(
+                "Unexpected error while creating permission request approval flow "
+                "for request_id=%s",
+                getattr(permission_request, "request_id", None),
+            )
+            raise serializers.ValidationError(
+                {"errors": "Failed to create approval flow, please contact admin."}
+            ) from exc
         return success_response(
             data={"request_id": auditor.workflow.request_id},
             status_code=status.HTTP_201_CREATED,
@@ -558,6 +594,7 @@ class PermissionRequestReviewCreate(views.APIView):
             _permission_request_audit_callback(
                 auditor.audit.workflow_id, auditor.audit.current_status
             )
+            _sync_permission_request_approval_notifications(auditor.workflow)
 
         async_task(
             notify_for_audit,

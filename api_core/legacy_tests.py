@@ -4523,18 +4523,19 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
         mock_handler.audit.current_status = WorkflowStatus.WAITING
         mock_get_auditor.return_value = mock_handler
 
-        response = self.client.post(
-            "/api/v1/access/request/",
-            {
-                "title": "Need DML access",
-                "target_type": "instance",
-                "resource_group_id": self.res_group.group_id,
-                "instance_id": self.instance.id,
-                "access_level": "query_dml",
-                "valid_date": "2099-12-31",
-            },
-            format="json",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                "/api/v1/access/request/",
+                {
+                    "title": "Need DML access",
+                    "target_type": "instance",
+                    "resource_group_id": self.res_group.group_id,
+                    "instance_id": self.instance.id,
+                    "access_level": "query_dml",
+                    "valid_date": "2099-12-31",
+                },
+                format="json",
+            )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response_data(response)["request_id"], 123)

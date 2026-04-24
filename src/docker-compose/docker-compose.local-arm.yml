@@ -100,16 +100,17 @@ services:
     ports:
       - "9123:9123"
     volumes:
+      - "../..:/opt/archery"
       - "./archery/settings.py:/opt/archery/local_settings.py"
       - "./archery/soar.yaml:/etc/soar.yaml"
       - "./archery/docs.md:/opt/archery/docs/docs.md"
       - "./archery/downloads:/opt/archery/downloads"
-      - "../../sql/migrations:/opt/archery/sql/migrations"
       - "./archery/logs:/opt/archery/logs"
       - "./archery/keys:/opt/archery/keys"
     environment:
       RUN_MIGRATIONS_ON_START: "1"
       RUN_LOCAL_DEMO_SEED: "1"
+      GUNICORN_RELOAD: "1"
     entrypoint: "bash /opt/archery/src/docker/startup.sh"
     env_file:
       - .env.local-arm

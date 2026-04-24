@@ -6,29 +6,29 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('sql', '0012_archiveconfig_consecutive_failures_and_more'),
+        ("sql", "0012_archiveconfig_consecutive_failures_and_more"),
     ]
 
     operations = [
         migrations.RemoveField(
-            model_name='aliyunrdsconfig',
-            name='ak',
+            model_name="aliyunrdsconfig",
+            name="ak",
         ),
         migrations.RemoveField(
-            model_name='aliyunrdsconfig',
-            name='instance',
+            model_name="aliyunrdsconfig",
+            name="instance",
         ),
         migrations.RemoveField(
-            model_name='instance',
-            name='tunnel',
+            model_name="instance",
+            name="tunnel",
         ),
         migrations.DeleteModel(
-            name='CloudAccessKey',
+            name="CloudAccessKey",
         ),
         migrations.DeleteModel(
-            name='AliyunRdsConfig',
+            name="AliyunRdsConfig",
         ),
         migrations.DeleteModel(
-            name='Tunnel',
+            name="Tunnel",
         ),
     ]

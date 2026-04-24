@@ -45,9 +45,9 @@ def slowquery_review(request):
     sortOrder = str(request.POST.get("sortOrder")).lower()
 
     # Time handling.
-    end_time = datetime.datetime.strptime(
-        end_time, "%Y-%m-%d"
-    ) + datetime.timedelta(days=1)
+    end_time = datetime.datetime.strptime(end_time, "%Y-%m-%d") + datetime.timedelta(
+        days=1
+    )
     filter_kwargs = {"slowqueryhistory__db_max": db_name} if db_name else {}
     # Get slow-query summary data.
     slowsql_obj = (
@@ -136,9 +136,9 @@ def slowquery_review_history(request):
     sortOrder = str(request.POST.get("sortOrder")).lower()
 
     # Time handling.
-    end_time = datetime.datetime.strptime(
-        end_time, "%Y-%m-%d"
-    ) + datetime.timedelta(days=1)
+    end_time = datetime.datetime.strptime(end_time, "%Y-%m-%d") + datetime.timedelta(
+        days=1
+    )
     limit = offset + limit
     filter_kwargs = {}
     filter_kwargs.update({"checksum": sql_id}) if sql_id else None

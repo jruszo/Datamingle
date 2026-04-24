@@ -30,6 +30,11 @@ from sql.archiver import (
     schedule_archive,
     serialize_archive_weekdays,
 )
+from sql.mailbox import (
+    resolve_mailbox_items,
+    sync_approval_notifications,
+    sync_execution_needed_notifications,
+)
 from sql.models import ArchiveConfig, ArchiveLog, Instance, ResourceGroup, WorkflowLog
 from sql.notify import notify_for_audit
 from sql.utils.resource_group import (
@@ -56,6 +61,42 @@ ARCHIVE_SUPPORTED_DB_TYPES = (
     "clickhouse",
     "doris",
 )
+
+
+def _sync_archive_mailbox_notifications_safe(workflow):
+    try:
+        sync_approval_notifications(workflow)
+        sync_execution_needed_notifications(workflow)
+    except Exception:
+        logger.exception(
+            "Archive mailbox sync failed for archive_id=%s while calling "
+            "sync_approval_notifications(workflow) and "
+            "sync_execution_needed_notifications(workflow)",
+            workflow.id,
+        )
+
+
+def _sync_archive_execution_mailbox_notifications_safe(workflow):
+    try:
+        sync_execution_needed_notifications(workflow)
+    except Exception:
+        logger.exception(
+            "Archive execution-needed mailbox sync failed for archive_id=%s while "
+            "calling sync_execution_needed_notifications(workflow)",
+            workflow.id,
+        )
+
+
+def _resolve_archive_mailbox_items_safe(workflow):
+    try:
+        resolve_mailbox_items(workflow, category="execution_needed")
+    except Exception:
+        logger.exception(
+            "Archive execution-needed mailbox resolution failed for archive_id=%s "
+            "while calling resolve_mailbox_items(workflow, "
+            "category='execution_needed')",
+            workflow.id,
+        )
 
 
 def _require_archive_module_access(user):
@@ -803,6 +844,7 @@ class ArchiveListCreate(generics.ListAPIView):
                 and audit_handler.audit.current_status == WorkflowStatus.PASSED
             ):
                 schedule_archive(audit_handler.workflow, run_at=next_run_at)
+        _sync_archive_mailbox_notifications_safe(audit_handler.workflow)
 
         async_task(
             notify_for_audit,
@@ -890,6 +932,7 @@ class ArchiveReviewCreate(views.APIView):
                 and auditor.audit.current_status == WorkflowStatus.PASSED
             ):
                 schedule_archive(auditor.workflow, run_at=auditor.workflow.next_run_at)
+        _sync_archive_mailbox_notifications_safe(auditor.workflow)
 
         async_task(
             notify_for_audit,
@@ -945,7 +988,6 @@ class ArchiveRunNow(views.APIView):
                     operator=request.user.username,
                     operator_display=request.user.display,
                 )
-
             async_task(
                 "sql.archiver.archive",
                 archive_id,
@@ -954,6 +996,7 @@ class ArchiveRunNow(views.APIView):
                 timeout=-1,
                 task_name=f"archive-{archive_id}",
             )
+        _resolve_archive_mailbox_items_safe(archive_config)
         return success_response(detail="Archive execution queued.")
 
 
@@ -995,6 +1038,7 @@ class ArchiveStateUpdate(views.APIView):
                 archive_config.next_run_at = None
                 archive_config.save(update_fields=["state", "next_run_at"])
                 cancel_archive_schedule(archive_id)
+        _sync_archive_execution_mailbox_notifications_safe(archive_config)
 
         audit = Audit.detail_by_workflow_id(archive_id, WorkflowType.ARCHIVE)
         if audit:

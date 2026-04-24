@@ -364,7 +364,6 @@ def _seed_instances(resource_groups, tags, log):
                 "verify_ssl": False,
                 "service_name": None,
                 "sid": None,
-                "tunnel": None,
             },
         )
         instance.resource_group.set(

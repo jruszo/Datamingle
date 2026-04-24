@@ -8,6 +8,7 @@ import archivesModule from '@/features/archives/manifest'
 import queriesModule from '@/features/queries/manifest'
 import permissionsModule from '@/features/permissions/manifest'
 import settingsModule from '@/features/settings/manifest'
+import mailboxModule from '@/features/mailbox/manifest'
 import type { FeatureModule, FeatureNavigationItem, NavigationSection } from '@/app/feature-contract'
 import { canAccessRequirement } from '@/shared/auth/access'
 import enterpriseFeatureModules from '@enterprise-feature-modules'
@@ -21,6 +22,7 @@ const builtInFeatureModules: FeatureModule[] = [
   archivesModule,
   queriesModule,
   permissionsModule,
+  mailboxModule,
   settingsModule,
 ]
 
