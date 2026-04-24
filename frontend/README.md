@@ -9,7 +9,7 @@ Vue 3 SPA using:
 - Tailwind CSS
 - shadcn-vue
 
-## Run with Archery Docker Backend
+## Run with Datamingle Docker Backend
 
 1. Make sure backend is running on `http://localhost:9123`.
 2. Copy env file:

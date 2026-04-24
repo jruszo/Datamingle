@@ -4,7 +4,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPOSE_FILE="$ROOT_DIR/src/docker-compose/docker-compose.local-arm.yml"
-DOWNLOAD_ROOT="$ROOT_DIR/src/docker-compose/archery/downloads"
+DOWNLOAD_ROOT="$ROOT_DIR/src/docker-compose/datamingle/downloads"
+COMPOSE=(docker-compose -f "$COMPOSE_FILE")
 
 log() {
   printf '[e2e-reset] %s\n' "$1"
@@ -23,14 +24,14 @@ container_running() {
 }
 
 log "Stopping local Docker stack"
-docker-compose -f "$COMPOSE_FILE" down -v --remove-orphans || true
+"${COMPOSE[@]}" down -v --remove-orphans || true
 
 log "Clearing generated downloads"
 clear_directory "$DOWNLOAD_ROOT/DataExportFile"
 clear_directory "$DOWNLOAD_ROOT/dictionary"
 
 log "Rebuilding and starting local Docker stack"
-docker-compose -f "$COMPOSE_FILE" up -d --build archery
+"${COMPOSE[@]}" up -d --build datamingle
 
 log "Waiting for datamingle-app container"
 for _ in $(seq 1 60); do
@@ -42,7 +43,7 @@ done
 
 if ! container_running "datamingle-app"; then
   log "datamingle-app did not start"
-  docker-compose -f "$COMPOSE_FILE" ps
+  "${COMPOSE[@]}" ps
   exit 1
 fi
 

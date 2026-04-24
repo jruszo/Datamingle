@@ -19,8 +19,8 @@ src/docker-compose-dev
 .coverage
 archery_custom
 src/docker-compose/mysql/datadir/
-src/docker-compose/archery/downloads/DataExportFile/
-src/docker-compose/archery/downloads/dictionary/
+src/docker-compose/datamingle/downloads/DataExportFile/
+src/docker-compose/datamingle/downloads/dictionary/
 frontend/playwright-report/
 frontend/test-results/
 /static/

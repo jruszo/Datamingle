@@ -22,7 +22,7 @@ services:
     volumes:
       - "./mysql/my.cnf:/etc/mysql/my.cnf"
     environment:
-      MYSQL_DATABASE: archery
+      MYSQL_DATABASE: datamingle
       MYSQL_ROOT_HOST: "%"
       MYSQL_ROOT_PASSWORD: 123456
     healthcheck:
@@ -53,10 +53,10 @@ services:
     environment:
       MYSQL_DATABASE: demo_orders
       MYSQL_ROOT_PASSWORD: 123456
-      MYSQL_USER: demo_archery
+      MYSQL_USER: demo_datamingle
       MYSQL_PASSWORD: demo123
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-udemo_archery", "-pdemo123"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-udemo_datamingle", "-pdemo123"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -71,15 +71,15 @@ services:
       - "./postgres-demo/init:/docker-entrypoint-initdb.d:ro"
     environment:
       POSTGRES_DB: workflow_pg
-      POSTGRES_USER: demo_archery
+      POSTGRES_USER: demo_datamingle
       POSTGRES_PASSWORD: demo123
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U demo_archery -d workflow_pg"]
+      test: ["CMD-SHELL", "pg_isready -U demo_datamingle -d workflow_pg"]
       interval: 5s
       timeout: 5s
       retries: 20
 
-  archery:
+  datamingle:
     image: datamingle-app:local-arm
     container_name: datamingle-app
     restart: always
@@ -100,17 +100,17 @@ services:
     ports:
       - "9123:9123"
     volumes:
-      - "../..:/opt/archery"
-      - "./archery/settings.py:/opt/archery/local_settings.py"
-      - "./archery/soar.yaml:/etc/soar.yaml"
-      - "./archery/docs.md:/opt/archery/docs/docs.md"
-      - "./archery/downloads:/opt/archery/downloads"
-      - "./archery/logs:/opt/archery/logs"
-      - "./archery/keys:/opt/archery/keys"
+      - "../..:/opt/datamingle"
+      - "./datamingle/settings.py:/opt/datamingle/local_settings.py"
+      - "./datamingle/soar.yaml:/etc/soar.yaml"
+      - "./datamingle/docs.md:/opt/datamingle/docs/docs.md"
+      - "./datamingle/downloads:/opt/datamingle/downloads"
+      - "./datamingle/logs:/opt/datamingle/logs"
+      - "./datamingle/keys:/opt/datamingle/keys"
     environment:
       RUN_MIGRATIONS_ON_START: "1"
       RUN_LOCAL_DEMO_SEED: "1"
       GUNICORN_RELOAD: "1"
-    entrypoint: "bash /opt/archery/src/docker/startup.sh"
+    entrypoint: "bash /opt/datamingle/src/docker/startup.sh"
     env_file:
       - .env.local-arm

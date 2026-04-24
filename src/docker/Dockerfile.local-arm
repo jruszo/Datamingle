@@ -5,7 +5,7 @@ ENV TZ=UTC \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-WORKDIR /opt/archery
+WORKDIR /opt/datamingle
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -21,8 +21,8 @@ RUN apt-get update \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m venv /opt/venv4archery
-ENV PATH="/opt/venv4archery/bin:${PATH}"
+RUN python3 -m venv /opt/venv4datamingle
+ENV PATH="/opt/venv4datamingle/bin:${PATH}"
 
 COPY requirements.txt /tmp/requirements.txt
 COPY dev-requirements.txt /tmp/dev-requirements.txt
@@ -31,13 +31,13 @@ RUN pip install --upgrade pip \
     && pip install -r /tmp/requirements.txt \
     && pip install -r /tmp/dev-requirements.txt
 
-COPY . /opt/archery
+COPY . /opt/datamingle
 
 RUN useradd -r -s /usr/sbin/nologin nginx || true \
-    && cp -f /opt/archery/src/docker/nginx.conf /etc/nginx/nginx.conf \
-    && cp -f /opt/archery/src/docker/supervisord.conf /etc/supervisord.conf \
-    && mkdir -p /opt/archery/logs /opt/archery/downloads /opt/archery/keys
+    && cp -f /opt/datamingle/src/docker/nginx.conf /etc/nginx/nginx.conf \
+    && cp -f /opt/datamingle/src/docker/supervisord.conf /etc/supervisord.conf \
+    && mkdir -p /opt/datamingle/logs /opt/datamingle/downloads /opt/datamingle/keys
 
 EXPOSE 9123
 
-ENTRYPOINT ["bash", "/opt/archery/src/docker/startup.sh"]
+ENTRYPOINT ["bash", "/opt/datamingle/src/docker/startup.sh"]

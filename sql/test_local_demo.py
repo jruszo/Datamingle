@@ -73,9 +73,11 @@ class TestLocalDemoSeed(TestCase):
         mysql_instance = Instance.objects.get(instance_name="demo-mysql-workflow")
         self.assertEqual(mysql_instance.host, "mysql_demo")
         self.assertEqual(mysql_instance.port, 3306)
+        self.assertEqual(mysql_instance.user, "demo_datamingle")
         self.assertEqual(mysql_instance.db_type, "mysql")
 
         pg_instance = Instance.objects.get(instance_name="demo-pgsql-workflow")
         self.assertEqual(pg_instance.host, "postgres_demo")
         self.assertEqual(pg_instance.port, 5432)
+        self.assertEqual(pg_instance.user, "demo_datamingle")
         self.assertEqual(pg_instance.db_type, "pgsql")

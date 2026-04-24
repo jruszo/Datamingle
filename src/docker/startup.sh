@@ -2,10 +2,10 @@
 
 set -eo pipefail
 
-cd /opt/archery
+cd /opt/datamingle
 
 echo Switch Python runtime environment
-source /opt/venv4archery/bin/activate
+source /opt/venv4datamingle/bin/activate
 #pip install -r requirements.txt -i https://mirrors.ustc.edu.cn/pypi/web/simple/
 
 echo Update redirect port
@@ -43,6 +43,5 @@ if [[ "${GUNICORN_RELOAD:-0}" == "1" ]]; then
     GUNICORN_RELOAD_ARGS="--reload"
 fi
 gunicorn -w 4 -b 127.0.0.1:8888 --timeout 600 ${GUNICORN_RELOAD_ARGS} archery.wsgi:application
-
 
 

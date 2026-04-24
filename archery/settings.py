@@ -23,7 +23,7 @@ env = environ.Env(
         str,
         "",
     ),  # Reference: https://docs.djangoproject.com/en/4.0/ref/settings/#secret-key
-    DATABASE_URL=(str, "mysql://root:@127.0.0.1:3306/archery"),
+    DATABASE_URL=(str, "mysql://root:@127.0.0.1:3306/datamingle"),
     CACHE_URL=(str, "redis://127.0.0.1:6379/0"),
     AUTH_MODE=(str, "builtin"),
     WORKOS_API_KEY=(str, ""),
@@ -264,7 +264,7 @@ DATABASES = {
                 "charset": "utf8mb4",
             },
             "TEST": {
-                "NAME": "test_archery",
+                "NAME": "test_datamingle",
                 "CHARSET": "utf8mb4",
             },
         },
@@ -273,7 +273,7 @@ DATABASES = {
 
 # Django-Q
 Q_CLUSTER = {
-    "name": "archery",
+    "name": "datamingle",
     "workers": env("Q_CLUISTER_WORKERS", default=4),
     "recycle": 500,
     "timeout": env("Q_CLUISTER_TIMEOUT", default=60),
@@ -340,7 +340,7 @@ REST_FRAMEWORK = {
 
 # Swagger UI
 SPECTACULAR_SETTINGS = {
-    "TITLE": "Archery API",
+    "TITLE": "Datamingle API",
     "DESCRIPTION": "OpenAPI 3.0",
     "VERSION": "1.0.0",
 }
@@ -400,7 +400,7 @@ LOGGING = {
         "default": {
             "level": "DEBUG",
             "class": "logging.handlers.RotatingFileHandler",
-            "filename": "logs/archery.log",
+            "filename": "logs/datamingle.log",
             "maxBytes": 1024 * 1024 * 100,  # 5 MB
             "backupCount": 5,
             "formatter": "verbose",
@@ -442,8 +442,8 @@ LOGGING = {
     },
 }
 
-# Append this content to website title and login page to distinguish multiple Archery instances.
-# The same option exists in Archery admin; if both are set, admin configuration takes precedence.
+# Append this content to website title and login page to distinguish multiple Datamingle instances.
+# The same option exists in Datamingle admin; if both are set, admin configuration takes precedence.
 CUSTOM_TITLE_SUFFIX = env("CUSTOM_TITLE_SUFFIX", default="")
 
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
