@@ -45,6 +45,14 @@ Public Datamingle demo: coming soon.
 ### Docker
 Use the Docker and compose files in this repository (`src/docker` and `src/docker-compose`).
 
+Existing local Docker data directories from before the Datamingle rename may
+still have the application database under the old `archery` name. Copy that data
+into the new `datamingle` database before starting the renamed stack:
+
+```bash
+scripts/docker/migrate-archery-db-to-datamingle.sh
+```
+
 ### Local Demo Users
 The local ARM compose setup can seed demo users, resource groups, and demo database instances for manual UX testing.
 
@@ -128,7 +136,7 @@ WorkOS setup assumptions in this repo:
 5. Rebuild the app container so the `workos` Python dependency is installed:
 
 ```bash
-docker-compose -f src/docker-compose/docker-compose.local-arm.yml up -d --build archery
+docker-compose -f src/docker-compose/docker-compose.local-arm.yml up -d --build datamingle
 ```
 
 6. Restart the deployment and open `/login/`.

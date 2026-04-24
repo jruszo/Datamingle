@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPOSE_FILE="$ROOT_DIR/src/docker-compose/docker-compose.local-arm.yml"
-DOWNLOAD_ROOT="$ROOT_DIR/src/docker-compose/archery/downloads"
+DOWNLOAD_ROOT="$ROOT_DIR/src/docker-compose/datamingle/downloads"
 
 log() {
   printf '[e2e-reset] %s\n' "$1"
@@ -30,7 +30,7 @@ clear_directory "$DOWNLOAD_ROOT/DataExportFile"
 clear_directory "$DOWNLOAD_ROOT/dictionary"
 
 log "Rebuilding and starting local Docker stack"
-docker-compose -f "$COMPOSE_FILE" up -d --build archery
+docker-compose -f "$COMPOSE_FILE" up -d --build datamingle
 
 log "Waiting for datamingle-app container"
 for _ in $(seq 1 60); do

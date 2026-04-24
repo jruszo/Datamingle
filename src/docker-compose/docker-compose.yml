@@ -24,7 +24,7 @@ services:
       - "./mysql/my.cnf:/etc/mysql/my.cnf"
       - "./mysql/datadir:/var/lib/mysql"
     environment:
-      MYSQL_DATABASE: archery
+      MYSQL_DATABASE: datamingle
       MYSQL_ROOT_PASSWORD: 123456
     healthcheck:
       test: ["CMD", "mysqladmin", "ping"]
@@ -41,13 +41,12 @@ services:
     volumes:
       - "./inception/config.toml:/etc/config.toml"
 
-  archery:
-    # The image reference below is only an example. Check the sources below for the version you need:
-    # dockerhub https://hub.docker.com/r/hhyo/archery
-    # github packages https://github.com/jruszo/Datamingle/pkgs/container/archery
-    # If needed, you can also build your own Docker image and replace this image reference.
-    image: hhyo/archery:v1.13.0
-    container_name: archery
+  datamingle:
+    # Local image tag. Build and tag it before using this compose file:
+    # docker build -f ../docker/Dockerfile -t datamingle-app:latest ../..
+    # Published images can replace this with your registry reference.
+    image: datamingle-app:latest
+    container_name: datamingle-app
     restart: always
     depends_on:
       redis:
@@ -57,15 +56,15 @@ services:
     ports:
       - "9123:9123"
     volumes:
-      - "./archery/settings.py:/opt/archery/local_settings.py"
-      - "./archery/soar.yaml:/etc/soar.yaml"
-      - "./archery/docs.md:/opt/archery/docs/docs.md"
-      - "./archery/downloads:/opt/archery/downloads"
-      - "./archery/sql/migrations:/opt/archery/sql/migrations"
-      - "./archery/logs:/opt/archery/logs"
-      - "./archery/keys:/opt/archery/keys"
+      - "./datamingle/settings.py:/opt/datamingle/local_settings.py"
+      - "./datamingle/soar.yaml:/etc/soar.yaml"
+      - "./datamingle/docs.md:/opt/datamingle/docs/docs.md"
+      - "./datamingle/downloads:/opt/datamingle/downloads"
+      - "./datamingle/sql/migrations:/opt/datamingle/sql/migrations"
+      - "./datamingle/logs:/opt/datamingle/logs"
+      - "./datamingle/keys:/opt/datamingle/keys"
     environment:
       RUN_MIGRATIONS_ON_START: "1"
-    entrypoint: "bash /opt/archery/src/docker/startup.sh"
+    entrypoint: "bash /opt/datamingle/src/docker/startup.sh"
     env_file:
       - .env

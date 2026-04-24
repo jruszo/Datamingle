@@ -17,7 +17,7 @@ The local compose file sets `RUN_LOCAL_DEMO_SEED=1` on the `datamingle-app` cont
 On rebuild or recreate, startup runs:
 
 ```bash
-docker-compose -f src/docker-compose/docker-compose.local-arm.yml up -d --build archery
+docker-compose -f src/docker-compose/docker-compose.local-arm.yml up -d --build datamingle
 ```
 
 The app container then runs:
@@ -77,10 +77,10 @@ Both instances are tagged with `can_read` and `can_write` and are associated wit
 ## Demo database credentials
 
 - MySQL demo user:
-  - Username: `demo_archery`
+  - Username: `demo_datamingle`
   - Password: `demo123`
 - PostgreSQL demo user:
-  - Username: `demo_archery`
+  - Username: `demo_datamingle`
   - Password: `demo123`
 
 ## Separate smoke check
@@ -111,7 +111,7 @@ If you want to recreate the initial SQL content from scratch, tear down the loca
 
 ```bash
 docker-compose -f src/docker-compose/docker-compose.local-arm.yml down -v
-docker-compose -f src/docker-compose/docker-compose.local-arm.yml up -d --build archery
+docker-compose -f src/docker-compose/docker-compose.local-arm.yml up -d --build datamingle
 ```
 
 That recreates the databases, reruns migrations, and reapplies the local demo seed.
