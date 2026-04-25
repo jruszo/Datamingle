@@ -201,11 +201,6 @@ const instanceTypeOption = computed(() => {
   return buildPieOption(series?.labels ?? [], series?.values ?? [])
 })
 
-const slowQueryByDbOption = computed(() => {
-  const series = dashboard.value?.charts.slow_query_by_db
-  return buildBarOption(series?.labels ?? [], series?.values ?? [], '#f59e0b')
-})
-
 const queryActivityOption = computed(() => {
   const series = dashboard.value?.charts.query_activity
   return {
@@ -431,16 +426,6 @@ onMounted(() => {
     </div>
 
     <div class="grid gap-4 xl:grid-cols-12">
-      <Card class="xl:col-span-6">
-        <CardHeader class="pb-3">
-          <CardTitle>24h Slow Queries by Database</CardTitle>
-          <CardDescription>Slow query volume per database.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <VChart class="h-72 w-full" :option="slowQueryByDbOption" autoresize />
-        </CardContent>
-      </Card>
-
       <Card class="xl:col-span-6">
         <CardHeader class="pb-3">
           <CardTitle>Rows Retrieved by User</CardTitle>

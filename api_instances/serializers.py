@@ -141,7 +141,9 @@ class InstanceAccountPayloadSerializer(serializers.Serializer):
         return value.strip()
 
     def validate_password(self, value):
-        return value.strip()
+        if not value or not value.strip():
+            raise serializers.ValidationError("Password cannot be blank.")
+        return value
 
     def validate_remark(self, value):
         return value.strip()
@@ -216,7 +218,9 @@ class InstanceParamListSerializer(serializers.Serializer):
 
 
 class InstanceParamHistorySerializer(serializers.ModelSerializer):
-    instance_name = serializers.CharField(source="instance.instance_name")
+    instance_name = serializers.CharField(
+        source="instance.instance_name", read_only=True
+    )
 
     class Meta:
         model = ParamHistory

@@ -2,6 +2,7 @@ import datetime
 
 from django.contrib.auth.decorators import permission_required
 from django.db.models import Q
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema
 from rest_framework import generics, serializers, views
@@ -27,7 +28,7 @@ def _date_range(start_date, end_date):
         )
     except ValueError:
         return None
-    return start, end
+    return timezone.make_aware(start), timezone.make_aware(end)
 
 
 class GeneralAuditLogList(generics.ListAPIView):
@@ -208,7 +209,14 @@ class WorkflowOperationLogList(views.APIView):
                 {"errors": "audit_id or workflow_id is required."}
             )
 
-        if not audit_id:
+        if audit_id:
+            try:
+                audit_id = int(audit_id)
+            except ValueError as exc:
+                raise serializers.ValidationError(
+                    {"audit_id": "A valid integer is required."}
+                ) from exc
+        else:
             try:
                 audit_id = WorkflowAudit.objects.get(
                     workflow_id=workflow_id, workflow_type=workflow_type

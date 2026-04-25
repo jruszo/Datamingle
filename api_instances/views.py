@@ -143,10 +143,10 @@ def _data_dictionary_queryset(user):
 def _data_dictionary_instance(user, instance_id):
     try:
         return _data_dictionary_queryset(user).get(pk=instance_id)
-    except Instance.DoesNotExist:
+    except Instance.DoesNotExist as exc:
         raise serializers.ValidationError(
             {"errors": "The instance is not associated with your group."}
-        )
+        ) from exc
 
 
 def _safe_dictionary_export_path(base_dir, instance_name, db_name):
@@ -170,8 +170,10 @@ def _safe_positive_int(value, default, maximum):
 def _required_int(value, field_name):
     try:
         return int(value)
-    except (TypeError, ValueError):
-        raise serializers.ValidationError({field_name: "A valid integer is required."})
+    except (TypeError, ValueError) as exc:
+        raise serializers.ValidationError(
+            {field_name: "A valid integer is required."}
+        ) from exc
 
 
 def _mysql_quote_identifier(value):
@@ -222,10 +224,10 @@ def _table_groups_to_list(grouped_tables):
 def _operation_database_instance(user, instance_id):
     try:
         return _operation_database_queryset(user).get(pk=instance_id)
-    except Instance.DoesNotExist:
+    except Instance.DoesNotExist as exc:
         raise serializers.ValidationError(
             {"errors": "The instance is not associated with your group."}
-        )
+        ) from exc
 
 
 def _operation_database_queryset(user):
@@ -246,10 +248,10 @@ def _operation_account_instance(user, instance_id, db_type=None):
         if db_type:
             queryset = queryset.filter(db_type__in=db_type)
         return queryset.get(pk=instance_id)
-    except Instance.DoesNotExist:
+    except Instance.DoesNotExist as exc:
         raise serializers.ValidationError(
             {"errors": "The instance is not associated with your group."}
-        )
+        ) from exc
 
 
 def _operation_param_queryset(user):
@@ -261,10 +263,10 @@ def _operation_param_queryset(user):
 def _operation_param_instance(user, instance_id):
     try:
         return _operation_param_queryset(user).get(pk=instance_id)
-    except Instance.DoesNotExist:
+    except Instance.DoesNotExist as exc:
         raise serializers.ValidationError(
             {"errors": "The instance is not associated with your group."}
-        )
+        ) from exc
 
 
 def _operation_diagnostic_queryset(user):
@@ -274,10 +276,10 @@ def _operation_diagnostic_queryset(user):
 def _operation_diagnostic_instance(user, instance_id):
     try:
         return _operation_diagnostic_queryset(user).get(pk=instance_id)
-    except Instance.DoesNotExist:
+    except Instance.DoesNotExist as exc:
         raise serializers.ValidationError(
             {"errors": "The instance is not associated with your group."}
-        )
+        ) from exc
 
 
 def _owner_display(owner):
@@ -285,8 +287,8 @@ def _owner_display(owner):
         return ""
     try:
         return Users.objects.get(username=owner).display
-    except Users.DoesNotExist:
-        raise serializers.ValidationError({"owner": "Owner does not exist."})
+    except Users.DoesNotExist as exc:
+        raise serializers.ValidationError({"owner": "Owner does not exist."}) from exc
 
 
 def _clear_instance_resource_cache():
@@ -1415,7 +1417,7 @@ class InstanceOperationAccountPassword(views.APIView):
             raise serializers.ValidationError({"errors": exec_result.error})
 
         user, host, db_name = _account_metadata_fields(instance, data)
-        account, _ = InstanceAccount.objects.update_or_create(
+        account, _created = InstanceAccount.objects.get_or_create(
             instance=instance,
             user=user,
             host=host,
@@ -1794,7 +1796,17 @@ class InstanceOperationParamEdit(views.APIView):
                     {"errors": "Parameter was not returned by the instance."}
                 )
 
-            runtime_value = current_variables.rows[0][1]
+            current_row = current_variables.rows[0]
+            if (
+                not isinstance(current_row, (list, tuple))
+                or len(current_row) < 2
+                or current_row[1] is None
+            ):
+                raise serializers.ValidationError(
+                    {"errors": "Parameter returned unexpected row shape from instance."}
+                )
+
+            runtime_value = current_row[1]
             if str(variable_value) == str(runtime_value):
                 raise serializers.ValidationError(
                     {

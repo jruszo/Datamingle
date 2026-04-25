@@ -105,3 +105,9 @@ This file tracks the migration work needed to remove the legacy Bootstrap/Django
 - Binlog/My2SQL: `/my2sql/`, `/binlog/list/`, `/binlog/my2sql/`, `/binlog/del_log/`.
 - SchemaSync: `/schemasync/`, `/instance/schemasync/`.
 - DBA principles/docs: `/dbaprinciples/`.
+
+Retired permission codenames are documented in `RETIRED_SQL_PERMISSION_CODENAMES`
+and removed by `remove_retired_sql_permissions` in
+`sql/migrations/0015_alter_permission_options.py`. Legacy Archery `src/init_sql`
+bootstrap files were removed; schema and permission changes should go through
+Django migrations.

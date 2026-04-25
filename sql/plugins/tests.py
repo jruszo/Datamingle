@@ -142,7 +142,7 @@ class TestPlugin(TestCase):
             "some_stdout",
             "some_stderr",
         )
-        stdout, stderr = plugin.execute_cmd(cmd_args).communicate()
+        stdout, _stderr = plugin.execute_cmd(cmd_args).communicate()
         mock_subprocess.Popen.assert_called_once_with(
             cmd_args, shell=False, stdout=ANY, stderr=ANY, universal_newlines=ANY
         )

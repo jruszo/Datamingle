@@ -70,7 +70,7 @@ class AuditApiTests(TestCase):
             {
                 "search": "invalid-date-filter-target",
                 "start_date": "bad-date",
-                "end_date": "2026-04-25",
+                "end_date": "9999-12-31",
             },
         )
 
@@ -163,3 +163,14 @@ class AuditApiTests(TestCase):
         payload = response.json()["data"]
         self.assertEqual(payload["count"], 1)
         self.assertEqual(payload["results"][0]["operation_info"], "Approved by DBA")
+
+    def test_workflow_operation_logs_reject_invalid_audit_id(self):
+        self.add_audit_permission()
+
+        response = self.client.get(
+            "/api/v1/audit/workflow-log/",
+            {"audit_id": "not-a-number"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("audit_id", response.json())

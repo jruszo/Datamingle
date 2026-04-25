@@ -90,9 +90,6 @@ mysql:
       max_binlog_size         = 500M
       character-set-server = utf8mb4
       collation-server = utf8mb4_general_ci
-      slow_query_log_file = mysql-slow.log
-      slow_query_log      = 1
-      long_query_time = 1
       [client]
       default-character-set=utf8mb4
       socket=/opt/bitnami/mysql/tmp/mysql.sock
@@ -142,9 +139,6 @@ volumeMounts:
     subPath: local_settings.py
     mountPath: /opt/archery/local_settings.py
   - name: archery-settings
-    subPath: analysis_slow_query.sh
-    mountPath: /opt/archery/src/script/analysis_slow_query.sh
-  - name: archery-settings
     subPath: startup.sh
     mountPath: /opt/archery/src/docker/startup.sh
   - name: archery-settings
@@ -182,41 +176,3 @@ configMap:
     local_settings.py: |-
         # -*- coding: UTF-8 -*-
         # override your configs here
-    analysis_slow_query.sh: |-
-        #!/bin/bash
-        DIR="$( cd "$( dirname "$0"  )" && pwd  )"
-        cd $DIR
-        
-        # Configure Archery database connection
-        monitor_db_host="archery-mysql"
-        monitor_db_port=3306
-        monitor_db_user="root"
-        monitor_db_password="MYSQL_ROOT_PASSWORD"
-        monitor_db_database="archery"
-        
-        # Slow log path of the analyzed instance
-        slowquery_file="/home/mysql/log_slow.log"
-        pt_query_digest="/usr/bin/pt-query-digest"
-        
-        # Connection identifier of the analyzed instance
-        hostname="mysql_host:mysql_port" # Must match Archery instance config for filtering
-        
-        # Get last analysis time; for initial full analysis, remove last_analysis_time_$hostname
-        if [ -s last_analysis_time_$hostname ]; then
-            last_analysis_time=`cat last_analysis_time_$hostname`
-        else
-            last_analysis_time='1000-01-01 00:00:00'
-        fi
-        
-        # Collect logs
-        # Add --no-version-check for RDS
-        $pt_query_digest \
-        --user=$monitor_db_user --password=$monitor_db_password --port=$monitor_db_port \
-        --review h=$monitor_db_host,D=$monitor_db_database,t=mysql_slow_query_review  \
-        --history h=$monitor_db_host,D=$monitor_db_database,t=mysql_slow_query_review_history  \
-        --no-report --limit=100% --charset=utf8 \
-        --since "$last_analysis_time" \
-        --filter="\$event->{Bytes} = length(\$event->{arg}) and \$event->{hostname}=\"$hostname\"  and \$event->{client}=\$event->{ip} " \
-        $slowquery_file > /tmp/analysis_slow_query.log
-        
-        echo `date +"%Y-%m-%d %H:%M:%S"`>last_analysis_time_$hostname

@@ -101,7 +101,7 @@ const visibleTabs = computed(() =>
 
 const columns = computed(() => {
   const firstRow = rows.value[0]
-  return firstRow ? Object.keys(firstRow).slice(0, 10) : []
+  return firstRow ? Object.keys(firstRow) : []
 })
 
 function rowValue(row: InstanceOperationDiagnosticRow, column: string) {
@@ -126,6 +126,16 @@ function toggleThread(row: InstanceOperationDiagnosticRow) {
   selectedThreadIds.value = selectedThreadIds.value.includes(id)
     ? selectedThreadIds.value.filter((threadId) => threadId !== id)
     : [...selectedThreadIds.value, id]
+}
+
+function processRowState(row: InstanceOperationDiagnosticRow) {
+  const id = processId(row)
+  return {
+    id,
+    label: `Select process ${id ?? 'unknown'}`,
+    selected: id !== null && selectedThreadIds.value.includes(id),
+    disabled: id === null,
+  }
 }
 
 async function loadInstances() {
@@ -230,7 +240,12 @@ async function confirmKill() {
 }
 
 onMounted(async () => {
-  await authStore.loadCurrentUser()
+  try {
+    await authStore.loadCurrentUser()
+  } catch (errorValue) {
+    error.value = toUserFacingMessage(errorValue, 'Failed to load the current user.')
+    return
+  }
 
   if (!canOpenDiagnostics.value) {
     error.value = 'You do not have permission to open session diagnostics.'
@@ -362,14 +377,16 @@ watch([selectedInstanceId, activeTab, commandType], () => {
               <tbody class="divide-y divide-slate-100 bg-white">
                 <tr v-for="(row, index) in rows" :key="index">
                   <td v-if="activeTab === 'processes' && canKillProcesses" class="px-4 py-3">
-                    <input
-                      type="checkbox"
-                      class="h-4 w-4 rounded border-slate-300"
-                      :aria-label="`Select process ${processId(row) ?? 'unknown'}`"
-                      :checked="processId(row) ? selectedThreadIds.includes(processId(row) as number) : false"
-                      :disabled="!processId(row)"
-                      @change="toggleThread(row)"
-                    >
+                    <template v-for="state in [processRowState(row)]" :key="state.id ?? 'unknown'">
+                      <input
+                        type="checkbox"
+                        class="h-4 w-4 rounded border-slate-300"
+                        :aria-label="state.label"
+                        :checked="state.selected"
+                        :disabled="state.disabled"
+                        @change="toggleThread(row)"
+                      >
+                    </template>
                   </td>
                   <td v-for="column in columns" :key="column" class="max-w-[18rem] truncate px-4 py-3 text-slate-600">
                     {{ rowValue(row, column) }}

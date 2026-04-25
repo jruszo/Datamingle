@@ -305,8 +305,6 @@ export type DashboardPayload = {
     query_activity: DashboardQueryActivitySeries
     query_rows_by_user: DashboardNamedSeries
     query_rows_by_db: DashboardNamedSeries
-    slow_query_by_db_user: DashboardNamedSeries
-    slow_query_by_db: DashboardNamedSeries
     instance_type_distribution: DashboardNamedSeries
     instance_env_distribution: DashboardStackedSeries
   }
@@ -1459,13 +1457,13 @@ export function fetchWorkflowOperationAuditLogs(
   options: { audit_id?: number; workflow_id?: number; workflow_type?: number },
 ) {
   const params = new URLSearchParams()
-  if (options.audit_id) {
+  if (options.audit_id != null) {
     params.set('audit_id', `${options.audit_id}`)
   }
-  if (options.workflow_id) {
+  if (options.workflow_id != null) {
     params.set('workflow_id', `${options.workflow_id}`)
   }
-  if (options.workflow_type) {
+  if (options.workflow_type != null) {
     params.set('workflow_type', `${options.workflow_type}`)
   }
 

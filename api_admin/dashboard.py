@@ -204,20 +204,6 @@ class DashboardOverview(views.APIView):
                 "querylog_effect_row_by_db",
             )
         )
-        slow_db_user_labels, slow_db_user_values = _labels_and_values(
-            self._safe_rows(
-                lambda: chart_dao.slow_query_count_by_db_by_user(
-                    query_start, query_end
-                ),
-                "slow_query_count_by_db_by_user",
-            )
-        )
-        slow_db_labels, slow_db_values = _labels_and_values(
-            self._safe_rows(
-                lambda: chart_dao.slow_query_count_by_db(query_start, query_end),
-                "slow_query_count_by_db",
-            )
-        )
         instance_type_labels, instance_type_values = _labels_and_values(
             self._safe_rows(
                 chart_dao.instance_count_by_type,
@@ -271,14 +257,6 @@ class DashboardOverview(views.APIView):
                 "query_rows_by_db": {
                     "labels": query_db_labels,
                     "values": query_db_values,
-                },
-                "slow_query_by_db_user": {
-                    "labels": slow_db_user_labels,
-                    "values": slow_db_user_values,
-                },
-                "slow_query_by_db": {
-                    "labels": slow_db_labels,
-                    "values": slow_db_values,
                 },
                 "instance_type_distribution": {
                     "labels": instance_type_labels,

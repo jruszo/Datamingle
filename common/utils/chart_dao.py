@@ -131,46 +131,6 @@ class ChartDao(object):
         limit 20;""".format(start_date, end_date)
         return self.__query(sql)
 
-    # Slow log trend (by execution count)
-    def slow_query_review_history_by_cnt(self, checksum):
-        sql = f"""select sum(ts_cnt),date(date_add(ts_min, interval 8 HOUR))
-from mysql_slow_query_review_history
-where checksum = '{checksum}'
-group by date(date_add(ts_min, interval 8 HOUR));"""
-        return self.__query(sql)
-
-    # Slow log trend (by duration)
-    def slow_query_review_history_by_pct_95_time(self, checksum):
-        sql = f"""select truncate(Query_time_pct_95,6),date(date_add(ts_min, interval 8 HOUR))
-from mysql_slow_query_review_history
-where checksum = '{checksum}'
-group by date(date_add(ts_min, interval 8 HOUR));"""
-        return self.__query(sql)
-
-    # Slow log stats by db/user
-    def slow_query_count_by_db_by_user(self, start_date, end_date):
-        sql = """
-        select
-            concat(db_max,' user: ' ,user_max),
-            sum(ts_cnt) 
-        from mysql_slow_query_review_history 
-        where ts_min >= '{}' and ts_min <= '{}'
-        group by db_max,user_max order by sum(ts_cnt) desc limit 50;
-        """.format(start_date, end_date)
-        return self.__query(sql)
-
-    # Slow log stats by db
-    def slow_query_count_by_db(self, start_date, end_date):
-        sql = """
-        select
-            db_max,
-            sum(ts_cnt) 
-        from mysql_slow_query_review_history 
-        where ts_min >= '{}' and ts_min <= '{}'
-        group by db_max order by sum(ts_cnt) desc limit 50;
-        """.format(start_date, end_date)
-        return self.__query(sql)
-
     # DB instance type distribution
     def instance_count_by_type(self):
         sql = """

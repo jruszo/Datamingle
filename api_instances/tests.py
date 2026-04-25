@@ -29,7 +29,19 @@ class FakeDictionaryResult:
         self.full_sql = full_sql
 
     def to_dict(self):
-        return [dict(zip(self.column_list, row)) for row in self.rows]
+        if not self.column_list:
+            raise ValueError("FakeDictionaryResult requires column_list for to_dict().")
+
+        records = []
+        for row in self.rows:
+            if len(self.column_list) == 1 and not isinstance(row, (list, tuple)):
+                row = (row,)
+            if len(row) != len(self.column_list):
+                raise ValueError(
+                    "FakeDictionaryResult row length does not match column_list."
+                )
+            records.append(dict(zip(self.column_list, row)))
+        return records
 
 
 class FakeDictionaryEngine:
@@ -623,7 +635,11 @@ class InstanceOperationAccountApiTests(TestCase):
     def test_account_password_reset_does_not_store_password(self, get_engine):
         self.add_manage_permission()
         InstanceAccount.objects.create(
-            instance=self.instance, user="app", host="%", db_name="", remark=""
+            instance=self.instance,
+            user="app",
+            host="%",
+            db_name="",
+            remark="Existing remark",
         )
         get_engine.side_effect = lambda instance: FakeDictionaryEngine(instance)
 
@@ -642,6 +658,7 @@ class InstanceOperationAccountApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         account = InstanceAccount.objects.get(instance=self.instance, user="app")
         self.assertEqual(account.password, "")
+        self.assertEqual(account.remark, "Existing remark")
 
     @patch("api_instances.views.get_engine")
     def test_account_grant_returns_mysql_grant_sql(self, get_engine):
@@ -932,6 +949,29 @@ class InstanceOperationParamApiTests(TestCase):
         self.assertEqual(history.old_var, "100")
         self.assertEqual(history.new_var, "200")
         self.assertEqual(history.user_display, "Param User")
+
+    @patch("api_instances.views.get_engine")
+    def test_param_edit_rejects_unexpected_runtime_row_shape(self, get_engine):
+        self.add_edit_permission()
+        self.create_template(editable=True)
+        engine = FakeDictionaryEngine(self.instance)
+        engine.get_variables = lambda variables=None: FakeDictionaryResult(
+            [["max_connections"]]
+        )
+        get_engine.return_value = engine
+
+        response = self.client.post(
+            "/api/v1/instance-operations/param/edit/",
+            {
+                "instance_id": self.instance.id,
+                "variable_name": "max_connections",
+                "runtime_value": "200",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("unexpected row shape", response.json()["errors"])
 
 
 class InstanceOperationDiagnosticApiTests(TestCase):

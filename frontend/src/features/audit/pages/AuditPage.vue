@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { useDebounceFn } from '@vueuse/core'
 import { RefreshCw, Search } from 'lucide-vue-next'
 
@@ -22,11 +22,13 @@ import { useAuthStore } from '@/stores/auth'
 type AuditView = 'general' | 'query' | 'workflow'
 
 const authStore = useAuthStore()
+const route = useRoute()
 
 const activeView = ref<AuditView>('general')
 const loading = ref(false)
 const error = ref('')
 const pageSize = 20
+let initializing = true
 
 const filters = reactive({
   search: '',
@@ -161,7 +163,6 @@ function setView(view: AuditView) {
   filters.action = ''
   filters.status = ''
   filters.syntaxType = ''
-  void loadAuditLogs()
 }
 
 function movePage(direction: -1 | 1) {
@@ -179,14 +180,41 @@ const debouncedLoadAuditLogs = useDebounceFn(() => {
 }, 250)
 
 watch(
-  () => [filters.search, filters.action, filters.status, filters.syntaxType, filters.startDate, filters.endDate],
+  () => [
+    activeView.value,
+    filters.search,
+    filters.action,
+    filters.status,
+    filters.syntaxType,
+    filters.startDate,
+    filters.endDate,
+  ],
   () => {
+    if (initializing) {
+      return
+    }
     debouncedLoadAuditLogs()
   },
 )
 
 onMounted(async () => {
-  await authStore.loadCurrentUser()
+  try {
+    await authStore.loadCurrentUser()
+  } catch (errorValue) {
+    error.value = toUserFacingMessage(errorValue, 'Failed to load the current user.')
+    return
+  }
+
+  const tab = Array.isArray(route.query.tab) ? route.query.tab[0] : route.query.tab
+  if (tab === 'query') {
+    activeView.value = 'query'
+  } else if (tab === 'workflow' || tab === 'sql-workflow') {
+    activeView.value = 'workflow'
+  } else {
+    activeView.value = 'general'
+  }
+
+  initializing = false
   await loadAuditLogs()
 })
 </script>

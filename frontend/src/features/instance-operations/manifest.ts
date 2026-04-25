@@ -1,4 +1,4 @@
-import { Wrench } from 'lucide-vue-next'
+import { Database, SlidersHorizontal, SquareActivity, UserRound } from 'lucide-vue-next'
 
 import type { FeatureModule } from '@/app/feature-contract'
 import AccountManagementPage from '@/features/instance-operations/pages/AccountManagementPage.vue'
@@ -19,7 +19,7 @@ const instanceOperationsModule: FeatureModule = {
       to: '/instance-operations/databases',
       label: 'Instance Databases',
       section: 'primary',
-      icon: Wrench,
+      icon: Database,
       order: 22,
       access: { anyPermissions: ['sql.menu_database'] },
     },
@@ -27,7 +27,7 @@ const instanceOperationsModule: FeatureModule = {
       to: '/instance-operations/accounts',
       label: 'Instance Accounts',
       section: 'primary',
-      icon: Wrench,
+      icon: UserRound,
       order: 23,
       access: { anyPermissions: ['sql.menu_instance_account'] },
     },
@@ -35,7 +35,7 @@ const instanceOperationsModule: FeatureModule = {
       to: '/instance-operations/parameters',
       label: 'Parameters',
       section: 'primary',
-      icon: Wrench,
+      icon: SlidersHorizontal,
       order: 24,
       access: { anyPermissions: ['sql.menu_param'] },
     },
@@ -43,7 +43,7 @@ const instanceOperationsModule: FeatureModule = {
       to: '/instance-operations/diagnostics',
       label: 'Diagnostics',
       section: 'primary',
-      icon: Wrench,
+      icon: SquareActivity,
       order: 25,
       access: { anyPermissions: ['sql.menu_dbdiagnostic'] },
     },

@@ -244,7 +244,7 @@ watch([selectedInstanceId, savedOnly], () => {
         </p>
       </div>
       <div class="flex flex-wrap gap-2">
-        <Button variant="outline" type="button" class="gap-2" :disabled="loadingDatabases" @click="void refreshDatabases()">
+        <Button variant="outline" type="button" class="gap-2" :disabled="loadingInstances || loadingDatabases" @click="void refreshDatabases()">
           <RefreshCw class="h-4 w-4" />
           Refresh
         </Button>

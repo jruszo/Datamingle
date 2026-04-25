@@ -127,6 +127,10 @@ const filteredAccounts = computed(() => {
   )
 })
 
+const gridColsClass = computed(() =>
+  activeFormMode.value ? 'xl:grid-cols-[minmax(0,1fr)_minmax(21rem,0.34fr)]' : 'xl:grid-cols-1',
+)
+
 function splitList(value: string) {
   return value
     .split(',')
@@ -236,7 +240,11 @@ async function loadAccounts() {
 
 async function refreshAccounts() {
   feedback.value = ''
-  await Promise.all([loadInstances(), loadAccounts()])
+  const priorInstanceId = selectedInstanceId.value
+  await loadInstances()
+  if (selectedInstanceId.value && selectedInstanceId.value === priorInstanceId) {
+    await loadAccounts()
+  }
 }
 
 function accountPayload() {
@@ -466,7 +474,7 @@ watch([selectedInstanceId, savedOnly], () => {
         </p>
       </div>
       <div class="flex flex-wrap gap-2">
-        <Button variant="outline" type="button" class="gap-2" :disabled="loadingAccounts" @click="void refreshAccounts()">
+        <Button variant="outline" type="button" class="gap-2" :disabled="loadingInstances || loadingAccounts" @click="void refreshAccounts()">
           <RefreshCw class="h-4 w-4" />
           Refresh
         </Button>
@@ -515,7 +523,7 @@ watch([selectedInstanceId, savedOnly], () => {
       </CardContent>
     </Card>
 
-    <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(21rem,0.34fr)]">
+    <div :class="['grid gap-6', gridColsClass]">
       <Card class="border-slate-200">
         <CardHeader>
           <CardTitle class="flex items-center gap-2">

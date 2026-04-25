@@ -165,7 +165,11 @@ async function loadHistory() {
 
 async function refreshAll() {
   feedback.value = ''
-  await Promise.all([loadInstances(), loadParams(), loadHistory()])
+  const priorInstanceId = selectedInstanceId.value
+  await loadInstances()
+  if (selectedInstanceId.value && selectedInstanceId.value === priorInstanceId) {
+    await Promise.all([loadParams(), loadHistory()])
+  }
 }
 
 async function applyFilters() {

@@ -48,10 +48,6 @@ import logging
 logger = logging.getLogger("default")
 
 
-def spa_redirect(path):
-    return HttpResponseRedirect(path)
-
-
 def index(request):
     index_path_url = SysConfig().get("index_path_url", "sqlworkflow")
     return HttpResponseRedirect(f"/{index_path_url.strip('/')}/")
@@ -467,31 +463,31 @@ def instance(request):
 @permission_required("sql.menu_instance_account", raise_exception=True)
 def instanceaccount(request):
     """Instance account management page."""
-    return spa_redirect("/instance-operations/accounts")
+    return HttpResponseRedirect("/instance-operations/accounts")
 
 
 @permission_required("sql.menu_database", raise_exception=True)
 def database(request):
     """Instance database management page."""
-    return spa_redirect("/instance-operations/databases")
+    return HttpResponseRedirect("/instance-operations/databases")
 
 
 @permission_required("sql.menu_dbdiagnostic", raise_exception=True)
 def dbdiagnostic(request):
     """Session management page."""
-    return spa_redirect("/instance-operations/diagnostics")
+    return HttpResponseRedirect("/instance-operations/diagnostics")
 
 
 @permission_required("sql.menu_data_dictionary", raise_exception=True)
 def data_dictionary(request):
     """Data dictionary page."""
-    return spa_redirect("/inventory/data-dictionary")
+    return HttpResponseRedirect("/inventory/data-dictionary")
 
 
 @permission_required("sql.menu_param", raise_exception=True)
 def instance_param(request):
     """Instance parameter management page."""
-    return spa_redirect("/instance-operations/parameters")
+    return HttpResponseRedirect("/instance-operations/parameters")
 
 
 @permission_required("sql.menu_archive", raise_exception=True)
@@ -633,19 +629,19 @@ def workflowsdetail(request, audit_id):
 @permission_required("sql.audit_user", raise_exception=True)
 def audit(request):
     """General audit log page."""
-    return spa_redirect("/audit")
+    return HttpResponseRedirect("/audit?tab=general")
 
 
 @permission_required("sql.audit_user", raise_exception=True)
 def audit_sqlquery(request):
     """Online SQL query audit page."""
-    return spa_redirect("/audit")
+    return HttpResponseRedirect("/audit?tab=query")
 
 
 @permission_required("sql.audit_user", raise_exception=True)
 def audit_sqlworkflow(request):
     """SQL review workflow list page."""
-    return spa_redirect("/audit")
+    return HttpResponseRedirect("/audit?tab=sql-workflow")
 
 
 @permission_required("sql.sqlexport_submit", raise_exception=True)

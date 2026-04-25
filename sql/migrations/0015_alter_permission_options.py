@@ -16,12 +16,38 @@ RETIRED_SQL_PERMISSION_CODENAMES = (
     "optimize_soar",
 )
 
+RETIRED_SQL_PERMISSION_NAMES = {
+    "menu_sqlanalyze": "Menu SQL Analysis",
+    "menu_sqloptimize": "Menu SQL Optimization",
+    "menu_sqladvisor": "Menu Optimization Tools",
+    "menu_slowquery": "Menu Slow Query Log",
+    "menu_my2sql": "Menu My2SQL",
+    "menu_schemasync": "Menu SchemaSync",
+    "menu_document": "Menu Documentation",
+    "sql_analyze": "Execute SQL analysis",
+    "optimize_sqladvisor": "Execute SQLAdvisor",
+    "optimize_sqltuning": "Execute SQLTuning",
+    "optimize_soar": "Execute SOAR",
+}
+
 
 def remove_retired_sql_permissions(apps, schema_editor):
     Permission = apps.get_model("auth", "Permission")
     Permission.objects.filter(
         content_type__app_label="sql", codename__in=RETIRED_SQL_PERMISSION_CODENAMES
     ).delete()
+
+
+def recreate_retired_sql_permissions(apps, schema_editor):
+    ContentType = apps.get_model("contenttypes", "ContentType")
+    Permission = apps.get_model("auth", "Permission")
+    content_type = ContentType.objects.get(app_label="sql", model="permission")
+    for codename in RETIRED_SQL_PERMISSION_CODENAMES:
+        Permission.objects.get_or_create(
+            content_type=content_type,
+            codename=codename,
+            defaults={"name": RETIRED_SQL_PERMISSION_NAMES[codename]},
+        )
 
 
 class Migration(migrations.Migration):
@@ -92,5 +118,7 @@ class Migration(migrations.Migration):
                 ),
             },
         ),
-        migrations.RunPython(remove_retired_sql_permissions, migrations.RunPython.noop),
+        migrations.RunPython(
+            remove_retired_sql_permissions, recreate_retired_sql_permissions
+        ),
     ]

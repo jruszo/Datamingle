@@ -265,7 +265,9 @@ async function exportSelectedDictionary() {
     document.body.appendChild(anchor)
     anchor.click()
     anchor.remove()
-    window.URL.revokeObjectURL(objectUrl)
+    setTimeout(() => {
+      window.URL.revokeObjectURL(objectUrl)
+    }, 0)
     feedback.value = 'Data dictionary export prepared.'
   } catch (errorValue) {
     error.value = toUserFacingMessage(errorValue, 'Failed to export data dictionary.')
@@ -275,7 +277,12 @@ async function exportSelectedDictionary() {
 }
 
 onMounted(async () => {
-  await authStore.loadCurrentUser()
+  try {
+    await authStore.loadCurrentUser()
+  } catch (errorValue) {
+    error.value = toUserFacingMessage(errorValue, 'Failed to load the current user.')
+    return
+  }
 
   if (!canViewDataDictionary.value) {
     error.value = 'You do not have permission to access the data dictionary.'

@@ -2,7 +2,6 @@ import json
 from datetime import timedelta, datetime
 from unittest.mock import MagicMock, patch, ANY, Mock
 from django.conf import settings
-from django.db import connection
 from django.contrib.auth.models import Group
 from django.contrib.auth.models import Permission
 from django.test import Client, TestCase, TransactionTestCase, override_settings
@@ -101,11 +100,6 @@ class TestView(TransactionTestCase):
         self.wl = WorkflowLog.objects.create(
             audit_id=self.audit.audit_id, operation_type=1
         )
-        # Create slow query review tables.
-        with connection.cursor() as cursor:
-            with open("src/init_sql/mysql_slow_query_review.sql") as fp:
-                content = fp.read()
-                cursor.execute(content)
 
     def tearDown(self):
         self.sys_config.purge()
@@ -116,10 +110,6 @@ class TestView(TransactionTestCase):
         WorkflowLog.objects.all().delete()
         QueryPrivilegesApply.objects.all().delete()
         ResourceGroup.objects.all().delete()
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "DROP table mysql_slow_query_review,mysql_slow_query_review_history"
-            )
 
     def test_index(self):
         """Test index page."""
@@ -167,19 +157,19 @@ class TestView(TransactionTestCase):
     def test_queryuserprivileges(self):
         """Test queryuserprivileges page."""
         data = {}
-        r = self.client.get(f"/queryuserprivileges/", data=data)
+        r = self.client.get("/queryuserprivileges/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_instance(self):
         """Test instance page."""
         data = {}
-        r = self.client.get(f"/instance/", data=data)
+        r = self.client.get("/instance/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_instanceaccount(self):
         """Test instanceaccount page."""
         data = {}
-        r = self.client.get(f"/instanceaccount/", data=data)
+        r = self.client.get("/instanceaccount/", data=data)
         self.assertRedirects(
             r, "/instance-operations/accounts", fetch_redirect_response=False
         )
@@ -187,7 +177,7 @@ class TestView(TransactionTestCase):
     def test_database(self):
         """Test database page."""
         data = {}
-        r = self.client.get(f"/database/", data=data)
+        r = self.client.get("/database/", data=data)
         self.assertRedirects(
             r, "/instance-operations/databases", fetch_redirect_response=False
         )
@@ -195,7 +185,7 @@ class TestView(TransactionTestCase):
     def test_dbdiagnostic(self):
         """Test dbdiagnostic page."""
         data = {}
-        r = self.client.get(f"/dbdiagnostic/", data=data)
+        r = self.client.get("/dbdiagnostic/", data=data)
         self.assertRedirects(
             r, "/instance-operations/diagnostics", fetch_redirect_response=False
         )
@@ -203,7 +193,7 @@ class TestView(TransactionTestCase):
     def test_instanceparam(self):
         """Test instance_param page."""
         data = {}
-        r = self.client.get(f"/instanceparam/", data=data)
+        r = self.client.get("/instanceparam/", data=data)
         self.assertRedirects(
             r, "/instance-operations/parameters", fetch_redirect_response=False
         )
@@ -211,38 +201,40 @@ class TestView(TransactionTestCase):
     def test_archive(self):
         """Test archive page."""
         data = {}
-        r = self.client.get(f"/archive/", data=data)
+        r = self.client.get("/archive/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_config(self):
         """Test config page."""
         data = {}
-        r = self.client.get(f"/config/", data=data)
+        r = self.client.get("/config/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_group(self):
         """Test group page."""
         data = {}
-        r = self.client.get(f"/group/", data=data)
+        r = self.client.get("/group/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_audit(self):
         """Test audit page."""
         data = {}
-        r = self.client.get(f"/audit/", data=data)
-        self.assertRedirects(r, "/audit", fetch_redirect_response=False)
+        r = self.client.get("/audit/", data=data)
+        self.assertRedirects(r, "/audit?tab=general", fetch_redirect_response=False)
 
     def test_audit_sqlquery(self):
         """Test audit_sqlquery page."""
         data = {}
-        r = self.client.get(f"/audit_sqlquery/", data=data)
-        self.assertRedirects(r, "/audit", fetch_redirect_response=False)
+        r = self.client.get("/audit_sqlquery/", data=data)
+        self.assertRedirects(r, "/audit?tab=query", fetch_redirect_response=False)
 
     def test_audit_sqlworkflow(self):
         """Test audit_sqlworkflow page."""
         data = {}
-        r = self.client.get(f"/audit_sqlworkflow/", data=data)
-        self.assertRedirects(r, "/audit", fetch_redirect_response=False)
+        r = self.client.get("/audit_sqlworkflow/", data=data)
+        self.assertRedirects(
+            r, "/audit?tab=sql-workflow", fetch_redirect_response=False
+        )
 
     def test_groupmgmt(self):
         """Test groupmgmt page."""
