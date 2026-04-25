@@ -897,6 +897,295 @@ export type InstanceResourceList = {
   result: string[]
 }
 
+export type DataDictionaryInstance = {
+  id: number
+  instance_name: string
+  db_type: string
+  label: string
+}
+
+export type DataDictionaryDatabaseList = {
+  count: number
+  result: string[]
+}
+
+export type DataDictionaryTableGroup = {
+  group: string
+  tables: Array<[string, string]>
+}
+
+export type DataDictionaryTableGroupList = {
+  count: number
+  result: DataDictionaryTableGroup[]
+}
+
+export type DataDictionaryResultSet = {
+  column_list?: string[]
+  rows: unknown
+}
+
+export type DataDictionaryTableDetail = {
+  meta_data: DataDictionaryResultSet
+  desc: DataDictionaryResultSet
+  index: DataDictionaryResultSet
+  create_sql?: unknown
+}
+
+export type DataDictionaryExportResult =
+  | {
+    mode: 'blob'
+    data: Blob
+    filename: string
+  }
+  | {
+    mode: 'message'
+    detail: string
+  }
+
+export type AuditListFilters = {
+  page?: number
+  size?: number
+  search?: string
+  start_date?: string
+  end_date?: string
+  action?: string
+  status?: string
+  syntax_type?: string
+  group_id?: string
+  instance_id?: string
+  instance_name?: string
+  username?: string
+}
+
+export type GeneralAuditLogRecord = {
+  id?: number
+  user_id: number | null
+  user_name: string
+  user_display: string
+  action: string
+  extra_info: string
+  action_time: string
+}
+
+export type QueryAuditLogRecord = {
+  id: number
+  instance_name: string
+  db_name: string
+  sqllog: string
+  effect_row: number
+  cost_time: string
+  username: string
+  user_display: string
+  priv_check: boolean
+  hit_rule: boolean
+  masking: boolean
+  favorite: boolean
+  alias: string
+  create_time: string
+}
+
+export type SqlWorkflowAuditLogRecord = {
+  id: number
+  workflow_name: string
+  demand_url: string
+  group_id: number
+  group_name: string
+  instance_id: number
+  instance_name: string
+  db_name: string
+  schema_name: string
+  syntax_type: number
+  syntax_type_label: string
+  is_backup: boolean
+  engineer: string
+  engineer_display: string
+  status: string
+  status_label: string
+  run_date_start: string | null
+  run_date_end: string | null
+  create_time: string
+  finish_time: string | null
+  is_offline_export: number
+  export_format: string | null
+}
+
+export type WorkflowOperationAuditLogRecord = {
+  id: number
+  audit_id: number
+  operation_type: number
+  operation_type_desc: string
+  operation_info: string
+  operator: string
+  operator_display: string
+  operation_time: string
+}
+
+export type InstanceOperationDatabaseInstance = {
+  id: number
+  instance_name: string
+  db_type: string
+  label: string
+}
+
+export type InstanceOperationDatabaseRecord = {
+  id?: number
+  db_name: string
+  owner?: string
+  owner_display?: string
+  remark?: string
+  saved: boolean
+  sys_time?: string
+  table_rows?: unknown
+  data_length?: unknown
+  index_length?: unknown
+  data_total?: unknown
+}
+
+export type InstanceOperationDatabaseList = {
+  count: number
+  results: InstanceOperationDatabaseRecord[]
+}
+
+export type InstanceOperationDatabasePayload = {
+  instance_id: number
+  db_name: string
+  owner?: string
+  remark?: string
+}
+
+export type InstanceOperationAccountInstance = InstanceOperationDatabaseInstance
+
+export type InstanceOperationAccountRecord = {
+  id?: number
+  user: string
+  host?: string
+  db_name?: string
+  user_host?: string
+  db_name_user?: string
+  roles?: unknown
+  privileges?: unknown
+  is_locked?: string | null
+  remark?: string
+  saved: boolean
+  sys_time?: string
+}
+
+export type InstanceOperationAccountList = {
+  count: number
+  results: InstanceOperationAccountRecord[]
+}
+
+export type InstanceOperationAccountPayload = {
+  instance_id: number
+  db_name?: string
+  user: string
+  host?: string
+  password?: string
+  remark?: string
+}
+
+export type InstanceOperationAccountPasswordPayload = {
+  instance_id: number
+  db_name?: string
+  db_name_user?: string
+  user_host?: string
+  user: string
+  host?: string
+  password: string
+}
+
+export type InstanceOperationAccountLockPayload = {
+  instance_id: number
+  user_host: string
+  locked: boolean
+}
+
+export type InstanceOperationAccountDeletePayload = {
+  instance_id: number
+  db_name?: string
+  db_name_user?: string
+  user_host?: string
+  user: string
+  host?: string
+}
+
+export type InstanceOperationAccountGrantPayload = {
+  instance_id: number
+  user_host?: string
+  db_name_user?: string
+  op_type?: 0 | 1
+  priv_type?: 0 | 1 | 2 | 3
+  privs?: Record<string, string[]> | string[]
+  db_name?: string
+  db_names?: string[]
+  tb_name?: string
+  tb_names?: string[]
+  col_names?: string[]
+  roles?: unknown[]
+}
+
+export type InstanceOperationAccountGrantResult = {
+  grant_sql: string
+}
+
+export type InstanceOperationParamInstance = InstanceOperationDatabaseInstance
+
+export type InstanceOperationParamRecord = {
+  id?: number
+  variable_name: string
+  runtime_value: string | null
+  default_value?: string
+  valid_values?: string
+  description?: string
+  editable: boolean
+  configured: boolean
+}
+
+export type InstanceOperationParamList = {
+  count: number
+  results: InstanceOperationParamRecord[]
+}
+
+export type InstanceOperationParamHistoryRecord = {
+  instance_name: string
+  variable_name: string
+  old_var: string
+  new_var: string
+  set_sql: string
+  user_name: string
+  user_display: string
+  create_time: string
+}
+
+export type InstanceOperationParamHistoryList = {
+  count: number
+  results: InstanceOperationParamHistoryRecord[]
+}
+
+export type InstanceOperationParamEditPayload = {
+  instance_id: number
+  variable_name: string
+  runtime_value: string
+}
+
+export type InstanceOperationDiagnosticInstance = InstanceOperationDatabaseInstance
+
+export type InstanceOperationDiagnosticRow = Record<string, unknown>
+
+export type InstanceOperationDiagnosticList = {
+  count: number
+  results: InstanceOperationDiagnosticRow[]
+}
+
+export type InstanceOperationDiagnosticKillPayload = {
+  instance_id: number
+  thread_ids: number[]
+}
+
+export type InstanceOperationDiagnosticKillPreview = {
+  kill_sql: string
+}
+
 export type QueryResultPayload = {
   full_sql: string
   is_execute: boolean
@@ -1005,6 +1294,379 @@ export function fetchInstanceResources(
 
   return apiGet<unknown>(`/v1/instance/resource/?${params.toString()}`, { token }).then((payload) =>
     extractData<InstanceResourceList>(payload),
+  )
+}
+
+export function fetchDataDictionaryInstances(token: string) {
+  return apiGet<unknown>('/v1/instance/data-dictionary/instances/', { token }).then((payload) =>
+    extractData<DataDictionaryInstance[]>(payload),
+  )
+}
+
+export function fetchDataDictionaryDatabases(instanceId: number, token: string) {
+  const params = new URLSearchParams({ instance_id: `${instanceId}` })
+
+  return apiGet<unknown>(`/v1/instance/data-dictionary/databases/?${params.toString()}`, { token }).then(
+    (payload) => extractData<DataDictionaryDatabaseList>(payload),
+  )
+}
+
+export function fetchDataDictionaryTables(instanceId: number, dbName: string, token: string) {
+  const params = new URLSearchParams({
+    instance_id: `${instanceId}`,
+    db_name: dbName,
+  })
+
+  return apiGet<unknown>(`/v1/instance/data-dictionary/tables/?${params.toString()}`, { token }).then(
+    (payload) => extractData<DataDictionaryTableGroupList>(payload),
+  )
+}
+
+export function fetchDataDictionaryTableDetail(
+  instanceId: number,
+  dbName: string,
+  tableName: string,
+  token: string,
+) {
+  const params = new URLSearchParams({
+    instance_id: `${instanceId}`,
+    db_name: dbName,
+    table_name: tableName,
+  })
+
+  return apiGet<unknown>(`/v1/instance/data-dictionary/table/?${params.toString()}`, { token }).then(
+    (payload) => extractData<DataDictionaryTableDetail>(payload),
+  )
+}
+
+export async function exportDataDictionary(
+  instanceId: number,
+  dbName: string,
+  token: string,
+  options: { skipAuthRetry?: boolean } = {},
+): Promise<DataDictionaryExportResult> {
+  let authorizationToken = ''
+
+  try {
+    authorizationToken = await getUsableAccessToken(token)
+  } catch (error) {
+    if (error instanceof AuthSessionExpiredError) {
+      notifyUnauthorized(error.message)
+      throw new Error(`GET /v1/instance/data-dictionary/export/ failed (401): ${error.message}`)
+    }
+    throw error
+  }
+
+  const params = new URLSearchParams({ instance_id: `${instanceId}` })
+  if (dbName) {
+    params.set('db_name', dbName)
+  }
+
+  const response = await fetch(buildUrl(`/v1/instance/data-dictionary/export/?${params.toString()}`), {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${authorizationToken}`,
+    },
+  })
+
+  if (!response.ok) {
+    const body = await response.text()
+    let message = body
+
+    try {
+      message = flattenErrorMessage(JSON.parse(body)) || body
+    } catch {
+      message = body
+    }
+
+    if (response.status === 401 && !options.skipAuthRetry) {
+      try {
+        const refreshedAccessToken = await refreshAccessToken()
+        return exportDataDictionary(instanceId, dbName, refreshedAccessToken, { skipAuthRetry: true })
+      } catch (error) {
+        if (error instanceof AuthSessionExpiredError) {
+          notifyUnauthorized(error.message)
+          throw new Error(`GET /v1/instance/data-dictionary/export/ failed (401): ${error.message}`)
+        }
+        throw error
+      }
+    }
+
+    if (response.status === 401) {
+      notifyUnauthorized(message)
+    }
+
+    throw new Error(`GET /v1/instance/data-dictionary/export/ failed (${response.status}): ${message}`)
+  }
+
+  const contentType = response.headers.get('content-type') || ''
+  if (contentType.includes('application/json')) {
+    const payload = await response.json()
+    return {
+      mode: 'message',
+      detail: isRecord(payload) && typeof payload.detail === 'string' ? payload.detail : 'Export completed.',
+    }
+  }
+
+  const blob = await response.blob()
+  const disposition = response.headers.get('content-disposition') || ''
+  const fileNameMatch = disposition.match(/filename="?([^"]+)"?$/i)
+  const filename = fileNameMatch?.[1] || `data-dictionary-${instanceId}.html`
+
+  return {
+    mode: 'blob',
+    data: blob,
+    filename,
+  }
+}
+
+function buildAuditQueryString(filters: AuditListFilters = {}) {
+  const params = new URLSearchParams()
+
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== null && `${value}` !== '') {
+      params.set(key, `${value}`)
+    }
+  }
+
+  return params.toString()
+}
+
+export function fetchGeneralAuditLogs(filters: AuditListFilters, token: string) {
+  const query = buildAuditQueryString(filters)
+  return apiGet<unknown>(`/v1/audit/general/?${query}`, { token }).then((payload) =>
+    extractData<PaginatedResponse<GeneralAuditLogRecord>>(payload),
+  )
+}
+
+export function fetchQueryAuditLogs(filters: AuditListFilters, token: string) {
+  const query = buildAuditQueryString(filters)
+  return apiGet<unknown>(`/v1/audit/query/?${query}`, { token }).then((payload) =>
+    extractData<PaginatedResponse<QueryAuditLogRecord>>(payload),
+  )
+}
+
+export function fetchSqlWorkflowAuditLogs(filters: AuditListFilters, token: string) {
+  const query = buildAuditQueryString(filters)
+  return apiGet<unknown>(`/v1/audit/sql-workflow/?${query}`, { token }).then((payload) =>
+    extractData<PaginatedResponse<SqlWorkflowAuditLogRecord>>(payload),
+  )
+}
+
+export function fetchWorkflowOperationAuditLogs(
+  token: string,
+  options: { audit_id?: number; workflow_id?: number; workflow_type?: number },
+) {
+  const params = new URLSearchParams()
+  if (options.audit_id) {
+    params.set('audit_id', `${options.audit_id}`)
+  }
+  if (options.workflow_id) {
+    params.set('workflow_id', `${options.workflow_id}`)
+  }
+  if (options.workflow_type) {
+    params.set('workflow_type', `${options.workflow_type}`)
+  }
+
+  return apiGet<unknown>(`/v1/audit/workflow-log/?${params.toString()}`, { token }).then((payload) =>
+    extractData<{ count: number; results: WorkflowOperationAuditLogRecord[] }>(payload),
+  )
+}
+
+export function fetchInstanceOperationDatabaseInstances(token: string) {
+  return apiGet<unknown>('/v1/instance-operations/database/instances/', { token }).then((payload) =>
+    extractData<InstanceOperationDatabaseInstance[]>(payload),
+  )
+}
+
+export function fetchInstanceOperationDatabases(
+  token: string,
+  options: { instance_id: number; saved?: boolean },
+) {
+  const params = new URLSearchParams({ instance_id: `${options.instance_id}` })
+  if (options.saved !== undefined) {
+    params.set('saved', `${options.saved}`)
+  }
+
+  return apiGet<unknown>(`/v1/instance-operations/database/?${params.toString()}`, { token }).then((payload) =>
+    extractData<InstanceOperationDatabaseList>(payload),
+  )
+}
+
+export function createInstanceOperationDatabase(payload: InstanceOperationDatabasePayload, token: string) {
+  return apiPost<unknown>('/v1/instance-operations/database/', payload, { token }).then((responsePayload) =>
+    extractData<InstanceOperationDatabaseRecord>(responsePayload),
+  )
+}
+
+export function updateInstanceOperationDatabase(payload: InstanceOperationDatabasePayload, token: string) {
+  return apiPut<unknown>('/v1/instance-operations/database/metadata/', payload, { token }).then((responsePayload) =>
+    extractData<InstanceOperationDatabaseRecord>(responsePayload),
+  )
+}
+
+export function fetchInstanceOperationAccountInstances(token: string) {
+  return apiGet<unknown>('/v1/instance-operations/account/instances/', { token }).then((payload) =>
+    extractData<InstanceOperationAccountInstance[]>(payload),
+  )
+}
+
+export function fetchInstanceOperationAccounts(
+  token: string,
+  options: { instance_id: number; saved?: boolean },
+) {
+  const params = new URLSearchParams({ instance_id: `${options.instance_id}` })
+  if (options.saved !== undefined) {
+    params.set('saved', `${options.saved}`)
+  }
+
+  return apiGet<unknown>(`/v1/instance-operations/account/?${params.toString()}`, { token }).then((payload) =>
+    extractData<InstanceOperationAccountList>(payload),
+  )
+}
+
+export function createInstanceOperationAccount(payload: InstanceOperationAccountPayload, token: string) {
+  return apiPost<unknown>('/v1/instance-operations/account/', payload, { token }).then((responsePayload) =>
+    extractData<InstanceOperationAccountRecord>(responsePayload),
+  )
+}
+
+export function updateInstanceOperationAccount(payload: InstanceOperationAccountPayload, token: string) {
+  return apiPut<unknown>('/v1/instance-operations/account/metadata/', payload, { token }).then((responsePayload) =>
+    extractData<InstanceOperationAccountRecord>(responsePayload),
+  )
+}
+
+export function resetInstanceOperationAccountPassword(payload: InstanceOperationAccountPasswordPayload, token: string) {
+  return apiPost<unknown>('/v1/instance-operations/account/password/', payload, { token }).then((responsePayload) =>
+    extractData<InstanceOperationAccountRecord>(responsePayload),
+  )
+}
+
+export function updateInstanceOperationAccountLock(payload: InstanceOperationAccountLockPayload, token: string) {
+  return apiPost<unknown>('/v1/instance-operations/account/lock/', payload, { token }).then((responsePayload) =>
+    extractData<Record<string, never>>(responsePayload),
+  )
+}
+
+export function deleteInstanceOperationAccount(payload: InstanceOperationAccountDeletePayload, token: string) {
+  return apiDelete<unknown>('/v1/instance-operations/account/delete/', { token, body: payload }).then((responsePayload) =>
+    extractData<Record<string, never>>(responsePayload),
+  )
+}
+
+export function grantInstanceOperationAccount(payload: InstanceOperationAccountGrantPayload, token: string) {
+  return apiPost<unknown>('/v1/instance-operations/account/grant/', payload, { token }).then((responsePayload) =>
+    extractData<InstanceOperationAccountGrantResult>(responsePayload),
+  )
+}
+
+export function fetchInstanceOperationParamInstances(token: string) {
+  return apiGet<unknown>('/v1/instance-operations/param/instances/', { token }).then((payload) =>
+    extractData<InstanceOperationParamInstance[]>(payload),
+  )
+}
+
+export function fetchInstanceOperationParams(
+  token: string,
+  options: { instance_id: number; editable?: boolean; search?: string },
+) {
+  const params = new URLSearchParams({ instance_id: `${options.instance_id}` })
+  if (options.editable !== undefined) {
+    params.set('editable', `${options.editable}`)
+  }
+  if (options.search) {
+    params.set('search', options.search)
+  }
+
+  return apiGet<unknown>(`/v1/instance-operations/param/?${params.toString()}`, { token }).then((payload) =>
+    extractData<InstanceOperationParamList>(payload),
+  )
+}
+
+export function fetchInstanceOperationParamHistory(
+  token: string,
+  options: { instance_id: number; search?: string; page?: number; size?: number },
+) {
+  const params = new URLSearchParams({ instance_id: `${options.instance_id}` })
+  if (options.search) {
+    params.set('search', options.search)
+  }
+  if (options.page) {
+    params.set('page', `${options.page}`)
+  }
+  if (options.size) {
+    params.set('size', `${options.size}`)
+  }
+
+  return apiGet<unknown>(`/v1/instance-operations/param/history/?${params.toString()}`, { token }).then((payload) =>
+    extractData<InstanceOperationParamHistoryList>(payload),
+  )
+}
+
+export function editInstanceOperationParam(payload: InstanceOperationParamEditPayload, token: string) {
+  return apiPost<unknown>('/v1/instance-operations/param/edit/', payload, { token }).then((responsePayload) =>
+    extractData<Record<string, never>>(responsePayload),
+  )
+}
+
+export function fetchInstanceOperationDiagnosticInstances(token: string) {
+  return apiGet<unknown>('/v1/instance-operations/diagnostic/instances/', { token }).then((payload) =>
+    extractData<InstanceOperationDiagnosticInstance[]>(payload),
+  )
+}
+
+export function fetchInstanceOperationDiagnosticProcesses(
+  token: string,
+  options: { instance_id: number; command_type?: string },
+) {
+  const params = new URLSearchParams({ instance_id: `${options.instance_id}` })
+  if (options.command_type) {
+    params.set('command_type', options.command_type)
+  }
+  return apiGet<unknown>(`/v1/instance-operations/diagnostic/processes/?${params.toString()}`, { token }).then((payload) =>
+    extractData<InstanceOperationDiagnosticList>(payload),
+  )
+}
+
+export function previewInstanceOperationDiagnosticKill(payload: InstanceOperationDiagnosticKillPayload, token: string) {
+  return apiPost<unknown>('/v1/instance-operations/diagnostic/kill/preview/', payload, { token }).then((responsePayload) =>
+    extractData<InstanceOperationDiagnosticKillPreview>(responsePayload),
+  )
+}
+
+export function killInstanceOperationDiagnosticSessions(payload: InstanceOperationDiagnosticKillPayload, token: string) {
+  return apiPost<unknown>('/v1/instance-operations/diagnostic/kill/', payload, { token }).then((responsePayload) =>
+    extractData<Record<string, never>>(responsePayload),
+  )
+}
+
+export function fetchInstanceOperationDiagnosticTablespace(
+  token: string,
+  options: { instance_id: number; page?: number; size?: number },
+) {
+  const params = new URLSearchParams({ instance_id: `${options.instance_id}` })
+  if (options.page) {
+    params.set('page', `${options.page}`)
+  }
+  if (options.size) {
+    params.set('size', `${options.size}`)
+  }
+  return apiGet<unknown>(`/v1/instance-operations/diagnostic/tablespace/?${params.toString()}`, { token }).then((payload) =>
+    extractData<InstanceOperationDiagnosticList>(payload),
+  )
+}
+
+export function fetchInstanceOperationDiagnosticTransactions(token: string, instanceId: number) {
+  return apiGet<unknown>(`/v1/instance-operations/diagnostic/transactions/?instance_id=${instanceId}`, { token }).then((payload) =>
+    extractData<InstanceOperationDiagnosticList>(payload),
+  )
+}
+
+export function fetchInstanceOperationDiagnosticLocks(token: string, instanceId: number) {
+  return apiGet<unknown>(`/v1/instance-operations/diagnostic/locks/?instance_id=${instanceId}`, { token }).then((payload) =>
+    extractData<InstanceOperationDiagnosticList>(payload),
   )
 }
 

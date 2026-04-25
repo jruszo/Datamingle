@@ -1,18 +1,5 @@
 #!/bin/bash
 set -euxo pipefail
-#sqladvisor
-curl -o sqladvisor -L https://github.com/LeoQuote/SQLAdvisor/releases/download/v2.1/sqladvisor-linux-amd64
-chmod +x sqladvisor
-curl -o sqlparser.tar.gz -L https://github.com/LeoQuote/SQLAdvisor/releases/download/v2.1/sqlparser-linux-amd64.tar.gz
-tar -xzvf sqlparser.tar.gz
-mv sqlparser /usr/local/sqlparser
-rm -rf sqlparser*
-#soar
-curl -L -q https://github.com/XiaoMi/soar/releases/download/$SOAR_VERSION/soar.linux-amd64 -o soar
-chmod +x soar
-#my2sql
-curl -L -q https://raw.githubusercontent.com/liuhr/my2sql/master/releases/centOS_release_7.x/my2sql -o my2sql
-chmod +x my2sql
 #mongo
 curl -L -q -o mongodb-linux-x86_64-rhel70-3.6.20.tgz https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-rhel70-3.6.20.tgz
 tar -xvf mongodb-linux-x86_64-rhel70-3.6.20.tgz
@@ -41,11 +28,8 @@ percona-release setup -y ps-57
 apt-get install -yq --no-install-recommends percona-toolkit
 percona-release disable  ps-57
 apt-get install -yq --no-install-recommends gcc libmariadb-dev libldap2-dev libsasl2-dev ldap-utils
-# MySQL symlink for sqladvisor
-ln -s /usr/lib/x86_64-linux-gnu/libmariadb.so.3 /usr/lib/x86_64-linux-gnu/libmysqlclient.so.18
 apt-get clean
 ln -snf /usr/share/zoneinfo/$TZ /etc/localtime
 echo $TZ > /etc/timezone
-chmod +x sqladvisor soar my2sql
 chmod +x /usr/local/bin/mongo
 python3 -m venv /opt/venv4datamingle

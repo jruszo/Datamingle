@@ -107,11 +107,6 @@
                                         <a href="/sqlworkflow/">SQL Release</a>
                                     </li>
                                 {% endif %}
-                                {% if perms.sql.menu_sqlanalyze %}
-                                    <li>
-                                        <a href="/sqlanalyze/">SQL Analysis</a>
-                                    </li>
-                                {% endif %}
                             </ul>
                             <!-- /.nav-second-level -->
                         </li>
@@ -132,7 +127,7 @@
                                 {% endif %}
                                 {% if perms.sql.menu_data_dictionary %}
                                     <li>
-                                        <a href="/data_dictionary/">Data Dictionary</a>
+                                        <a href="/inventory/data-dictionary">Data Dictionary</a>
                                     </li>
                                 {% endif %}
                                 {% if perms.sql.menu_queryapplylist %}
@@ -141,24 +136,6 @@
                                     </li>
                                 {% endif %}
 
-                            </ul>
-                            <!-- /.nav-second-level -->
-                        </li>
-                    {% endif %}
-                    {% if perms.sql.menu_sqloptimize %}
-                        <li>
-                            <a href="#"><i class="fa fa-wrench fa-fw"></i> SQL Optimization<span class="fa arrow"></span></a>
-                            <ul class="nav nav-second-level collapse">
-                                {% if perms.sql.menu_sqladvisor %}
-                                    <li>
-                                        <a href="/sqladvisor/">Optimization Tools</a>
-                                    </li>
-                                {% endif %}
-                                {% if perms.sql.menu_slowquery %}
-                                    <li>
-                                        <a href="/slowquery/">Slow Query Logs</a>
-                                    </li>
-                                {% endif %}
                             </ul>
                             <!-- /.nav-second-level -->
                         </li>
@@ -174,23 +151,23 @@
                                 {% endif %}
                                 {% if perms.sql.menu_dbdiagnostic %}
                                     <li>
-                                        <a href="/dbdiagnostic/">Session Management</a>
+                                        <a href="/instance-operations/diagnostics">Session Management</a>
                                     </li>
                                 {% endif %}
                                 {% if perms.sql.menu_database %}
                                     <li>
-                                        <a href="/database/">Database Management</a>
+                                        <a href="/instance-operations/databases">Database Management</a>
                                     </li>
                                 {% endif %}
 
                                 {% if perms.sql.menu_instance_account %}
                                     <li>
-                                        <a href="/instanceaccount/">Account Management</a>
+                                        <a href="/instance-operations/accounts">Account Management</a>
                                     </li>
                                 {% endif %}
                                 {% if perms.sql.menu_param %}
                                     <li>
-                                        <a href="/instanceparam/">Parameter Settings</a>
+                                        <a href="/instance-operations/parameters">Parameter Settings</a>
                                     </li>
                                 {% endif %}
                             </ul>
@@ -204,16 +181,6 @@
                                 {% if perms.sql.menu_archive %}
                                     <li>
                                         <a href="/archive/">PTArchiver</a>
-                                    </li>
-                                {% endif %}
-                                {% if perms.sql.menu_my2sql %}
-                                    <li>
-                                        <a href="/my2sql/">My2SQL</a>
-                                    </li>
-                                {% endif %}
-                                {% if perms.sql.menu_schemasync %}
-                                    <li>
-                                        <a href="/schemasync/">SchemaSync</a>
                                     </li>
                                 {% endif %}
                             </ul>
@@ -254,20 +221,9 @@
                             <a href="#"><i class="fa fa-eye fa-fw"></i> System Audit<span class="fa arrow"></span></a>
                             <ul class="nav nav-second-level collapse">
                                 <li>
-                                    <a href="/audit/">General Audit</a>
-                                </li>
-                                <li>
-                                    <a href="/audit_sqlworkflow/">SQL Release Audit</a>
-                                </li>
-                                <li>
-                                    <a href="/audit_sqlquery/">Query Audit</a>
+                                    <a href="/audit">Audit</a>
                                 </li>
                             </ul>
-                        </li>
-                    {% endif %}
-                    {% if perms.sql.menu_document %}
-                        <li>
-                            <a href="/dbaprinciples/"><i class="fa fa-sitemap fa-fw"></i> Related Documentation</a>
                         </li>
                     {% endif %}
                     {% if perms.sql.menu_openapi %}

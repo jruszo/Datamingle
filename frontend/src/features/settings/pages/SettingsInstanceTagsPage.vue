@@ -37,7 +37,7 @@ function hasPermission(permission: string) {
   if (authStore.currentUser?.is_superuser) {
     return true
   }
-  return authStore.currentUser?.permissions.includes(permission) ?? false
+  return authStore.currentUser?.permissions?.includes(permission) ?? false
 }
 
 const canManageInstanceTags = computed(() => hasPermission('sql.menu_instance'))

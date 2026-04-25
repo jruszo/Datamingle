@@ -3,7 +3,9 @@ from rest_framework import serializers
 
 from sql.models import (
     Instance,
+    InstanceDatabase,
     InstanceTag,
+    ParamHistory,
     QueryPrivilegesApply,
     ResourceGroup,
 )
@@ -12,6 +14,256 @@ from sql.models import (
 class ChoiceOptionSerializer(serializers.Serializer):
     value = serializers.CharField()
     label = serializers.CharField()
+
+
+class DataDictionaryInstanceSerializer(serializers.ModelSerializer):
+    label = serializers.SerializerMethodField()
+
+    def get_label(self, obj):
+        return f"{obj.instance_name} ({obj.db_type})"
+
+    class Meta:
+        model = Instance
+        fields = ("id", "instance_name", "db_type", "label")
+
+
+class DataDictionaryDatabaseListSerializer(serializers.Serializer):
+    count = serializers.IntegerField()
+    result = serializers.ListField(child=serializers.CharField())
+
+
+class DataDictionaryTableGroupSerializer(serializers.Serializer):
+    group = serializers.CharField()
+    tables = serializers.ListField(child=serializers.ListField())
+
+
+class DataDictionaryTableGroupListSerializer(serializers.Serializer):
+    count = serializers.IntegerField()
+    result = DataDictionaryTableGroupSerializer(many=True)
+
+
+class DataDictionaryResultSetSerializer(serializers.Serializer):
+    column_list = serializers.ListField(child=serializers.CharField(), required=False)
+    rows = serializers.JSONField()
+
+
+class DataDictionaryTableDetailSerializer(serializers.Serializer):
+    meta_data = DataDictionaryResultSetSerializer()
+    desc = DataDictionaryResultSetSerializer()
+    index = DataDictionaryResultSetSerializer()
+    create_sql = serializers.JSONField(required=False)
+
+
+class InstanceDatabaseRecordSerializer(serializers.Serializer):
+    id = serializers.IntegerField(required=False)
+    db_name = serializers.CharField()
+    owner = serializers.CharField(required=False, allow_blank=True)
+    owner_display = serializers.CharField(required=False, allow_blank=True)
+    remark = serializers.CharField(required=False, allow_blank=True)
+    saved = serializers.BooleanField(default=False)
+    sys_time = serializers.DateTimeField(required=False)
+    table_rows = serializers.JSONField(required=False)
+    data_length = serializers.JSONField(required=False)
+    index_length = serializers.JSONField(required=False)
+    data_total = serializers.JSONField(required=False)
+
+
+class InstanceDatabaseListSerializer(serializers.Serializer):
+    count = serializers.IntegerField()
+    results = InstanceDatabaseRecordSerializer(many=True)
+
+
+class InstanceDatabasePayloadSerializer(serializers.Serializer):
+    instance_id = serializers.IntegerField()
+    db_name = serializers.CharField(max_length=128)
+    owner = serializers.CharField(max_length=50, allow_blank=True, required=False)
+    remark = serializers.CharField(max_length=255, allow_blank=True, required=False)
+
+    def validate_db_name(self, value):
+        db_name = value.strip()
+        if not db_name:
+            raise serializers.ValidationError("Database name cannot be blank.")
+        return db_name
+
+    def validate_owner(self, value):
+        return value.strip()
+
+    def validate_remark(self, value):
+        return value.strip()
+
+
+class InstanceDatabaseMetadataSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InstanceDatabase
+        fields = ("id", "db_name", "owner", "owner_display", "remark", "sys_time")
+
+
+class InstanceAccountRecordSerializer(serializers.Serializer):
+    id = serializers.IntegerField(required=False)
+    user = serializers.CharField()
+    host = serializers.CharField(required=False, allow_blank=True)
+    db_name = serializers.CharField(required=False, allow_blank=True)
+    user_host = serializers.CharField(required=False, allow_blank=True)
+    db_name_user = serializers.CharField(required=False, allow_blank=True)
+    roles = serializers.JSONField(required=False)
+    privileges = serializers.JSONField(required=False)
+    is_locked = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    remark = serializers.CharField(required=False, allow_blank=True)
+    saved = serializers.BooleanField(default=False)
+    sys_time = serializers.DateTimeField(required=False)
+
+
+class InstanceAccountListSerializer(serializers.Serializer):
+    count = serializers.IntegerField()
+    results = InstanceAccountRecordSerializer(many=True)
+
+
+class InstanceAccountPayloadSerializer(serializers.Serializer):
+    instance_id = serializers.IntegerField()
+    db_name = serializers.CharField(max_length=128, allow_blank=True, required=False)
+    user = serializers.CharField(max_length=128)
+    host = serializers.CharField(max_length=64, allow_blank=True, required=False)
+    password = serializers.CharField(
+        max_length=128, allow_blank=True, required=False, write_only=True
+    )
+    remark = serializers.CharField(max_length=255, allow_blank=True, required=False)
+
+    def validate_user(self, value):
+        user = value.strip()
+        if not user:
+            raise serializers.ValidationError("User cannot be blank.")
+        return user
+
+    def validate_host(self, value):
+        return value.strip()
+
+    def validate_db_name(self, value):
+        return value.strip()
+
+    def validate_password(self, value):
+        return value.strip()
+
+    def validate_remark(self, value):
+        return value.strip()
+
+
+class InstanceAccountPasswordSerializer(serializers.Serializer):
+    instance_id = serializers.IntegerField()
+    db_name = serializers.CharField(max_length=128, allow_blank=True, required=False)
+    db_name_user = serializers.CharField(
+        max_length=260, allow_blank=True, required=False
+    )
+    user_host = serializers.CharField(max_length=260, allow_blank=True, required=False)
+    user = serializers.CharField(max_length=128)
+    host = serializers.CharField(max_length=64, allow_blank=True, required=False)
+    password = serializers.CharField(max_length=128, write_only=True)
+
+
+class InstanceAccountLockSerializer(serializers.Serializer):
+    instance_id = serializers.IntegerField()
+    user_host = serializers.CharField(max_length=260)
+    locked = serializers.BooleanField()
+
+
+class InstanceAccountDeleteSerializer(serializers.Serializer):
+    instance_id = serializers.IntegerField()
+    db_name = serializers.CharField(max_length=128, allow_blank=True, required=False)
+    db_name_user = serializers.CharField(
+        max_length=260, allow_blank=True, required=False
+    )
+    user_host = serializers.CharField(max_length=260, allow_blank=True, required=False)
+    user = serializers.CharField(max_length=128)
+    host = serializers.CharField(max_length=64, allow_blank=True, required=False)
+
+
+class InstanceAccountGrantSerializer(serializers.Serializer):
+    instance_id = serializers.IntegerField()
+    user_host = serializers.CharField(max_length=260, allow_blank=True, required=False)
+    db_name_user = serializers.CharField(
+        max_length=260, allow_blank=True, required=False
+    )
+    op_type = serializers.ChoiceField(choices=[0, 1], required=False)
+    priv_type = serializers.ChoiceField(choices=[0, 1, 2, 3], required=False)
+    privs = serializers.JSONField(required=False)
+    db_name = serializers.CharField(max_length=128, allow_blank=True, required=False)
+    db_names = serializers.ListField(
+        child=serializers.CharField(max_length=128), required=False
+    )
+    tb_name = serializers.CharField(max_length=128, allow_blank=True, required=False)
+    tb_names = serializers.ListField(
+        child=serializers.CharField(max_length=128), required=False
+    )
+    col_names = serializers.ListField(
+        child=serializers.CharField(max_length=128), required=False
+    )
+    roles = serializers.ListField(child=serializers.JSONField(), required=False)
+
+
+class InstanceParamRecordSerializer(serializers.Serializer):
+    id = serializers.IntegerField(required=False)
+    variable_name = serializers.CharField()
+    runtime_value = serializers.CharField(allow_blank=True, allow_null=True)
+    default_value = serializers.CharField(required=False, allow_blank=True)
+    valid_values = serializers.CharField(required=False, allow_blank=True)
+    description = serializers.CharField(required=False, allow_blank=True)
+    editable = serializers.BooleanField(default=False)
+    configured = serializers.BooleanField(default=False)
+
+
+class InstanceParamListSerializer(serializers.Serializer):
+    count = serializers.IntegerField()
+    results = InstanceParamRecordSerializer(many=True)
+
+
+class InstanceParamHistorySerializer(serializers.ModelSerializer):
+    instance_name = serializers.CharField(source="instance.instance_name")
+
+    class Meta:
+        model = ParamHistory
+        fields = (
+            "instance_name",
+            "variable_name",
+            "old_var",
+            "new_var",
+            "set_sql",
+            "user_name",
+            "user_display",
+            "create_time",
+        )
+
+
+class InstanceParamHistoryListSerializer(serializers.Serializer):
+    count = serializers.IntegerField()
+    results = InstanceParamHistorySerializer(many=True)
+
+
+class InstanceParamEditSerializer(serializers.Serializer):
+    instance_id = serializers.IntegerField()
+    variable_name = serializers.CharField(max_length=64)
+    runtime_value = serializers.CharField(max_length=1024)
+
+    def validate_variable_name(self, value):
+        variable_name = value.strip()
+        if not variable_name:
+            raise serializers.ValidationError("Parameter name cannot be blank.")
+        return variable_name
+
+    def validate_runtime_value(self, value):
+        return value.strip()
+
+
+class InstanceDiagnosticListSerializer(serializers.Serializer):
+    count = serializers.IntegerField()
+    results = serializers.ListField(child=serializers.JSONField())
+
+
+class InstanceDiagnosticKillPreviewSerializer(serializers.Serializer):
+    instance_id = serializers.IntegerField()
+    thread_ids = serializers.ListField(child=serializers.IntegerField(), min_length=1)
+
+
+class InstanceDiagnosticKillResultSerializer(serializers.Serializer):
+    kill_sql = serializers.CharField(allow_blank=True)
 
 
 class InstanceListSerializer(serializers.ModelSerializer):

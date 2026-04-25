@@ -1,11 +1,6 @@
 # -*- coding: UTF-8 -*-
 
-import MySQLdb
-import os
-import time
-
 import simplejson as json
-from django.conf import settings
 from django.contrib.auth.decorators import permission_required
 from django.http import HttpResponse
 from django.views.decorators.cache import cache_page
@@ -13,7 +8,6 @@ from django.views.decorators.cache import cache_page
 from common.utils.extend_json_encoder import ExtendJSONEncoder
 from common.utils.convert import Convert
 from sql.engines import get_engine
-from sql.plugins.schemasync import SchemaSync
 from sql.utils.sql_utils import filter_db_list
 from .models import Instance, ParamTemplate, ParamHistory
 
@@ -218,104 +212,6 @@ def param_edit(request):
             "msg": "Update succeeded. Please persist manually to config file!",
             "data": [],
         }
-    return HttpResponse(json.dumps(result), content_type="application/json")
-
-
-@permission_required("sql.menu_schemasync", raise_exception=True)
-def schemasync(request):
-    """Compare schema information between instances."""
-    instance_name = request.POST.get("instance_name")
-    db_name = request.POST.get("db_name")
-    target_instance_name = request.POST.get("target_instance_name")
-    target_db_name = request.POST.get("target_db_name")
-    sync_auto_inc = True if request.POST.get("sync_auto_inc") == "true" else False
-    sync_comments = True if request.POST.get("sync_comments") == "true" else False
-    result = {
-        "status": 0,
-        "msg": "ok",
-        "data": {"diff_stdout": "", "patch_stdout": "", "revert_stdout": ""},
-    }
-
-    # Compare all databases in loop mode.
-    if db_name == "all" or target_db_name == "all":
-        db_name = "*"
-        target_db_name = "*"
-
-    # Load instance connection information.
-    instance = Instance.objects.get(instance_name=instance_name)
-    target_instance = Instance.objects.get(instance_name=target_instance_name)
-
-    # Run SchemaSync to get diff results.
-    schema_sync = SchemaSync()
-    # Prepare parameters.
-    tag = int(time.time())
-    output_directory = os.path.join(settings.BASE_DIR, "downloads/schemasync/")
-    os.makedirs(output_directory, exist_ok=True)
-
-    username, password = instance.get_username_password()
-    target_username, target_password = target_instance.get_username_password()
-
-    args = {
-        "sync-auto-inc": sync_auto_inc,
-        "sync-comments": sync_comments,
-        "charset": "utf8mb4",
-        "tag": tag,
-        "output-directory": output_directory,
-        "source": f"mysql://{username}:{password}@{instance.host}:{instance.port}/{db_name}",
-        "target": f"mysql://{target_username}:{target_password}@{target_instance.host}:{target_instance.port}/{target_db_name}",
-    }
-    # Validate parameters.
-    args_check_result = schema_sync.check_args(args)
-    if args_check_result["status"] == 1:
-        return HttpResponse(
-            json.dumps(args_check_result), content_type="application/json"
-        )
-    # Convert parameters.
-    cmd_args = schema_sync.generate_args2cmd(args)
-    # Execute command.
-    try:
-        stdout, stderr = schema_sync.execute_cmd(cmd_args).communicate()
-        diff_stdout = f"{stdout}{stderr}"
-    except RuntimeError as e:
-        diff_stdout = str(e)
-
-    # For single-db comparison, return patch/revert scripts for frontend display.
-    if db_name != "*":
-        date = time.strftime("%Y%m%d", time.localtime())
-        patch_sql_file = "%s%s_%s.%s.patch.sql" % (
-            output_directory,
-            target_db_name,
-            tag,
-            date,
-        )
-        revert_sql_file = "%s%s_%s.%s.revert.sql" % (
-            output_directory,
-            target_db_name,
-            tag,
-            date,
-        )
-        try:
-            with open(patch_sql_file, "r") as f:
-                patch_sql = f.read()
-        except FileNotFoundError as e:
-            patch_sql = str(e)
-        try:
-            with open(revert_sql_file, "r") as f:
-                revert_sql = f.read()
-        except FileNotFoundError as e:
-            revert_sql = str(e)
-        result["data"] = {
-            "diff_stdout": diff_stdout,
-            "patch_stdout": patch_sql,
-            "revert_stdout": revert_sql,
-        }
-    else:
-        result["data"] = {
-            "diff_stdout": diff_stdout,
-            "patch_stdout": "",
-            "revert_stdout": "",
-        }
-
     return HttpResponse(json.dumps(result), content_type="application/json")
 
 

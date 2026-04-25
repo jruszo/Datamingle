@@ -102,7 +102,6 @@ services:
     volumes:
       - "../..:/opt/datamingle"
       - "./datamingle/settings.py:/opt/datamingle/local_settings.py"
-      - "./datamingle/soar.yaml:/etc/soar.yaml"
       - "./datamingle/docs.md:/opt/datamingle/docs/docs.md"
       - "./datamingle/downloads:/opt/datamingle/downloads"
       - "./datamingle/logs:/opt/datamingle/logs"

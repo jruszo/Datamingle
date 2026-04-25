@@ -11,7 +11,7 @@ metadata:
 data:
   init-archery.sh: |-
     #!/bin/bash
-    mkdir -p /opt/archery/downloads/{binlog2sql,log,schemasync}
+    mkdir -p /opt/archery/downloads/log
     cd /opt/archery
     echo Switch Python runtime environment
     source /opt/venv4archery/bin/activate

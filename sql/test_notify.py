@@ -24,7 +24,6 @@ from sql.notify import (
     EventType,
     LegacyRender,
     GenericWebhookNotifier,
-    My2SqlResult,
     FeishuPersonNotifier,
     FeishuWebhookNotifier,
     QywxWebhookNotifier,
@@ -33,7 +32,6 @@ from sql.notify import (
     Notifier,
     notify_for_execute,
     notify_for_audit,
-    notify_for_my2sql,
     MailNotifier,
 )
 
@@ -234,30 +232,6 @@ class TestNotify(TestCase):
             audit_detail=self.audit_wf_detail,
         )
 
-    @patch("sql.notify.auto_notify")
-    def test_notify_for_m2sql(self, mock_auto_notify: Mock):
-        """Test adapter."""
-        task = Mock()
-        task.success = True
-        task.kwargs = {"user": "foo"}
-        task.result = ["", "/foo"]
-        expect_workflow = My2SqlResult(success=True, submitter="foo", file_path="/foo")
-        notify_for_my2sql(task)
-        mock_auto_notify.assert_called_once_with(
-            workflow=expect_workflow, sys_config=ANY, event_type=EventType.M2SQL
-        )
-        mock_auto_notify.reset_mock()
-        # Test failure scenario.
-        task.success = False
-        task.result = "Traceback blahblah"
-        expect_workflow = My2SqlResult(
-            success=False, submitter="foo", error=task.result
-        )
-        notify_for_my2sql(task)
-        mock_auto_notify.assert_called_once_with(
-            workflow=expect_workflow, sys_config=ANY, event_type=EventType.M2SQL
-        )
-
     # The tests below focus on notifier render() and send().
     def test_legacy_render_execution(self):
         notifier = LegacyRender(
@@ -395,37 +369,6 @@ class TestNotify(TestCase):
         self.assertEqual(len(notifier.messages), 1)
         self.assertIn("Workflow Cancelled by Submitter", notifier.messages[0].msg_title)
         self.assertIn("Withdrawn foo-bar", notifier.messages[0].msg_content)
-
-    def test_legacy_render_m2sql(self):
-        successful_workflow = My2SqlResult(
-            submitter=self.user.username, success=True, file_path="/foo/bar"
-        )
-        notifier = LegacyRender(
-            workflow=successful_workflow,
-            sys_config=self.sys_config,
-            event_type=EventType.M2SQL,
-        )
-        notifier.render()
-        self.assertEqual(len(notifier.messages), 1)
-        self.assertEqual(
-            notifier.messages[0].msg_title,
-            "[Archery Notification] My2SQL execution finished",
-        )
-        # Failure.
-        failed_workflow = My2SqlResult(
-            submitter=self.user.username, success=False, error="Traceback blahblah"
-        )
-        notifier = LegacyRender(
-            workflow=failed_workflow,
-            sys_config=self.sys_config,
-            event_type=EventType.M2SQL,
-        )
-        notifier.render()
-        self.assertEqual(len(notifier.messages), 1)
-        self.assertEqual(
-            notifier.messages[0].msg_title,
-            "[Archery Notification] My2SQL execution failed",
-        )
 
     def test_general_webhook(self):
         # SQL deployment workflow

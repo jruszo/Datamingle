@@ -106,7 +106,7 @@ def generate_sql(text):
     """
     Parse SQL list from SQL text or MyBatis3 Mapper XML file.
     :param text:
-    :return: [{"sql_id": key, "sql": soar.compress(value)}]
+    :return: [{"sql_id": key, "sql": value}]
     """
     # Try XML parsing first.
     try:
