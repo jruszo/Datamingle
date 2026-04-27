@@ -613,6 +613,25 @@ class InstanceOperationAccountApiTests(TestCase):
         )
         self.assertIsNotNone(response.json()["data"]["id"])
 
+    @patch("api_instances.views.get_engine")
+    def test_account_create_requires_password(self, get_engine):
+        self.add_manage_permission()
+        get_engine.side_effect = lambda instance: FakeDictionaryEngine(instance)
+
+        response = self.client.post(
+            "/api/v1/instance-operations/account/",
+            {
+                "instance_id": self.instance.id,
+                "user": "app",
+                "host": "%",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("password", response.json())
+        get_engine.assert_not_called()
+
     def test_account_metadata_update_registers_account(self):
         self.add_manage_permission()
 

@@ -317,7 +317,7 @@ watch(selectedDbName, () => {
         </p>
       </div>
       <div class="flex flex-wrap gap-2">
-        <Button variant="outline" type="button" class="gap-2" :disabled="loadingInstances" @click="void refreshDataDictionary()">
+        <Button variant="outline" type="button" class="gap-2" :disabled="refreshing || loadingInstances" @click="void refreshDataDictionary()">
           <RefreshCw class="h-4 w-4" />
           Refresh
         </Button>
@@ -460,8 +460,8 @@ watch(selectedDbName, () => {
                     <thead class="bg-slate-50">
                       <tr>
                         <th
-                          v-for="column in tableDetail.desc.column_list ?? []"
-                          :key="column"
+                          v-for="(column, columnIndex) in tableDetail.desc.column_list ?? []"
+                          :key="`desc-header-${columnIndex}`"
                           class="px-3 py-2 text-left font-medium text-slate-600"
                         >
                           {{ column }}
@@ -470,7 +470,7 @@ watch(selectedDbName, () => {
                     </thead>
                     <tbody class="divide-y divide-slate-100 bg-white">
                       <tr v-for="(row, rowIndex) in normalizeRows(tableDetail.desc)" :key="`desc-${rowIndex}`">
-                        <td v-for="(column, columnIndex) in tableDetail.desc.column_list ?? []" :key="column" class="px-3 py-2 text-slate-900">
+                        <td v-for="(column, columnIndex) in tableDetail.desc.column_list ?? []" :key="`desc-cell-${rowIndex}-${columnIndex}`" class="px-3 py-2 text-slate-900">
                           {{ cellValue(row[columnIndex]) }}
                         </td>
                       </tr>
@@ -486,8 +486,8 @@ watch(selectedDbName, () => {
                     <thead class="bg-slate-50">
                       <tr>
                         <th
-                          v-for="column in tableDetail.index.column_list ?? []"
-                          :key="column"
+                          v-for="(column, columnIndex) in tableDetail.index.column_list ?? []"
+                          :key="`index-header-${columnIndex}`"
                           class="px-3 py-2 text-left font-medium text-slate-600"
                         >
                           {{ column }}
@@ -496,7 +496,7 @@ watch(selectedDbName, () => {
                     </thead>
                     <tbody class="divide-y divide-slate-100 bg-white">
                       <tr v-for="(row, rowIndex) in normalizeRows(tableDetail.index)" :key="`index-${rowIndex}`">
-                        <td v-for="(column, columnIndex) in tableDetail.index.column_list ?? []" :key="column" class="px-3 py-2 text-slate-900">
+                        <td v-for="(column, columnIndex) in tableDetail.index.column_list ?? []" :key="`index-cell-${rowIndex}-${columnIndex}`" class="px-3 py-2 text-slate-900">
                           {{ cellValue(row[columnIndex]) }}
                         </td>
                       </tr>

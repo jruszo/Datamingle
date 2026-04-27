@@ -110,4 +110,6 @@ Retired permission codenames are documented in `RETIRED_SQL_PERMISSION_CODENAMES
 and removed by `remove_retired_sql_permissions` in
 `sql/migrations/0015_alter_permission_options.py`. Legacy Archery `src/init_sql`
 bootstrap files were removed; schema and permission changes should go through
-Django migrations.
+Django migrations. Rolling back the retired-permission migration recreates the
+permission rows only; user/group assignments for retired features are
+intentionally not recoverable.

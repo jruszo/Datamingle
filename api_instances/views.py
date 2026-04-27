@@ -44,6 +44,7 @@ from api_instances.serializers import (
     DataDictionaryInstanceSerializer,
     DataDictionaryTableDetailSerializer,
     DataDictionaryTableGroupListSerializer,
+    InstanceAccountCreatePayloadSerializer,
     InstanceAccountDeleteSerializer,
     InstanceAccountGrantSerializer,
     InstanceAccountListSerializer,
@@ -185,6 +186,26 @@ def _mysql_quote_identifier(value):
 
 def _mysql_account_identifier(user, host):
     return f"{_mysql_quote_identifier(user)}@{_mysql_quote_identifier(host)}"
+
+
+def _validate_mongo_db_name(value):
+    db_name = str(value or "").strip()
+    illegal_characters = {"/", "\\", ".", '"', "$", "\x00"}
+    if not db_name:
+        raise serializers.ValidationError({"db_name": "Database name cannot be blank."})
+    if any(character in db_name for character in illegal_characters):
+        raise serializers.ValidationError(
+            {
+                "db_name": (
+                    'Mongo database name cannot contain /, \\, ., ", $, or null bytes.'
+                )
+            }
+        )
+    if len(db_name.encode("utf-8")) > 63:
+        raise serializers.ValidationError(
+            {"db_name": "Mongo database name must be 63 bytes or fewer."}
+        )
+    return db_name
 
 
 def _parse_mysql_account_identifier(user_host):
@@ -1118,8 +1139,9 @@ class InstanceOperationDatabaseListCreate(views.APIView):
             elif instance.db_type == "mongo":
                 exec_result = ResultSet()
                 conn = engine.get_connection()
-                database = conn[db_name]
-                database.create_collection(name=f"archery-{db_name}")
+                validated_db_name = _validate_mongo_db_name(db_name)
+                database = conn[validated_db_name]
+                database.create_collection(name=f"archery-{validated_db_name}")
             else:
                 raise serializers.ValidationError(
                     {"errors": f"Unsupported instance type: {instance.db_type}"}
@@ -1278,7 +1300,7 @@ class InstanceOperationAccountListCreate(views.APIView):
 
     @extend_schema(
         summary="Create Instance Account",
-        request=InstanceAccountPayloadSerializer,
+        request=InstanceAccountCreatePayloadSerializer,
         responses={201: InstanceAccountRecordSerializer},
         description="Create a database account on the instance, then save account metadata.",
     )
@@ -1286,7 +1308,7 @@ class InstanceOperationAccountListCreate(views.APIView):
         permission_required("sql.instance_account_manage", raise_exception=True)
     )
     def post(self, request):
-        serializer = InstanceAccountPayloadSerializer(data=request.data)
+        serializer = InstanceAccountCreatePayloadSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         instance = _operation_account_instance(request.user, data["instance_id"])

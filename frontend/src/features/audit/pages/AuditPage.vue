@@ -167,7 +167,7 @@ function setView(view: AuditView) {
 
 function movePage(direction: -1 | 1) {
   const nextPage = filters.page + direction
-  if (nextPage < 1) {
+  if (nextPage < 1 || (direction === 1 && activePage.value.next === null)) {
     return
   }
   filters.page = nextPage

@@ -39,6 +39,9 @@ def remove_retired_sql_permissions(apps, schema_editor):
 
 
 def recreate_retired_sql_permissions(apps, schema_editor):
+    # Rollback recreates only the retired Permission rows. User/group assignments
+    # to those retired permissions are intentionally not recoverable because this
+    # migration permanently removes obsolete feature access from active roles.
     ContentType = apps.get_model("contenttypes", "ContentType")
     Permission = apps.get_model("auth", "Permission")
     content_type, _created = ContentType.objects.get_or_create(

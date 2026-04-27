@@ -418,7 +418,7 @@ watch([selectedInstanceId, activeTab, commandType], () => {
             <div v-if="killSql" class="rounded-md border border-slate-200 bg-slate-50 p-3 font-mono text-xs text-slate-700">
               {{ killSql }}
             </div>
-            <Button variant="destructive" type="button" class="gap-2" :disabled="!killSql || submitting" @click="void confirmKill()">
+            <Button variant="destructive" type="button" class="gap-2" :disabled="!canKillProcesses || !killSql || submitting" @click="void confirmKill()">
               <Trash2 class="h-4 w-4" />
               Kill sessions
             </Button>

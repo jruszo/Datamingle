@@ -123,9 +123,7 @@ class InstanceAccountPayloadSerializer(serializers.Serializer):
     db_name = serializers.CharField(max_length=128, allow_blank=True, required=False)
     user = serializers.CharField(max_length=128)
     host = serializers.CharField(max_length=64, allow_blank=True, required=False)
-    password = serializers.CharField(
-        max_length=128, allow_blank=True, required=False, write_only=True
-    )
+    password = serializers.CharField(max_length=128, required=False, write_only=True)
     remark = serializers.CharField(max_length=255, allow_blank=True, required=False)
 
     def validate_user(self, value):
@@ -147,6 +145,10 @@ class InstanceAccountPayloadSerializer(serializers.Serializer):
 
     def validate_remark(self, value):
         return value.strip()
+
+
+class InstanceAccountCreatePayloadSerializer(InstanceAccountPayloadSerializer):
+    password = serializers.CharField(max_length=128, write_only=True)
 
 
 class InstanceAccountPasswordSerializer(serializers.Serializer):
