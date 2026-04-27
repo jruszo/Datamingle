@@ -151,9 +151,7 @@ class MsgSender(object):
         if r_json["errcode"] == 0:
             logger.debug(f"WeCom push sent successfully\nTarget:{to_user}")
         else:
-            logger.error(
-                f"WeCom push failed\nRequest url:{send_url}\nRequest data:{data}\nResponse:{r_json}"
-            )
+            logger.error("WeCom push failed: errcode=%s", r_json.get("errcode"))
 
     def send_qywx_webhook(self, qywx_webhook, msg):
         send_url = qywx_webhook
@@ -175,9 +173,7 @@ class MsgSender(object):
         if r_json["errcode"] == 0:
             logger.debug("WeCom bot push sent successfully\nTarget:bot")
         else:
-            logger.error(
-                f"WeCom bot push failed\nRequest url:{send_url}\nRequest data:{data}\nResponse:{r_json}"
-            )
+            logger.error("WeCom bot push failed: errcode=%s", r_json.get("errcode"))
 
     @staticmethod
     def send_feishu_webhook(url, title, content):
@@ -202,13 +198,9 @@ class MsgSender(object):
             or ("StatusCode" in r_json and r_json["StatusCode"] == 0)
             or ("code" in r_json and r_json["code"] == 0)
         ):
-            logger.debug(
-                f"Feishu webhook sent successfully\nTarget:{url}\nContent:{content}"
-            )
+            logger.debug("Feishu webhook sent successfully")
         else:
-            logger.error(
-                f"Feishu webhook failed\nRequest url:{url}\nRequest data:{data}\nResponse:{r_json}"
-            )
+            logger.error("Feishu webhook failed: response=%s", r_json)
 
     @staticmethod
     def send_feishu_user(title, content, open_id, user_mail):

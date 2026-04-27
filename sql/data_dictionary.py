@@ -1,6 +1,7 @@
 # -*- coding: UTF-8 -*-
 import datetime
 import os
+import logging
 from urllib.parse import quote
 
 import MySQLdb
@@ -14,6 +15,8 @@ from django.http import HttpResponse, JsonResponse, FileResponse
 from common.utils.extend_json_encoder import ExtendJSONEncoder
 from sql.utils.resource_group import user_instances
 from .models import Instance
+
+logger = logging.getLogger("default")
 
 
 @permission_required("sql.menu_data_dictionary", raise_exception=True)
@@ -34,8 +37,9 @@ def table_list(request):
             res = {"status": 0, "data": data}
         except Instance.DoesNotExist:
             res = {"status": 1, "msg": "Instance.DoesNotExist"}
-        except Exception as e:
-            res = {"status": 1, "msg": str(e)}
+        except Exception:
+            logger.exception("Failed to load data dictionary table list")
+            res = {"status": 1, "msg": "Failed to load table list."}
     else:
         res = {"status": 1, "msg": "Invalid request!"}
     return HttpResponse(
@@ -80,8 +84,9 @@ def table_info(request):
             res = {"status": 0, "data": data}
         except Instance.DoesNotExist:
             res = {"status": 1, "msg": "Instance.DoesNotExist"}
-        except Exception as e:
-            res = {"status": 1, "msg": str(e)}
+        except Exception:
+            logger.exception("Failed to load data dictionary table info")
+            res = {"status": 1, "msg": "Failed to load table information."}
     else:
         res = {"status": 1, "msg": "Invalid request!"}
     return HttpResponse(

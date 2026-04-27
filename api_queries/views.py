@@ -222,12 +222,9 @@ class QueryExecute(views.APIView):
                     else:
                         result_data = masking_result.__dict__
                 except Exception as exc:
-                    logger.error(traceback.format_exc())
+                    logger.exception("Data masking failed")
                     if config.get("query_check"):
-                        error_message = (
-                            "Data masking error, contact admin. "
-                            f"Error details: {str(exc)}"
-                        )
+                        error_message = "Data masking error, contact admin."
                     else:
                         logger.warning(
                             "Data masking error, allowed by config. SQL: %s error: %s",
@@ -243,14 +240,8 @@ class QueryExecute(views.APIView):
         except serializers.ValidationError:
             raise
         except Exception as exc:
-            logger.error(
-                "Query error.\nSQL: %s\nError details: %s",
-                sql_content,
-                traceback.format_exc(),
-            )
-            raise serializers.ValidationError(
-                {"errors": f"Query error, details: {exc}"}
-            )
+            logger.exception("Query error while executing user SQL")
+            raise serializers.ValidationError({"errors": "Query error, contact admin."})
 
         if query_result is not None:
             if error_message:
@@ -360,7 +351,7 @@ class QueryDescribe(views.APIView):
                 schema_name=schema_name,
             )
         except Exception as exc:
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
 
         if query_result.error:
             raise serializers.ValidationError({"errors": query_result.error})
@@ -414,7 +405,7 @@ class QueryLogBase(generics.ListAPIView):
                 ) + datetime.timedelta(days=1)
             except ValueError as exc:
                 raise serializers.ValidationError(
-                    {"errors": f"Invalid end_date format: {str(exc)}"}
+                    {"errors": "Invalid end_date format."}
                 )
             queryset = queryset.filter(create_time__range=(start_date, end_date_obj))
         if search:
@@ -826,7 +817,7 @@ class QueryPrivilegeApplicationReviewCreate(views.APIView):
             audit_status = WorkflowAction(int(data["audit_status"]))
         except ValueError as exc:
             raise serializers.ValidationError(
-                {"errors": f"Invalid audit_status parameter, {str(exc)}"}
+                {"errors": "Invalid audit_status parameter."}
             )
 
         try:
@@ -841,9 +832,7 @@ class QueryPrivilegeApplicationReviewCreate(views.APIView):
                     audit_status, request.user, data.get("audit_remark", "")
                 )
             except AuditException as exc:
-                raise serializers.ValidationError(
-                    {"errors": f"Audit failed: {str(exc)}"}
-                )
+                raise serializers.ValidationError({"errors": "Audit failed."})
             _query_apply_audit_call_back(
                 auditor.audit.workflow_id, auditor.audit.current_status
             )

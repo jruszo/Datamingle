@@ -912,7 +912,7 @@ class ArchiveReviewCreate(views.APIView):
                     action, request.user, data["audit_remark"]
                 )
             except AuditException as exc:
-                raise serializers.ValidationError({"errors": str(exc)})
+                raise serializers.ValidationError({"errors": "Operation failed."})
 
             auditor.workflow.status = auditor.audit.current_status
             if auditor.audit.current_status == WorkflowStatus.PASSED:

@@ -360,13 +360,13 @@ class SystemSettingsSerializer(serializers.Serializer):
         try:
             return validate_binary_path(value, "gh-ost")
         except ValueError as exc:
-            raise serializers.ValidationError(str(exc))
+            raise serializers.ValidationError("Operation failed.")
 
     def validate_pt_osc(self, value):
         try:
             return validate_binary_path(value, "pt-online-schema-change")
         except ValueError as exc:
-            raise serializers.ValidationError(str(exc))
+            raise serializers.ValidationError("Operation failed.")
 
     def validate(self, attrs):
         attrs = super().validate(attrs)

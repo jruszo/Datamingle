@@ -135,7 +135,7 @@ class TestPlugin(TestCase):
 
     @patch("sql.plugins.plugin.subprocess")
     def test_execute_cmd(self, mock_subprocess):
-        plugin = Plugin(path="/usr/bin/example")
+        plugin = Plugin(path="/bin/echo")
         cmd_args = plugin.generate_args2cmd({"query": "select 1;"})
 
         mock_subprocess.Popen.return_value.communicate.return_value = (
@@ -143,9 +143,14 @@ class TestPlugin(TestCase):
             "some_stderr",
         )
         stdout, _stderr = plugin.execute_cmd(cmd_args).communicate()
-        mock_subprocess.Popen.assert_called_once_with(
-            cmd_args, shell=False, stdout=ANY, stderr=ANY, universal_newlines=ANY
-        )
+        mock_subprocess.Popen.assert_called_once()
+        popen_args, popen_kwargs = mock_subprocess.Popen.call_args
+        self.assertTrue(popen_args[0][0].endswith("echo"))
+        self.assertEqual(popen_args[0][1:], ["-query", "select 1;"])
+        self.assertFalse(popen_kwargs["shell"])
+        self.assertIsNotNone(popen_kwargs["stdout"])
+        self.assertIsNotNone(popen_kwargs["stderr"])
+        self.assertTrue(popen_kwargs["universal_newlines"])
         self.assertIn("some_stdout", stdout)
         # Exception.
 

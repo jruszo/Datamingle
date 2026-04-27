@@ -151,10 +151,11 @@ def _data_dictionary_instance(user, instance_id):
 
 
 def _safe_dictionary_export_path(base_dir, instance_name, db_name):
-    base_dir = os.path.normpath(base_dir)
-    full_path = os.path.normpath(
-        os.path.join(base_dir, f"{instance_name}_{db_name}.html")
-    )
+    base_dir = os.path.realpath(base_dir)
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{instance_name}_{db_name}")[:180]
+    if not safe_name or safe_name in {".", ".."}:
+        return ""
+    full_path = os.path.realpath(os.path.join(base_dir, f"{safe_name}.html"))
     if os.path.commonpath([base_dir, full_path]) != base_dir:
         return ""
     return full_path
@@ -749,7 +750,7 @@ class DataDictionaryDatabaseList(views.APIView):
                 "Failed to list data dictionary databases for instance_id=%s",
                 instance_id,
             )
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
         finally:
             if "query_engine" in locals():
                 query_engine.close()
@@ -812,7 +813,7 @@ class DataDictionaryTableList(views.APIView):
                 instance_id,
                 db_name,
             )
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
         finally:
             if "query_engine" in locals():
                 query_engine.close()
@@ -908,7 +909,7 @@ class DataDictionaryTableDetail(views.APIView):
                 db_name,
                 table_name,
             )
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
         finally:
             if "query_engine" in locals():
                 query_engine.close()
@@ -984,6 +985,8 @@ class DataDictionaryExport(views.APIView):
                     raise serializers.ValidationError(
                         {"errors": "Invalid instance name or database name."}
                     )
+                # Path is normalized under the dictionary export directory.
+                # codeql[py/path-injection]
                 with open(full_path, "w", encoding="utf-8") as export_file:
                     export_file.write(data)
         except PermissionDenied:
@@ -996,7 +999,9 @@ class DataDictionaryExport(views.APIView):
                 instance_id,
                 db_name,
             )
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError(
+                {"errors": "Data dictionary export failed."}
+            )
         finally:
             if "query_engine" in locals():
                 query_engine.close()
@@ -1009,6 +1014,8 @@ class DataDictionaryExport(views.APIView):
                 raise serializers.ValidationError(
                     {"errors": "Invalid instance name or database name."}
                 )
+            # Path is normalized under the dictionary export directory.
+            # codeql[py/path-injection]
             export_file = open(full_path, "rb")
             try:
                 response = FileResponse(export_file)
@@ -1091,7 +1098,7 @@ class InstanceOperationDatabaseListCreate(views.APIView):
                 "Failed to list instance-operation databases for instance_id=%s",
                 instance_id,
             )
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
         finally:
             if "query_engine" in locals():
                 query_engine.close()
@@ -1154,7 +1161,7 @@ class InstanceOperationDatabaseListCreate(views.APIView):
                 instance.id,
                 db_name,
             )
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
         finally:
             if "engine" in locals():
                 engine.close()
@@ -1278,7 +1285,7 @@ class InstanceOperationAccountListCreate(views.APIView):
                 "Failed to list instance-operation accounts for instance_id=%s",
                 instance_id,
             )
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
         finally:
             if "query_engine" in locals():
                 query_engine.close()
@@ -1329,7 +1336,7 @@ class InstanceOperationAccountListCreate(views.APIView):
                 instance.id,
                 data["user"],
             )
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
         finally:
             if "engine" in locals():
                 engine.close()
@@ -1435,7 +1442,7 @@ class InstanceOperationAccountPassword(views.APIView):
                 instance.id,
                 data["user"],
             )
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
         finally:
             if "engine" in locals():
                 engine.close()
@@ -1490,7 +1497,7 @@ class InstanceOperationAccountLock(views.APIView):
                 instance.id,
                 data["user_host"],
             )
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
         finally:
             if "engine" in locals():
                 engine.close()
@@ -1534,7 +1541,7 @@ class InstanceOperationAccountDelete(views.APIView):
                 instance.id,
                 data["user"],
             )
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
         finally:
             if "engine" in locals():
                 engine.close()
@@ -1604,7 +1611,7 @@ class InstanceOperationAccountGrant(views.APIView):
                 "Failed to change account privileges for instance_id=%s",
                 instance.id,
             )
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
         finally:
             if "engine" in locals():
                 engine.close()
@@ -1697,7 +1704,7 @@ class InstanceOperationParamList(views.APIView):
                 "Failed to list instance parameters for instance_id=%s",
                 instance_id,
             )
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
         finally:
             if "engine" in locals():
                 engine.close()
@@ -1852,7 +1859,7 @@ class InstanceOperationParamEdit(views.APIView):
                 instance.id,
                 data["variable_name"],
             )
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
         finally:
             if "engine" in locals():
                 engine.close()
@@ -1951,7 +1958,7 @@ class InstanceOperationDiagnosticProcessList(views.APIView):
                 "Failed to list diagnostic processes for instance_id=%s",
                 instance.id,
             )
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
         finally:
             if "engine" in locals():
                 engine.close()
@@ -1996,7 +2003,7 @@ class InstanceOperationDiagnosticKillPreview(views.APIView):
             logger.exception(
                 "Failed to build kill command for instance_id=%s", instance.id
             )
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
         finally:
             if "engine" in locals():
                 engine.close()
@@ -2041,7 +2048,7 @@ class InstanceOperationDiagnosticKill(views.APIView):
             raise
         except Exception as exc:
             logger.exception("Failed to kill sessions for instance_id=%s", instance.id)
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
         finally:
             if "engine" in locals():
                 engine.close()
@@ -2089,7 +2096,7 @@ class InstanceOperationDiagnosticTablespace(views.APIView):
             logger.exception(
                 "Failed to list tablespace for instance_id=%s", instance.id
             )
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
         finally:
             if "engine" in locals():
                 engine.close()
@@ -2135,7 +2142,7 @@ class InstanceOperationDiagnosticTransactions(views.APIView):
             logger.exception(
                 "Failed to list transactions for instance_id=%s", instance.id
             )
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
         finally:
             if "engine" in locals():
                 engine.close()
@@ -2179,7 +2186,7 @@ class InstanceOperationDiagnosticLocks(views.APIView):
             raise
         except Exception as exc:
             logger.exception("Failed to list locks for instance_id=%s", instance.id)
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
         finally:
             if "engine" in locals():
                 engine.close()
@@ -2498,7 +2505,7 @@ class InstanceResource(views.APIView):
                     {"errors": "Unsupported resource type or incomplete parameters."}
                 )
         except Exception as msg:
-            raise serializers.ValidationError({"errors": str(msg)})
+            raise serializers.ValidationError({"errors": "Operation failed."})
         else:
             if resource.error:
                 raise serializers.ValidationError({"errors": resource.error})

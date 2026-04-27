@@ -171,7 +171,7 @@ def validate_file_storage_payload(payload):
             result["status"] = 1
             result["msg"] = "Storage connectivity test failed."
             logging.error("Storage connectivity test failed")
-            logging.debug("Storage connectivity test error: %s", message)
+            logging.debug("Storage connectivity test returned an error.")
         else:
             logging.info("Storage connectivity test succeeded")
     except Exception as e:

@@ -337,11 +337,19 @@ def rollback(request):
         # Get data and save into directory
         path = os.path.join(settings.BASE_DIR, "downloads/rollback")
         os.makedirs(path, exist_ok=True)
-        file_name = f"{path}/rollback_{workflow_id}.sql"
+        file_name = os.path.realpath(os.path.join(path, f"rollback_{workflow.id}.sql"))
+        if os.path.commonpath([os.path.realpath(path), file_name]) != os.path.realpath(
+            path
+        ):
+            raise Http404
+        # Path is derived from a validated workflow record and constrained to downloads.
+        # codeql[py/path-injection]
         with open(file_name, "w") as f:
             for sql in list_backup_sql:
                 f.write(f"/*{sql[0]}*/\n{sql[1]}\n")
         # Return response
+        # Path is derived from a validated workflow record and constrained to downloads.
+        # codeql[py/path-injection]
         response = FileResponse(open(file_name, "rb"))
         response["Content-Type"] = "application/octet-stream"
         response["Content-Disposition"] = (

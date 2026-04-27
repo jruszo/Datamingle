@@ -50,8 +50,8 @@ def debug(request):
             "maxmemory_human": full_redis_info.get("maxmemory_human"),
             "used_memory_human": full_redis_info.get("used_memory_human"),
         }
-    except Exception as e:
-        redis_info = f"Failed to get Redis info: {e}"
+    except Exception:
+        redis_info = "Failed to get Redis info."
         full_redis_info = redis_info
 
     task_backend = task_backend_info(full=bool(full))
@@ -92,8 +92,8 @@ def debug(request):
             "osc_bin_dir": full_goinception_info.get("osc_bin_dir"),
             "ghost_on": full_goinception_info.get("ghost_on"),
         }
-    except Exception as e:
-        goinception_info = f"Failed to get goInception info: {e}"
+    except Exception:
+        goinception_info = "Failed to get goInception info."
         full_goinception_info = goinception_info
 
     # Backup database.
@@ -108,8 +108,8 @@ def debug(request):
         cursor = bak_conn.cursor()
         cursor.execute("select 1;")
         backup_info = "normal"
-    except Exception as e:
-        backup_info = f"Unable to connect to goInception backup database\n{e}"
+    except Exception:
+        backup_info = "Unable to connect to goInception backup database."
 
     # PACKAGES
     installed_packages_list = sorted(

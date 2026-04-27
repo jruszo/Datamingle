@@ -78,7 +78,7 @@ def _response_from_authenticator(result, default_error_message):
             status_code=status.HTTP_200_OK,
         )
     return Response(
-        {"errors": result.get("msg", default_error_message)},
+        {"errors": default_error_message},
         status=status.HTTP_400_BAD_REQUEST,
     )
 
