@@ -41,22 +41,11 @@ logger = logging.getLogger("default")
 class EventType(Enum):
     EXECUTE = "execute"
     AUDIT = "audit"
-    M2SQL = "m2sql"
-
-
-@dataclass
-class My2SqlResult:
-    submitter: str
-    success: bool
-    file_path: str = ""
-    error: str = ""
 
 
 @dataclass
 class Notifier:
-    workflow: Union[SqlWorkflow, ArchiveConfig, QueryPrivilegesApply, My2SqlResult] = (
-        None
-    )
+    workflow: Union[SqlWorkflow, ArchiveConfig, QueryPrivilegesApply] = None
     sys_config: SysConfig = None
     # init=False here creates a class-level default, not an instance field input.
     name: str = field(init=False, default="base")
@@ -70,7 +59,7 @@ class Notifier:
             raise ValueError("WorkflowAudit or workflow is required")
         if not self.workflow:
             self.workflow = self.audit.get_workflow()
-        if not self.audit and not isinstance(self.workflow, My2SqlResult):
+        if not self.audit:
             self.audit = self.workflow.get_audit()
         # Prevent explicit None from get_auditor.
         if not self.sys_config:
@@ -350,33 +339,12 @@ Workflow Preview: {preview}"""
                 msg_to = Users.objects.filter(groups__name__in=ddl_notify_auth_group)
                 self.messages.append(LegacyMessage(msg_title, msg_content, msg_to))
 
-    def render_m2sql(self):
-        submitter_in_db = Users.objects.get(username=self.workflow.submitter)
-        if self.workflow.success:
-            title = "[Archery Notification] My2SQL execution finished"
-            content = (
-                f"Parsed SQL files are available in {self.workflow.file_path}. "
-                "Please check that directory."
-            )
-        else:
-            title = "[Archery Notification] My2SQL execution failed"
-            content = self.workflow.error
-        self.messages = [
-            LegacyMessage(
-                msg_to=[submitter_in_db],
-                msg_title=title,
-                msg_content=content,
-            )
-        ]
-
     def render(self):
         """Render messages into ``self.messages``."""
         if self.event_type == EventType.EXECUTE:
             self.render_execute()
         if self.event_type == EventType.AUDIT:
             self.render_audit()
-        if self.event_type == EventType.M2SQL:
-            self.render_m2sql()
 
 
 class FeishuWebhookNotifier(LegacyRender):
@@ -461,9 +429,7 @@ class MailNotifier(LegacyRender):
 
 def auto_notify(
     sys_config: SysConfig,
-    workflow: Union[
-        SqlWorkflow, ArchiveConfig, QueryPrivilegesApply, My2SqlResult
-    ] = None,
+    workflow: Union[SqlWorkflow, ArchiveConfig, QueryPrivilegesApply] = None,
     audit: WorkflowAudit = None,
     audit_detail: WorkflowAuditDetail = None,
     event_type: EventType = EventType.AUDIT,
@@ -518,22 +484,3 @@ def notify_for_audit(
         sys_config=sys_config,
         event_type=EventType.AUDIT,
     )
-
-
-def notify_for_my2sql(task):
-    """
-    Notification for My2SQL completion.
-    :param task:
-    :return:
-    """
-    if task.success:
-        result = My2SqlResult(
-            success=True, submitter=task.kwargs["user"], file_path=task.result[1]
-        )
-    else:
-        result = My2SqlResult(
-            success=False, submitter=task.kwargs["user"], error=task.result
-        )
-    # Send notification
-    sys_config = SysConfig()
-    auto_notify(workflow=result, sys_config=sys_config, event_type=EventType.M2SQL)

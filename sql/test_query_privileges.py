@@ -461,7 +461,7 @@ class TestQueryPrivilegesCheck(TestCase):
         r = sql.query_privileges._table_ref(
             "select * from sql_users limit 100;", self.slave, self.db_name
         )
-        self.assertListEqual(r, [{"schema": "test_archery", "name": "sql_users"}])
+        self.assertListEqual(r, [{"schema": self.db_name, "name": "sql_users"}])
 
     @patch("sql.engines.goinception.GoInceptionEngine.query_print")
     def test_table_ref_wrong(self, _query_print):

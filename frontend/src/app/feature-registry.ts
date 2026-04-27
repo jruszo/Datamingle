@@ -3,10 +3,12 @@ import authModule from '@/features/auth/manifest'
 import dashboardModule from '@/features/dashboard/manifest'
 import reportsModule from '@/features/reports/manifest'
 import inventoryModule from '@/features/inventory/manifest'
+import instanceOperationsModule from '@/features/instance-operations/manifest'
 import workflowsModule from '@/features/workflows/manifest'
 import archivesModule from '@/features/archives/manifest'
 import queriesModule from '@/features/queries/manifest'
 import permissionsModule from '@/features/permissions/manifest'
+import auditModule from '@/features/audit/manifest'
 import settingsModule from '@/features/settings/manifest'
 import mailboxModule from '@/features/mailbox/manifest'
 import type { FeatureModule, FeatureNavigationItem, NavigationSection } from '@/app/feature-contract'
@@ -18,10 +20,12 @@ const builtInFeatureModules: FeatureModule[] = [
   dashboardModule,
   reportsModule,
   inventoryModule,
+  instanceOperationsModule,
   workflowsModule,
   archivesModule,
   queriesModule,
   permissionsModule,
+  auditModule,
   mailboxModule,
   settingsModule,
 ]

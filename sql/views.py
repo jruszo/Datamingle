@@ -358,12 +358,6 @@ def rollback(request):
         return render(request, "rollback.html", context)
 
 
-@permission_required("sql.menu_sqlanalyze", raise_exception=True)
-def sqlanalyze(request):
-    """SQL analysis page."""
-    return render(request, "sqlanalyze.html")
-
-
 @permission_required("sql.menu_query", raise_exception=True)
 def sqlquery(request):
     """Online SQL query page."""
@@ -458,18 +452,6 @@ def queryuserprivileges(request):
     return render(request, "queryuserprivileges.html", context)
 
 
-@permission_required("sql.menu_sqladvisor", raise_exception=True)
-def sqladvisor(request):
-    """SQL optimization tool page."""
-    return render(request, "sqladvisor.html")
-
-
-@permission_required("sql.menu_slowquery", raise_exception=True)
-def slowquery(request):
-    """SQL slow log page."""
-    return render(request, "slowquery.html")
-
-
 @permission_required("sql.menu_instance", raise_exception=True)
 def instance(request):
     """Instance management page."""
@@ -481,46 +463,31 @@ def instance(request):
 @permission_required("sql.menu_instance_account", raise_exception=True)
 def instanceaccount(request):
     """Instance account management page."""
-    return render(request, "instanceaccount.html")
+    return HttpResponseRedirect("/instance-operations/accounts")
 
 
 @permission_required("sql.menu_database", raise_exception=True)
 def database(request):
     """Instance database management page."""
-    # Get all active users as notification targets
-    active_user = Users.objects.filter(is_active=1)
-
-    return render(request, "database.html", {"active_user": active_user})
+    return HttpResponseRedirect("/instance-operations/databases")
 
 
 @permission_required("sql.menu_dbdiagnostic", raise_exception=True)
 def dbdiagnostic(request):
     """Session management page."""
-    return render(request, "dbdiagnostic.html")
+    return HttpResponseRedirect("/instance-operations/diagnostics")
 
 
 @permission_required("sql.menu_data_dictionary", raise_exception=True)
 def data_dictionary(request):
     """Data dictionary page."""
-    return render(request, "data_dictionary.html", locals())
+    return HttpResponseRedirect("/inventory/data-dictionary")
 
 
 @permission_required("sql.menu_param", raise_exception=True)
 def instance_param(request):
     """Instance parameter management page."""
-    return render(request, "param.html")
-
-
-@permission_required("sql.menu_my2sql", raise_exception=True)
-def my2sql(request):
-    """My2SQL page."""
-    return render(request, "my2sql.html")
-
-
-@permission_required("sql.menu_schemasync", raise_exception=True)
-def schemasync(request):
-    """Schema diff page."""
-    return render(request, "schemasync.html")
+    return HttpResponseRedirect("/instance-operations/parameters")
 
 
 @permission_required("sql.menu_archive", raise_exception=True)
@@ -659,72 +626,22 @@ def workflowsdetail(request, audit_id):
         )
 
 
-@permission_required("sql.menu_document", raise_exception=True)
-def dbaprinciples(request):
-    """SQL documentation page."""
-    # Read markdown file
-    file = os.path.join(settings.BASE_DIR, "docs/docs.md")
-    with open(file, "r", encoding="utf-8") as f:
-        md = f.read().replace("\n", "\\n")
-    return render(request, "dbaprinciples.html", {"md": md})
-
-
 @permission_required("sql.audit_user", raise_exception=True)
 def audit(request):
     """General audit log page."""
-    _action_types = AuditEntry.objects.values_list("action").distinct()
-    action_types = [i[0] for i in _action_types]
-    return render(request, "audit.html", {"action_types": action_types})
+    return HttpResponseRedirect("/audit?tab=general")
 
 
 @permission_required("sql.audit_user", raise_exception=True)
 def audit_sqlquery(request):
     """Online SQL query audit page."""
-    user = request.user
-    favorites = QueryLog.objects.filter(username=user.username, favorite=True).values(
-        "id", "alias"
-    )
-    return render(request, "audit_sqlquery.html", {"favorites": favorites})
+    return HttpResponseRedirect("/audit?tab=query")
 
 
+@permission_required("sql.audit_user", raise_exception=True)
 def audit_sqlworkflow(request):
     """SQL review workflow list page."""
-    user = request.user
-    # Data for filter options
-    filter_dict = dict()
-    # Admin users can view all workflows
-    if user.is_superuser or user.has_perm("sql.audit_user"):
-        pass
-    # Non-admin users with review or resource-group execution permission
-    # can view all workflows in their groups.
-    elif user.has_perm("sql.sql_review") or user.has_perm(
-        "sql.sql_execute_for_resource_group"
-    ):
-        # Get the user's resource groups first
-        group_list = user_groups(user)
-        group_ids = [group.group_id for group in group_list]
-        filter_dict["group_id__in"] = group_ids
-    # Everyone else can only view their own workflows
-    else:
-        filter_dict["engineer"] = user.username
-    instance_id = (
-        SqlWorkflow.objects.filter(**filter_dict).values("instance_id").distinct()
-    )
-    instance = Instance.objects.filter(pk__in=instance_id)
-    resource_group_id = (
-        SqlWorkflow.objects.filter(**filter_dict).values("group_id").distinct()
-    )
-    resource_group = ResourceGroup.objects.filter(group_id__in=resource_group_id)
-
-    return render(
-        request,
-        "audit_sqlworkflow.html",
-        {
-            "status_list": SQL_WORKFLOW_CHOICES,
-            "instance": instance,
-            "resource_group": resource_group,
-        },
-    )
+    return HttpResponseRedirect("/audit?tab=sql-workflow")
 
 
 @permission_required("sql.sqlexport_submit", raise_exception=True)

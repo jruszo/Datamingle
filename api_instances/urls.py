@@ -3,15 +3,164 @@ from django.urls import path
 from api_instances import views
 
 urlpatterns = [
-    path("v1/instance/", views.InstanceList.as_view()),
-    path("v1/instance/tag/", views.InstanceTagList.as_view()),
-    path("v1/instance/tag/<int:pk>/", views.InstanceTagDetail.as_view()),
-    path("v1/instance/metadata/", views.InstanceMetadata.as_view()),
-    path("v1/instance/test-connection/", views.InstanceDraftConnectionTest.as_view()),
+    path("v1/instance/", views.InstanceList.as_view(), name="instance-list"),
+    path("v1/instance/tag/", views.InstanceTagList.as_view(), name="instance-tag-list"),
+    path(
+        "v1/instance/tag/<int:pk>/",
+        views.InstanceTagDetail.as_view(),
+        name="instance-tag-detail",
+    ),
+    path(
+        "v1/instance/metadata/",
+        views.InstanceMetadata.as_view(),
+        name="instance-metadata",
+    ),
+    path(
+        "v1/instance/test-connection/",
+        views.InstanceDraftConnectionTest.as_view(),
+        name="instance-draft-test-connection",
+    ),
     path(
         "v1/instance/<int:pk>/test-connection/",
         views.InstanceConnectionTest.as_view(),
+        name="instance-test-connection",
     ),
-    path("v1/instance/<int:pk>/", views.InstanceDetail.as_view()),
-    path("v1/instance/resource/", views.InstanceResource.as_view()),
+    path(
+        "v1/instance/<int:pk>/", views.InstanceDetail.as_view(), name="instance-detail"
+    ),
+    path(
+        "v1/instance/resource/",
+        views.InstanceResource.as_view(),
+        name="instance-resource",
+    ),
+    path(
+        "v1/instance/data-dictionary/instances/",
+        views.DataDictionaryInstanceList.as_view(),
+        name="data-dictionary-instance-list",
+    ),
+    path(
+        "v1/instance/data-dictionary/databases/",
+        views.DataDictionaryDatabaseList.as_view(),
+        name="data-dictionary-database-list",
+    ),
+    path(
+        "v1/instance/data-dictionary/tables/",
+        views.DataDictionaryTableList.as_view(),
+        name="data-dictionary-table-list",
+    ),
+    path(
+        "v1/instance/data-dictionary/table/",
+        views.DataDictionaryTableDetail.as_view(),
+        name="data-dictionary-table-detail",
+    ),
+    path(
+        "v1/instance/data-dictionary/export/",
+        views.DataDictionaryExport.as_view(),
+        name="data-dictionary-export",
+    ),
+    path(
+        "v1/instance-operations/database/",
+        views.InstanceOperationDatabaseListCreate.as_view(),
+        name="instance-operation-database-list-create",
+    ),
+    path(
+        "v1/instance-operations/database/instances/",
+        views.InstanceOperationDatabaseInstanceList.as_view(),
+        name="instance-operation-database-instance-list",
+    ),
+    path(
+        "v1/instance-operations/database/metadata/",
+        views.InstanceOperationDatabaseDetail.as_view(),
+        name="instance-operation-database-metadata",
+    ),
+    path(
+        "v1/instance-operations/account/",
+        views.InstanceOperationAccountListCreate.as_view(),
+        name="instance-operation-account-list-create",
+    ),
+    path(
+        "v1/instance-operations/account/instances/",
+        views.InstanceOperationAccountInstanceList.as_view(),
+        name="instance-operation-account-instance-list",
+    ),
+    path(
+        "v1/instance-operations/account/metadata/",
+        views.InstanceOperationAccountMetadata.as_view(),
+        name="instance-operation-account-metadata",
+    ),
+    path(
+        "v1/instance-operations/account/password/",
+        views.InstanceOperationAccountPassword.as_view(),
+        name="instance-operation-account-password",
+    ),
+    path(
+        "v1/instance-operations/account/lock/",
+        views.InstanceOperationAccountLock.as_view(),
+        name="instance-operation-account-lock",
+    ),
+    path(
+        "v1/instance-operations/account/delete/",
+        views.InstanceOperationAccountDelete.as_view(),
+        name="instance-operation-account-delete",
+    ),
+    path(
+        "v1/instance-operations/account/grant/",
+        views.InstanceOperationAccountGrant.as_view(),
+        name="instance-operation-account-grant",
+    ),
+    path(
+        "v1/instance-operations/param/",
+        views.InstanceOperationParamList.as_view(),
+        name="instance-operation-param-list",
+    ),
+    path(
+        "v1/instance-operations/param/instances/",
+        views.InstanceOperationParamInstanceList.as_view(),
+        name="instance-operation-param-instance-list",
+    ),
+    path(
+        "v1/instance-operations/param/history/",
+        views.InstanceOperationParamHistory.as_view(),
+        name="instance-operation-param-history",
+    ),
+    path(
+        "v1/instance-operations/param/edit/",
+        views.InstanceOperationParamEdit.as_view(),
+        name="instance-operation-param-edit",
+    ),
+    path(
+        "v1/instance-operations/diagnostic/instances/",
+        views.InstanceOperationDiagnosticInstanceList.as_view(),
+        name="instance-operation-diagnostic-instance-list",
+    ),
+    path(
+        "v1/instance-operations/diagnostic/processes/",
+        views.InstanceOperationDiagnosticProcessList.as_view(),
+        name="instance-operation-diagnostic-process-list",
+    ),
+    path(
+        "v1/instance-operations/diagnostic/kill/preview/",
+        views.InstanceOperationDiagnosticKillPreview.as_view(),
+        name="instance-operation-diagnostic-kill-preview",
+    ),
+    path(
+        "v1/instance-operations/diagnostic/kill/",
+        views.InstanceOperationDiagnosticKill.as_view(),
+        name="instance-operation-diagnostic-kill",
+    ),
+    path(
+        "v1/instance-operations/diagnostic/tablespace/",
+        views.InstanceOperationDiagnosticTablespace.as_view(),
+        name="instance-operation-diagnostic-tablespace",
+    ),
+    path(
+        "v1/instance-operations/diagnostic/transactions/",
+        views.InstanceOperationDiagnosticTransactions.as_view(),
+        name="instance-operation-diagnostic-transactions",
+    ),
+    path(
+        "v1/instance-operations/diagnostic/locks/",
+        views.InstanceOperationDiagnosticLocks.as_view(),
+        name="instance-operation-diagnostic-locks",
+    ),
 ]

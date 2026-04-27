@@ -2,14 +2,12 @@ import json
 from datetime import timedelta, datetime
 from unittest.mock import MagicMock, patch, ANY, Mock
 from django.conf import settings
-from django.db import connection
 from django.contrib.auth.models import Group
 from django.contrib.auth.models import Permission
 from django.test import Client, TestCase, TransactionTestCase, override_settings
 
 from common.config import SysConfig
 from common.utils.const import WorkflowStatus, WorkflowType, WorkflowAction
-from sql.binlog import my2sql_file
 from sql.engines.models import ResultSet
 from sql.utils.execute_sql import execute_callback
 from sql.query import kill_query_conn
@@ -102,11 +100,6 @@ class TestView(TransactionTestCase):
         self.wl = WorkflowLog.objects.create(
             audit_id=self.audit.audit_id, operation_type=1
         )
-        # Create slow query review tables.
-        with connection.cursor() as cursor:
-            with open("src/init_sql/mysql_slow_query_review.sql") as fp:
-                content = fp.read()
-                cursor.execute(content)
 
     def tearDown(self):
         self.sys_config.purge()
@@ -117,10 +110,6 @@ class TestView(TransactionTestCase):
         WorkflowLog.objects.all().delete()
         QueryPrivilegesApply.objects.all().delete()
         ResourceGroup.objects.all().delete()
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "DROP table mysql_slow_query_review,mysql_slow_query_review_history"
-            )
 
     def test_index(self):
         """Test index page."""
@@ -153,12 +142,6 @@ class TestView(TransactionTestCase):
         r = self.client.get("/rollback/", data=data)
         self.assertEqual(r.status_code, 200)
 
-    def test_sqlanalyze(self):
-        """Test sqlanalyze page."""
-        data = {}
-        r = self.client.get("/sqlanalyze/", data=data)
-        self.assertEqual(r.status_code, 200)
-
     def test_sqlquery(self):
         """Test sqlquery page."""
         data = {}
@@ -174,98 +157,84 @@ class TestView(TransactionTestCase):
     def test_queryuserprivileges(self):
         """Test queryuserprivileges page."""
         data = {}
-        r = self.client.get(f"/queryuserprivileges/", data=data)
-        self.assertEqual(r.status_code, 200)
-
-    def test_sqladvisor(self):
-        """Test sqladvisor page."""
-        data = {}
-        r = self.client.get(f"/sqladvisor/", data=data)
-        self.assertEqual(r.status_code, 200)
-
-    def test_slowquery(self):
-        """Test slowquery page."""
-        data = {}
-        r = self.client.get(f"/slowquery/", data=data)
+        r = self.client.get("/queryuserprivileges/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_instance(self):
         """Test instance page."""
         data = {}
-        r = self.client.get(f"/instance/", data=data)
+        r = self.client.get("/instance/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_instanceaccount(self):
         """Test instanceaccount page."""
         data = {}
-        r = self.client.get(f"/instanceaccount/", data=data)
-        self.assertEqual(r.status_code, 200)
+        r = self.client.get("/instanceaccount/", data=data)
+        self.assertRedirects(
+            r, "/instance-operations/accounts", fetch_redirect_response=False
+        )
 
     def test_database(self):
         """Test database page."""
         data = {}
-        r = self.client.get(f"/database/", data=data)
-        self.assertEqual(r.status_code, 200)
+        r = self.client.get("/database/", data=data)
+        self.assertRedirects(
+            r, "/instance-operations/databases", fetch_redirect_response=False
+        )
 
     def test_dbdiagnostic(self):
         """Test dbdiagnostic page."""
         data = {}
-        r = self.client.get(f"/dbdiagnostic/", data=data)
-        self.assertEqual(r.status_code, 200)
+        r = self.client.get("/dbdiagnostic/", data=data)
+        self.assertRedirects(
+            r, "/instance-operations/diagnostics", fetch_redirect_response=False
+        )
 
     def test_instanceparam(self):
         """Test instance_param page."""
         data = {}
-        r = self.client.get(f"/instanceparam/", data=data)
-        self.assertEqual(r.status_code, 200)
-
-    def test_my2sql(self):
-        """Test my2sql page."""
-        data = {}
-        r = self.client.get(f"/my2sql/", data=data)
-        self.assertEqual(r.status_code, 200)
-
-    def test_schemasync(self):
-        """Test schemasync page."""
-        data = {}
-        r = self.client.get(f"/schemasync/", data=data)
-        self.assertEqual(r.status_code, 200)
+        r = self.client.get("/instanceparam/", data=data)
+        self.assertRedirects(
+            r, "/instance-operations/parameters", fetch_redirect_response=False
+        )
 
     def test_archive(self):
         """Test archive page."""
         data = {}
-        r = self.client.get(f"/archive/", data=data)
+        r = self.client.get("/archive/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_config(self):
         """Test config page."""
         data = {}
-        r = self.client.get(f"/config/", data=data)
+        r = self.client.get("/config/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_group(self):
         """Test group page."""
         data = {}
-        r = self.client.get(f"/group/", data=data)
+        r = self.client.get("/group/", data=data)
         self.assertEqual(r.status_code, 200)
 
     def test_audit(self):
         """Test audit page."""
         data = {}
-        r = self.client.get(f"/audit/", data=data)
-        self.assertEqual(r.status_code, 200)
+        r = self.client.get("/audit/", data=data)
+        self.assertRedirects(r, "/audit?tab=general", fetch_redirect_response=False)
 
     def test_audit_sqlquery(self):
         """Test audit_sqlquery page."""
         data = {}
-        r = self.client.get(f"/audit_sqlquery/", data=data)
-        self.assertEqual(r.status_code, 200)
+        r = self.client.get("/audit_sqlquery/", data=data)
+        self.assertRedirects(r, "/audit?tab=query", fetch_redirect_response=False)
 
     def test_audit_sqlworkflow(self):
         """Test audit_sqlworkflow page."""
         data = {}
-        r = self.client.get(f"/audit_sqlworkflow/", data=data)
-        self.assertEqual(r.status_code, 200)
+        r = self.client.get("/audit_sqlworkflow/", data=data)
+        self.assertRedirects(
+            r, "/audit?tab=sql-workflow", fetch_redirect_response=False
+        )
 
     def test_groupmgmt(self):
         """Test groupmgmt page."""
@@ -284,12 +253,6 @@ class TestView(TransactionTestCase):
         data = {}
         r = self.client.get(f"/workflow/{self.audit.audit_id}/", data=data)
         self.assertRedirects(r, f"/queryapplydetail/1/", fetch_redirect_response=False)
-
-    def test_dbaprinciples(self):
-        """Test DBA principles page."""
-        data = {}
-        r = self.client.get(f"/dbaprinciples/", data=data)
-        self.assertEqual(r.status_code, 200)
 
 
 class TestSignUp(TestCase):
@@ -1079,227 +1042,6 @@ class TestWorkflowView(TransactionTestCase):
         )
 
 
-class TestOptimize(TestCase):
-    """
-    SQL optimization tests.
-    """
-
-    def setUp(self):
-        self.superuser = User(username="super", is_superuser=True)
-        self.superuser.save()
-        # Keep instance and test service consistent in CI.
-        self.master = Instance(
-            instance_name="test_instance",
-            type="master",
-            db_type="mysql",
-            host=settings.DATABASES["default"]["HOST"],
-            port=settings.DATABASES["default"]["PORT"],
-            user=settings.DATABASES["default"]["USER"],
-            password=settings.DATABASES["default"]["PASSWORD"],
-        )
-        self.master.save()
-        self.sys_config = SysConfig()
-        self.client = Client()
-        self.client.force_login(self.superuser)
-
-    def tearDown(self):
-        self.superuser.delete()
-        self.master.delete()
-        self.sys_config.replace(json.dumps({}))
-
-    @patch("sql.plugins.plugin.subprocess")
-    def test_sqladvisor(self, _subprocess):
-        """
-        Test SQLAdvisor report.
-        :return:
-        """
-        _subprocess.Popen.return_value.communicate.return_value = (
-            "some_stdout",
-            "some_stderr",
-        )
-        r = self.client.post(path="/slowquery/optimize_sqladvisor/")
-        self.assertEqual(
-            json.loads(r.content),
-            {"status": 1, "msg": "Submitted page parameters may be empty", "data": []},
-        )
-        r = self.client.post(
-            path="/slowquery/optimize_sqladvisor/",
-            data={"sql_content": "select 1;", "instance_name": "test_instance"},
-        )
-        self.assertEqual(
-            json.loads(r.content),
-            {"status": 1, "msg": "Please configure the SQLAdvisor path!", "data": []},
-        )
-        self.sys_config.set("sqladvisor", "/opt/archery/src/plugins/sqladvisor")
-        self.sys_config.get_all_config()
-        r = self.client.post(
-            path="/slowquery/optimize_sqladvisor/",
-            data={"sql_content": "select 1;", "instance_name": "test_instance"},
-        )
-        self.assertEqual(json.loads(r.content)["status"], 0)
-
-        # test db_name
-        r = self.client.post(
-            path="/slowquery/optimize_sqladvisor/",
-            data={
-                "sql_content": "select 1;",
-                "instance_name": "test_instance",
-                "db_name": "--help",
-            },
-        )
-        self.assertEqual(json.loads(r.content)["status"], 1)
-        r = self.client.post(
-            path="/slowquery/optimize_sqladvisor/",
-            data={
-                "sql_content": "select 1;",
-                "instance_name": "test_instance",
-                "db_name": ";drop table",
-            },
-        )
-        self.assertEqual(json.loads(r.content)["status"], 1)
-
-    @patch("sql.plugins.plugin.subprocess")
-    def test_soar(self, _subprocess):
-        """
-        Test SOAR report.
-        :return:
-        """
-        _subprocess.Popen.return_value.communicate.return_value = (
-            "some_stdout",
-            "some_stderr",
-        )
-        r = self.client.post(path="/slowquery/optimize_soar/")
-        self.assertEqual(
-            json.loads(r.content),
-            {"status": 1, "msg": "Submitted page parameters may be empty", "data": []},
-        )
-        r = self.client.post(
-            path="/slowquery/optimize_soar/",
-            data={
-                "sql": "select 1;",
-                "instance_name": "test_instance",
-                "db_name": "mysql",
-            },
-        )
-        self.assertEqual(
-            json.loads(r.content),
-            {
-                "status": 1,
-                "msg": "Please configure soar_path and test_dsn!",
-                "data": [],
-            },
-        )
-        self.sys_config.set("soar", "/opt/archery/src/plugins/soar")
-        self.sys_config.set("soar_test_dsn", "root:@127.0.0.1:3306/information_schema")
-        self.sys_config.get_all_config()
-        r = self.client.post(
-            path="/slowquery/optimize_soar/",
-            data={
-                "sql": "select 1;",
-                "instance_name": "test_instance",
-                "db_name": "mysql",
-            },
-        )
-        self.assertEqual(json.loads(r.content)["status"], 0)
-
-    def test_tuning(self):
-        """
-        Test SQLTuning report.
-        :return:
-        """
-        data = {
-            "sql_content": "select * from test_archery.sql_users;",
-            "instance_name": "test_instance",
-            "db_name": settings.DATABASES["default"]["TEST"]["NAME"],
-        }
-        data["instance_name"] = "test_instancex"
-        r = self.client.post(path="/slowquery/optimize_sqltuning/", data=data)
-        self.assertEqual(
-            json.loads(r.content),
-            {
-                "status": 1,
-                "msg": "Your group is not associated with this instance!",
-                "data": [],
-            },
-        )
-
-        # Get sys_parm.
-        data["instance_name"] = "test_instance"
-        data["option[]"] = "sys_parm"
-        r = self.client.post(path="/slowquery/optimize_sqltuning/", data=data)
-        self.assertListEqual(
-            list(json.loads(r.content)["data"].keys()),
-            ["basic_information", "sys_parameter", "optimizer_switch", "sqltext"],
-        )
-
-        # Get sql_plan.
-        data["option[]"] = "sql_plan"
-        r = self.client.post(path="/slowquery/optimize_sqltuning/", data=data)
-        self.assertListEqual(
-            list(json.loads(r.content)["data"].keys()),
-            ["optimizer_rewrite_sql", "plan", "sqltext"],
-        )
-
-        # Get obj_stat.
-        data["option[]"] = "obj_stat"
-        r = self.client.post(path="/slowquery/optimize_sqltuning/", data=data)
-        self.assertListEqual(
-            list(json.loads(r.content)["data"].keys()), ["object_statistics", "sqltext"]
-        )
-
-        # Get sql_profile.
-        data["option[]"] = "sql_profile"
-        r = self.client.post(path="/slowquery/optimize_sqltuning/", data=data)
-        self.assertListEqual(
-            list(json.loads(r.content)["data"].keys()), ["session_status", "sqltext"]
-        )
-
-
-class TestSchemaSync(TestCase):
-    """
-    SchemaSync tests.
-    """
-
-    def setUp(self):
-        self.superuser = User(username="super", is_superuser=True)
-        self.superuser.save()
-        # Keep instance and test service consistent in CI.
-        self.master = Instance(
-            instance_name="test_instance",
-            type="master",
-            db_type="mysql",
-            host=settings.DATABASES["default"]["HOST"],
-            port=settings.DATABASES["default"]["PORT"],
-            user=settings.DATABASES["default"]["USER"],
-            password=settings.DATABASES["default"]["PASSWORD"],
-        )
-        self.master.save()
-        self.sys_config = SysConfig()
-        self.client = Client()
-        self.client.force_login(self.superuser)
-
-    def tearDown(self):
-        self.superuser.delete()
-        self.master.delete()
-        self.sys_config.replace(json.dumps({}))
-
-    def test_schema_sync(self):
-        """
-        Test SchemaSync.
-        :return:
-        """
-        data = {
-            "instance_name": "test_instance",
-            "db_name": "test",
-            "target_instance_name": "test_instance",
-            "target_db_name": "test",
-            "sync_auto_inc": True,
-            "sync_comments": False,
-        }
-        r = self.client.post(path="/instance/schemasync/", data=data)
-        self.assertEqual(json.loads(r.content)["status"], 0)
-
-
 class TestAsync(TestCase):
     def setUp(self):
         self.now = datetime.now()
@@ -1367,322 +1109,6 @@ class TestAsync(TestCase):
             operator_display=ANY,
         )
         mock_notify.assert_called_once()
-
-
-class TestSQLAnalyze(TestCase):
-    """
-    SQL analysis tests.
-    """
-
-    def setUp(self):
-        self.superuser = User(username="super", is_superuser=True)
-        self.superuser.save()
-        # Keep instance and test service consistent in CI.
-        self.master = Instance(
-            instance_name="test_instance",
-            type="master",
-            db_type="mysql",
-            host=settings.DATABASES["default"]["HOST"],
-            port=settings.DATABASES["default"]["PORT"],
-            user=settings.DATABASES["default"]["USER"],
-            password=settings.DATABASES["default"]["PASSWORD"],
-        )
-        self.master.save()
-        self.sys_config = SysConfig()
-        self.client = Client()
-        self.client.force_login(self.superuser)
-
-    def tearDown(self):
-        self.superuser.delete()
-        self.master.delete()
-        self.sys_config.replace(json.dumps({}))
-
-    def test_generate_text_None(self):
-        """
-        Test SQL generation with empty text.
-        :return:
-        """
-        self.sys_config.set("soar", "/opt/archery/src/plugins/soar")
-        r = self.client.post(path="/sql_analyze/generate/", data={})
-        self.assertEqual(json.loads(r.content), {"rows": [], "total": 0})
-
-    def test_generate_text_not_None(self):
-        """
-        Test SQL generation with non-empty text.
-        :return:
-        """
-        self.sys_config.set("soar", "/opt/archery/src/plugins/soar")
-        text = "select * from sql_user;select * from sql_workflow;"
-        r = self.client.post(path="/sql_analyze/generate/", data={"text": text})
-        self.assertEqual(
-            json.loads(r.content),
-            {
-                "total": 2,
-                "rows": [
-                    {"sql_id": 1, "sql": "select * from sql_user;"},
-                    {"sql_id": 2, "sql": "select * from sql_workflow;"},
-                ],
-            },
-        )
-
-    def test_analyze_text_None(self):
-        """
-        Test SQL analysis with empty text.
-        :return:
-        """
-        r = self.client.post(path="/sql_analyze/analyze/", data={})
-        self.assertEqual(json.loads(r.content), {"rows": [], "total": 0})
-
-    @patch("sql.plugins.plugin.subprocess")
-    def test_analyze_text_not_None(self, _subprocess):
-        """
-        Test SQL analysis with non-empty text.
-        :return:
-        """
-        _subprocess.Popen.return_value.communicate.return_value = (
-            "some_stdout",
-            "some_stderr",
-        )
-        self.sys_config.set("soar", "/opt/archery/src/plugins/soar")
-        text = "select * from sql_user;select * from sql_workflow;"
-        instance_name = self.master.instance_name
-        db_name = settings.DATABASES["default"]["TEST"]["NAME"]
-        r = self.client.post(
-            path="/sql_analyze/analyze/",
-            data={"text": text, "instance_name": instance_name, "db_name": db_name},
-        )
-        self.assertListEqual(
-            list(json.loads(r.content)["rows"][0].keys()), ["sql_id", "sql", "report"]
-        )
-
-    @patch("sql.sql_analyze.Path")
-    @patch("sql.plugins.plugin.subprocess")
-    def test_analyze_text_evil(self, _subprocess, mock_path):
-        """
-        Test SQL analysis with malicious text input.
-        :return:
-        """
-        _subprocess.Popen.return_value.communicate.return_value = (
-            "some_stdout",
-            "some_stderr",
-        )
-        mock_path.return_value.exists.return_value = True
-        self.sys_config.set("soar", "/opt/archery/src/plugins/soar")
-        text = "/etc/passwd"
-        instance_name = self.master.instance_name
-        db_name = settings.DATABASES["default"]["TEST"]["NAME"]
-        r = self.client.post(
-            path="/sql_analyze/analyze/",
-            data={"text": text, "instance_name": instance_name, "db_name": db_name},
-        )
-        self.assertEqual(r.json()["msg"], "Invalid SQL statement")
-
-
-class TestBinLog(TestCase):
-    """
-    Binlog-related tests.
-    """
-
-    def setUp(self):
-        self.superuser = User(username="super", is_superuser=True)
-        self.superuser.save()
-        # Keep instance and test service consistent in CI.
-        self.master = Instance(
-            instance_name="test_instance",
-            type="master",
-            db_type="mysql",
-            host=settings.DATABASES["default"]["HOST"],
-            port=settings.DATABASES["default"]["PORT"],
-            user=settings.DATABASES["default"]["USER"],
-            password=settings.DATABASES["default"]["PASSWORD"],
-        )
-        self.master.save()
-        self.sys_config = SysConfig()
-        self.client = Client()
-        self.client.force_login(self.superuser)
-
-    def tearDown(self):
-        self.superuser.delete()
-        self.master.delete()
-        self.sys_config.replace(json.dumps({}))
-
-    def test_binlog_list_instance_not_exist(self):
-        """
-        Test binlog list when instance does not exist.
-        :return:
-        """
-        data = {"instance_name": "some_instance"}
-        r = self.client.post(path="/binlog/list/", data=data)
-        self.assertEqual(
-            json.loads(r.content),
-            {"status": 1, "msg": "Instance does not exist", "data": []},
-        )
-
-    def test_binlog_list_instance(self):
-        """
-        Test binlog list when instance exists.
-        :return:
-        """
-        data = {"instance_name": "test_instance"}
-        r = self.client.post(path="/binlog/list/", data=data)
-        # self.assertEqual(json.loads(r.content).get('status'), 1)
-
-    def test_my2sql_path_not_exist(self):
-        """
-        Test my2sql parsing when executable path is not configured.
-        :return:
-        """
-        data = {
-            "instance_name": "test_instance",
-            "save_sql": "false",
-            "rollback": "2sql",
-            "num": "",
-            "threads": 1,
-            "extra_info": "false",
-            "ignore_primary_key": "false",
-            "full_columns": "false",
-            "no_db_prefix": "false",
-            "file_per_table": "false",
-            "start_file": "mysql-bin.000045",
-            "start_pos": "",
-            "end_file": "mysql-bin.000045",
-            "end_pos": "",
-            "stop_time": "",
-            "start_time": "",
-            "only_schemas": "",
-            "sql_type": "",
-        }
-        r = self.client.post(path="/binlog/my2sql/", data=data)
-        self.assertEqual(
-            json.loads(r.content),
-            {"status": 1, "msg": "Executable path cannot be empty!", "data": {}},
-        )
-
-    @patch("sql.plugins.plugin.subprocess")
-    def test_my2sql(self, _subprocess):
-        """
-        Test my2sql parsing when executable path is configured.
-        :param _subprocess:
-        :return:
-        """
-        self.sys_config.set("my2sql", "/opt/archery/src/plugins/my2sql")
-        self.sys_config.get_all_config()
-        data = {
-            "instance_name": "test_instance",
-            "save_sql": "1",
-            "rollback": "2sql",
-            "num": "1",
-            "threads": 1,
-            "extra_info": "false",
-            "ignore_primary_key": "false",
-            "full_columns": "false",
-            "no_db_prefix": "false",
-            "file_per_table": "false",
-            "start_file": "mysql-bin.000045",
-            "start_pos": "",
-            "end_file": "mysql-bin.000046",
-            "end_pos": "",
-            "stop_time": "",
-            "start_time": "",
-            "only_schemas": "",
-            "sql_type": "",
-        }
-        r = self.client.post(path="/binlog/my2sql/", data=data)
-        self.assertEqual(json.loads(r.content), {"status": 0, "msg": "ok", "data": []})
-
-    @patch("builtins.open")
-    @patch("sql.plugins.plugin.subprocess")
-    def test_my2sql_file(self, _open, _subprocess):
-        """
-        Test file save.
-        :param _subprocess:
-        :return:
-        """
-        _subprocess.Popen.return_value.communicate.return_value = (
-            "some_stdout",
-            "some_stderr",
-        )
-        self.sys_config.set("my2sql", "/opt/archery/src/plugins/my2sql")
-        args = {
-            "instance_name": "test_instance",
-            "save_sql": "1",
-            "rollback": "2sql",
-            "num": "1",
-            "threads": 1,
-            "add-extraInfo": "false",
-            "ignore-primaryKey-forInsert": "false",
-            "full-columns": "false",
-            "do-not-add-prifixDb": "false",
-            "file-per-table": "false",
-            "start-file": "mysql-bin.000045",
-            "start-pos": "",
-            "stop-file": "mysql-bin.000045",
-            "stop-pos": "",
-            "stop-datetime": "",
-            "start-datetime": "",
-            "databases": "",
-            "sql": "",
-            "instance": self.master,
-        }
-        r = my2sql_file(args=args, user=self.superuser)
-        self.assertEqual(self.superuser, r[0])
-
-    def test_del_binlog_instance_not_exist(self):
-        """
-        Test deleting binlog when instance does not exist.
-        :return:
-        """
-        data = {
-            "instance_id": 0,
-            "binlog": "mysql-bin.000001",
-        }
-        r = self.client.post(path="/binlog/del_log/", data=data)
-        self.assertEqual(
-            json.loads(r.content),
-            {"status": 1, "msg": "Instance does not exist", "data": []},
-        )
-
-    def test_del_binlog_binlog_not_exist(self):
-        """
-        Test deleting binlog when binlog is not provided.
-        :return:
-        """
-        data = {"instance_id": self.master.id, "binlog": ""}
-        r = self.client.post(path="/binlog/del_log/", data=data)
-        self.assertEqual(
-            json.loads(r.content),
-            {"status": 1, "msg": "Error: no binlog selected!", "data": ""},
-        )
-
-    @patch("sql.engines.mysql.MysqlEngine.query")
-    @patch("sql.engines.get_engine")
-    def test_del_binlog(self, _get_engine, _query):
-        """
-        Test deleting binlog.
-        :return:
-        """
-        data = {"instance_id": self.master.id, "binlog": "mysql-bin.000001"}
-        _query.return_value = ResultSet(full_sql="select 1")
-        r = self.client.post(path="/binlog/del_log/", data=data)
-        self.assertEqual(
-            json.loads(r.content), {"status": 0, "msg": "Cleanup succeeded", "data": ""}
-        )
-
-    @patch("sql.engines.mysql.MysqlEngine.query")
-    @patch("sql.engines.get_engine")
-    def test_del_binlog_wrong(self, _get_engine, _query):
-        """
-        Test deleting binlog with failure.
-        :return:
-        """
-        data = {"instance_id": self.master.id, "binlog": "mysql-bin.000001"}
-        _query.return_value = ResultSet(full_sql="select 1")
-        _query.return_value.error = "cleanup failed"
-        r = self.client.post(path="/binlog/del_log/", data=data)
-        self.assertEqual(
-            json.loads(r.content),
-            {"status": 2, "msg": "Cleanup failed, Error: cleanup failed", "data": ""},
-        )
 
 
 class TestParam(TestCase):
@@ -1918,7 +1344,9 @@ class TestDataDictionary(TestCase):
         :return:
         """
         r = self.client.get(path="/data_dictionary/")
-        self.assertEqual(r.status_code, 200)
+        self.assertRedirects(
+            r, "/inventory/data-dictionary", fetch_redirect_response=False
+        )
 
     @patch("sql.data_dictionary.get_engine")
     def test_table_list(self, _get_engine):

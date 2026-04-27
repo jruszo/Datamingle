@@ -17,9 +17,6 @@ RUN apt-get update \
     && pip install -r /opt/datamingle/requirements.txt \
     && cp -f /opt/datamingle/src/docker/nginx.conf /etc/nginx/ \
     && cp -f /opt/datamingle/src/docker/supervisord.conf /etc/ \
-    && mv /opt/sqladvisor /opt/datamingle/src/plugins/ \
-    && mv /opt/soar /opt/datamingle/src/plugins/ \
-    && mv /opt/my2sql /opt/datamingle/src/plugins/ \
     && apt-get -yq remove gcc curl \
     && apt-get clean \
     && rm -rf /var/cache/apt/* \

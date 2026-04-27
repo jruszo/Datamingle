@@ -193,18 +193,14 @@ export const systemSettingsSections: SystemSettingsSectionDefinition[] = [
   {
     id: 'integrations',
     title: 'Integrations And AI',
-    description: 'Maintain analyzer binaries, OpenAI defaults, and related integration endpoints used by Datamingle.',
+    description: 'Maintain migration binaries, OpenAI defaults, and related integration endpoints used by Datamingle.',
     fields: [
-      { key: 'sqladvisor', label: 'SQLAdvisor binary path', input: 'text' },
-      { key: 'soar', label: 'SOAR binary path', input: 'text' },
-      { key: 'soar_test_dsn', label: 'SOAR test DSN', input: 'text' },
       { key: 'gh_ost', label: 'gh-ost binary path', input: 'text' },
       { key: 'pt_osc', label: 'pt-online-schema-change binary path', input: 'text' },
       { key: 'openai_base_url', label: 'OpenAI base URL', input: 'text' },
       { key: 'openai_api_key', label: 'OpenAI API key', input: 'password' },
       { key: 'default_chat_model', label: 'Default chat model', input: 'text', defaultValue: 'gpt-3.5-turbo' },
       { key: 'default_query_template', label: 'Default query template', input: 'textarea', rows: 5, defaultValue: DEFAULT_QUERY_TEMPLATE },
-      { key: 'my2sql', label: 'my2sql binary path', input: 'text' },
     ],
   },
   {

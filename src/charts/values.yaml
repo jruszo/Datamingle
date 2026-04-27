@@ -90,9 +90,6 @@ mysql:
       max_binlog_size         = 500M
       character-set-server = utf8mb4
       collation-server = utf8mb4_general_ci
-      slow_query_log_file = mysql-slow.log
-      slow_query_log      = 1
-      long_query_time = 1
       [client]
       default-character-set=utf8mb4
       socket=/opt/bitnami/mysql/tmp/mysql.sock
@@ -142,12 +139,6 @@ volumeMounts:
     subPath: local_settings.py
     mountPath: /opt/archery/local_settings.py
   - name: archery-settings
-    subPath: soar.yaml
-    mountPath: /etc/soar.yaml
-  - name: archery-settings
-    subPath: analysis_slow_query.sh
-    mountPath: /opt/archery/src/script/analysis_slow_query.sh
-  - name: archery-settings
     subPath: startup.sh
     mountPath: /opt/archery/src/docker/startup.sh
   - name: archery-settings
@@ -185,88 +176,3 @@ configMap:
     local_settings.py: |-
         # -*- coding: UTF-8 -*-
         # override your configs here
-    soar.yaml: |-
-        # Whether test and production environments are allowed to share the same config
-        allow-online-as-test: false
-        # Whether to clean temporary files generated during testing
-        drop-test-temporary: true
-        # Syntax-check helper mode
-        only-syntax-check: false
-        sampling-data-factor: 100
-        sampling: false
-        sampling-statistic-target: 100
-        profiling: false
-        trace: false
-        # Log level [0:Emergency, 1:Alert, 2:Critical, 3:Error, 4:Warning, 5:Notice, 6:Informational, 7:Debug]
-        log-level: 3
-        log-output: /opt/archery/logs/soar.log
-        # Output format for optimization suggestions
-        report-type: markdown
-        ignore-rules:
-        - ""
-        # Heuristic algorithm settings
-        max-join-table-count: 5
-        max-group-by-cols-count: 5
-        max-distinct-count: 5
-        max-index-cols-count: 5
-        max-total-rows: 9999999
-        spaghetti-query-length: 2048
-        allow-drop-index: false
-        # EXPLAIN settings
-        explain-sql-report-type: pretty
-        explain-type: extended
-        explain-format: traditional
-        explain-warn-select-type:
-        - ""
-        explain-warn-access-type:
-        - ALL
-        explain-max-keys: 3
-        explain-min-keys: 0
-        explain-max-rows: 10000
-        explain-warn-extra:
-        - ""
-        explain-max-filtered: 100
-        explain-warn-scalability:
-        - O(n)
-        query: ""
-        list-heuristic-rules: false
-        list-test-sqls: false
-        verbose: true
-    analysis_slow_query.sh: |-
-        #!/bin/bash
-        DIR="$( cd "$( dirname "$0"  )" && pwd  )"
-        cd $DIR
-        
-        # Configure Archery database connection
-        monitor_db_host="archery-mysql"
-        monitor_db_port=3306
-        monitor_db_user="root"
-        monitor_db_password="MYSQL_ROOT_PASSWORD"
-        monitor_db_database="archery"
-        
-        # Slow log path of the analyzed instance
-        slowquery_file="/home/mysql/log_slow.log"
-        pt_query_digest="/usr/bin/pt-query-digest"
-        
-        # Connection identifier of the analyzed instance
-        hostname="mysql_host:mysql_port" # Must match Archery instance config for filtering
-        
-        # Get last analysis time; for initial full analysis, remove last_analysis_time_$hostname
-        if [ -s last_analysis_time_$hostname ]; then
-            last_analysis_time=`cat last_analysis_time_$hostname`
-        else
-            last_analysis_time='1000-01-01 00:00:00'
-        fi
-        
-        # Collect logs
-        # Add --no-version-check for RDS
-        $pt_query_digest \
-        --user=$monitor_db_user --password=$monitor_db_password --port=$monitor_db_port \
-        --review h=$monitor_db_host,D=$monitor_db_database,t=mysql_slow_query_review  \
-        --history h=$monitor_db_host,D=$monitor_db_database,t=mysql_slow_query_review_history  \
-        --no-report --limit=100% --charset=utf8 \
-        --since "$last_analysis_time" \
-        --filter="\$event->{Bytes} = length(\$event->{arg}) and \$event->{hostname}=\"$hostname\"  and \$event->{client}=\$event->{ip} " \
-        $slowquery_file > /tmp/analysis_slow_query.log
-        
-        echo `date +"%Y-%m-%d %H:%M:%S"`>last_analysis_time_$hostname

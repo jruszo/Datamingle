@@ -159,18 +159,6 @@ def get_chart_data(start_date, end_date):
     value = [int(row[1]) for row in data["rows"]]
     pie5 = create_pie_chart(attr, value)
 
-    # Slow query stats by db/user
-    data = chart_dao.slow_query_count_by_db_by_user(start_date, end_date)
-    attr = [row[0] for row in data["rows"]]
-    value = [int(row[1]) for row in data["rows"]]
-    pie3 = create_pie_chart(attr, value)
-
-    # Slow query stats by db
-    data = chart_dao.slow_query_count_by_db(start_date, end_date)
-    attr = [row[0] for row in data["rows"]]
-    value = [row[1] for row in data["rows"]]
-    bar3 = create_bar_chart(attr, value)
-
     # SQL deployment workflows
     data = chart_dao.query_sql_prod_bill(start_date, end_date)
     attr = [row[0] for row in data["rows"]]
@@ -180,11 +168,9 @@ def get_chart_data(start_date, end_date):
     chart = {
         "bar1": bar1.render_embed(),
         "bar2": bar2.render_embed(),
-        "bar3": bar3.render_embed(),
         "bar5": bar5.render_embed(),
         "pie1": pie1.render_embed(),
         "pie2": pie2.render_embed(),
-        "pie3": pie3.render_embed(),
         "pie4": pie4.render_embed(),
         "pie5": pie5.render_embed(),
         "line1": line1.render_embed(),

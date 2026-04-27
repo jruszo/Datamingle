@@ -57,7 +57,6 @@ services:
       - "9123:9123"
     volumes:
       - "./datamingle/settings.py:/opt/datamingle/local_settings.py"
-      - "./datamingle/soar.yaml:/etc/soar.yaml"
       - "./datamingle/docs.md:/opt/datamingle/docs/docs.md"
       - "./datamingle/downloads:/opt/datamingle/downloads"
       - "./datamingle/sql/migrations:/opt/datamingle/sql/migrations"

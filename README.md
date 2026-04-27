@@ -23,13 +23,13 @@ Original project copyright and license notices are preserved in this repository.
 Feature Matrix
 ====
 
-| Database   | Query | Review | Execute | Backup | Data Dictionary | Slow Log | Session Management | Account Management | Parameter Management | Data Archive |
-|------------| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| MySQL      | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ |
-| MsSQL      | √ | × | √ | × | √ | × | × | × | × | × |
-| Redis      | √ | × | √ | × | × | × | × | × | × | × |
-| PgSQL      | √ | × | √ | × | × | × | × | × | × | × |
-| Oracle     | √ | √ | √ | √ | √ | × | √ | × | × | × |
+| Database   | Query | Review | Execute | Backup | Data Dictionary | Session Management | Account Management | Parameter Management | Data Archive |
+|------------| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| MySQL      | √ | √ | √ | √ | √ | √ | √ | √ | √ |
+| MsSQL      | √ | × | √ | × | √ | × | × | × | × |
+| Redis      | √ | × | √ | × | × | × | × | × | × |
+| PgSQL      | √ | × | √ | × | × | × | × | × | × |
+| Oracle     | √ | √ | √ | √ | √ | √ | × | × | × |
 | MongoDB    | √ | √ | √ | × | × | × | √ | √ | × | × |
 | Phoenix    | √ | × | √ | × | × | × | × | × | × | × |
 | ODPS       | √ | × | × | × | × | × | × | × | × | × |
@@ -195,18 +195,12 @@ Dependencies
 - ClickHouse connector [clickhouse-driver](https://github.com/mymarilyn/clickhouse-driver)
 - WorkOS auth [workos-python](https://github.com/workos/workos-python)
 - SQL parse/split/type detection [sqlparse](https://github.com/andialbrecht/sqlparse)
-- MySQL binlog parse/rollback [python-mysql-replication](https://github.com/noplay/python-mysql-replication)
 - Serialization [simplejson](https://github.com/simplejson/simplejson)
 - Time utilities [python-dateutil](https://github.com/paxan/python-dateutil)
 
 ### Functional Dependencies
 - Visualization [pyecharts](https://github.com/pyecharts/pyecharts)
 - MySQL review/execute/backup [goInception](https://github.com/hanchuanchuan/goInception) | [inception](https://github.com/hhyo/inception)
-- MySQL index optimization [SQLAdvisor](https://github.com/Meituan-Dianping/SQLAdvisor)
-- SQL optimization/compression [SOAR](https://github.com/XiaoMi/soar)
-- My2SQL [my2sql](https://github.com/liuhr/my2sql)
-- Schema sync [SchemaSync](https://github.com/hhyo/SchemaSync)
-- Slow log parsing and display [pt-query-digest](https://www.percona.com/doc/percona-toolkit/3.0/pt-query-digest.html) | [aquila_v2](https://github.com/thinkdb/aquila_v2)
 - Large table DDL [gh-ost](https://github.com/github/gh-ost) | [pt-online-schema-change](https://www.percona.com/doc/percona-toolkit/3.0/pt-online-schema-change.html)
 - MyBatis XML parsing [mybatis-mapper2sql](https://github.com/hhyo/mybatis-mapper2sql)
 - RDS management [aliyun-openapi-python-sdk](https://github.com/aliyun/aliyun-openapi-python-sdk)
