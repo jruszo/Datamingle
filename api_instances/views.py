@@ -304,7 +304,7 @@ def _validate_account_password(password):
     try:
         validate_password(password, user=None, password_validators=None)
     except DjangoValidationError as exc:
-        raise serializers.ValidationError({"password": list(exc.messages)})
+        raise serializers.ValidationError({"password": list(exc.messages)}) from exc
 
 
 def _mysql_user_host(user, host, user_host=""):
@@ -988,12 +988,17 @@ class DataDictionaryExport(views.APIView):
                 raise serializers.ValidationError(
                     {"errors": "Invalid instance name or database name."}
                 )
-            response = FileResponse(open(full_path, "rb"))
-            response["Content-Type"] = "application/octet-stream"
-            response["Content-Disposition"] = (
-                f'attachment;filename="{quote(instance.instance_name)}_{quote(db_name)}.html"'
-            )
-            return response
+            export_file = open(full_path, "rb")
+            try:
+                response = FileResponse(export_file)
+                response["Content-Type"] = "application/octet-stream"
+                response["Content-Disposition"] = (
+                    f'attachment;filename="{quote(instance.instance_name)}_{quote(db_name)}.html"'
+                )
+                return response
+            except Exception:
+                export_file.close()
+                raise
 
         return success_response(
             detail=(

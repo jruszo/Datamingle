@@ -267,7 +267,7 @@ async function exportSelectedDictionary() {
     anchor.remove()
     setTimeout(() => {
       window.URL.revokeObjectURL(objectUrl)
-    }, 0)
+    }, 60000)
     feedback.value = 'Data dictionary export prepared.'
   } catch (errorValue) {
     error.value = toUserFacingMessage(errorValue, 'Failed to export data dictionary.')

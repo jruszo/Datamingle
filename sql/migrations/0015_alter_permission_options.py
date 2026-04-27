@@ -41,7 +41,9 @@ def remove_retired_sql_permissions(apps, schema_editor):
 def recreate_retired_sql_permissions(apps, schema_editor):
     ContentType = apps.get_model("contenttypes", "ContentType")
     Permission = apps.get_model("auth", "Permission")
-    content_type = ContentType.objects.get(app_label="sql", model="permission")
+    content_type, _created = ContentType.objects.get_or_create(
+        app_label="sql", model="permission"
+    )
     for codename in RETIRED_SQL_PERMISSION_CODENAMES:
         Permission.objects.get_or_create(
             content_type=content_type,

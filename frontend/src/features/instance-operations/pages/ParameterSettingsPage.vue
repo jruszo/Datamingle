@@ -345,7 +345,7 @@ watch([selectedInstanceId, editableFilter], () => {
                       </span>
                     </div>
                   </td>
-                  <td class="max-w-[12rem] truncate px-4 py-3 text-slate-600">{{ param.runtime_value ?? '-' }}</td>
+                  <td class="max-w-[12rem] truncate px-4 py-3 text-slate-600">{{ param.runtime_value || '-' }}</td>
                   <td class="max-w-[12rem] truncate px-4 py-3 text-slate-600">{{ param.default_value || '-' }}</td>
                   <td class="max-w-[14rem] truncate px-4 py-3 text-slate-600">{{ param.valid_values || '-' }}</td>
                   <td class="px-4 py-3 text-right">

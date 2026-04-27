@@ -253,7 +253,10 @@ class InstanceParamEditSerializer(serializers.Serializer):
         return variable_name
 
     def validate_runtime_value(self, value):
-        return value.strip()
+        runtime_value = value.strip()
+        if not runtime_value:
+            raise serializers.ValidationError("Runtime value cannot be blank.")
+        return runtime_value
 
 
 class InstanceDiagnosticListSerializer(serializers.Serializer):

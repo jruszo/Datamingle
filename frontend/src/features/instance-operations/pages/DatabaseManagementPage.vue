@@ -32,6 +32,7 @@ const submitting = ref(false)
 const error = ref('')
 const feedback = ref('')
 const activeFormMode = ref<FormMode | null>(null)
+const suppressDatabaseWatcher = ref(false)
 
 const form = reactive({
   dbName: '',
@@ -169,8 +170,13 @@ async function loadDatabases() {
 
 async function refreshDatabases() {
   feedback.value = ''
-  await loadInstances()
-  await loadDatabases()
+  suppressDatabaseWatcher.value = true
+  try {
+    await loadInstances()
+    await loadDatabases()
+  } finally {
+    suppressDatabaseWatcher.value = false
+  }
 }
 
 async function submitDatabaseForm() {
@@ -227,6 +233,9 @@ onMounted(async () => {
 })
 
 watch([selectedInstanceId, savedOnly], () => {
+  if (suppressDatabaseWatcher.value) {
+    return
+  }
   if (!canManageDatabases.value) {
     return
   }
