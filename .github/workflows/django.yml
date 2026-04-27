@@ -67,11 +67,18 @@ jobs:
         EOF
         docker cp my.cnf mysql:/etc/mysql/conf.d/
         docker restart mysql
+        MAX_ATTEMPTS=30
+        attempt=1
         until docker exec mysql mysqladmin ping -h127.0.0.1 -uroot -proot --silent; do
           if [ "$(docker inspect -f '{{.State.Running}}' mysql 2>/dev/null)" != "true" ]; then
             docker logs mysql
             exit 1
           fi
+          if [ "$attempt" -ge "$MAX_ATTEMPTS" ]; then
+            docker logs mysql
+            exit 1
+          fi
+          attempt=$((attempt + 1))
           sleep 2
         done
     
@@ -94,7 +101,7 @@ jobs:
 
     - name: Run Tests
       env:
-        SECRET_KEY: XViQ1NfutP1RraqhHV3M3akMsB3JWZr9
+        SECRET_KEY: ${{ secrets.SECRET_KEY }}
       run: |
         python manage.py makemigrations
         python manage.py makemigrations sql

@@ -769,14 +769,14 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                 )
                 rowid += 1
             except Exception as e:
-                logger.warning(f"MSSQL USE statement failed: {traceback.format_exc()}")
-                execute_result.error = str(e)
+                logger.warning("MSSQL USE statement failed", exc_info=True)
+                execute_result.error = "Execution failed"
                 execute_result.rows.append(
                     ReviewResult(
                         id=rowid,
                         errlevel=2,
                         stagestatus="Execute Failed",
-                        errormessage=f"Exception info: {e}",
+                        errormessage="Execution failed",
                         sql=use_sql,
                         affected_rows=0,
                         execute_time=0,
@@ -803,18 +803,15 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                     )
                 )
             except Exception as e:
-                logger.warning(
-                    f"Mssql command execution failed, SQL: {statement}, "
-                    f"error: {traceback.format_exc()}"
-                )
-                execute_result.error = str(e)
+                logger.warning("Mssql command execution failed", exc_info=True)
+                execute_result.error = "Execution failed"
                 # Append failed statement to execution results.
                 execute_result.rows.append(
                     ReviewResult(
                         id=rowid,
                         errlevel=2,
                         stagestatus="Execute Failed",
-                        errormessage=f"Exception info: {e}",
+                        errormessage="Execution failed",
                         sql=statement,
                         affected_rows=0,
                         execute_time=0,

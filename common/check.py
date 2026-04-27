@@ -4,6 +4,7 @@ import traceback
 
 import MySQLdb
 import simplejson as json
+from django.core.exceptions import ValidationError
 from django.http import HttpResponse
 
 from common.utils.permission import superuser_required
@@ -13,6 +14,7 @@ from common.utils.sendmsg import MsgSender
 from sql.storage import DynamicStorage
 
 logger = logging.getLogger("default")
+VALID_STORAGE_TYPES = {"sftp", "s3c", "azure"}
 
 
 def _parse_bool(value):
@@ -44,10 +46,10 @@ def validate_go_inception_payload(payload):
             connect_timeout=5,
         )
         cur = conn.cursor()
-    except Exception as e:
+    except Exception:
         logger.error(traceback.format_exc())
         result["status"] = 1
-        result["msg"] = "Unable to connect to goInception\n{}".format(str(e))
+        result["msg"] = "Unable to connect to goInception"
         return result
     else:
         cur.close()
@@ -63,12 +65,10 @@ def validate_go_inception_payload(payload):
             connect_timeout=5,
         )
         cur = conn.cursor()
-    except Exception as e:
+    except Exception:
         logger.error(traceback.format_exc())
         result["status"] = 1
-        result["msg"] = "Unable to connect to goInception backup database\n{}".format(
-            str(e)
-        )
+        result["msg"] = "Unable to connect to goInception backup database"
     else:
         cur.close()
         conn.close()
@@ -112,7 +112,8 @@ def validate_email_payload(payload, user_email):
     sender_response = sender.send_email(subj, bd, [user_email])
     if sender_response != "success":
         result["status"] = 1
-        result["msg"] = sender_response
+        result["msg"] = "Email delivery failed; check server logs."
+        logger.error("Email delivery test failed: %s", sender_response)
         return result
     return result
 
@@ -120,12 +121,17 @@ def validate_email_payload(payload, user_email):
 def validate_file_storage_payload(payload):
     result = {"status": 0, "msg": "ok", "data": []}
     storage_type = payload.get("storage_type")
+    if storage_type not in VALID_STORAGE_TYPES:
+        result["status"] = 1
+        result["msg"] = "Invalid storage type."
+        return result
 
     max_export_rows = payload.get("max_export_rows", "10000")
     max_export_rows = max_export_rows if max_export_rows else "10000"
     try:
         if not str(max_export_rows).isdigit():
             raise TypeError("max_export_rows must be an integer")
+        max_export_rows = int(max_export_rows)
     except TypeError as e:
         result["status"] = 1
         result["msg"] = f"Invalid parameter type: {str(e)}"
@@ -143,6 +149,7 @@ def validate_file_storage_payload(payload):
 
     config_dict = {
         "storage_type": storage_type,
+        "max_export_rows": max_export_rows,
         "sftp_host": payload.get("sftp_host", ""),
         "sftp_port": payload.get("sftp_port", 22),
         "sftp_user": payload.get("sftp_user", ""),
@@ -174,11 +181,10 @@ def validate_file_storage_payload(payload):
             logging.debug("Storage connectivity test returned an error.")
         else:
             logging.info("Storage connectivity test succeeded")
-    except Exception as e:
+    except Exception:
         result["status"] = 1
         result["msg"] = "Storage connectivity test raised an exception."
-        error_msg = f"Connection test exception: {str(e)}"
-        logging.error(error_msg, exc_info=True)
+        logger.error("Storage connectivity test failed", exc_info=True)
 
     return result
 
@@ -202,18 +208,31 @@ def email(request):
 def instance(request):
     result = {"status": 0, "msg": "ok", "data": []}
     instance_id = request.POST.get("instance_id")
-    instance = Instance.objects.get(id=instance_id)
+    try:
+        instance = Instance.objects.get(id=instance_id)
+    except (Instance.DoesNotExist, ValueError, TypeError, ValidationError):
+        logger.exception("Instance lookup failed for connection test")
+        result["status"] = 1
+        result["msg"] = "Instance not found"
+        return HttpResponse(json.dumps(result), content_type="application/json")
+
     try:
         engine = get_engine(instance=instance)
         test_result = engine.test_connection()
         if test_result.error:
-            result["status"] = 1
-            result["msg"] = "Unable to connect to instance,\n{}".format(
-                test_result.error
+            logger.error(
+                "Instance connection test returned an error for instance_id=%s",
+                instance_id,
             )
-    except Exception as e:
+            result["status"] = 1
+            result["msg"] = "Unable to connect to instance"
+    except Exception:
+        logger.exception(
+            "Instance connection test raised an exception for instance_id=%s",
+            instance_id,
+        )
         result["status"] = 1
-        result["msg"] = "Unable to connect to instance,\n{}".format(str(e))
+        result["msg"] = "Unable to connect to instance"
     # Return result
     return HttpResponse(json.dumps(result), content_type="application/json")
 

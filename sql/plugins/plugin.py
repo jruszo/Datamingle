@@ -41,6 +41,12 @@ class Plugin:
             }
         # Check disabled arguments.
         for arg in args.keys():
+            if not SAFE_ARGUMENT_RE.fullmatch(str(arg)):
+                return {
+                    "status": 1,
+                    "msg": "Argument {arg} has an invalid name".format(arg=arg),
+                    "data": {},
+                }
             if arg in self.disable_args:
                 return {
                     "status": 1,
@@ -75,7 +81,7 @@ class Plugin:
         cmd_args = [self.path]
         for arg, value in args.items():
             if not SAFE_ARGUMENT_RE.fullmatch(str(arg)):
-                raise ValueError(f"Invalid argument name: {arg}")
+                raise ValueError(f"Argument {arg} has an invalid name")
             if not value:
                 continue
             cmd_args.append(f"-{arg}")

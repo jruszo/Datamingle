@@ -174,13 +174,13 @@ class DorisEngine(MysqlEngine):
                 )
             except Exception as e:
                 logger.warning("%s command execution failed", self.name, exc_info=True)
-                execute_result.error = str(e)
+                execute_result.error = "Execution failed"
                 execute_result.rows.append(
                     ReviewResult(
                         id=rowid,
                         errlevel=2,
                         stagestatus="Execute Failed",
-                        errormessage=f"Exception: {e}",
+                        errormessage="Execution failed",
                         sql=statement,
                         affected_rows=effect_row,
                         execute_time=t.cost,

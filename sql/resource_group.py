@@ -1,6 +1,5 @@
 # -*- coding: UTF-8 -*-
 import logging
-import traceback
 from itertools import chain
 
 import simplejson as json

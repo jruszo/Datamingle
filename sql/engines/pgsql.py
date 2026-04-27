@@ -361,17 +361,15 @@ class PgSQLEngine(EngineBase):
             conn.commit()
         except Exception as e:
             conn.rollback()
-            logger.warning(
-                f"PGSQL command execution failed, statement: {statement or sql}, details: {traceback.format_exc()}"
-            )
-            execute_result.error = str(e)
+            logger.warning("PGSQL command execution failed", exc_info=True)
+            execute_result.error = "Execution failed"
             # Append current failed statement to execution results.
             execute_result.rows.append(
                 ReviewResult(
                     id=line,
                     errlevel=2,
                     stagestatus="Execute Failed",
-                    errormessage=f"Exception: {e}",
+                    errormessage="Execution failed",
                     sql=statement or sql,
                     affected_rows=0,
                     execute_time=0,

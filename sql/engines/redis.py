@@ -263,17 +263,15 @@ class RedisEngine(EngineBase):
                 )
                 line += 1
         except Exception as e:
-            logger.warning(
-                f"Redis command execution failed, statement: {cmd or sql}, details: {traceback.format_exc()}"
-            )
+            logger.warning("Redis command execution failed", exc_info=True)
             # Append current failed statement to execution result.
-            execute_result.error = str(e)
+            execute_result.error = "Execution failed"
             execute_result.rows.append(
                 ReviewResult(
                     id=line,
                     errlevel=2,
                     stagestatus="Execute Failed",
-                    errormessage=f"Exception: {e}",
+                    errormessage="Execution failed",
                     sql=cmd,
                     affected_rows=0,
                     execute_time=0,

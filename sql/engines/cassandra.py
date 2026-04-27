@@ -216,16 +216,14 @@ class CassandraEngine(EngineBase):
                     )
                 )
             except Exception as e:
-                logger.warning(
-                    f"{self.name} command execution error, statement: {sql}, details: {traceback.format_exc()}"
-                )
-                execute_result.error = str(e)
+                logger.warning("%s command execution error", self.name, exc_info=True)
+                execute_result.error = "Execution failed"
                 execute_result.rows.append(
                     ReviewResult(
                         id=rowid,
                         errlevel=2,
                         stagestatus="Execute Failed",
-                        errormessage=f"Exception: {e}",
+                        errormessage="Execution failed",
                         sql=statement,
                         affected_rows=0,
                         execute_time=0,

@@ -588,6 +588,12 @@ class PermissionRequestReviewCreate(views.APIView):
                     action, request.user, data.get("audit_remark", "")
                 )
             except AuditException as exc:
+                logger.exception(
+                    "Permission request audit failed for request_id=%s user=%s action=%s",
+                    request_id,
+                    request.user,
+                    action,
+                )
                 raise serializers.ValidationError({"errors": "Audit failed."})
             _permission_request_audit_callback(
                 auditor.audit.workflow_id, auditor.audit.current_status

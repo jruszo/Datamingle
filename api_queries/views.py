@@ -339,12 +339,11 @@ class QueryDescribe(views.APIView):
                 {"errors": "The instance is not associated with your group."}
             )
 
-        query_engine = get_engine(instance=instance)
-        db_name = query_engine.escape_string(data["db_name"])
-        schema_name = query_engine.escape_string(data.get("schema_name", ""))
-        tb_name = query_engine.escape_string(data["tb_name"])
-
         try:
+            query_engine = get_engine(instance=instance)
+            db_name = query_engine.escape_string(data["db_name"])
+            schema_name = query_engine.escape_string(data.get("schema_name", ""))
+            tb_name = query_engine.escape_string(data["tb_name"])
             query_result = query_engine.describe_table(
                 db_name=db_name,
                 tb_name=tb_name,
@@ -352,6 +351,9 @@ class QueryDescribe(views.APIView):
             )
         except Exception as exc:
             raise serializers.ValidationError({"errors": "Operation failed."})
+        finally:
+            if "query_engine" in locals():
+                query_engine.close()
 
         if query_result.error:
             raise serializers.ValidationError({"errors": query_result.error})

@@ -1,4 +1,5 @@
 import logging
+import hashlib
 import os
 import re
 from urllib.parse import quote
@@ -152,8 +153,11 @@ def _data_dictionary_instance(user, instance_id):
 
 def _safe_dictionary_export_path(base_dir, instance_name, db_name):
     base_dir = os.path.realpath(base_dir)
-    safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{instance_name}_{db_name}")[:180]
-    if not safe_name or safe_name in {".", ".."}:
+    original_name = f"{instance_name}_{db_name}"
+    fingerprint = hashlib.sha256(original_name.encode("utf-8")).hexdigest()[:12]
+    safe_stem = re.sub(r"[^A-Za-z0-9_.-]", "_", original_name).strip("._")
+    safe_name = f"{safe_stem[:167]}_{fingerprint}" if safe_stem else fingerprint
+    if safe_name in {".", ".."}:
         return ""
     full_path = os.path.realpath(os.path.join(base_dir, f"{safe_name}.html"))
     if os.path.commonpath([base_dir, full_path]) != base_dir:
@@ -955,7 +959,7 @@ class DataDictionaryExport(views.APIView):
         try:
             query_engine = get_engine(instance=instance)
             if db_name:
-                databases = [query_engine.escape_string(db_name)]
+                databases = [db_name]
             elif request.user.is_superuser:
                 databases = query_engine.get_all_databases().rows
             else:

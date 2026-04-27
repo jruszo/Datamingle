@@ -12,8 +12,8 @@ def get_wx_access_token():
     # Read from cache first
     try:
         token = cache.get("wx_access_token")
-    except Exception as e:
-        logger.error(f"Failed to read WeCom token from cache: {e}")
+    except Exception:
+        logger.exception("Failed to read WeCom token from cache")
         token = None
     if token:
         return token

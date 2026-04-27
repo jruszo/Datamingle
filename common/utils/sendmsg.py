@@ -200,7 +200,10 @@ class MsgSender(object):
         ):
             logger.debug("Feishu webhook sent successfully")
         else:
-            logger.error("Feishu webhook failed: response=%s", r_json)
+            logger.error(
+                "Feishu webhook failed: code=%s",
+                r_json.get("code") or r_json.get("StatusCode") or r_json.get("status"),
+            )
 
     @staticmethod
     def send_feishu_user(title, content, open_id, user_mail):
@@ -214,16 +217,17 @@ class MsgSender(object):
             "msg_type": "text",
             "content": {"text": f"{title}\n{content}"},
         }
-        r = requests.post(
+        response = requests.post(
             url=url,
             json=data,
             headers={"Authorization": "Bearer " + get_feishu_access_token()},
-        ).json()
+        )
+        r = response.json()
         if r["code"] == 0:
-            logger.debug(
-                f"Feishu direct message sent successfully\nTarget:{url}\nContent:{content}"
-            )
+            logger.debug("Feishu direct message sent successfully")
         else:
             logger.error(
-                f"Feishu direct message failed\nRequest url:{url}\nRequest data:{data}\nResponse:{r}"
+                "Feishu direct message failed: status=%s code=%s",
+                response.status_code,
+                r.get("code"),
             )
