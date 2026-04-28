@@ -1,14 +1,12 @@
 # -*- coding: UTF-8 -*-
 
 from django.urls import path
-from django.views.i18n import JavaScriptCatalog
 
 import sql.instance_database
 import sql.query_privileges
-from common import auth, config, workflow, dashboard, check
+from common import config, workflow, check
 from common.twofa import totp
 from sql import (
-    views,
     sql_workflow,
     query,
     instance,
@@ -24,51 +22,12 @@ from sql import (
 from sql.utils import tasks
 
 urlpatterns = [
-    path("", views.index),
-    path("jsi18n/", JavaScriptCatalog.as_view(), name="javascript-catalog"),
-    path("index/", views.index),
-    path("login/", views.login, name="login"),
-    path("login/2fa/", views.twofa, name="twofa"),
-    path("logout/", auth.sign_out),
-    path("signup/", auth.sign_up),
-    path("sqlworkflow/", views.sqlworkflow),
-    path("submitsql/", views.submit_sql),
-    path("editsql/", views.submit_sql),
-    path("submitotherinstance/", views.submit_sql),
-    path("detail/<int:workflow_id>/", views.detail, name="detail"),
     path("downloadfile/", offlinedownload.offline_file_download),
     path("passed/", sql_workflow.passed),
     path("execute/", sql_workflow.execute),
     path("timingtask/", sql_workflow.timing_task),
     path("alter_run_date/", sql_workflow.alter_run_date),
     path("cancel/", sql_workflow.cancel),
-    path("rollback/", views.rollback),
-    path("sqlquery/", views.sqlquery),
-    path("queryapplylist/", views.queryapplylist),
-    path(
-        "queryapplydetail/<int:apply_id>/",
-        views.queryapplydetail,
-        name="queryapplydetail",
-    ),
-    path("queryuserprivileges/", views.queryuserprivileges),
-    path("dbdiagnostic/", views.dbdiagnostic),
-    path("workflow/", views.workflows),
-    path("workflow/<int:audit_id>/", views.workflowsdetail),
-    path("dashboard/", dashboard.pyecharts),
-    path("dashboard/api/", dashboard.DashboardApi),
-    path("group/", views.group),
-    path("grouprelations/<int:group_id>/", views.groupmgmt),
-    path("instance/", views.instance),
-    path("instanceaccount/", views.instanceaccount),
-    path("database/", views.database),
-    path("instanceparam/", views.instance_param),
-    path("archive/", views.archive),
-    path("archive/<int:id>/", views.archive_detail, name="archive_detail"),
-    path("config/", views.config),
-    path("audit/", views.audit),
-    path("audit_sqlquery/", views.audit_sqlquery),
-    path("audit_sqlworkflow/", views.audit_sqlworkflow),
-    path("authenticate/", auth.authenticate_entry),
     path("sqlworkflow_list/", sql_workflow.sql_workflow_list),
     path("sqlworkflow_list_audit/", sql_workflow.sql_workflow_list_audit),
     path("sqlworkflow/detail_content/", sql_workflow.detail_content),
@@ -104,7 +63,6 @@ urlpatterns = [
     path("instance/database/edit/", sql.instance_database.edit),
     path("instance/instance_resource/", instance.instance_resource),
     path("instance/describetable/", instance.describe),
-    path("data_dictionary/", views.data_dictionary),
     path("data_dictionary/table_list/", data_dictionary.table_list),
     path("data_dictionary/table_info/", data_dictionary.table_info),
     path("data_dictionary/export/", data_dictionary.export),
@@ -138,6 +96,4 @@ urlpatterns = [
     path("audit/input/", audit_log.audit_input),
     path("user/list/", user.lists),
     path("user/qrcode/<str:data>/", totp.generate_qrcode),
-    path("sqlexportworkflow/", views.sqlexportworkflow),
-    path("sqlexportsubmit/", views.sqlexportsubmit),
 ]

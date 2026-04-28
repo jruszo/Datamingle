@@ -22,7 +22,6 @@ from django.db.models import Q, Value as V, TextField
 from django.db.models.functions import Concat
 from django.http import HttpResponse, JsonResponse, HttpResponseRedirect
 from django.shortcuts import render
-from django.urls import reverse
 from django.utils import timezone
 
 from common.task_queue import async_task, schedule, delete_schedule, task_info
@@ -873,7 +872,7 @@ def archive_audit(request):
         task_name=f"archive-audit-{archive_id}",
     )
 
-    return HttpResponseRedirect(reverse("sql:archive_detail", args=(archive_id,)))
+    return HttpResponseRedirect(f"/archives/{archive_id}")
 
 
 def add_archive_task(archive_ids=None):

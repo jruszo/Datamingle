@@ -11,7 +11,6 @@ from django.db import transaction
 from django.db.models import Q
 from django.http import HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import render, get_object_or_404
-from django.urls import reverse
 from common.task_queue import async_task
 
 from common.config import SysConfig
@@ -34,6 +33,10 @@ from sql.utils.workflow_audit import Audit, get_auditor, AuditException
 from .models import SqlWorkflow, WorkflowAudit
 
 logger = logging.getLogger("default")
+
+
+def _workflow_detail_redirect(workflow_id):
+    return HttpResponseRedirect(f"/workflows/{workflow_id}")
 
 
 @permission_required("sql.menu_sqlworkflow", raise_exception=True)
@@ -236,7 +239,7 @@ def alter_run_date(request):
         context = {"errMsg": msg}
         return render(request, "error.html", context)
 
-    return HttpResponseRedirect(reverse("sql:detail", args=(workflow_id,)))
+    return _workflow_detail_redirect(workflow_id)
 
 
 @permission_required("sql.sql_review", raise_exception=True)
@@ -290,7 +293,7 @@ def passed(request):
             task_name=f"sqlreview-pass-{workflow_id}",
         )
 
-    return HttpResponseRedirect(reverse("sql:detail", args=(workflow_id,)))
+    return _workflow_detail_redirect(workflow_id)
 
 
 def execute(request):
@@ -379,7 +382,7 @@ def execute(request):
         )
         if is_notified:
             notify_for_execute(workflow=SqlWorkflow.objects.get(id=workflow_id))
-    return HttpResponseRedirect(reverse("sql:detail", args=(workflow_id,)))
+    return _workflow_detail_redirect(workflow_id)
 
 
 def timing_task(request):
@@ -447,7 +450,7 @@ def timing_task(request):
         )
         context = {"errMsg": msg}
         return render(request, "error.html", context)
-    return HttpResponseRedirect(reverse("sql:detail", args=(workflow_id,)))
+    return _workflow_detail_redirect(workflow_id)
 
 
 def cancel(request):
@@ -508,7 +511,7 @@ def cancel(request):
             timeout=60,
             task_name=f"sqlreview-cancel-{workflow_id}",
         )
-    return HttpResponseRedirect(reverse("sql:detail", args=(workflow_id,)))
+    return _workflow_detail_redirect(workflow_id)
 
 
 def get_workflow_status(request):

@@ -17,7 +17,6 @@ from django.db import transaction
 from django.db.models import Q
 from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import render
-from django.urls import reverse
 from common.task_queue import async_task
 
 from common.config import SysConfig
@@ -474,7 +473,7 @@ def query_priv_audit(request):
         task_name=f"query-priv-audit-{apply_id}",
     )
 
-    return HttpResponseRedirect(reverse("sql:queryapplydetail", args=(apply_id,)))
+    return HttpResponseRedirect(f"/permission-management?requestId={apply_id}")
 
 
 def _table_ref(sql_content, instance, db_name):

@@ -5,11 +5,12 @@ from unittest.mock import patch, ANY, Mock
 import datetime
 from dateutil.relativedelta import relativedelta
 from django.contrib.auth import get_user_model
-from django.test import Client, TestCase, override_settings
+from django.test import Client, RequestFactory, TestCase, override_settings
 
 from common.config import SysConfig
 from common import task_queue
 from common.utils.sendmsg import MsgSender
+from common.utils.global_info import global_info
 from sql.engines import EngineBase, ResultSet
 from sql.models import (
     Instance,
@@ -189,26 +190,29 @@ class SendMessageTest(TestCase):
 
 class GlobalInfoTest(TestCase):
     def setUp(self):
+        self.factory = RequestFactory()
         self.u1 = User(username="test_user", display="Chinese display", is_active=True)
         self.u1.save()
 
     @patch("sql.utils.workflow_audit.Audit.todo")
     def testGlobalInfo(self, todo):
         """Test global info context."""
-        c = Client()
-        r = c.get("/", follow=True)
+        request = self.factory.get("/missing-page/")
+        request.user = type("AnonymousUser", (), {"is_authenticated": False})()
+        r = global_info(request)
         todo.assert_not_called()
-        self.assertEqual(r.context["todo"], 0)
+        self.assertEqual(r["todo"], 0)
         # Authenticated user
-        c.force_login(self.u1)
         todo.return_value = 3
-        r = c.get("/", follow=True)
+        request = self.factory.get("/missing-page/")
+        request.user = self.u1
+        r = global_info(request)
         todo.assert_called_once_with(self.u1)
-        self.assertEqual(r.context["todo"], 3)
+        self.assertEqual(r["todo"], 3)
         # Exception case
         todo.side_effect = NameError("some exception")
-        r = c.get("/", follow=True)
-        self.assertEqual(r.context["todo"], 0)
+        r = global_info(request)
+        self.assertEqual(r["todo"], 0)
 
     def tearDown(self):
         self.u1.delete()
@@ -601,13 +605,13 @@ class PermissionTest(TestCase):
 
     def test_superuser_required_false(self):
         """Test superuser permission validation."""
-        r = self.client.get("/config/")
+        r = self.client.post("/config/change/", data={"configs": "{}"})
         self.assertContains(r, "You are not authorized. Contact admin.")
 
     def test_superuser_required_true(self):
         """Test superuser permission validation."""
         User.objects.filter(username=self.user.username).update(is_superuser=1)
-        r = self.client.get("/config/")
+        r = self.client.post("/config/change/", data={"configs": "{}"})
         self.assertNotContains(r, "You are not authorized. Contact admin.")
 
 
