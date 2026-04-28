@@ -103,6 +103,7 @@ jobs:
       env:
         SECRET_KEY: ${{ secrets.SECRET_KEY }}
       run: |
+        export SECRET_KEY="${SECRET_KEY:-django-insecure-ci-only-test-key}"
         python manage.py makemigrations
         python manage.py makemigrations sql
         pytest --cov --cov-report xml
