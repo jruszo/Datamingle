@@ -20,6 +20,10 @@ on:
       - 'master'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
   analyze:
     name: Analyze

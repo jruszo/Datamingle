@@ -769,7 +769,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                 )
                 rowid += 1
             except Exception as e:
-                logger.warning(f"MSSQL USE statement failed: {traceback.format_exc()}")
+                logger.warning("MSSQL USE statement failed", exc_info=True)
                 execute_result.error = str(e)
                 execute_result.rows.append(
                     ReviewResult(
@@ -803,10 +803,7 @@ then DATA_TYPE + '(' + convert(varchar(max), CHARACTER_MAXIMUM_LENGTH) + ')' els
                     )
                 )
             except Exception as e:
-                logger.warning(
-                    f"Mssql command execution failed, SQL: {statement}, "
-                    f"error: {traceback.format_exc()}"
-                )
+                logger.warning("Mssql command execution failed", exc_info=True)
                 execute_result.error = str(e)
                 # Append failed statement to execution results.
                 execute_result.rows.append(

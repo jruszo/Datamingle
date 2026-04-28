@@ -7,7 +7,7 @@
 """
 
 from common.config import SysConfig
-from sql.plugins.plugin import Plugin
+from sql.plugins.plugin import Plugin, SAFE_ARGUMENT_RE
 
 __author__ = "hhyo"
 
@@ -30,6 +30,8 @@ class PtArchiver(Plugin):
         """
         cmd_args = [self.path]
         for arg, value in args.items():
+            if not SAFE_ARGUMENT_RE.fullmatch(str(arg)):
+                raise ValueError(f"Invalid argument name: {arg}")
             if not value:
                 continue
             cmd_args.append(f"--{arg}")

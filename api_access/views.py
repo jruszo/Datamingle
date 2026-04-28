@@ -578,7 +578,7 @@ class PermissionRequestReviewCreate(views.APIView):
             action = WorkflowAction(int(data["audit_status"]))
         except ValueError as exc:
             raise serializers.ValidationError(
-                {"errors": f"Invalid audit_status parameter, {str(exc)}"}
+                {"errors": "Invalid audit_status parameter."}
             )
 
         auditor = get_auditor(workflow=permission_request)
@@ -588,9 +588,13 @@ class PermissionRequestReviewCreate(views.APIView):
                     action, request.user, data.get("audit_remark", "")
                 )
             except AuditException as exc:
-                raise serializers.ValidationError(
-                    {"errors": f"Audit failed: {str(exc)}"}
+                logger.exception(
+                    "Permission request audit failed for request_id=%s user=%s action=%s",
+                    request_id,
+                    request.user,
+                    action,
                 )
+                raise serializers.ValidationError({"errors": "Audit failed."})
             _permission_request_audit_callback(
                 auditor.audit.workflow_id, auditor.audit.current_status
             )

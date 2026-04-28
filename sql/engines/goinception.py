@@ -186,6 +186,8 @@ class GoInceptionEngine(EngineBase):
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
+            # goInception is a SQL review engine; SQL text is the audited payload.
+            # codeql[py/sql-injection]
             effect_row = cursor.execute(sql)
             if int(limit_num) > 0:
                 rows = cursor.fetchmany(size=int(limit_num))

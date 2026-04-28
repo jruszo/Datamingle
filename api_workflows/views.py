@@ -1316,7 +1316,7 @@ class WorkflowRollbackDetail(views.APIView):
             rollback_rows = query_engine.get_rollback(workflow=workflow)
         except Exception as exc:
             logger.error("Failed to load rollback SQL", exc_info=True)
-            raise serializers.ValidationError({"errors": str(exc)})
+            raise serializers.ValidationError({"errors": "Operation failed."}) from None
 
         if request.query_params.get("download") == "true":
             response = HttpResponse(
@@ -1416,7 +1416,8 @@ class WorkflowScheduleCreate(views.APIView):
                     preflight=True,
                 )
             except MysqlDDLExecutorError as exc:
-                raise serializers.ValidationError({"errors": str(exc)})
+                logger.warning("Failed to resolve MySQL DDL executor", exc_info=True)
+                raise serializers.ValidationError({"errors": str(exc)}) from None
             selected_executor = resolved_executor.executor_id
 
         schedule_name = f"sqlreview-timing-{workflow_id}"
@@ -1571,7 +1572,13 @@ class WorkflowReviewCreate(views.APIView):
         try:
             workflow_audit_detail = auditor.operate(action, user, data["audit_remark"])
         except AuditException as e:
-            raise serializers.ValidationError({"errors": f"Operation failed, {str(e)}"})
+            logger.warning(
+                "Workflow audit operation failed for user=%s action=%s",
+                getattr(user, "username", user),
+                action,
+                exc_info=True,
+            )
+            raise serializers.ValidationError({"errors": "Operation failed."}) from None
 
         # Finally handle source workflow status
         if auditor.workflow_type == WorkflowType.QUERY:
@@ -1691,7 +1698,13 @@ class WorkflowExecutionCreate(views.APIView):
                             preflight=True,
                         )
                     except MysqlDDLExecutorError as exc:
-                        raise serializers.ValidationError({"errors": str(exc)})
+                        logger.warning(
+                            "Failed to resolve MySQL DDL executor for execution",
+                            exc_info=True,
+                        )
+                        raise serializers.ValidationError(
+                            {"errors": str(exc)}
+                        ) from None
                     selected_executor = resolved_executor.executor_id
                 # Set workflow status to queuing
                 workflow.status = "workflow_queuing"

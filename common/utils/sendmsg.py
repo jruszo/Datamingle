@@ -151,9 +151,7 @@ class MsgSender(object):
         if r_json["errcode"] == 0:
             logger.debug(f"WeCom push sent successfully\nTarget:{to_user}")
         else:
-            logger.error(
-                f"WeCom push failed\nRequest url:{send_url}\nRequest data:{data}\nResponse:{r_json}"
-            )
+            logger.error("WeCom push failed: errcode=%s", r_json.get("errcode"))
 
     def send_qywx_webhook(self, qywx_webhook, msg):
         send_url = qywx_webhook
@@ -175,9 +173,7 @@ class MsgSender(object):
         if r_json["errcode"] == 0:
             logger.debug("WeCom bot push sent successfully\nTarget:bot")
         else:
-            logger.error(
-                f"WeCom bot push failed\nRequest url:{send_url}\nRequest data:{data}\nResponse:{r_json}"
-            )
+            logger.error("WeCom bot push failed: errcode=%s", r_json.get("errcode"))
 
     @staticmethod
     def send_feishu_webhook(url, title, content):
@@ -202,12 +198,11 @@ class MsgSender(object):
             or ("StatusCode" in r_json and r_json["StatusCode"] == 0)
             or ("code" in r_json and r_json["code"] == 0)
         ):
-            logger.debug(
-                f"Feishu webhook sent successfully\nTarget:{url}\nContent:{content}"
-            )
+            logger.debug("Feishu webhook sent successfully")
         else:
             logger.error(
-                f"Feishu webhook failed\nRequest url:{url}\nRequest data:{data}\nResponse:{r_json}"
+                "Feishu webhook failed: code=%s",
+                r_json.get("code") or r_json.get("StatusCode") or r_json.get("status"),
             )
 
     @staticmethod
@@ -222,16 +217,17 @@ class MsgSender(object):
             "msg_type": "text",
             "content": {"text": f"{title}\n{content}"},
         }
-        r = requests.post(
+        response = requests.post(
             url=url,
             json=data,
             headers={"Authorization": "Bearer " + get_feishu_access_token()},
-        ).json()
+        )
+        r = response.json()
         if r["code"] == 0:
-            logger.debug(
-                f"Feishu direct message sent successfully\nTarget:{url}\nContent:{content}"
-            )
+            logger.debug("Feishu direct message sent successfully")
         else:
             logger.error(
-                f"Feishu direct message failed\nRequest url:{url}\nRequest data:{data}\nResponse:{r}"
+                "Feishu direct message failed: status=%s code=%s",
+                response.status_code,
+                r.get("code"),
             )

@@ -26,6 +26,13 @@ logger = logging.getLogger("default")
 # Local path of mongo client.
 mongo = "mongo"
 
+MONGO_DB_CALL_RE = re.compile(
+    r"^db\.[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*\([\s\S]*\)\s*;*$"
+)
+MONGO_GET_COLLECTION_RE = re.compile(
+    r"""^db\.getCollection\(\s*['"][A-Za-z0-9_.]+['"]\s*\)\.[A-Za-z]+\([\s\S]*\)\s*;*$"""
+)
+
 
 # Custom exception.
 class mongo_error(Exception):
@@ -1080,11 +1087,7 @@ class MongoEngine(EngineBase):
             sql = sql[7:] + ".explain()"
             sql = re.sub(r"[;\s]*\.explain\(\)$", ".explain()", sql).strip()
         result = {"msg": "", "bad_query": False, "filtered_sql": sql, "has_star": False}
-        pattern = re.compile(
-            r"""^db\.(\w+\.?)+(?:\([\s\S]*\)(\s*;*)$)|^db\.getCollection\((?:\s*)(?:'|")(\w+\.?)+('|")(\s*)\)\.([A-Za-z]+)(\([\s\S]*\)(\s*;*)$)"""
-        )
-        m = pattern.match(sql)
-        if m is not None:
+        if MONGO_DB_CALL_RE.match(sql) or MONGO_GET_COLLECTION_RE.match(sql):
             logger.debug(sql)
             query_dict = self.parse_query_sentence(sql)
             if "method" not in query_dict:

@@ -4,12 +4,15 @@ import simplejson as json
 from django.contrib.auth.decorators import permission_required
 from django.http import HttpResponse
 from django.views.decorators.cache import cache_page
+import logging
 
 from common.utils.extend_json_encoder import ExtendJSONEncoder
 from common.utils.convert import Convert
 from sql.engines import get_engine
 from sql.utils.sql_utils import filter_db_list
 from .models import Instance, ParamTemplate, ParamHistory
+
+logger = logging.getLogger("default")
 
 
 @permission_required("sql.menu_instance_list", raise_exception=True)
@@ -269,8 +272,9 @@ def instance_resource(request):
         else:
             raise TypeError("Unsupported resource type or incomplete parameters!")
     except Exception as msg:
+        logger.exception("Failed to load instance resources")
         result["status"] = 1
-        result["msg"] = str(msg)
+        result["msg"] = "Failed to load instance resources."
     else:
         if resource.error:
             result["status"] = 1
@@ -304,8 +308,9 @@ def describe(request):
         )
         result["data"] = query_result.__dict__
     except Exception as msg:
+        logger.exception("Failed to describe table")
         result["status"] = 1
-        result["msg"] = str(msg)
+        result["msg"] = "Failed to describe table."
     if result["data"].get("error"):
         result["status"] = 1
         result["msg"] = result["data"]["error"]

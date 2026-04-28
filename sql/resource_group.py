@@ -1,6 +1,5 @@
 # -*- coding: UTF-8 -*-
 import logging
-import traceback
 from itertools import chain
 
 import simplejson as json
@@ -187,8 +186,8 @@ def addrelation(request):
             resource_group.instance_set.add(*Instance.objects.filter(pk__in=obj_ids))
         result = {"status": 0, "msg": "ok"}
     except Exception as e:
-        logger.error(traceback.format_exc())
-        result = {"status": 1, "msg": str(e)}
+        logger.exception("Failed to save resource group objects")
+        result = {"status": 1, "msg": "Failed to save resource group objects."}
     return HttpResponse(json.dumps(result), content_type="application/json")
 
 
@@ -253,8 +252,8 @@ def changeauditors(request):
     try:
         Audit.change_settings(group_id, workflow_type, ",".join(audit_auth_groups))
     except Exception as msg:
-        logger.error(traceback.format_exc())
-        result["msg"] = str(msg)
+        logger.exception("Failed to update resource group audit settings")
+        result["msg"] = "Failed to update resource group audit settings."
         result["status"] = 1
 
     # Return result.

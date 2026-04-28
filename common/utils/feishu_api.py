@@ -12,8 +12,8 @@ def get_feishu_access_token():
     # Read from cache first
     try:
         token = cache.get("feishu_access_token")
-    except Exception as e:
-        logger.error(f"Failed to read Feishu token from cache: {e}")
+    except Exception:
+        logger.exception("Failed to read Feishu token from cache")
         token = None
     if token:
         return token
@@ -25,14 +25,13 @@ def get_feishu_access_token():
     data = {"app_id": app_id, "app_secret": app_secret}
     resp = requests.post(url, json=data, timeout=5).json()
     # resp = requests.get(url, timeout=3).json()
-    logger.info(f"Fetched Feishu access_token response: {resp}")
     if resp.get("code") == 0:
         access_token = resp.get("app_access_token")
         expires_in = resp.get("expire")
         cache.set("feishu_access_token", access_token, timeout=expires_in - 60)
         return access_token
     else:
-        logger.error(f"Failed to fetch Feishu access_token: {resp}")
+        logger.error("Failed to fetch Feishu access_token: code=%s", resp.get("code"))
         return None
 
 

@@ -483,8 +483,10 @@ def offline_file_download(request):
             raise PermissionDenied(
                 "You do not have permission to download export files."
             )
-    except PermissionDenied as exc:
-        return JsonResponse({"error": str(exc)}, status=403)
+    except PermissionDenied:
+        return JsonResponse(
+            {"error": "You do not have permission to download this file."}, status=403
+        )
 
     if not workflow.is_offline_export:
         return JsonResponse(

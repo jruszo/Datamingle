@@ -912,7 +912,15 @@ class ArchiveReviewCreate(views.APIView):
                     action, request.user, data["audit_remark"]
                 )
             except AuditException as exc:
-                raise serializers.ValidationError({"errors": str(exc)})
+                logger.exception(
+                    "Archive audit failed for archive_id=%s user=%s action=%s",
+                    archive_id,
+                    request.user,
+                    action,
+                )
+                raise serializers.ValidationError(
+                    {"errors": "Operation failed."}
+                ) from None
 
             auditor.workflow.status = auditor.audit.current_status
             if auditor.audit.current_status == WorkflowStatus.PASSED:

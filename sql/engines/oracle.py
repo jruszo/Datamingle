@@ -1233,8 +1233,9 @@ class OracleEngine(EngineBase):
                 line += 1
         except Exception as e:
             logger.warning(
-                f"Oracle command execution failed, workflow id: {workflow.id}, "
-                f"SQL: {statement or sql}, error: {traceback.format_exc()}"
+                "Oracle command execution failed for workflow id: %s",
+                workflow.id,
+                exc_info=True,
             )
             execute_result.error = str(e)
             # conn.rollback()

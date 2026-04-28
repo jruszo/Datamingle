@@ -174,16 +174,14 @@ class PhoenixEngine(EngineBase):
             try:
                 cursor.execute(statement.rstrip(";"), parameters)
             except Exception as e:
-                logger.error(
-                    f"Phoenix command execution failed, sql: {sql}, details: {traceback.format_exc()}"
-                )
-                execute_result.error = str(e)
+                logger.error("Phoenix command execution failed", exc_info=True)
+                execute_result.error = "Execution failed"
                 execute_result.rows.append(
                     ReviewResult(
                         id=rowid,
                         errlevel=2,
                         stagestatus="Execute Failed",
-                        errormessage=f"Exception: {e}",
+                        errormessage="Execution failed",
                         sql=statement,
                         affected_rows=0,
                         execute_time=0,

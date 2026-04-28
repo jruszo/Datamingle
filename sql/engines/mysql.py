@@ -533,6 +533,8 @@ class MysqlEngine(EngineBase):
                 cursor.execute(f"set session max_execution_time={max_execution_time};")
             except MySQLdb.OperationalError:
                 pass
+            # This engine intentionally executes SQL that passed Archery's query checks.
+            # codeql[py/sql-injection]
             effect_row = cursor.execute(sql, parameters)
             if int(limit_num) > 0:
                 rows = cursor.fetchmany(size=int(limit_num))
@@ -549,10 +551,7 @@ class MysqlEngine(EngineBase):
             if kwargs.get("binary_as_hex"):
                 result_set = self.result_set_binary_as_hex(result_set)
         except Exception as e:
-            logger.warning(
-                f"{self.name} statement execution failed, SQL: {sql}, "
-                f"error: {traceback.format_exc()}"
-            )
+            logger.warning("%s statement execution failed", self.name, exc_info=True)
             result_set.error = str(e)
         finally:
             if close_conn:
@@ -583,15 +582,14 @@ class MysqlEngine(EngineBase):
                 result["bad_query"] = True
                 result["msg"] = explain_result.error
         # Access to mysql.user should not be allowed.
-        if re.match(
-            ".*(\\s)+(mysql|`mysql`)(\\s)*\\.(\\s)*(user|`user`)((\\s)*|;).*",
-            sql.lower().replace("\n", ""),
-        ) or (
-            db_name == "mysql"
-            and re.match(
-                ".*(\\s)+(user|`user`)((\\s)*|;).*", sql.lower().replace("\n", "")
-            )
-        ):
+        normalized_sql = sql.lower().replace("`", " ")
+        normalized_sql = " ".join(normalized_sql.replace("\n", " ").split())
+        normalized_sql = re.sub(r"\s*\.\s*", ".", normalized_sql)
+        references_mysql_user = "mysql.user" in normalized_sql
+        references_user_table = any(
+            token.strip(";") == "user" for token in normalized_sql.split()
+        )
+        if references_mysql_user or (db_name == "mysql" and references_user_table):
             result["bad_query"] = True
             result["msg"] = "You do not have permission to view this table"
 
@@ -801,14 +799,15 @@ class MysqlEngine(EngineBase):
                 resolved_executor=resolved,
             )
         except MysqlDDLExecutorError as e:
+            logger.warning("MySQL DDL workflow execution failed", exc_info=True)
             execute_result = ReviewSet(full_sql=workflow.sqlworkflowcontent.sql_content)
-            execute_result.error = str(e)
+            execute_result.error = "Execution failed"
             execute_result.rows.append(
                 ReviewResult(
                     id=1,
                     errlevel=2,
                     stagestatus="Execute Failed",
-                    errormessage=str(e),
+                    errormessage="Execution failed",
                     sql=workflow.sqlworkflowcontent.sql_content,
                     executor=executor_id or "",
                 )
@@ -828,13 +827,14 @@ class MysqlEngine(EngineBase):
                 resolved_executor=resolved_executor,
             )
         except MysqlDDLExecutorError as e:
-            execute_result.error = str(e)
+            logger.warning("External MySQL DDL execution failed", exc_info=True)
+            execute_result.error = "Execution failed"
             execute_result.rows.append(
                 ReviewResult(
                     id=1,
                     errlevel=2,
                     stagestatus="Execute Failed",
-                    errormessage=str(e),
+                    errormessage="Execution failed",
                     sql=workflow.sqlworkflowcontent.sql_content,
                     executor=resolved_executor.executor_id,
                 )
@@ -899,19 +899,14 @@ class MysqlEngine(EngineBase):
                     conn.rollback()
                 except Exception:
                     pass
-            logger.warning(
-                "%s direct DDL execution failed, SQL: %s, error: %s",
-                self.name,
-                current_statement,
-                traceback.format_exc(),
-            )
-            execute_result.error = str(e)
+            logger.warning("%s direct DDL execution failed", self.name, exc_info=True)
+            execute_result.error = "Execution failed"
             execute_result.rows.append(
                 ReviewResult(
                     id=len(execute_result.rows) + 1,
                     errlevel=2,
                     stagestatus="Execute Failed",
-                    errormessage=str(e),
+                    errormessage="Execution failed",
                     sql=current_statement,
                     executor=executor_id,
                 )
@@ -1005,10 +1000,7 @@ class MysqlEngine(EngineBase):
             conn.commit()
             cursor.close()
         except Exception as e:
-            logger.warning(
-                f"{self.name} statement execution failed, SQL: {sql}, "
-                f"error: {traceback.format_exc()}"
-            )
+            logger.warning("%s statement execution failed", self.name, exc_info=True)
             result.error = str(e)
         if close_conn:
             self.close()
