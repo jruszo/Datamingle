@@ -37,9 +37,9 @@ def table_list(request):
             res = {"status": 0, "data": data}
         except Instance.DoesNotExist:
             res = {"status": 1, "msg": "Instance.DoesNotExist"}
-        except Exception:
+        except Exception as e:
             logger.exception("Failed to load data dictionary table list")
-            res = {"status": 1, "msg": "Failed to load table list."}
+            res = {"status": 1, "msg": str(e)}
     else:
         res = {"status": 1, "msg": "Invalid request!"}
     return HttpResponse(
@@ -84,9 +84,9 @@ def table_info(request):
             res = {"status": 0, "data": data}
         except Instance.DoesNotExist:
             res = {"status": 1, "msg": "Instance.DoesNotExist"}
-        except Exception:
+        except Exception as e:
             logger.exception("Failed to load data dictionary table info")
-            res = {"status": 1, "msg": "Failed to load table information."}
+            res = {"status": 1, "msg": str(e)}
     else:
         res = {"status": 1, "msg": "Invalid request!"}
     return HttpResponse(

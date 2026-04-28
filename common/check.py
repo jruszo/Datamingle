@@ -112,7 +112,7 @@ def validate_email_payload(payload, user_email):
     sender_response = sender.send_email(subj, bd, [user_email])
     if sender_response != "success":
         result["status"] = 1
-        result["msg"] = "Email delivery failed; check server logs."
+        result["msg"] = sender_response
         logger.error("Email delivery test failed: %s", sender_response)
         return result
     return result

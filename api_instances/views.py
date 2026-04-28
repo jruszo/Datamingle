@@ -154,6 +154,9 @@ def _data_dictionary_instance(user, instance_id):
 def _safe_dictionary_export_path(base_dir, instance_name, db_name):
     base_dir = os.path.realpath(base_dir)
     original_name = f"{instance_name}_{db_name}"
+    raw_full_path = os.path.realpath(os.path.join(base_dir, f"{original_name}.html"))
+    if os.path.commonpath([base_dir, raw_full_path]) != base_dir:
+        return ""
     fingerprint = hashlib.sha256(original_name.encode("utf-8")).hexdigest()[:12]
     safe_stem = re.sub(r"[^A-Za-z0-9_.-]", "_", original_name).strip("._")
     safe_name = f"{safe_stem[:167]}_{fingerprint}" if safe_stem else fingerprint

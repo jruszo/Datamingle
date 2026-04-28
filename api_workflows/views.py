@@ -1417,9 +1417,7 @@ class WorkflowScheduleCreate(views.APIView):
                 )
             except MysqlDDLExecutorError as exc:
                 logger.warning("Failed to resolve MySQL DDL executor", exc_info=True)
-                raise serializers.ValidationError(
-                    {"errors": "Operation failed."}
-                ) from None
+                raise serializers.ValidationError({"errors": str(exc)}) from None
             selected_executor = resolved_executor.executor_id
 
         schedule_name = f"sqlreview-timing-{workflow_id}"
@@ -1705,7 +1703,7 @@ class WorkflowExecutionCreate(views.APIView):
                             exc_info=True,
                         )
                         raise serializers.ValidationError(
-                            {"errors": "Operation failed."}
+                            {"errors": str(exc)}
                         ) from None
                     selected_executor = resolved_executor.executor_id
                 # Set workflow status to queuing

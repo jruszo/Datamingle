@@ -1237,7 +1237,7 @@ class OracleEngine(EngineBase):
                 workflow.id,
                 exc_info=True,
             )
-            execute_result.error = "Execution failed"
+            execute_result.error = str(e)
             # conn.rollback()
             # Append failed statement info to execution result.
             execute_result.rows.append(
@@ -1245,7 +1245,7 @@ class OracleEngine(EngineBase):
                     id=line,
                     errlevel=2,
                     stagestatus="Execute Failed",
-                    errormessage="Execution failed",
+                    errormessage=f"Exception info: {e}",
                     sql=statement or sql,
                     affected_rows=0,
                     execute_time=0,
