@@ -28,6 +28,7 @@ from common.task_queue import async_task, schedule, delete_schedule, task_info
 
 from common.utils.const import WorkflowStatus, WorkflowType, WorkflowAction
 from common.utils.extend_json_encoder import ExtendJSONEncoder
+from common.utils.spa import spa_path_for_workflow
 from common.utils.timer import FuncTimer
 from sql.engines import get_engine
 from sql.engines.models import ReviewSet, ReviewResult
@@ -872,7 +873,7 @@ def archive_audit(request):
         task_name=f"archive-audit-{archive_id}",
     )
 
-    return HttpResponseRedirect(f"/archives/{archive_id}")
+    return HttpResponseRedirect(spa_path_for_workflow(WorkflowType.ARCHIVE, archive_id))
 
 
 def add_archive_task(archive_ids=None):

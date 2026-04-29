@@ -1146,6 +1146,7 @@ class InstanceOperationDiagnosticApiTests(TestCase):
 class RetiredLegacyRouteTests(TestCase):
     def test_removed_legacy_bootstrap_routes_return_404(self):
         removed_routes = [
+            "/admin/",
             "/sqlanalyze/",
             "/sqladvisor/",
             "/slowquery/",

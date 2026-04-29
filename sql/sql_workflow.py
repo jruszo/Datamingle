@@ -16,6 +16,7 @@ from common.task_queue import async_task
 from common.config import SysConfig
 from common.utils.const import WorkflowStatus, WorkflowType, WorkflowAction
 from common.utils.extend_json_encoder import ExtendJSONEncoder
+from common.utils.spa import spa_path_for_workflow
 from sql.engines import get_engine
 from sql.engines.models import ReviewResult, ReviewSet
 from sql.notify import notify_for_audit, EventType, notify_for_execute
@@ -36,7 +37,9 @@ logger = logging.getLogger("default")
 
 
 def _workflow_detail_redirect(workflow_id):
-    return HttpResponseRedirect(f"/workflows/{workflow_id}")
+    return HttpResponseRedirect(
+        spa_path_for_workflow(WorkflowType.SQL_REVIEW, workflow_id)
+    )
 
 
 @permission_required("sql.menu_sqlworkflow", raise_exception=True)

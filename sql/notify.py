@@ -14,6 +14,7 @@ from django.contrib.auth.models import Group
 
 from common.config import SysConfig
 from common.utils.const import WorkflowStatus, WorkflowType
+from common.utils.spa import spa_url_for_workflow
 from common.utils.sendmsg import MsgSender
 from sql.models import (
     QueryPrivilegesApply,
@@ -39,13 +40,7 @@ logger = logging.getLogger("default")
 
 
 def _spa_workflow_url(base_url, workflow_type, workflow_id):
-    if workflow_type == WorkflowType.SQL_REVIEW:
-        return f"{base_url}/workflows/{workflow_id}"
-    if workflow_type == WorkflowType.QUERY:
-        return f"{base_url}/permission-management?requestId={workflow_id}"
-    if workflow_type == WorkflowType.ARCHIVE:
-        return f"{base_url}/archives/{workflow_id}"
-    return base_url
+    return spa_url_for_workflow(base_url, workflow_type, workflow_id)
 
 
 class EventType(Enum):

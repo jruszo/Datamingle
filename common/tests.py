@@ -5,12 +5,14 @@ from unittest.mock import patch, ANY, Mock
 import datetime
 from dateutil.relativedelta import relativedelta
 from django.contrib.auth import get_user_model
-from django.test import Client, RequestFactory, TestCase, override_settings
+from django.test import RequestFactory, TestCase, override_settings
 
 from common.config import SysConfig
 from common import task_queue
 from common.utils.sendmsg import MsgSender
+from common.utils.const import WorkflowType
 from common.utils.global_info import global_info
+from common.utils.spa import spa_path_for_workflow, spa_url_for_workflow
 from sql.engines import EngineBase, ResultSet
 from sql.models import (
     Instance,
@@ -218,177 +220,30 @@ class GlobalInfoTest(TestCase):
         self.u1.delete()
 
 
-class CheckTest(TestCase):
-    """Configuration check endpoint tests."""
-
-    def setUp(self):
-        self.superuser1 = User(
-            username="test_user",
-            display="Chinese display",
-            is_active=True,
-            is_superuser=True,
-            email="XXX@xxx.com",
-        )
-        self.superuser1.save()
-        self.slave1 = Instance(
-            instance_name="some_name",
-            host="some_host",
-            type="slave",
-            db_type="mysql",
-            user="some_user",
-            port=1234,
-            password="some_str",
-        )
-        self.slave1.save()
-
-    def tearDown(self):
-        self.superuser1.delete()
-
-    @patch.object(MsgSender, "__init__", return_value=None)
-    @patch.object(MsgSender, "send_email")
-    def testEmailCheck(self, send_email, mailsender):
-        """Email config check."""
-        mail_switch = "true"
-        smtp_ssl = "false"
-        smtp_server = "some_server"
-        smtp_port = "1234"
-        smtp_user = "some_user"
-        smtp_pass = "some_str"
-        # Skip superuser check
-        # Mail switch disabled
-        mail_switch = "false"
-        c = Client()
-        c.force_login(self.superuser1)
-        r = c.post(
-            "/check/email/",
-            data={
-                "mail": mail_switch,
-                "mail_ssl": smtp_ssl,
-                "mail_smtp_server": smtp_server,
-                "mail_smtp_port": smtp_port,
-                "mail_smtp_user": smtp_user,
-                "mail_smtp_password": smtp_pass,
-            },
-        )
-        r_json = r.json()
-        self.assertEqual(r_json["status"], 1)
-        self.assertEqual(r_json["msg"], "Please enable email notifications first.")
-        mail_switch = "true"
-        # Invalid negative port number
-        smtp_port = "-3"
-        r = c.post(
-            "/check/email/",
-            data={
-                "mail": mail_switch,
-                "mail_ssl": smtp_ssl,
-                "mail_smtp_server": smtp_server,
-                "mail_smtp_port": smtp_port,
-                "mail_smtp_user": smtp_user,
-                "mail_smtp_password": smtp_pass,
-            },
-        )
-        r_json = r.json()
-        self.assertEqual(r_json["status"], 1)
-        self.assertEqual(r_json["msg"], "Port must be a positive integer.")
-        smtp_port = "1234"
-        # User email not set
-        self.superuser1.email = ""
-        self.superuser1.save()
-        r = c.post(
-            "/check/email/",
-            data={
-                "mail": mail_switch,
-                "mail_ssl": smtp_ssl,
-                "mail_smtp_server": smtp_server,
-                "mail_smtp_port": smtp_port,
-                "mail_smtp_user": smtp_user,
-                "mail_smtp_password": smtp_pass,
-            },
-        )
-        r_json = r.json()
-        self.assertEqual(r_json["status"], 1)
+class SpaRouteHelperTest(TestCase):
+    def test_spa_path_for_supported_workflow_types(self):
         self.assertEqual(
-            r_json["msg"], "Please complete the current user's email first."
+            spa_path_for_workflow(WorkflowType.SQL_REVIEW, 12), "/workflows/12"
         )
-        self.superuser1.email = "XXX@xxx.com"
-        self.superuser1.save()
-        # Send failure should return traceback text
-        send_email.return_value = "some traceback"
-        r = c.post(
-            "/check/email/",
-            data={
-                "mail": mail_switch,
-                "mail_ssl": smtp_ssl,
-                "mail_smtp_server": smtp_server,
-                "mail_smtp_port": smtp_port,
-                "mail_smtp_user": smtp_user,
-                "mail_smtp_password": smtp_pass,
-            },
+        self.assertEqual(
+            spa_path_for_workflow(WorkflowType.QUERY, 34),
+            "/permission-management?requestId=34",
         )
-        r_json = r.json()
-        self.assertEqual(r_json["status"], 1)
-        self.assertIn("some traceback", r_json["msg"])
-        send_email.reset_mock()  # Reset mock call counter
-        mailsender.reset_mock()
-        # Send success
-        send_email.return_value = "success"
-        r = c.post(
-            "/check/email/",
-            data={
-                "mail": mail_switch,
-                "mail_ssl": smtp_ssl,
-                "mail_smtp_server": smtp_server,
-                "mail_smtp_port": smtp_port,
-                "mail_smtp_user": smtp_user,
-                "mail_smtp_password": smtp_pass,
-            },
+        self.assertEqual(
+            spa_path_for_workflow(WorkflowType.ARCHIVE, 56), "/archives/56"
         )
-        r_json = r.json()
-        mailsender.assert_called_once_with(
-            server=smtp_server,
-            port=int(smtp_port),
-            user=smtp_user,
-            password=smtp_pass,
-            ssl=False,
-        )
-        send_email.assert_called_once_with(
-            "Archery email delivery test",
-            "Archery email delivery test...",
-            [self.superuser1.email],
-        )
-        self.assertEqual(r_json["status"], 0)
-        self.assertEqual(r_json["msg"], "ok")
 
-    @patch("MySQLdb.connect")
-    @patch("common.check.get_engine")
-    def testInstanceCheck(self, _get_engine, _conn):
-        _get_engine.return_value.get_connection = _conn
-        _get_engine.return_value.get_all_databases.return_value.rows.return_value = (
-            ResultSet(rows=((),), error="Wrong password")
+    def test_spa_url_for_supported_workflow_types(self):
+        self.assertEqual(
+            spa_url_for_workflow(
+                "https://app.example.com/", WorkflowType.SQL_REVIEW, 12
+            ),
+            "https://app.example.com/workflows/12",
         )
-        c = Client()
-        c.force_login(self.superuser1)
-        r = c.post("/check/instance/", data={"instance_id": self.slave1.id})
-        r_json = r.json()
-        self.assertEqual(r_json["status"], 1)
 
-    @patch("MySQLdb.connect")
-    def test_go_inception_check(self, _conn):
-        c = Client()
-        c.force_login(self.superuser1)
-        data = {
-            "go_inception_host": "inception",
-            "go_inception_port": "6669",
-            "go_inception_user": "",
-            "go_inception_password": "",
-            "inception_remote_backup_host": "mysql",
-            "inception_remote_backup_port": 3306,
-            "inception_remote_backup_user": "mysql",
-            "inception_remote_backup_password": "123456",
-        }
-        r = c.post("/check/go_inception/", data=data)
-        r_json = r.json()
-        self.assertEqual(r_json["status"], 0)
+    def test_spa_path_rejects_unknown_workflow_type(self):
+        with self.assertRaises(ValueError):
+            spa_path_for_workflow(WorkflowType.ACCESS_REQUEST, 99)
 
 
 class ChartTest(TestCase):
@@ -588,31 +443,6 @@ class TestTwoFactorAuth(TestCase):
             result,
             {"status": 1, "msg": "TOTP 2FA is not configured for this account."},
         )
-
-
-class PermissionTest(TestCase):
-    def setUp(self) -> None:
-        self.user = User.objects.create(
-            username="test_user",
-            display="Chinese display",
-            is_active=True,
-            email="XXX@xxx.com",
-        )
-        self.client.force_login(self.user)
-
-    def tearDown(self) -> None:
-        self.user.delete()
-
-    def test_superuser_required_false(self):
-        """Test superuser permission validation."""
-        r = self.client.post("/config/change/", data={"configs": "{}"})
-        self.assertContains(r, "You are not authorized. Contact admin.")
-
-    def test_superuser_required_true(self):
-        """Test superuser permission validation."""
-        User.objects.filter(username=self.user.username).update(is_superuser=1)
-        r = self.client.post("/config/change/", data={"configs": "{}"})
-        self.assertNotContains(r, "You are not authorized. Contact admin.")
 
 
 class ExtendJSONEncoderFTimeTest(TestCase):

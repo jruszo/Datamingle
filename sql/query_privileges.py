@@ -22,6 +22,7 @@ from common.task_queue import async_task
 from common.config import SysConfig
 from common.utils.const import WorkflowStatus, WorkflowType, WorkflowAction
 from common.utils.extend_json_encoder import ExtendJSONEncoder
+from common.utils.spa import spa_path_for_workflow
 from sql.engines.goinception import GoInceptionEngine
 from sql.models import QueryPrivilegesApply, QueryPrivileges, Instance, ResourceGroup
 from sql.notify import notify_for_audit
@@ -473,7 +474,7 @@ def query_priv_audit(request):
         task_name=f"query-priv-audit-{apply_id}",
     )
 
-    return HttpResponseRedirect(f"/permission-management?requestId={apply_id}")
+    return HttpResponseRedirect(spa_path_for_workflow(WorkflowType.QUERY, apply_id))
 
 
 def _table_ref(sql_content, instance, db_name):
