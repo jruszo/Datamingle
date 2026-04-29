@@ -585,7 +585,6 @@ def test_get_review_info(
 def test_get_review_info_auto_pass(
     sql_query_apply,
     fake_generate_audit_setting,
-    admin_client,
 ):
     # Auto-pass case.
     fake_generate_audit_setting.return_value = AuditSetting(auto_pass=True)
@@ -593,10 +592,6 @@ def test_get_review_info_auto_pass(
     audit.create_audit()
     review_info = audit.get_review_info()
     assert review_info.nodes[0].node_type == ReviewNodeType.AUTO_PASS
-    # Verify detail page GET.
-    response = admin_client.get(f"/queryapplydetail/{sql_query_apply.apply_id}/")
-    assert response.status_code == 200
-    assert "No approval required" in response.content.decode("utf-8")
 
 
 def test_auto_review_with_auto_reject(sql_workflow, mocker: MockFixture):

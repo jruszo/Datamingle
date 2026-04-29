@@ -14,6 +14,7 @@ from django.contrib.auth.models import Group
 
 from common.config import SysConfig
 from common.utils.const import WorkflowStatus, WorkflowType
+from common.utils.spa import spa_url_for_workflow
 from common.utils.sendmsg import MsgSender
 from sql.models import (
     QueryPrivilegesApply,
@@ -36,6 +37,10 @@ from api_workflows.serializers import (
 )
 
 logger = logging.getLogger("default")
+
+
+def _spa_workflow_url(base_url, workflow_type, workflow_id):
+    return spa_url_for_workflow(base_url, workflow_type, workflow_id)
 
 
 class EventType(Enum):
@@ -135,8 +140,10 @@ class LegacyRender(Notifier):
         base_url = self.sys_config.get(
             "archery_base_url", "http://127.0.0.1:8000"
         ).rstrip("/")
-        workflow_url = "{base_url}/workflow/{audit_id}".format(
-            base_url=base_url, audit_id=self.audit.audit_id
+        workflow_url = _spa_workflow_url(
+            base_url=base_url,
+            workflow_type=self.audit.workflow_type,
+            workflow_id=self.audit.workflow_id,
         )
         workflow_id = self.audit.workflow_id
         workflow_type = self.audit.workflow_type
@@ -287,8 +294,10 @@ Workflow Preview: {}""".format(
         audit_handler = AuditV2(workflow=self.workflow, audit=self.audit)
         review_info = audit_handler.get_review_info()
         audit_id = Audit.detail_by_workflow_id(self.workflow.id, 2).audit_id
-        url = "{base_url}/workflow/{audit_id}".format(
-            base_url=base_url, audit_id=audit_id
+        url = _spa_workflow_url(
+            base_url=base_url,
+            workflow_type=WorkflowType.SQL_REVIEW,
+            workflow_id=self.workflow.id,
         )
         msg_title = (
             f"[{WorkflowType.SQL_REVIEW.label}]Workflow "

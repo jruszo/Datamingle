@@ -4,12 +4,6 @@ import traceback
 
 import MySQLdb
 import simplejson as json
-from django.core.exceptions import ValidationError
-from django.http import HttpResponse
-
-from common.utils.permission import superuser_required
-from sql.engines import get_engine
-from sql.models import Instance
 from common.utils.sendmsg import MsgSender
 from sql.storage import DynamicStorage
 
@@ -187,57 +181,3 @@ def validate_file_storage_payload(payload):
         logger.error("Storage connectivity test failed", exc_info=True)
 
     return result
-
-
-# Validate goInception configuration
-@superuser_required
-def go_inception(request):
-    result = validate_go_inception_payload(request.POST)
-    return HttpResponse(json.dumps(result), content_type="application/json")
-
-
-# Validate email configuration
-@superuser_required
-def email(request):
-    result = validate_email_payload(request.POST, request.user.email)
-    return HttpResponse(json.dumps(result), content_type="application/json")
-
-
-# Validate instance configuration
-@superuser_required
-def instance(request):
-    result = {"status": 0, "msg": "ok", "data": []}
-    instance_id = request.POST.get("instance_id")
-    try:
-        instance = Instance.objects.get(id=instance_id)
-    except (Instance.DoesNotExist, ValueError, TypeError, ValidationError):
-        logger.exception("Instance lookup failed for connection test")
-        result["status"] = 1
-        result["msg"] = "Instance not found"
-        return HttpResponse(json.dumps(result), content_type="application/json")
-
-    try:
-        engine = get_engine(instance=instance)
-        test_result = engine.test_connection()
-        if test_result.error:
-            logger.error(
-                "Instance connection test returned an error for instance_id=%s",
-                instance_id,
-            )
-            result["status"] = 1
-            result["msg"] = "Unable to connect to instance"
-    except Exception:
-        logger.exception(
-            "Instance connection test raised an exception for instance_id=%s",
-            instance_id,
-        )
-        result["status"] = 1
-        result["msg"] = "Unable to connect to instance"
-    # Return result
-    return HttpResponse(json.dumps(result), content_type="application/json")
-
-
-@superuser_required
-def file_storage_connect(request):
-    result = validate_file_storage_payload(request.POST)
-    return HttpResponse(json.dumps(result), content_type="application/json")

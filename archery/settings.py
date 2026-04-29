@@ -136,7 +136,6 @@ if DEFAULT_TASK_BACKEND not in {"django_q", "celery"}:
 
 # Application definition
 INSTALLED_APPS = (
-    "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
@@ -172,7 +171,6 @@ MIDDLEWARE = (
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.gzip.GZipMiddleware",
-    "common.middleware.check_login_middleware.CheckLoginMiddleware",
     "common.middleware.exception_logging_middleware.ExceptionLoggingMiddleware",
 )
 
