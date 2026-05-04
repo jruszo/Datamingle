@@ -19,6 +19,27 @@ class MssqlEngine(EngineBase):
     name = "MsSQL"
     info = "MsSQL engine"
 
+    def get_inventory_details(self):
+        default_details = super().get_inventory_details()
+        result = self.query(
+            sql=(
+                "SELECT CAST(SERVERPROPERTY('MachineName') AS varchar(255)), "
+                "CAST(SERVERPROPERTY('ProductVersion') AS varchar(255))"
+            )
+        )
+        if result.error or not result.rows:
+            logger.warning(
+                "Failed to fetch MSSQL inventory details for host %s: %s",
+                default_details["hostname"],
+                result.error or "empty result",
+            )
+            return default_details
+        hostname, version = result.rows[0]
+        return {
+            "hostname": hostname or default_details["hostname"],
+            "version": version or default_details["version"],
+        }
+
     def get_connection(self, db_name=None):
         if self.conn:
             return self.conn

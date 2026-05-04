@@ -89,6 +89,22 @@ class TestMssql(TestCase):
         self.assertEqual(tables.rows, ["tb_1", "tb_2"])
 
     @patch.object(MssqlEngine, "query")
+    def test_get_inventory_details_returns_fallback_when_query_fails(self, mock_query):
+        mock_query.return_value = ResultSet(error="boom", rows=[])
+        new_engine = MssqlEngine(instance=self.ins1)
+        details = new_engine.get_inventory_details()
+        self.assertEqual(details, {"hostname": "some_host", "version": ""})
+
+    @patch.object(MssqlEngine, "query")
+    def test_get_inventory_details_returns_fallback_when_query_is_empty(
+        self, mock_query
+    ):
+        mock_query.return_value = ResultSet(rows=[])
+        new_engine = MssqlEngine(instance=self.ins1)
+        details = new_engine.get_inventory_details()
+        self.assertEqual(details, {"hostname": "some_host", "version": ""})
+
+    @patch.object(MssqlEngine, "query")
     def testAllColumns(self, mock_query):
         db_result = ResultSet()
         db_result.rows = [("col_1", "type"), ("col_2", "type2")]

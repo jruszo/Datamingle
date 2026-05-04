@@ -13,7 +13,11 @@ from sql.utils.workflow_audit import AuditException, AuditSetting
 from sql.engines import ReviewSet
 from sql.engines.mysql_ddl import MysqlDDLExecutorError
 from sql.engines.models import ReviewResult, ResultSet
-from api_admin.settings import DEFAULT_CHAT_MODEL, NOTIFY_PHASE_OPTIONS
+from api_admin.settings import (
+    DEFAULT_CHAT_MODEL,
+    INVENTORY_REFRESH_INTERVAL_OPTIONS,
+    NOTIFY_PHASE_OPTIONS,
+)
 from sql.models import (
     ResourceGroup,
     Instance,
@@ -112,6 +116,48 @@ class SystemSettingsTaskBackendTest(TestCase):
             {"value": "celery", "label": "Celery"},
             payload["data"]["options"]["task_backends"],
         )
+        self.assertEqual(
+            payload["data"]["settings"]["inventory_refresh_interval"], "24h"
+        )
+        self.assertEqual(
+            payload["data"]["options"]["inventory_refresh_intervals"],
+            [
+                {"value": interval, "label": interval}
+                for interval in INVENTORY_REFRESH_INTERVAL_OPTIONS
+            ],
+        )
+
+    def test_put_system_settings_saves_inventory_refresh_interval(self):
+        response = self.client.put(
+            "/api/v1/system-settings/",
+            data=json.dumps({"inventory_refresh_interval": "6h"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.json()["data"]["settings"]["inventory_refresh_interval"], "6h"
+        )
+        self.assertTrue(response.json()["data"]["inventory_refresh_schedule_synced"])
+        self.assertEqual(self.sys_config.get("inventory_refresh_interval"), "6h")
+
+    @patch("api_admin.settings.sync_inventory_refresh_schedule", return_value=False)
+    def test_put_system_settings_surfaces_inventory_schedule_sync_warning(
+        self, _mock_sync
+    ):
+        response = self.client.put(
+            "/api/v1/system-settings/",
+            data=json.dumps({"inventory_refresh_interval": "12h"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.json()["detail"],
+            "System settings updated, but the inventory refresh schedule could not be synchronized. Check the task backend and try again.",
+        )
+        self.assertFalse(response.json()["data"]["inventory_refresh_schedule_synced"])
+        self.assertEqual(self.sys_config.get("inventory_refresh_interval"), "12h")
 
     def test_put_system_settings_requires_broker_url_for_celery(self):
         response = self.client.put(
@@ -1483,6 +1529,29 @@ class TestInstance(CacheIsolatedAPITestCase):
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(response_data(r)["count"], 1)
 
+    def test_get_instance_list_includes_inventory_snapshot_fields(self):
+        self.ins.inventory_status = Instance.INVENTORY_STATUS_OK
+        self.ins.inventory_detected_hostname = "detected-host"
+        self.ins.inventory_detected_version = "8.0.36"
+        self.ins.inventory_last_success_at = datetime.now()
+        self.ins.save(
+            update_fields=[
+                "inventory_status",
+                "inventory_detected_hostname",
+                "inventory_detected_version",
+                "inventory_last_success_at",
+            ]
+        )
+
+        r = self.client.get("/api/v1/instance/", format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)["results"][0]
+        self.assertEqual(payload["inventory_status"], "ok")
+        self.assertEqual(payload["inventory_detected_hostname"], "detected-host")
+        self.assertEqual(payload["inventory_detected_version"], "8.0.36")
+        self.assertIsNotNone(payload["inventory_last_refresh_at"])
+
     def test_get_instance_list_with_search_and_filters(self):
         """Search and filters should match legacy inventory behavior."""
         read_tag = InstanceTag.objects.create(
@@ -2247,7 +2316,7 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
         )
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
 
-    @patch("api_instances.views.get_engine")
+    @patch("sql.inventory.get_engine")
     def test_test_instance_connection(self, mock_get_engine):
         """Superusers can run the SPA connection test action."""
         self.user.is_superuser = True
@@ -2256,6 +2325,10 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
         mock_engine = Mock()
         mock_result = Mock(error="")
         mock_engine.test_connection.return_value = mock_result
+        mock_engine.get_inventory_details.return_value = {
+            "hostname": "detected-host",
+            "version": "8.0.36",
+        }
         mock_get_engine.return_value = mock_engine
 
         r = self.client.post(
@@ -2266,6 +2339,10 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
         payload = response_data(r)
         self.assertEqual(payload["success"], True)
         self.assertEqual(payload["message"], "Connection successful.")
+        self.ins.refresh_from_db()
+        self.assertEqual(self.ins.inventory_status, "ok")
+        self.assertEqual(self.ins.inventory_detected_hostname, "detected-host")
+        self.assertEqual(self.ins.inventory_detected_version, "8.0.36")
 
     @patch("api_instances.views.get_engine")
     def test_get_instance_resource(self, mock_get_engine):

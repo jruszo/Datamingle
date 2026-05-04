@@ -278,6 +278,9 @@ class InstanceDiagnosticKillResultSerializer(serializers.Serializer):
 class InstanceListSerializer(serializers.ModelSerializer):
     resource_group_ids = serializers.SerializerMethodField()
     instance_tag_ids = serializers.SerializerMethodField()
+    inventory_last_refresh_at = serializers.DateTimeField(
+        source="inventory_last_success_at", read_only=True
+    )
 
     def get_resource_group_ids(self, obj):
         return list(
@@ -305,6 +308,10 @@ class InstanceListSerializer(serializers.ModelSerializer):
             "sid",
             "resource_group_ids",
             "instance_tag_ids",
+            "inventory_status",
+            "inventory_detected_hostname",
+            "inventory_detected_version",
+            "inventory_last_refresh_at",
         )
 
 

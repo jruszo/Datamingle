@@ -47,6 +47,24 @@ class PgSQLEngine(EngineBase):
 
     info = "PgSQL engine"
 
+    def get_inventory_details(self):
+        default_details = super().get_inventory_details()
+        result = self.query(
+            sql="SELECT COALESCE(inet_server_addr()::text, ''), version();"
+        )
+        if result.error or not result.rows:
+            logger.warning(
+                "Failed to fetch PostgreSQL inventory details for host %s: %s",
+                default_details["hostname"],
+                result.error or "empty result",
+            )
+            return default_details
+        hostname, version = result.rows[0]
+        details = dict(default_details)
+        details["hostname"] = hostname or default_details["hostname"]
+        details["version"] = version or default_details["version"]
+        return details
+
     def get_all_databases(self):
         """
         Get database list.

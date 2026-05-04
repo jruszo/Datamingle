@@ -155,6 +155,21 @@ class MysqlEngine(EngineBase):
         self._server_version = tuple([numeric_part(n) for n in version.split(".")[:3]])
         return self._server_version
 
+    def get_inventory_details(self):
+        default_details = super().get_inventory_details()
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT @@hostname")
+            row = cursor.fetchone()
+        finally:
+            cursor.close()
+        hostname = row[0] if row else default_details["hostname"]
+        return {
+            "hostname": hostname or default_details["hostname"],
+            "version": conn.get_server_info(),
+        }
+
     @property
     def server_info(self):
         if self._server_info:

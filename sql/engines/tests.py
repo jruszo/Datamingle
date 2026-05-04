@@ -1,6 +1,6 @@
 import json
 from datetime import timedelta, datetime
-from unittest.mock import MagicMock, patch, Mock, ANY
+from unittest.mock import MagicMock, patch, Mock, ANY, PropertyMock
 
 import sqlparse
 from django.contrib.auth import get_user_model
@@ -602,6 +602,41 @@ class TestPgSQL(TestCase):
 
     @patch(
         "sql.engines.pgsql.PgSQLEngine.query",
+        return_value=ResultSet(error="boom", rows=[]),
+    )
+    def test_get_inventory_details_returns_fallback_when_query_fails(self, _query):
+        new_engine = PgSQLEngine(instance=self.ins)
+        details = new_engine.get_inventory_details()
+        self.assertEqual(details, {"hostname": "some_host", "version": ""})
+
+    @patch(
+        "sql.engines.pgsql.PgSQLEngine.query",
+        return_value=ResultSet(rows=[]),
+    )
+    def test_get_inventory_details_returns_fallback_when_query_is_empty(self, _query):
+        new_engine = PgSQLEngine(instance=self.ins)
+        details = new_engine.get_inventory_details()
+        self.assertEqual(details, {"hostname": "some_host", "version": ""})
+
+    @patch(
+        "sql.engines.pgsql.PgSQLEngine.query",
+        return_value=ResultSet(rows=[("detected-host", "PostgreSQL 16.1")]),
+    )
+    def test_get_inventory_details_preserves_base_fields(self, _query):
+        new_engine = PgSQLEngine(instance=self.ins)
+        with patch.object(
+            EngineBase,
+            "get_inventory_details",
+            return_value={"hostname": "some_host", "version": "", "region": "eu"},
+        ):
+            details = new_engine.get_inventory_details()
+        self.assertEqual(
+            details,
+            {"hostname": "detected-host", "version": "PostgreSQL 16.1", "region": "eu"},
+        )
+
+    @patch(
+        "sql.engines.pgsql.PgSQLEngine.query",
         return_value=ResultSet(
             rows=[("information_schema",), ("archery",), ("pg_catalog",)]
         ),
@@ -1184,6 +1219,28 @@ class TestOracle(TestCase):
         self.assertEqual(new_engine.info, "Oracle engine")
         _conn.return_value.version = "12.1.0.2.0"
         self.assertTupleEqual(new_engine.server_version, ("12", "1", "0"))
+
+    @patch.object(OracleEngine, "query")
+    @patch.object(OracleEngine, "server_version", new_callable=PropertyMock)
+    def test_get_inventory_details_returns_version_when_query_fails(
+        self, mock_version, mock_query
+    ):
+        mock_query.return_value = ResultSet(error="boom", rows=[])
+        mock_version.return_value = ("12", "1", "0")
+        new_engine = OracleEngine(instance=self.ins)
+        details = new_engine.get_inventory_details()
+        self.assertEqual(details, {"hostname": "some_host", "version": "12.1.0"})
+
+    @patch.object(OracleEngine, "query")
+    @patch.object(OracleEngine, "server_version", new_callable=PropertyMock)
+    def test_get_inventory_details_uses_hostname_when_query_succeeds(
+        self, mock_version, mock_query
+    ):
+        mock_query.return_value = ResultSet(rows=[("oracle-host",)])
+        mock_version.return_value = ("12", "1", "0")
+        new_engine = OracleEngine(instance=self.ins)
+        details = new_engine.get_inventory_details()
+        self.assertEqual(details, {"hostname": "oracle-host", "version": "12.1.0"})
 
     @patch("cx_Oracle.connect.cursor.execute")
     @patch("cx_Oracle.connect.cursor")
@@ -2168,6 +2225,12 @@ class TestClickHouse(TestCase):
         self.assertTupleEqual(server_version, (22, 1, 3))
 
     @patch.object(ClickHouseEngine, "query")
+    def test_server_version_returns_empty_tuple_when_query_fails(self, mock_query):
+        mock_query.return_value = ResultSet(error="boom", rows=[])
+        new_engine = ClickHouseEngine(instance=self.ins1)
+        self.assertTupleEqual(new_engine.server_version, tuple())
+
+    @patch.object(ClickHouseEngine, "query")
     def test_table_engine(self, mock_query):
         table_name = "default.tb_test"
         result = ResultSet()
@@ -2238,6 +2301,28 @@ class TestClickHouse(TestCase):
         new_engine = ClickHouseEngine(instance=self.ins1)
         new_engine.describe_table("some_db", "some_db")
         mock_query.assert_called_once()
+
+    @patch.object(ClickHouseEngine, "server_version", new_callable=PropertyMock)
+    @patch.object(ClickHouseEngine, "query")
+    def test_get_inventory_details_returns_fallback_when_query_fails(
+        self, mock_query, mock_version
+    ):
+        mock_query.return_value = ResultSet(error="boom", rows=[])
+        mock_version.return_value = (22, 1, 3)
+        new_engine = ClickHouseEngine(instance=self.ins1)
+        details = new_engine.get_inventory_details()
+        self.assertEqual(details, {"hostname": "some_host", "version": "22.1.3"})
+
+    @patch.object(ClickHouseEngine, "server_version", new_callable=PropertyMock)
+    @patch.object(ClickHouseEngine, "query")
+    def test_get_inventory_details_returns_fallback_when_row_is_empty(
+        self, mock_query, mock_version
+    ):
+        mock_query.return_value = ResultSet(rows=[tuple()])
+        mock_version.return_value = (22, 1, 3)
+        new_engine = ClickHouseEngine(instance=self.ins1)
+        details = new_engine.get_inventory_details()
+        self.assertEqual(details, {"hostname": "some_host", "version": "22.1.3"})
 
     def test_query_check_wrong_sql(self):
         new_engine = ClickHouseEngine(instance=self.ins1)

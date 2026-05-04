@@ -36,10 +36,12 @@ describe('feature registry', () => {
       'dashboard',
       'reports',
       'inventory',
+      'instance-operations',
       'workflows',
       'archives',
       'queries',
       'permissions',
+      'audit',
       'mailbox',
       'settings',
     ])
@@ -51,11 +53,17 @@ describe('feature registry', () => {
     expect(labels).toEqual([
       'Dashboard',
       'Inventory',
+      'Data Dictionary',
+      'Instance Databases',
+      'Instance Accounts',
+      'Parameters',
+      'Diagnostics',
       'Workflows',
       'Archives',
       'Queries',
       'Permission Management',
       'Reports',
+      'Audit',
       'Profile',
     ])
   })

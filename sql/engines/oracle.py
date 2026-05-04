@@ -108,6 +108,26 @@ class OracleEngine(EngineBase):
         version = conn.version
         return tuple([n for n in version.split(".")[:3]])
 
+    def get_inventory_details(self):
+        default_details = super().get_inventory_details()
+        version = ".".join(self.server_version)
+        result = self.query(sql="select instance_name from v$instance")
+        if result.error:
+            logger.warning(
+                "Failed to fetch Oracle inventory details for host %s: %s",
+                default_details["hostname"],
+                result.error,
+            )
+            details = dict(default_details)
+            details["version"] = version
+            return details
+
+        hostname = result.rows[0][0] if result.rows else default_details["hostname"]
+        details = dict(default_details)
+        details["hostname"] = hostname or default_details["hostname"]
+        details["version"] = version
+        return details
+
     def get_all_databases(self):
         """Get database list for upper layer.
         Internally this returns Oracle schema list.
