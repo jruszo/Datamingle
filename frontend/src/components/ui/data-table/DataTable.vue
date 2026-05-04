@@ -33,6 +33,7 @@ const props = withDefaults(defineProps<{
   searchQuery?: string
   sortKey?: string
   sortDirection?: SortDirection
+  rowClass?: (row: RowRecord) => string
 }>(), {
   loading: false,
   emptyText: 'No records found.',
@@ -51,6 +52,7 @@ const props = withDefaults(defineProps<{
   searchQuery: undefined,
   sortKey: undefined,
   sortDirection: undefined,
+  rowClass: undefined,
 })
 
 const emit = defineEmits<{
@@ -163,6 +165,10 @@ function getRowIdentifier(row: RowRecord) {
     return value
   }
   return JSON.stringify(value)
+}
+
+function getRowClass(row: RowRecord) {
+  return props.rowClass ? props.rowClass(row) : ''
 }
 
 function toggleSort(column: DataTableColumn) {
@@ -340,7 +346,11 @@ watch(currentSearchQuery, () => {
                 {{ emptyText }}
               </td>
             </tr>
-            <tr v-for="row in paginatedRows" :key="getRowIdentifier(row)" class="align-top">
+            <tr
+              v-for="row in paginatedRows"
+              :key="getRowIdentifier(row)"
+              :class="cn('align-top', getRowClass(row))"
+            >
               <td
                 v-for="column in visibleColumns"
                 :key="column.key"

@@ -14,7 +14,9 @@ from common.utils.const import WorkflowType
 from common.utils.global_info import global_info
 from common.utils.spa import spa_path_for_workflow, spa_url_for_workflow
 from sql.engines import EngineBase, ResultSet
+from sql import inventory
 from sql.models import (
+    Config,
     Instance,
     SqlWorkflow,
     SqlWorkflowContent,
@@ -101,6 +103,161 @@ class ConfigOpsTests(TestCase):
         archer_config = SysConfig()
         archer_config.set("other_config", "testvalue3")
         self.assertEqual(archer_config.sys_config["other_config"], "testvalue3")
+
+
+class InventoryRefreshTests(TestCase):
+    def setUp(self):
+        self.sys_config = SysConfig()
+        self.instance = Instance.objects.create(
+            instance_name="inventory-test",
+            type="master",
+            db_type="mysql",
+            host="inventory-host",
+            port=3306,
+            user="inventory-user",
+            password="secret",
+        )
+
+    def tearDown(self):
+        TaskSchedule.objects.all().delete()
+        Instance.objects.all().delete()
+        self.sys_config.purge()
+
+    @patch("django_q.tasks.schedule")
+    def test_ensure_inventory_refresh_schedule_creates_single_active_schedule(
+        self, mock_schedule
+    ):
+        inventory.ensure_inventory_refresh_schedule(force=True)
+        inventory.ensure_inventory_refresh_schedule()
+
+        self.assertEqual(
+            TaskSchedule.objects.filter(
+                name=inventory.INVENTORY_REFRESH_SCHEDULE_NAME
+            ).count(),
+            1,
+        )
+        mock_schedule.assert_called_once()
+
+    @patch("django_q.tasks.schedule")
+    def test_force_schedule_refresh_replaces_next_run_when_interval_changes(
+        self, mock_schedule
+    ):
+        self.sys_config.set("inventory_refresh_interval", "24h")
+        inventory.ensure_inventory_refresh_schedule(force=True)
+        first_run = TaskSchedule.objects.get(
+            name=inventory.INVENTORY_REFRESH_SCHEDULE_NAME
+        ).run_at
+
+        self.sys_config.set("inventory_refresh_interval", "1h")
+        inventory.ensure_inventory_refresh_schedule(force=True)
+        second_run = TaskSchedule.objects.get(
+            name=inventory.INVENTORY_REFRESH_SCHEDULE_NAME
+        ).run_at
+
+        self.assertLess(second_run, first_run)
+        self.assertEqual(mock_schedule.call_count, 2)
+        self.assertTrue(
+            Config.objects.filter(
+                item=inventory.INVENTORY_REFRESH_SCHEDULE_LOCK_NAME
+            ).exists()
+        )
+
+    @patch("django_q.tasks.schedule")
+    def test_inventory_refresh_task_callback_rearms_schedule(self, mock_schedule):
+        inventory.inventory_refresh_task_callback(Mock(success=True))
+
+        self.assertTrue(
+            TaskSchedule.objects.filter(
+                name=inventory.INVENTORY_REFRESH_SCHEDULE_NAME
+            ).exists()
+        )
+        mock_schedule.assert_called_once()
+
+    @patch(
+        "sql.inventory.collect_inventory_snapshot",
+        return_value={"hostname": "detected-host", "version": "8.0.36"},
+    )
+    def test_refresh_instance_inventory_snapshot_marks_ok(self, _collect_snapshot):
+        result = inventory.refresh_instance_inventory_snapshot(self.instance)
+
+        self.instance.refresh_from_db()
+        self.assertEqual(result["status"], Instance.INVENTORY_STATUS_OK)
+        self.assertEqual(self.instance.inventory_status, Instance.INVENTORY_STATUS_OK)
+        self.assertEqual(self.instance.inventory_detected_hostname, "detected-host")
+        self.assertEqual(self.instance.inventory_detected_version, "8.0.36")
+        self.assertIsNotNone(self.instance.inventory_last_attempt_at)
+        self.assertIsNotNone(self.instance.inventory_last_success_at)
+
+    @patch(
+        "sql.inventory.collect_inventory_snapshot",
+        side_effect=[
+            {"hostname": "detected-host", "version": "8.0.36"},
+            RuntimeError("boom"),
+        ],
+    )
+    def test_refresh_instance_inventory_snapshot_keeps_last_good_values_when_stale(
+        self, _collect_snapshot
+    ):
+        inventory.refresh_instance_inventory_snapshot(self.instance)
+        inventory.refresh_instance_inventory_snapshot(self.instance)
+
+        self.instance.refresh_from_db()
+        self.assertEqual(
+            self.instance.inventory_status, Instance.INVENTORY_STATUS_STALE
+        )
+        self.assertEqual(self.instance.inventory_detected_hostname, "detected-host")
+        self.assertEqual(self.instance.inventory_detected_version, "8.0.36")
+        self.assertIsNotNone(self.instance.inventory_last_success_at)
+
+    @patch("sql.inventory.collect_inventory_snapshot", side_effect=RuntimeError("boom"))
+    def test_refresh_instance_inventory_snapshot_marks_failed_before_first_success(
+        self, _collect_snapshot
+    ):
+        inventory.refresh_instance_inventory_snapshot(self.instance)
+
+        self.instance.refresh_from_db()
+        self.assertEqual(
+            self.instance.inventory_status, Instance.INVENTORY_STATUS_FAILED
+        )
+        self.assertEqual(self.instance.inventory_detected_hostname, "")
+        self.assertEqual(self.instance.inventory_detected_version, "")
+        self.assertIsNone(self.instance.inventory_last_success_at)
+
+    def test_engine_base_inventory_details_without_instance_returns_safe_defaults(self):
+        self.assertEqual(
+            EngineBase().get_inventory_details(),
+            {"hostname": "", "version": ""},
+        )
+
+    def test_refresh_inventory_snapshots_maps_status_constants_to_summary_keys(self):
+        mock_queryset = Mock()
+        mock_queryset.iterator.return_value = [self.instance]
+        with patch.object(Instance, "INVENTORY_STATUS_OK", "healthy"):
+            with patch("sql.inventory.close_old_connections"):
+                with patch(
+                    "sql.inventory.Instance.objects.order_by",
+                    return_value=mock_queryset,
+                ):
+                    with patch(
+                        "sql.inventory.refresh_instance_inventory_snapshot",
+                        return_value={"status": "healthy"},
+                    ):
+                        summary = inventory.refresh_inventory_snapshots()
+
+        self.assertEqual(summary["total"], 1)
+        self.assertEqual(summary["ok"], 1)
+        self.assertEqual(summary["stale"], 0)
+        self.assertEqual(summary["failed"], 0)
+
+    def test_format_inventory_version_normalizes_lists_and_tuples(self):
+        self.assertEqual(
+            inventory._format_inventory_version((" 8 ", None, " 0 ", "", " 36 ")),
+            "8.0.36",
+        )
+        self.assertEqual(
+            inventory._format_inventory_version(["  2024 ", " 04 ", " 1 "]),
+            "2024.04.1",
+        )
 
 
 class SendMessageTest(TestCase):

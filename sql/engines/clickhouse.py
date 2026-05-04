@@ -58,8 +58,30 @@ class ClickHouseEngine(EngineBase):
     def server_version(self):
         sql = "select value from system.build_options where name = 'VERSION_FULL';"
         result = self.query(sql=sql)
-        version = result.rows[0][0].split(" ")[1]
-        return tuple([int(n) for n in version.split(".")[:3]])
+        if result.error or not result.rows or not result.rows[0]:
+            logger.warning(
+                "Failed to fetch ClickHouse server version: %s",
+                result.error or "empty result",
+            )
+            return tuple()
+        try:
+            version = result.rows[0][0].split(" ")[1]
+            return tuple([int(n) for n in version.split(".")[:3]])
+        except (AttributeError, IndexError, TypeError, ValueError) as exc:
+            logger.warning("Failed to fetch ClickHouse server version: %s", exc)
+            return tuple()
+
+    def get_inventory_details(self):
+        default_details = super().get_inventory_details()
+        result = self.query(sql="select hostName()")
+        if result.error or not result.rows or not result.rows[0]:
+            hostname = default_details["hostname"]
+        else:
+            hostname = result.rows[0][0]
+        details = dict(default_details)
+        details["hostname"] = hostname or default_details["hostname"]
+        details["version"] = ".".join(map(str, self.server_version))
+        return details
 
     def get_table_engine(self, tb_name):
         """Get engine type of a table."""

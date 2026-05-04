@@ -58,6 +58,54 @@ class TestMysql(TestCase):
         new_engine.get_connection()
         connect.assert_called_once()
 
+    @patch.object(MysqlEngine, "get_connection")
+    def test_get_inventory_details_closes_cursor_and_falls_back_hostname(
+        self, mock_get_connection
+    ):
+        mock_conn = Mock()
+        mock_cursor = Mock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_conn.get_server_info.return_value = "8.0.36"
+        mock_cursor.fetchone.return_value = None
+        mock_get_connection.return_value = mock_conn
+
+        new_engine = MysqlEngine(instance=self.ins1)
+        details = new_engine.get_inventory_details()
+
+        self.assertEqual(details, {"hostname": "some_host", "version": "8.0.36"})
+        mock_cursor.close.assert_called_once()
+
+    @patch.object(MysqlEngine, "get_connection")
+    def test_get_inventory_details_returns_defaults_when_server_info_fails(
+        self, mock_get_connection
+    ):
+        mock_conn = Mock()
+        mock_conn.get_server_info.side_effect = RuntimeError("version boom")
+        mock_get_connection.return_value = mock_conn
+
+        new_engine = MysqlEngine(instance=self.ins1)
+        details = new_engine.get_inventory_details()
+
+        self.assertEqual(details, {"hostname": "some_host", "version": ""})
+        mock_conn.cursor.assert_not_called()
+
+    @patch.object(MysqlEngine, "get_connection")
+    def test_get_inventory_details_closes_cursor_and_returns_defaults_on_query_error(
+        self, mock_get_connection
+    ):
+        mock_conn = Mock()
+        mock_cursor = Mock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_conn.get_server_info.return_value = "8.0.36"
+        mock_cursor.execute.side_effect = RuntimeError("hostname boom")
+        mock_get_connection.return_value = mock_conn
+
+        new_engine = MysqlEngine(instance=self.ins1)
+        details = new_engine.get_inventory_details()
+
+        self.assertEqual(details, {"hostname": "some_host", "version": ""})
+        mock_cursor.close.assert_called_once()
+
     @patch("MySQLdb.connect")
     def testQuery(self, connect):
         cur = Mock()

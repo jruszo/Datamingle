@@ -155,6 +155,33 @@ class MysqlEngine(EngineBase):
         self._server_version = tuple([numeric_part(n) for n in version.split(".")[:3]])
         return self._server_version
 
+    def get_inventory_details(self):
+        default_details = super().get_inventory_details()
+        conn = self.get_connection()
+        try:
+            version = conn.get_server_info()
+        except Exception as exc:
+            logger.warning("Failed to fetch MySQL server version: %s", exc)
+            return default_details
+
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT @@hostname")
+            row = cursor.fetchone()
+        except Exception as exc:
+            logger.warning("Failed to fetch MySQL inventory details: %s", exc)
+            return default_details
+        finally:
+            if cursor is not None:
+                cursor.close()
+
+        hostname = row[0] if row else default_details["hostname"]
+        details = dict(default_details)
+        details["hostname"] = hostname or default_details["hostname"]
+        details["version"] = version
+        return details
+
     @property
     def server_info(self):
         if self._server_info:

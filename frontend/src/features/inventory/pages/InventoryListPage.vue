@@ -41,12 +41,16 @@ const testingInstanceId = ref<number | null>(null)
 const columns: DataTableColumn[] = [
   { key: 'id', label: 'ID', sortable: true, defaultVisible: false },
   { key: 'instance_name', label: 'Instance', sortable: true, hideable: false },
+  { key: 'inventory_status', label: 'Status', sortable: true },
   { key: 'type', label: 'Type', sortable: true },
   { key: 'db_type', label: 'Database', sortable: true },
   { key: 'host', label: 'Host', sortable: true },
+  { key: 'inventory_detected_hostname', label: 'Detected Hostname', sortable: true },
+  { key: 'inventory_detected_version', label: 'Version', sortable: true },
   { key: 'port', label: 'Port', sortable: true },
   { key: 'user', label: 'User', sortable: true },
   { key: 'actions', label: 'Actions', hideable: false, headerClass: 'w-[12rem]' },
+  { key: 'inventory_last_refresh_at', label: 'Last Refresh', sortable: true },
 ]
 
 const selectClass =
@@ -115,7 +119,11 @@ async function loadInstances() {
       return
     }
 
-    const ordering = sortKey.value ? `${sortDirection.value === 'desc' ? '-' : ''}${sortKey.value}` : undefined
+    const effectiveSortKey =
+      sortKey.value === 'inventory_last_refresh_at' ? 'inventory_last_success_at' : sortKey.value
+    const ordering = effectiveSortKey
+      ? `${sortDirection.value === 'desc' ? '-' : ''}${effectiveSortKey}`
+      : undefined
     const response = await fetchInstanceInventory(requireToken(), {
       page: currentPage.value,
       size: pageSize.value,
@@ -184,6 +192,56 @@ function handleTagChange(event: Event) {
     .map((option) => Number(option.value))
     .filter((value) => Number.isFinite(value))
   currentPage.value = 1
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) {
+    return 'Never'
+  }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return date.toLocaleString()
+}
+
+function inventoryStatusLabel(value: InstanceInventoryRecord['inventory_status']) {
+  switch (value) {
+    case 'ok':
+      return 'OK'
+    case 'stale':
+      return 'Stale'
+    case 'failed':
+      return 'Failed'
+    default:
+      return 'Never'
+  }
+}
+
+function inventoryStatusBadgeClass(value: InstanceInventoryRecord['inventory_status']) {
+  switch (value) {
+    case 'ok':
+      return 'bg-emerald-100 text-emerald-800'
+    case 'stale':
+      return 'bg-amber-100 text-amber-800'
+    case 'failed':
+      return 'bg-red-100 text-red-800'
+    default:
+      return 'bg-slate-100 text-slate-700'
+  }
+}
+
+function inventoryRowClass(row: Record<string, unknown>) {
+  const status = row.inventory_status
+  if (status === 'stale') {
+    return 'bg-amber-50'
+  }
+  if (status === 'failed') {
+    return 'bg-red-50'
+  }
+  return ''
 }
 
 onMounted(async () => {
@@ -310,9 +368,10 @@ watch(searchQuery, () => {
           :sort-key="sortKey"
           :sort-direction="sortDirection"
           :total-rows="totalCount"
+          :row-class="inventoryRowClass"
           row-key="id"
-          search-placeholder="Filter instances by name, host, user, or ID"
-          :search-keys="['instance_name', 'host', 'user', 'id']"
+          search-placeholder="Filter instances by name, host, user, ID, detected hostname, or detected version"
+          :search-keys="['instance_name', 'host', 'user', 'id', 'inventory_detected_hostname', 'inventory_detected_version']"
           @update:page="currentPage = $event"
           @update:page-size="handlePageSizeChange"
           @update:search-query="handleSearchQueryChange"
@@ -340,6 +399,12 @@ watch(searchQuery, () => {
           <template #cell-type="{ value }">
             <Badge variant="secondary" class="bg-slate-100 text-slate-700">
               {{ `${value}`.toUpperCase() }}
+            </Badge>
+          </template>
+
+          <template #cell-inventory_status="{ value }">
+            <Badge variant="secondary" :class="inventoryStatusBadgeClass(value as InstanceInventoryRecord['inventory_status'])">
+              {{ inventoryStatusLabel(value as InstanceInventoryRecord['inventory_status']) }}
             </Badge>
           </template>
 
@@ -373,6 +438,10 @@ watch(searchQuery, () => {
               </Button>
               <span v-else class="text-xs text-slate-400">Superuser only</span>
             </div>
+          </template>
+
+          <template #cell-inventory_last_refresh_at="{ value }">
+            <span class="text-slate-500">{{ formatDateTime(value as string | null) }}</span>
           </template>
         </DataTable>
       </CardContent>

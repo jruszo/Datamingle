@@ -168,6 +168,17 @@ class Instance(models.Model, PasswordMixin):
     Production instance configuration.
     """
 
+    INVENTORY_STATUS_NEVER = "never"
+    INVENTORY_STATUS_OK = "ok"
+    INVENTORY_STATUS_STALE = "stale"
+    INVENTORY_STATUS_FAILED = "failed"
+    INVENTORY_STATUS_CHOICES = (
+        (INVENTORY_STATUS_NEVER, "Never"),
+        (INVENTORY_STATUS_OK, "OK"),
+        (INVENTORY_STATUS_STALE, "Stale"),
+        (INVENTORY_STATUS_FAILED, "Failed"),
+    )
+
     instance_name = models.CharField("Instance Name", max_length=50, unique=True)
     type = models.CharField(
         "Instance Type",
@@ -218,6 +229,36 @@ class Instance(models.Model, PasswordMixin):
     )
     instance_tag = models.ManyToManyField(
         InstanceTag, verbose_name="Instance Tag", blank=True
+    )
+    inventory_status = models.CharField(
+        "Inventory Refresh Status",
+        max_length=20,
+        choices=INVENTORY_STATUS_CHOICES,
+        default=INVENTORY_STATUS_NEVER,
+    )
+    inventory_last_attempt_at = models.DateTimeField(
+        "Inventory Last Attempt At",
+        null=True,
+        blank=True,
+        default=None,
+    )
+    inventory_last_success_at = models.DateTimeField(
+        "Inventory Last Success At",
+        null=True,
+        blank=True,
+        default=None,
+    )
+    inventory_detected_hostname = models.CharField(
+        "Inventory Detected Hostname",
+        max_length=200,
+        default="",
+        blank=True,
+    )
+    inventory_detected_version = models.CharField(
+        "Inventory Detected Version",
+        max_length=200,
+        default="",
+        blank=True,
     )
     create_time = models.DateTimeField("Created Time", auto_now_add=True)
     update_time = models.DateTimeField("Updated Time", auto_now=True)

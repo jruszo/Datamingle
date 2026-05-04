@@ -73,6 +73,7 @@ export type SystemSettingsOptions = {
   storage_types: SystemSettingsOption[]
   sms_providers: SystemSettingsOption[]
   task_backends: SystemSettingsOption[]
+  inventory_refresh_intervals: SystemSettingsOption[]
 }
 
 export type SystemSettingsPayload = {
@@ -199,6 +200,10 @@ export type InstanceInventoryRecord = {
   sid: string | null
   resource_group_ids: number[]
   instance_tag_ids: number[]
+  inventory_status: 'never' | 'ok' | 'stale' | 'failed'
+  inventory_detected_hostname: string
+  inventory_detected_version: string
+  inventory_last_refresh_at: string | null
 }
 
 export type InstanceOptionRecord = {

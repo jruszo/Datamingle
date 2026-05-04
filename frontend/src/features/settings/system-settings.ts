@@ -91,6 +91,13 @@ export const systemSettingsSections: SystemSettingsSectionDefinition[] = [
     fields: [
       { key: 'task_backend', label: 'Task backend', input: 'select', optionSource: 'task_backends', defaultValue: 'django_q' },
       {
+        key: 'inventory_refresh_interval',
+        label: 'Inventory refresh interval',
+        input: 'select',
+        optionSource: 'inventory_refresh_intervals',
+        defaultValue: '24h',
+      },
+      {
         key: 'celery_broker_url',
         label: 'Celery broker URL',
         input: 'password',

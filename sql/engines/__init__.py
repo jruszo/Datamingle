@@ -69,6 +69,10 @@ class EngineBase:
         """Return engine server version as tuple (x, y, z)."""
         return tuple()
 
+    def get_inventory_details(self):
+        """Return basic inventory facts for a reachable instance."""
+        return {"hostname": getattr(self, "host", "") or "", "version": ""}
+
     def processlist(self, command_type, **kwargs) -> ResultSet:
         """Get connection information."""
         return ResultSet()

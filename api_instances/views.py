@@ -20,6 +20,10 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from sql.engines import ResultSet, engine_map, get_engine
+from sql.inventory import (
+    ensure_inventory_refresh_schedule,
+    refresh_instance_inventory_snapshot,
+)
 from sql.models import (
     Instance,
     InstanceAccount,
@@ -506,6 +510,8 @@ class InstanceList(generics.ListAPIView):
                 Q(instance_name__icontains=search)
                 | Q(host__icontains=search)
                 | Q(user__icontains=search)
+                | Q(inventory_detected_hostname__icontains=search)
+                | Q(inventory_detected_version__icontains=search)
             )
             if search.isdigit():
                 search_filter |= Q(id=int(search))
@@ -537,6 +543,14 @@ class InstanceList(generics.ListAPIView):
             "-user",
             "type",
             "-type",
+            "inventory_status",
+            "-inventory_status",
+            "inventory_detected_hostname",
+            "-inventory_detected_hostname",
+            "inventory_detected_version",
+            "-inventory_detected_version",
+            "inventory_last_success_at",
+            "-inventory_last_success_at",
         }
         if ordering in allowed_ordering:
             queryset = queryset.order_by(ordering, "id")
@@ -551,7 +565,7 @@ class InstanceList(generics.ListAPIView):
                 name="search",
                 type=OpenApiTypes.STR,
                 location=OpenApiParameter.QUERY,
-                description="Match instance ID, name, host, or user.",
+                description="Match instance ID, name, host, user, detected hostname, or detected version.",
             ),
             OpenApiParameter(
                 name="type",
@@ -584,6 +598,10 @@ class InstanceList(generics.ListAPIView):
         permission_required("sql.menu_instance_list", raise_exception=True)
     )
     def get(self, request):
+        try:
+            ensure_inventory_refresh_schedule()
+        except Exception:
+            logger.exception("Failed to ensure the inventory refresh schedule.")
         instances = self.filter_queryset(self.get_queryset())
         page_ins = self.paginate_queryset(queryset=instances)
         serializer_obj = self.get_serializer(page_ins, many=True)
@@ -2362,8 +2380,7 @@ class InstanceConnectionTest(views.APIView):
             raise Http404
 
         try:
-            query_engine = get_engine(instance=instance)
-            test_result = query_engine.test_connection()
+            snapshot_result = refresh_instance_inventory_snapshot(instance=instance)
         except serializers.ValidationError:
             raise
         except Exception:
@@ -2372,7 +2389,7 @@ class InstanceConnectionTest(views.APIView):
                 {"errors": "Unable to connect to instance. Check configuration."}
             )
 
-        if test_result.error:
+        if not snapshot_result["success"]:
             raise serializers.ValidationError(
                 {"errors": "Unable to connect to instance. Check configuration."}
             )

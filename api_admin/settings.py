@@ -1,3 +1,5 @@
+import logging
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.db import transaction
@@ -11,6 +13,10 @@ from common.check import (
     validate_go_inception_payload,
 )
 from common.config import SysConfig
+from sql.inventory import (
+    INVENTORY_REFRESH_INTERVAL_CHOICES,
+    ensure_inventory_refresh_schedule,
+)
 from sql.engines.mysql_ddl import validate_binary_path
 from sql.models import InstanceTag, ResourceGroup
 
@@ -18,6 +24,7 @@ from api_core.permissions import IsStaffOrSuperuser
 from api_core.response import success_response
 
 User = get_user_model()
+logger = logging.getLogger("default")
 
 DEFAULT_CHAT_MODEL = "gpt-3.5-turbo"
 DEFAULT_QUERY_TEMPLATE = (
@@ -38,6 +45,7 @@ AUTO_REVIEW_DB_TYPES = (
 STORAGE_TYPE_OPTIONS = ("local", "sftp", "s3c", "azure")
 SMS_PROVIDER_OPTIONS = ("disabled", "aliyun", "tencent")
 TASK_BACKEND_OPTIONS = ("django_q", "celery")
+INVENTORY_REFRESH_INTERVAL_OPTIONS = INVENTORY_REFRESH_INTERVAL_CHOICES
 
 SYSTEM_SETTINGS_SCHEMA = (
     {"name": "go_inception_host", "kind": "string", "default": ""},
@@ -76,6 +84,12 @@ SYSTEM_SETTINGS_SCHEMA = (
         "kind": "choice",
         "choices": TASK_BACKEND_OPTIONS,
         "default": "django_q",
+    },
+    {
+        "name": "inventory_refresh_interval",
+        "kind": "choice",
+        "choices": INVENTORY_REFRESH_INTERVAL_OPTIONS,
+        "default": "24h",
     },
     {"name": "celery_broker_url", "kind": "string", "default": ""},
     {"name": "celery_result_backend", "kind": "string", "default": ""},
@@ -281,7 +295,20 @@ def build_system_settings_options():
             }
             for backend in TASK_BACKEND_OPTIONS
         ],
+        "inventory_refresh_intervals": [
+            {"value": interval, "label": interval}
+            for interval in INVENTORY_REFRESH_INTERVAL_OPTIONS
+        ],
     }
+
+
+def sync_inventory_refresh_schedule(force=False):
+    try:
+        ensure_inventory_refresh_schedule(force=force)
+        return True
+    except Exception as exc:
+        logger.exception("Failed to synchronize the inventory refresh schedule.")
+        return False
 
 
 class SystemSettingsSerializer(serializers.Serializer):
@@ -480,6 +507,7 @@ class SystemSettingsView(views.APIView):
     )
     def get(self, request):
         serializer = SystemSettingsSerializer(instance=load_system_settings())
+        sync_inventory_refresh_schedule()
         return success_response(
             data={
                 "settings": serializer.data,
@@ -497,12 +525,20 @@ class SystemSettingsView(views.APIView):
         serializer = SystemSettingsSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         save_system_settings(serializer.validated_data)
+        schedule_synced = sync_inventory_refresh_schedule(force=True)
         response_serializer = SystemSettingsSerializer(instance=load_system_settings())
+        detail = "System settings updated successfully."
+        if not schedule_synced:
+            detail = (
+                "System settings updated, but the inventory refresh schedule "
+                "could not be synchronized. Check the task backend and try again."
+            )
         return success_response(
-            detail="System settings updated successfully.",
+            detail=detail,
             data={
                 "settings": response_serializer.data,
                 "options": build_system_settings_options(),
+                "inventory_refresh_schedule_synced": schedule_synced,
             },
         )
 
