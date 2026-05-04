@@ -142,6 +142,7 @@ class InventoryRefreshTests(TestCase):
     def test_force_schedule_refresh_replaces_next_run_when_interval_changes(
         self, mock_schedule
     ):
+        self.sys_config.set("inventory_refresh_interval", "24h")
         inventory.ensure_inventory_refresh_schedule(force=True)
         first_run = TaskSchedule.objects.get(
             name=inventory.INVENTORY_REFRESH_SCHEDULE_NAME

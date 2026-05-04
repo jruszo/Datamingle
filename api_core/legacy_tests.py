@@ -2082,7 +2082,7 @@ class TestInstance(CacheIsolatedAPITestCase):
         self.assertEqual(Instance.objects.filter(instance_name="some_ins").count(), 0)
 
 
-class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
+class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
     def setUp(self):
         self.review_group = Group.objects.create(name="Permission Approvers")
         self.resource_group = ResourceGroup.objects.create(group_name="permission-rg")
@@ -2310,8 +2310,9 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
 
     def test_test_instance_connection_requires_superuser(self):
         """Connection testing stays restricted to superusers."""
+        self._login(self.requester)
         r = self.client.post(
-            f"/api/v1/instance/{self.ins.id}/test-connection/",
+            f"/api/v1/instance/{self.instance.id}/test-connection/",
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
@@ -2319,8 +2320,9 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
     @patch("sql.inventory.get_engine")
     def test_test_instance_connection(self, mock_get_engine):
         """Superusers can run the SPA connection test action."""
-        self.user.is_superuser = True
-        self.user.save(update_fields=["is_superuser"])
+        self.requester.is_superuser = True
+        self.requester.save(update_fields=["is_superuser"])
+        self._login(self.requester)
 
         mock_engine = Mock()
         mock_result = Mock(error="")
@@ -2332,24 +2334,25 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
         mock_get_engine.return_value = mock_engine
 
         r = self.client.post(
-            f"/api/v1/instance/{self.ins.id}/test-connection/",
+            f"/api/v1/instance/{self.instance.id}/test-connection/",
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         payload = response_data(r)
         self.assertEqual(payload["success"], True)
         self.assertEqual(payload["message"], "Connection successful.")
-        self.ins.refresh_from_db()
-        self.assertEqual(self.ins.inventory_status, "ok")
-        self.assertEqual(self.ins.inventory_detected_hostname, "detected-host")
-        self.assertEqual(self.ins.inventory_detected_version, "8.0.36")
+        self.instance.refresh_from_db()
+        self.assertEqual(self.instance.inventory_status, "ok")
+        self.assertEqual(self.instance.inventory_detected_hostname, "detected-host")
+        self.assertEqual(self.instance.inventory_detected_version, "8.0.36")
 
     @patch("api_instances.views.get_engine")
     def test_get_instance_resource(self, mock_get_engine):
         """Test querying instance resources."""
         group = ResourceGroup.objects.create(group_name="instance_resource_test")
-        self.user.resource_group.add(group)
-        self.ins.resource_group.add(group)
+        self.query_user.resource_group.add(group)
+        self.instance.resource_group.add(group)
+        self._login(self.query_user)
 
         mock_engine = Mock()
         mock_engine.escape_string.side_effect = lambda x: x
@@ -2362,7 +2365,7 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
 
         r = self.client.get(
             "/api/v1/instance/resource/",
-            {"instance_id": self.ins.id, "resource_type": "database"},
+            {"instance_id": self.instance.id, "resource_type": "database"},
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)

@@ -565,7 +565,7 @@ class InstanceList(generics.ListAPIView):
                 name="search",
                 type=OpenApiTypes.STR,
                 location=OpenApiParameter.QUERY,
-                description="Match instance ID, name, host, or user.",
+                description="Match instance ID, name, host, user, detected hostname, or detected version.",
             ),
             OpenApiParameter(
                 name="type",

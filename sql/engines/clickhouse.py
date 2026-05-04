@@ -57,13 +57,17 @@ class ClickHouseEngine(EngineBase):
     @property
     def server_version(self):
         sql = "select value from system.build_options where name = 'VERSION_FULL';"
+        result = self.query(sql=sql)
+        if result.error or not result.rows or not result.rows[0]:
+            logger.warning(
+                "Failed to fetch ClickHouse server version: %s",
+                result.error or "empty result",
+            )
+            return tuple()
         try:
-            result = self.query(sql=sql)
-            if result.error or not result.rows or not result.rows[0]:
-                raise ValueError(result.error or "empty result")
             version = result.rows[0][0].split(" ")[1]
             return tuple([int(n) for n in version.split(".")[:3]])
-        except Exception as exc:
+        except (AttributeError, IndexError, TypeError, ValueError) as exc:
             logger.warning("Failed to fetch ClickHouse server version: %s", exc)
             return tuple()
 

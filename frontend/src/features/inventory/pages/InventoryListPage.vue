@@ -370,7 +370,7 @@ watch(searchQuery, () => {
           :total-rows="totalCount"
           :row-class="inventoryRowClass"
           row-key="id"
-          search-placeholder="Filter instances by name, host, user, or ID"
+          search-placeholder="Filter instances by name, host, user, ID, detected hostname, or detected version"
           :search-keys="['instance_name', 'host', 'user', 'id', 'inventory_detected_hostname', 'inventory_detected_version']"
           @update:page="currentPage = $event"
           @update:page-size="handlePageSizeChange"
