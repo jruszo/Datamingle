@@ -113,3 +113,51 @@ services:
     entrypoint: "bash /opt/datamingle/src/docker/startup.sh"
     env_file:
       - .env.local-arm
+
+  celery:
+    image: datamingle-app:local-arm
+    container_name: datamingle-celery
+    restart: always
+    depends_on:
+      redis:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      datamingle:
+        condition: service_started
+    volumes:
+      - "../..:/opt/datamingle"
+      - "./datamingle/settings.py:/opt/datamingle/local_settings.py"
+      - "./datamingle/docs.md:/opt/datamingle/docs/docs.md"
+      - "./datamingle/downloads:/opt/datamingle/downloads"
+      - "./datamingle/logs:/opt/datamingle/logs"
+      - "./datamingle/keys:/opt/datamingle/keys"
+    env_file:
+      - .env.local-arm
+    entrypoint: >-
+      bash -lc "source /opt/venv4datamingle/bin/activate &&
+      celery -A archery worker -l info -Q ${CELERY_TASK_DEFAULT_QUEUE:-datamingle-default}"
+
+  celerybeat:
+    image: datamingle-app:local-arm
+    container_name: datamingle-celerybeat
+    restart: always
+    depends_on:
+      redis:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      datamingle:
+        condition: service_started
+    volumes:
+      - "../..:/opt/datamingle"
+      - "./datamingle/settings.py:/opt/datamingle/local_settings.py"
+      - "./datamingle/docs.md:/opt/datamingle/docs/docs.md"
+      - "./datamingle/downloads:/opt/datamingle/downloads"
+      - "./datamingle/logs:/opt/datamingle/logs"
+      - "./datamingle/keys:/opt/datamingle/keys"
+    env_file:
+      - .env.local-arm
+    entrypoint: >-
+      bash -lc "source /opt/venv4datamingle/bin/activate &&
+      celery -A archery beat -l info --schedule /tmp/celerybeat-schedule"

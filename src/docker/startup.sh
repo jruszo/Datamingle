@@ -34,8 +34,12 @@ echo Start nginx
 echo Collect all static files into STATIC_ROOT
 python3 manage.py collectstatic -v0 --noinput
 
-echo Start Django Q cluster
-supervisord -c /etc/supervisord.conf
+if [[ "${TASK_BACKEND:-django_q}" == "django_q" ]]; then
+    echo Start Django Q cluster
+    supervisord -c /etc/supervisord.conf
+else
+    echo Skip Django Q cluster for TASK_BACKEND=${TASK_BACKEND}
+fi
 
 echo Start services
 GUNICORN_RELOAD_ARGS=""
@@ -43,5 +47,4 @@ if [[ "${GUNICORN_RELOAD:-0}" == "1" ]]; then
     GUNICORN_RELOAD_ARGS="--reload"
 fi
 gunicorn -w 4 -b 127.0.0.1:8888 --timeout 600 ${GUNICORN_RELOAD_ARGS} archery.wsgi:application
-
 
