@@ -52,13 +52,8 @@ SYSTEM_SETTINGS_SCHEMA = (
     {"name": "go_inception_port", "kind": "int", "default": None},
     {"name": "go_inception_user", "kind": "string", "default": ""},
     {"name": "go_inception_password", "kind": "string", "default": ""},
-    {"name": "inception_remote_backup_host", "kind": "string", "default": ""},
-    {"name": "inception_remote_backup_port", "kind": "int", "default": None},
-    {"name": "inception_remote_backup_user", "kind": "string", "default": ""},
-    {"name": "inception_remote_backup_password", "kind": "string", "default": ""},
     {"name": "critical_ddl_regex", "kind": "string", "default": ""},
     {"name": "auto_review_wrong", "kind": "int", "default": None},
-    {"name": "enable_backup_switch", "kind": "bool", "default": False},
     {"name": "auto_review", "kind": "bool", "default": False},
     {"name": "auto_review_tag", "kind": "list_string", "default": []},
     {
@@ -219,6 +214,8 @@ def _get_config_value(config, definition):
         if value in (None, "") and default is not None:
             return list(default)
         return _split_csv(value)
+    if kind == "choice" and value in (None, ""):
+        return default
     if value is None:
         return default
     return value
@@ -449,18 +446,6 @@ class GoInceptionConnectionTestSerializer(serializers.Serializer):
     go_inception_port = serializers.IntegerField(required=False, allow_null=True)
     go_inception_user = serializers.CharField(required=False, allow_blank=True)
     go_inception_password = serializers.CharField(required=False, allow_blank=True)
-    inception_remote_backup_host = serializers.CharField(
-        required=False, allow_blank=True
-    )
-    inception_remote_backup_port = serializers.IntegerField(
-        required=False, allow_null=True
-    )
-    inception_remote_backup_user = serializers.CharField(
-        required=False, allow_blank=True
-    )
-    inception_remote_backup_password = serializers.CharField(
-        required=False, allow_blank=True
-    )
 
 
 class EmailConnectionTestSerializer(serializers.Serializer):
@@ -549,7 +534,7 @@ class SystemSettingsGoInceptionTestView(views.APIView):
     @extend_schema(
         summary="Test goInception Configuration",
         request=GoInceptionConnectionTestSerializer,
-        description="Test the configured goInception and backup database connection settings.",
+        description="Test the configured goInception connection settings.",
     )
     def post(self, request):
         serializer = GoInceptionConnectionTestSerializer(data=request.data)
@@ -559,9 +544,7 @@ class SystemSettingsGoInceptionTestView(views.APIView):
             return Response(
                 {"errors": result["msg"]}, status=status.HTTP_400_BAD_REQUEST
             )
-        return success_response(
-            detail="goInception and backup database connection test succeeded."
-        )
+        return success_response(detail="goInception connection test succeeded.")
 
 
 class SystemSettingsEmailTestView(views.APIView):

@@ -56,17 +56,11 @@ def debug(request):
 
     task_backend = task_backend_info(full=bool(full))
 
-    # Inception and goInception information.
+    # goInception information.
     go_inception_host = sys_config.get("go_inception_host")
     go_inception_port = sys_config.get("go_inception_port", 0)
     go_inception_user = sys_config.get("go_inception_user", "")
     go_inception_password = sys_config.get("go_inception_password", "")
-    inception_remote_backup_host = sys_config.get("inception_remote_backup_host", "")
-    inception_remote_backup_port = sys_config.get("inception_remote_backup_port", "")
-    inception_remote_backup_user = sys_config.get("inception_remote_backup_user", "")
-    inception_remote_backup_password = sys_config.get(
-        "inception_remote_backup_password", ""
-    )
 
     # goInception
     try:
@@ -96,21 +90,6 @@ def debug(request):
         goinception_info = "Failed to get goInception info."
         full_goinception_info = goinception_info
 
-    # Backup database.
-    try:
-        bak_conn = MySQLdb.connect(
-            host=inception_remote_backup_host,
-            port=int(inception_remote_backup_port),
-            user=inception_remote_backup_user,
-            password=inception_remote_backup_password,
-            connect_timeout=1,
-        )
-        cursor = bak_conn.cursor()
-        cursor.execute("select 1;")
-        backup_info = "normal"
-    except Exception:
-        backup_info = "Unable to connect to goInception backup database."
-
     # PACKAGES
     installed_packages_list = sorted(
         f"{dist.metadata['Name']}=={dist.version}"
@@ -120,7 +99,6 @@ def debug(request):
 
     # Mask sensitive information.
     secret_keys = [
-        "inception_remote_backup_password",
         "feishu_app_secret",
         "mail_smtp_password",
         "go_inception_password",
@@ -131,6 +109,14 @@ def debug(request):
         "celery_result_backend",
     ]
     sys_config.update({k: "******" for k in secret_keys})
+    for key in (
+        "inception_remote_backup_host",
+        "inception_remote_backup_port",
+        "inception_remote_backup_user",
+        "inception_remote_backup_password",
+        "enable_backup_switch",
+    ):
+        sys_config.pop(key, None)
 
     # Final output.
     system_info = {
@@ -138,7 +124,6 @@ def debug(request):
         "task_backend": task_backend,
         "inception": {
             "goinception_info": full_goinception_info if full else goinception_info,
-            "backup_info": backup_info,
         },
         "runtime_info": {
             "python_version": platform.python_version(),

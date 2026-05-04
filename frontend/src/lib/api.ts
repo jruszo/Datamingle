@@ -795,7 +795,6 @@ export type WorkflowInstanceLookupRecord = {
 }
 
 export type WorkflowMetadataRecord = {
-  allow_backup_toggle: boolean
   manual_execution_enabled: boolean
   resource_groups: WorkflowResourceGroupLookupRecord[]
   instances: WorkflowInstanceLookupRecord[]
@@ -820,7 +819,6 @@ export type WorkflowSummaryRecord = {
   download_available: boolean
   status: string
   status_label: string
-  is_backup: boolean
   engineer: string
   engineer_display: string
   run_date_start: string | null
@@ -874,7 +872,6 @@ export type WorkflowDetailRecord = WorkflowSummaryRecord & {
   is_can_schedule: boolean
   is_can_cancel: boolean
   is_can_abort: boolean
-  is_can_rollback: boolean
   is_can_manual_execute: boolean
   is_can_edit_execution_window: boolean
   manual_execution_enabled: boolean
@@ -1950,11 +1947,6 @@ export type WorkflowContentRecord = {
   column_list: string[]
 }
 
-export type WorkflowRollbackRecord = {
-  rows: Array<[string, string]>
-  download_content: string
-}
-
 export function fetchPermissionGrants(token: string, filters: PermissionGrantListFilters = {}) {
   const queryString = buildListQueryString(filters)
   const path = queryString ? `/v1/access/grant/?${queryString}` : '/v1/access/grant/'
@@ -1995,7 +1987,6 @@ export type WorkflowSubmitInstanceRecord = {
 export type WorkflowSubmissionMetadata = {
   resource_groups: WorkflowSubmitResourceGroupRecord[]
   instances: WorkflowSubmitInstanceRecord[]
-  enable_backup_switch: boolean
   manual_execution_enabled: boolean
 }
 
@@ -2065,7 +2056,6 @@ export type WorkflowCreatePayload = {
     db_name: string
     schema_name?: string | null
     instance: number
-    is_backup?: boolean
     is_offline_export: 0 | 1
     export_format?: 'csv' | 'tsv' | 'sql' | 'xlsx'
     run_date_start?: string | null
@@ -2499,12 +2489,6 @@ export async function downloadWorkflowExport(
 export function fetchWorkflowContent(workflowId: number, token: string) {
   return apiGet<unknown>(`/v1/workflow/${workflowId}/content/`, { token }).then((payload) =>
     extractData<WorkflowContentRecord>(payload),
-  )
-}
-
-export function fetchWorkflowRollback(workflowId: number, token: string) {
-  return apiGet<unknown>(`/v1/workflow/${workflowId}/rollback/`, { token }).then((payload) =>
-    extractData<WorkflowRollbackRecord>(payload),
   )
 }
 

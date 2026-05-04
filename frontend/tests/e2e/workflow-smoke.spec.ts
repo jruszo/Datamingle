@@ -8,10 +8,8 @@ import {
   clickAndAcceptDialogIfPresent,
   closeRoleSessions,
   createRoleSession,
-  expectWorkflowBackupFlag,
   fillSqlEditor,
   openWorkflowDetail,
-  setBackupSwitchEnabled,
   setSystemConfigValues,
   uniqueWorkflowName,
   waitForWorkflowAction,
@@ -23,7 +21,6 @@ type RoleSession = Awaited<ReturnType<typeof createRoleSession>>
 
 test.describe.serial('workflow smoke', () => {
   test.beforeEach(() => {
-    setBackupSwitchEnabled(false)
     setSystemConfigValues({
       gh_ost: '',
       pt_osc: '',
@@ -31,7 +28,6 @@ test.describe.serial('workflow smoke', () => {
   })
 
   test.afterEach(() => {
-    setBackupSwitchEnabled(false)
     setSystemConfigValues({
       gh_ost: '',
       pt_osc: '',
@@ -199,22 +195,18 @@ test.describe.serial('workflow smoke', () => {
     }
   })
 
-  test('runs a DML multi-stage workflow without backup through PM and DBA approvals', async ({ browser }) => {
+  test('runs a DML multi-stage workflow through PM and DBA approvals', async ({ browser }) => {
     const requester = await createRoleSession(browser, 'demo_requester')
     let pm: RoleSession | undefined
     let dba: RoleSession | undefined
 
     try {
       const workflowName = uniqueWorkflowName('dml smoke')
-      setBackupSwitchEnabled(true)
 
       await requester.page.goto('/workflows/dml/new')
       await requester.page.getByTestId('workflow-name').fill(workflowName)
       await requester.page.getByTestId('workflow-group').selectOption({ label: 'Demo Workflow Multi Stage' })
       await expect(requester.page.getByTestId('workflow-approval-preview')).toHaveText('PM -> DBA')
-      await expect(requester.page.getByTestId('workflow-backup-toggle')).toBeChecked()
-      await requester.page.getByTestId('workflow-backup-toggle').uncheck()
-      await expect(requester.page.getByTestId('workflow-backup-toggle')).not.toBeChecked()
       await requester.page.getByTestId('workflow-instance').selectOption({ label: 'demo-mysql-workflow / MYSQL' })
       await requester.page.getByTestId('workflow-db').selectOption('demo_orders')
       await fillSqlEditor(
@@ -234,7 +226,6 @@ test.describe.serial('workflow smoke', () => {
       await requester.page.waitForURL(/\/workflows\/\d+$/)
       await expect(requester.page.getByTestId('workflow-detail-refresh')).toBeVisible()
       const workflowId = workflowIdFromUrl(requester.page)
-      await expectWorkflowBackupFlag(requester.page, workflowId, false)
 
       pm = await createRoleSession(browser, 'demo_pm')
       await openWorkflowDetail(pm.page, workflowId)
@@ -246,63 +237,6 @@ test.describe.serial('workflow smoke', () => {
       await openWorkflowDetail(dba.page, workflowId)
       await waitForWorkflowAction(dba.page, 'workflow-approve')
       await dba.page.getByLabel('Remark').fill('Approved by DBA smoke test')
-      await dba.page.getByTestId('workflow-approve').click()
-      await assertReviewRowsPresent(dba.page)
-
-      await waitForWorkflowAction(dba.page, 'workflow-execute-now')
-      await dba.page.getByTestId('workflow-execute-now').click()
-      await waitForWorkflowStatus(dba.page, 'Finished')
-      await assertExecutionRowsPresent(dba.page)
-    } finally {
-      await closeRoleSessions(requester.context, pm?.context, dba?.context)
-    }
-  })
-
-  test('runs a DML multi-stage workflow with backup through PM and DBA approvals', async ({ browser }) => {
-    const requester = await createRoleSession(browser, 'demo_requester')
-    let pm: RoleSession | undefined
-    let dba: RoleSession | undefined
-
-    try {
-      const workflowName = uniqueWorkflowName('dml backup smoke')
-      setBackupSwitchEnabled(true)
-
-      await requester.page.goto('/workflows/dml/new')
-      await requester.page.getByTestId('workflow-name').fill(workflowName)
-      await requester.page.getByTestId('workflow-group').selectOption({ label: 'Demo Workflow Multi Stage' })
-      await expect(requester.page.getByTestId('workflow-approval-preview')).toHaveText('PM -> DBA')
-      await expect(requester.page.getByTestId('workflow-backup-toggle')).toBeChecked()
-      await requester.page.getByTestId('workflow-instance').selectOption({ label: 'demo-mysql-workflow / MYSQL' })
-      await requester.page.getByTestId('workflow-db').selectOption('demo_orders')
-      await fillSqlEditor(
-        requester.page,
-        'workflow-sql-editor',
-        "UPDATE orders SET order_status = 'shipped' WHERE customer_email = 'noah@example.com';",
-      )
-
-      await requester.page.getByRole('button', { name: 'SQL check' }).click()
-      await expect(
-        requester.page.getByText('This check is current and the SQL is classified as DML.'),
-      ).toBeVisible()
-
-      await clickAndAcceptDialogIfPresent(requester.page, () =>
-        requester.page.getByTestId('workflow-submit').click(),
-      )
-      await requester.page.waitForURL(/\/workflows\/\d+$/)
-      await expect(requester.page.getByTestId('workflow-detail-refresh')).toBeVisible()
-      const workflowId = workflowIdFromUrl(requester.page)
-      await expectWorkflowBackupFlag(requester.page, workflowId, true)
-
-      pm = await createRoleSession(browser, 'demo_pm')
-      await openWorkflowDetail(pm.page, workflowId)
-      await waitForWorkflowAction(pm.page, 'workflow-approve')
-      await pm.page.getByLabel('Remark').fill('Approved by PM backup smoke test')
-      await pm.page.getByTestId('workflow-approve').click()
-
-      dba = await createRoleSession(browser, 'demo_dba')
-      await openWorkflowDetail(dba.page, workflowId)
-      await waitForWorkflowAction(dba.page, 'workflow-approve')
-      await dba.page.getByLabel('Remark').fill('Approved by DBA backup smoke test')
       await dba.page.getByTestId('workflow-approve').click()
       await assertReviewRowsPresent(dba.page)
 

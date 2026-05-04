@@ -67,7 +67,6 @@ const form = reactive({
   groupId: '',
   instanceId: '',
   dbName: '',
-  isBackup: true,
   runDateStart: '',
   runDateEnd: '',
   sqlContent: '',
@@ -224,9 +223,6 @@ async function loadSubmissionMetadata() {
 
   try {
     submissionMetadata.value = await fetchWorkflowSubmissionMetadata(requireToken())
-    if (submissionMetadata.value.enable_backup_switch === false) {
-      form.isBackup = true
-    }
   } catch (errorValue) {
     pageError.value = toUserFacingMessage(
       errorValue,
@@ -444,7 +440,6 @@ async function submitWorkflow() {
           group_id: Number(form.groupId),
           db_name: form.dbName,
           instance: Number(form.instanceId),
-          is_backup: submissionMetadata.value?.enable_backup_switch ? form.isBackup : undefined,
           is_offline_export: 0,
           run_date_start: form.runDateStart || null,
           run_date_end: form.runDateEnd || null,
@@ -731,26 +726,6 @@ onMounted(() => {
                   </option>
                 </select>
                 <p v-if="databasesError" class="text-sm text-red-600">{{ databasesError }}</p>
-              </div>
-
-              <div
-                v-if="submissionMetadata?.enable_backup_switch"
-                class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4"
-              >
-                <div class="flex items-center justify-between gap-3">
-                  <div>
-                    <p class="text-sm font-medium text-slate-900">Backup SQL</p>
-                    <p class="text-sm text-slate-500">Keep rollback data when the engine supports it.</p>
-                  </div>
-                  <input
-                    id="workflow-backup-toggle"
-                    v-model="form.isBackup"
-                    data-testid="workflow-backup-toggle"
-                    class="h-4 w-4 rounded border-slate-300"
-                    type="checkbox"
-                    :disabled="submitting"
-                  />
-                </div>
               </div>
 
               <div class="grid gap-3 md:grid-cols-2">

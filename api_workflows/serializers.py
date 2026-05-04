@@ -22,7 +22,7 @@ from sql.utils.resource_group import (
     user_has_instance_query_access,
     user_has_instance_workflow_access,
 )
-from sql.utils.sql_review import can_cancel, can_execute, can_rollback, can_timingtask
+from sql.utils.sql_review import can_cancel, can_execute, can_timingtask
 from sql.utils.sql_utils import generate_sql
 from sql.utils.tasks import task_info
 from sql.utils.workflow_audit import get_auditor
@@ -102,6 +102,8 @@ class WorkflowParseResultSerializer(serializers.Serializer):
 
 class WorkflowSerializer(serializers.ModelSerializer):
     def to_internal_value(self, data):
+        data = data.copy()
+        data.pop("is_backup", None)
         if data.get("run_date_start") == "":
             data["run_date_start"] = None
         if data.get("run_date_end") == "":
@@ -132,7 +134,6 @@ class WorkflowSerializer(serializers.ModelSerializer):
         ]
         extra_kwargs = {
             "demand_url": {"required": False},
-            "is_backup": {"required": False},
             "engineer": {"required": False},
         }
 
@@ -258,16 +259,9 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                 }
             )
 
-        if "is_backup" in workflow_data:
-            is_backup = workflow_data["is_backup"]
-        else:
-            is_backup = SqlWorkflow._meta.get_field("is_backup").get_default()
-        if is_offline_export:
-            is_backup = False
-
         workflow_data.update(
             status="workflow_manreviewing",
-            is_backup=is_backup,
+            is_backup=False,
             is_manual=0,
             syntax_type=check_result.syntax_type,
             engineer=user.username,

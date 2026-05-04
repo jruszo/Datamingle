@@ -7,7 +7,6 @@ import ast
 from django.contrib.auth.models import Group
 from django.db import transaction
 from django.db.models import Q
-from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from common.task_queue import async_task
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
@@ -53,7 +52,6 @@ from sql.utils.sql_utils import generate_sql, get_syntax_type
 from sql.utils.sql_review import (
     can_cancel,
     can_execute,
-    can_rollback,
     can_timingtask,
     can_view,
     on_correct_time_period,
@@ -151,7 +149,6 @@ class WorkflowSummarySerializer(serializers.ModelSerializer):
             "download_available",
             "status",
             "status_label",
-            "is_backup",
             "engineer",
             "engineer_display",
             "run_date_start",
@@ -199,7 +196,6 @@ class WorkflowInstanceLookupSerializer(serializers.ModelSerializer):
 
 
 class WorkflowMetadataSerializer(serializers.Serializer):
-    allow_backup_toggle = serializers.BooleanField()
     manual_execution_enabled = serializers.BooleanField()
     resource_groups = WorkflowResourceGroupLookupSerializer(many=True)
     instances = WorkflowInstanceLookupSerializer(many=True)
@@ -443,14 +439,12 @@ def _serialize_workflow_detail(workflow, user):
         can_execute_now = False
         can_schedule_now = False
         can_cancel_now = False
-        can_rollback_now = False
         can_manual_execute_now = False
     else:
         can_review_now = Audit.can_review(user, workflow.id, WorkflowType.SQL_REVIEW)
         can_execute_now = can_execute(user, workflow.id)
         can_schedule_now = can_timingtask(user, workflow.id)
         can_cancel_now = can_cancel(user, workflow.id)
-        can_rollback_now = can_rollback(user, workflow.id)
         can_manual_execute_now = can_execute_now
 
     schedule = task_info(f"sqlreview-timing-{workflow.id}")
@@ -487,7 +481,6 @@ def _serialize_workflow_detail(workflow, user):
             "is_can_schedule": can_schedule_now,
             "is_can_cancel": can_cancel_now,
             "is_can_abort": can_cancel_now and workflow.engineer == user.username,
-            "is_can_rollback": can_rollback_now,
             "is_can_manual_execute": can_manual_execute_now and manual_enabled,
             "is_can_edit_execution_window": can_review_now,
             "manual_execution_enabled": manual_enabled,
@@ -778,10 +771,6 @@ def _load_workflow_result_rows(workflow):
 
     column_list = list(rows[0].keys()) if rows else []
     return {"source": source, "rows": rows, "column_list": column_list}
-
-
-def _rollback_download_content(rollback_rows):
-    return "".join(f"/*{row[0]}*/\n{row[1]}\n" for row in rollback_rows)
 
 
 class ExecuteCheck(views.APIView):
@@ -1082,7 +1071,6 @@ class WorkflowMetadata(views.APIView):
 
         temporary_instance_groups = _workflow_metadata_instance_groups(request.user)
         payload = {
-            "allow_backup_toggle": bool(SysConfig().get("enable_backup_switch")),
             "manual_execution_enabled": bool(SysConfig().get("manual")),
             "resource_groups": _workflow_metadata_resource_groups(request.user),
             "instances": user_instances(request.user, tag_codes=["can_write"])
@@ -1114,7 +1102,6 @@ class WorkflowSubmissionMetadata(views.APIView):
             data={
                 "resource_groups": submission_scope["resource_groups"],
                 "instances": submission_scope["instances"],
-                "enable_backup_switch": bool(SysConfig().get("enable_backup_switch")),
                 "manual_execution_enabled": bool(SysConfig().get("manual")),
             }
         )
@@ -1139,7 +1126,6 @@ class WorkflowExportSubmissionMetadata(views.APIView):
             data={
                 "resource_groups": submission_scope["resource_groups"],
                 "instances": submission_scope["instances"],
-                "enable_backup_switch": False,
                 "manual_execution_enabled": bool(SysConfig().get("manual")),
             }
         )
@@ -1293,47 +1279,6 @@ class WorkflowDownload(views.APIView):
                 {"errors": "The export artifact is not available yet."}
             )
         return download_export_file(request, workflow.file_name, workflow.id)
-
-
-class WorkflowRollbackDetail(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
-    @extend_schema(
-        summary="Workflow Rollback SQL",
-        responses={200: OpenApiTypes.OBJECT},
-        description="Return rollback SQL pairs for a completed workflow.",
-    )
-    def get(self, request, workflow_id):
-        if not can_rollback(request.user, workflow_id):
-            raise PermissionDenied("You do not have permission to view rollback SQL.")
-
-        workflow = get_object_or_404(
-            SqlWorkflow.objects.select_related("instance"),
-            pk=workflow_id,
-        )
-        try:
-            query_engine = get_engine(instance=workflow.instance)
-            rollback_rows = query_engine.get_rollback(workflow=workflow)
-        except Exception as exc:
-            logger.error("Failed to load rollback SQL", exc_info=True)
-            raise serializers.ValidationError({"errors": "Operation failed."}) from None
-
-        if request.query_params.get("download") == "true":
-            response = HttpResponse(
-                _rollback_download_content(rollback_rows),
-                content_type="application/sql",
-            )
-            response["Content-Disposition"] = (
-                f'attachment; filename="rollback_{workflow_id}.sql"'
-            )
-            return response
-
-        return success_response(
-            data={
-                "rows": rollback_rows,
-                "download_content": _rollback_download_content(rollback_rows),
-            }
-        )
 
 
 class WorkflowExecutionWindowUpdate(views.APIView):

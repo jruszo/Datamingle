@@ -41,7 +41,6 @@ const form = reactive({
   groupId: '',
   instanceId: '',
   dbName: '',
-  isBackup: true,
   runDateStart: '',
   runDateEnd: '',
   sqlContent: '',
@@ -190,9 +189,6 @@ async function loadMetadata() {
 
   try {
     metadata.value = await fetchWorkflowMetadata(requireToken())
-    if (metadata.value.allow_backup_toggle === false) {
-      form.isBackup = true
-    }
   } catch (errorValue) {
     pageError.value = toUserFacingMessage(errorValue, 'Failed to load workflow submission metadata.')
   } finally {
@@ -275,7 +271,6 @@ async function submitWorkflowForm() {
           db_name: form.dbName.trim(),
           instance: Number(form.instanceId),
           is_offline_export: 0,
-          is_backup: metadata.value?.allow_backup_toggle ? form.isBackup : undefined,
           run_date_start: form.runDateStart || null,
           run_date_end: form.runDateEnd || null,
         },
@@ -426,14 +421,6 @@ onMounted(async () => {
                   <option v-for="dbName in databaseOptions" :key="dbName" :value="dbName">
                     {{ dbName }}
                   </option>
-                </select>
-              </div>
-
-              <div v-if="metadata?.allow_backup_toggle" class="space-y-2">
-                <label class="text-sm font-medium text-slate-700" for="workflow-backup">Backup</label>
-                <select id="workflow-backup" v-model="form.isBackup" :class="selectClass">
-                  <option :value="true">Backup SQL</option>
-                  <option :value="false">Do not create SQL backup</option>
                 </select>
               </div>
 

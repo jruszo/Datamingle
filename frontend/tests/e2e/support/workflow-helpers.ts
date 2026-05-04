@@ -99,30 +99,6 @@ export async function openArchiveDetail(page: Page, archiveId: number) {
   await expect(page.getByTestId('archive-detail-refresh')).toBeVisible()
 }
 
-export async function expectWorkflowBackupFlag(page: Page, workflowId: number, expected: boolean) {
-  const detail = await page.evaluate(async (id) => {
-    const token = window.localStorage.getItem('archery.access_token') || ''
-    if (!token) {
-      throw new Error('Missing access token for workflow detail fetch.')
-    }
-
-    const response = await fetch(`/api/v1/workflow/${id}/`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    })
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch workflow detail: ${response.status}`)
-    }
-
-    const payload = await response.json()
-    return payload.data ?? payload
-  }, workflowId)
-
-  expect(detail.is_backup).toBe(expected)
-}
-
 export async function waitForWorkflowAction(page: Page, testId: string, timeoutMs = DEFAULT_TIMEOUT_MS) {
   await pollWorkflowDetail(
     page,
@@ -211,12 +187,6 @@ export async function closeRoleSessions(...contexts: Array<BrowserContext | unde
       }
     }),
   )
-}
-
-export function setBackupSwitchEnabled(enabled: boolean) {
-  setSystemConfigValues({
-    enable_backup_switch: enabled,
-  })
 }
 
 export function setSystemConfigValues(values: Record<string, boolean | number | string>) {

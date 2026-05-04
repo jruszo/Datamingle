@@ -39,17 +39,13 @@ export const systemSettingsSections: SystemSettingsSectionDefinition[] = [
   {
     id: 'sql-review',
     title: 'SQL Review Engine',
-    description: 'Configure goInception and rollback backup connectivity used for SQL review and rollback generation.',
+    description: 'Configure goInception connectivity used for MySQL SQL review and execution checks.',
     testAction: 'goInception',
     fields: [
       { key: 'go_inception_host', label: 'goInception host', input: 'text', placeholder: 'goInception host' },
       { key: 'go_inception_port', label: 'goInception port', input: 'number', placeholder: 'goInception port' },
       { key: 'go_inception_user', label: 'goInception user', input: 'text', placeholder: 'Optional if auth is disabled' },
       { key: 'go_inception_password', label: 'goInception password', input: 'password', placeholder: 'Optional if auth is disabled' },
-      { key: 'inception_remote_backup_host', label: 'Backup host', input: 'text', placeholder: 'Backup database host' },
-      { key: 'inception_remote_backup_port', label: 'Backup port', input: 'number', placeholder: 'Backup database port' },
-      { key: 'inception_remote_backup_user', label: 'Backup user', input: 'text', placeholder: 'Backup database user' },
-      { key: 'inception_remote_backup_password', label: 'Backup password', input: 'password', placeholder: 'Backup database password' },
     ],
   },
   {
@@ -59,7 +55,6 @@ export const systemSettingsSections: SystemSettingsSectionDefinition[] = [
     fields: [
       { key: 'critical_ddl_regex', label: 'Critical DDL regex', input: 'text', placeholder: 'Regex for statements that should be blocked' },
       { key: 'auto_review_wrong', label: 'Auto review reject level', input: 'number', placeholder: '1 rejects warnings, 2 rejects errors only' },
-      { key: 'enable_backup_switch', label: 'Allow backup toggle', input: 'checkbox', description: 'When disabled, backup is always enforced.' },
       { key: 'auto_review', label: 'Enable auto review', input: 'checkbox', description: 'Allow automatic approval when all auto-review rules pass.' },
       { key: 'auto_review_tag', label: 'Auto review instance tags', input: 'multiselect', optionSource: 'instance_tags', showWhen: { key: 'auto_review', equals: true } },
       { key: 'auto_review_db_type', label: 'Auto review database types', input: 'multiselect', optionSource: 'auto_review_db_types', showWhen: { key: 'auto_review', equals: true } },

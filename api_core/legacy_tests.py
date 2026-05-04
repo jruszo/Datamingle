@@ -6,6 +6,7 @@ from django.core.cache import cache
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
 from django.http import HttpResponse
+from django.urls import Resolver404, resolve
 from rest_framework.test import APITestCase, APIClient
 from rest_framework import status
 from common.config import SysConfig
@@ -2973,19 +2974,9 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(payload["source"], "review")
         self.assertEqual(payload["rows"][0]["sql"], "select 1")
 
-    @patch("api_workflows.views.get_engine")
-    def test_workflow_rollback_detail(self, mock_get_engine):
-        self.wf1.status = "workflow_finish"
-        self.wf1.is_backup = True
-        self.wf1.save(update_fields=["status", "is_backup"])
-        mock_get_engine.return_value.get_rollback.return_value = [
-            ["delete from t", "insert into t values (1);"]
-        ]
-        r = self.client.get(f"/api/v1/workflow/{self.wf1.id}/rollback/", format="json")
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        payload = response_data(r)
-        self.assertEqual(payload["rows"][0][0], "delete from t")
-        self.assertIn("insert into t values", payload["download_content"])
+    def test_workflow_rollback_detail_route_removed(self):
+        with self.assertRaises(Resolver404):
+            resolve(f"/api/v1/workflow/{self.wf1.id}/rollback/")
 
     def test_get_audit_list(self):
         """Test getting pending audit workflow list."""
@@ -3013,6 +3004,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(len(data["resource_groups"]), 1)
         self.assertEqual(len(data["instances"]), 1)
         self.assertEqual(data["instances"][0]["id"], self.ins.id)
+        self.assertNotIn("allow_backup_toggle", data)
 
     def test_get_workflow_submission_metadata(self):
         response = self.client.get(
@@ -3027,6 +3019,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(len(data["instances"]), 1)
         self.assertEqual(data["instances"][0]["id"], self.ins.id)
         self.assertEqual(data["instances"][0]["group_ids"], [self.res_group.group_id])
+        self.assertNotIn("enable_backup_switch", data)
 
     def test_get_workflow_approval_preview(self):
         response = self.client.get(
@@ -3119,6 +3112,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             data["logs"][0]["operation_type_desc"], self.wl.operation_type_desc
         )
         self.assertTrue(data["is_can_review"])
+        self.assertNotIn("is_can_rollback", data)
 
     def test_get_workflow_detail_allows_audit_user(self):
         audit_user = User.objects.create(
@@ -3434,9 +3428,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(r_data["workflow"]["engineer_display"], self.user.display)
 
     @patch("api_workflows.serializers.get_engine")
-    def test_submit_workflow_uses_model_backup_default_when_omitted(
-        self, mock_get_engine
-    ):
+    def test_submit_workflow_defaults_backup_to_false(self, mock_get_engine):
         review_set = ReviewSet(
             rows=[
                 ReviewResult(
@@ -3469,12 +3461,10 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         workflow_id = response_data(r)["workflow"]["id"]
         workflow = SqlWorkflow.objects.get(id=workflow_id)
-        self.assertTrue(workflow.is_backup)
+        self.assertFalse(workflow.is_backup)
 
     @patch("api_workflows.serializers.get_engine")
-    def test_submit_workflow_does_not_force_backup_when_toggle_disabled(
-        self, mock_get_engine
-    ):
+    def test_submit_workflow_ignores_submitted_backup_flag(self, mock_get_engine):
         review_set = ReviewSet(
             rows=[
                 ReviewResult(
@@ -3491,71 +3481,23 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         mock_get_engine.return_value.auto_backup = True
         mock_get_engine.return_value.execute_check.return_value = review_set
 
-        sys_config = SysConfig()
-        sys_config.set("enable_backup_switch", False)
-        try:
-            json_data = {
-                "workflow": {
-                    "workflow_name": "Release Workflow Without Backup",
-                    "demand_url": "test",
-                    "group_id": 1,
-                    "db_name": "test_db",
-                    "instance": self.ins.id,
-                    "is_backup": False,
-                    "is_offline_export": 0,
-                },
-                "sql_content": "alter table abc add column note varchar(64);",
-            }
-            r = self.client.post("/api/v1/workflow/", json_data, format="json")
-            self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-            workflow_id = response_data(r)["workflow"]["id"]
-            workflow = SqlWorkflow.objects.get(id=workflow_id)
-            self.assertFalse(workflow.is_backup)
-        finally:
-            sys_config.purge()
-
-    @patch("api_workflows.serializers.get_engine")
-    def test_submit_workflow_preserves_backup_when_toggle_enabled(
-        self, mock_get_engine
-    ):
-        review_set = ReviewSet(
-            rows=[
-                ReviewResult(
-                    errlevel=0,
-                    stagestatus="Audit completed",
-                    errormessage="None",
-                    sql="update abc set note = 'backup';",
-                )
-            ]
-        )
-        review_set.syntax_type = 2
-        review_set.error_count = 0
-        review_set.warning_count = 0
-        mock_get_engine.return_value.auto_backup = True
-        mock_get_engine.return_value.execute_check.return_value = review_set
-
-        sys_config = SysConfig()
-        sys_config.set("enable_backup_switch", True)
-        try:
-            json_data = {
-                "workflow": {
-                    "workflow_name": "Release Workflow With Backup",
-                    "demand_url": "test",
-                    "group_id": 1,
-                    "db_name": "test_db",
-                    "instance": self.ins.id,
-                    "is_backup": True,
-                    "is_offline_export": 0,
-                },
-                "sql_content": "update abc set note = 'backup';",
-            }
-            r = self.client.post("/api/v1/workflow/", json_data, format="json")
-            self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-            workflow_id = response_data(r)["workflow"]["id"]
-            workflow = SqlWorkflow.objects.get(id=workflow_id)
-            self.assertTrue(workflow.is_backup)
-        finally:
-            sys_config.purge()
+        json_data = {
+            "workflow": {
+                "workflow_name": "Release Workflow Ignored Backup",
+                "demand_url": "test",
+                "group_id": 1,
+                "db_name": "test_db",
+                "instance": self.ins.id,
+                "is_backup": True,
+                "is_offline_export": 0,
+            },
+            "sql_content": "alter table abc add column note varchar(64);",
+        }
+        r = self.client.post("/api/v1/workflow/", json_data, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        workflow_id = response_data(r)["workflow"]["id"]
+        workflow = SqlWorkflow.objects.get(id=workflow_id)
+        self.assertFalse(workflow.is_backup)
 
     @patch("api_workflows.serializers.OffLineDownLoad.pre_count_check")
     @patch("api_workflows.serializers.get_engine")
@@ -5015,10 +4957,22 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
             list(NOTIFY_PHASE_OPTIONS),
         )
         self.assertEqual(payload["settings"]["storage_type"], "local")
+        self.assertNotIn("enable_backup_switch", payload["settings"])
+        self.assertNotIn("inception_remote_backup_host", payload["settings"])
         self.assertEqual(
             payload["options"]["instance_tags"][0]["value"], self.instance_tag.tag_code
         )
         self.assertEqual(payload["options"]["auth_groups"][0]["value"], self.group.name)
+
+    def test_staff_gets_default_storage_type_when_blank_config_is_stored(self):
+        SysConfig().set("storage_type", "")
+        self.authenticate("staff_user", "staff_password")
+
+        response = self.client.get("/api/v1/system-settings/", format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response_data(response)
+        self.assertEqual(payload["settings"]["storage_type"], "local")
 
     def test_non_staff_users_cannot_access_system_settings(self):
         self.authenticate("regular_user", "regular_password")
@@ -5103,14 +5057,14 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
             {
                 "go_inception_host": "inception",
                 "go_inception_port": 4000,
-                "inception_remote_backup_host": "backup",
-                "inception_remote_backup_port": 3306,
             },
             format="json",
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn("connection test succeeded", response.json()["detail"].lower())
+        self.assertIn(
+            "goinception connection test succeeded", response.json()["detail"].lower()
+        )
 
     @patch("api_admin.settings.validate_email_payload")
     def test_staff_can_run_email_test(self, validate_payload):
