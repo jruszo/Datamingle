@@ -236,10 +236,6 @@ async function runSectionTest(action: 'goInception' | 'email' | 'storage') {
           'go_inception_port',
           'go_inception_user',
           'go_inception_password',
-          'inception_remote_backup_host',
-          'inception_remote_backup_port',
-          'inception_remote_backup_user',
-          'inception_remote_backup_password',
         ]),
         requireToken(),
       )

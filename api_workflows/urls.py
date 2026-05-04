@@ -28,10 +28,6 @@ urlpatterns = [
         views.WorkflowDownload.as_view(),
     ),
     path(
-        "v1/workflow/<int:workflow_id>/rollback/",
-        views.WorkflowRollbackDetail.as_view(),
-    ),
-    path(
         "v1/workflow/<int:workflow_id>/window/",
         views.WorkflowExecutionWindowUpdate.as_view(),
     ),

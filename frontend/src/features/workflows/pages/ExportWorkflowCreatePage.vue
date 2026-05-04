@@ -298,7 +298,6 @@ async function submitWorkflow() {
           schema_name: form.schemaName.trim() || undefined,
           instance: Number(form.instanceId),
           export_format: form.exportFormat,
-          is_backup: false,
           is_offline_export: 1,
           run_date_start: form.runDateStart || null,
           run_date_end: form.runDateEnd || null,

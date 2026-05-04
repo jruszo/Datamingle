@@ -8,7 +8,7 @@ from common.utils.sendmsg import MsgSender
 from sql.storage import DynamicStorage
 
 logger = logging.getLogger("default")
-VALID_STORAGE_TYPES = {"sftp", "s3c", "azure"}
+VALID_STORAGE_TYPES = {"local", "sftp", "s3c", "azure"}
 
 
 def _parse_bool(value):
@@ -23,12 +23,6 @@ def validate_go_inception_payload(payload):
     go_inception_port = payload.get("go_inception_port", "")
     go_inception_user = payload.get("go_inception_user", "")
     go_inception_password = payload.get("go_inception_password", "")
-    inception_remote_backup_host = payload.get("inception_remote_backup_host", "")
-    inception_remote_backup_port = payload.get("inception_remote_backup_port", "")
-    inception_remote_backup_user = payload.get("inception_remote_backup_user", "")
-    inception_remote_backup_password = payload.get(
-        "inception_remote_backup_password", ""
-    )
 
     try:
         conn = MySQLdb.connect(
@@ -45,24 +39,6 @@ def validate_go_inception_payload(payload):
         result["status"] = 1
         result["msg"] = "Unable to connect to goInception"
         return result
-    else:
-        cur.close()
-        conn.close()
-
-    try:
-        conn = MySQLdb.connect(
-            host=inception_remote_backup_host,
-            port=int(inception_remote_backup_port),
-            user=inception_remote_backup_user,
-            password=inception_remote_backup_password,
-            charset="utf8mb4",
-            connect_timeout=5,
-        )
-        cur = conn.cursor()
-    except Exception:
-        logger.error(traceback.format_exc())
-        result["status"] = 1
-        result["msg"] = "Unable to connect to goInception backup database"
     else:
         cur.close()
         conn.close()
