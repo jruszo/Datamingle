@@ -32,7 +32,7 @@ wait_for_frontend() {
 
 verify_frontend() {
   cd "$FRONTEND_DIR"
-  node -e "const { chromium } = require('@playwright/test'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.goto('${FRONTEND_URL}/login', { waitUntil: 'networkidle' }); const count = await page.locator('[data-testid=login-username]').count(); await browser.close(); if (count === 0) { process.exit(1); } })().catch(async (error) => { console.error(error); process.exit(1); });"
+  node -e "const { chromium } = require('@playwright/test'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.goto('${FRONTEND_URL}/login', { waitUntil: 'networkidle' }); const count = await page.locator('[data-testid=login-workos]').count(); await browser.close(); if (count === 0) { process.exit(1); } })().catch(async (error) => { console.error(error); process.exit(1); });"
 }
 
 if [[ "$START_FRONTEND" == "1" ]]; then
@@ -57,7 +57,7 @@ if ! wait_for_frontend; then
 fi
 
 if ! verify_frontend; then
-  log "Frontend is reachable but did not render the expected login form. Restart the local Vite server and try again."
+  log "Frontend is reachable but did not render the expected WorkOS login action. Restart the local Vite server and try again."
   exit 1
 fi
 

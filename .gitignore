@@ -14,6 +14,8 @@ conda311
 sonar-project.properties
 .scannerwork
 .env
+src/docker-compose/.env
+src/docker-compose/.env.local-arm
 local_settings.py
 src/docker-compose-dev
 .coverage

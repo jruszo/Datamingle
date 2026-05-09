@@ -3,7 +3,6 @@ from rest_framework.test import APIClient
 
 from sql.engines import get_engine
 from sql.local_demo import (
-    DEMO_APP_PASSWORD,
     DEMO_INSTANCES,
     DEMO_RESOURCE_GROUPS,
     DEMO_USERS,
@@ -65,14 +64,14 @@ class Command(BaseCommand):
 
         client = APIClient()
         for username in DEMO_USERS.keys():
-            response = client.post(
-                "/api/auth/token/",
-                {"username": username, "password": DEMO_APP_PASSWORD},
-                format="json",
-            )
+            client.force_authenticate(user=users[username])
+            response = client.get("/api/v1/me/", format="json")
             if response.status_code != 200:
-                raise CommandError(f"Failed to login as {username}: {response.content}")
-            self.stdout.write(f"Login OK: {username}")
+                raise CommandError(
+                    f"Failed to load current-user context for {username}: {response.content}"
+                )
+            self.stdout.write(f"Current-user context OK: {username}")
+        client.force_authenticate(user=None)
 
         requester = users["demo_requester"]
         client.force_authenticate(user=requester)

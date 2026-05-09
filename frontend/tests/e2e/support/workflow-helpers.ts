@@ -3,7 +3,6 @@ import { fileURLToPath } from 'node:url'
 
 import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test'
 
-const DEMO_PASSWORD = 'demo123'
 const POLL_INTERVAL_MS = 2_000
 const DEFAULT_TIMEOUT_MS = 120_000
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url))
@@ -20,14 +19,37 @@ export async function createRoleSession(browser: Browser, username: DemoUser) {
 }
 
 export async function loginAs(page: Page, username: DemoUser) {
+  const tokens = issueDemoTokens(username)
+
   await page.goto('/login')
-
-  await page.getByTestId('login-username').fill(username)
-  await page.getByTestId('login-password').fill(DEMO_PASSWORD)
-  await page.getByTestId('login-submit').click()
-
-  await page.waitForURL((url) => !url.pathname.endsWith('/login'))
+  await page.evaluate((issuedTokens) => {
+    localStorage.setItem('archery.access_token', issuedTokens.access)
+    localStorage.setItem('archery.refresh_token', issuedTokens.refresh)
+  }, tokens)
+  await page.goto('/')
   await expect(page.getByRole('link', { name: 'Workflows' })).toBeVisible()
+}
+
+function issueDemoTokens(username: DemoUser) {
+  const script = [
+    'import json',
+    'from rest_framework_simplejwt.tokens import RefreshToken',
+    'from sql.models import Users',
+    `user = Users.objects.get(username=${JSON.stringify(username)})`,
+    'refresh = RefreshToken.for_user(user)',
+    'print(json.dumps({"access": str(refresh.access_token), "refresh": str(refresh)}))',
+  ].join('; ')
+  const output = execFileSync(
+    'docker',
+    ['exec', 'datamingle-app', 'python', 'manage.py', 'shell', '-c', script],
+    {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      stdio: 'pipe',
+    },
+  )
+
+  return JSON.parse(output.trim()) as { access: string; refresh: string }
 }
 
 export function uniqueWorkflowName(prefix: string) {

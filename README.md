@@ -64,16 +64,16 @@ MYSQL_CONTAINER=mysql scripts/docker/migrate-archery-db-to-datamingle.sh
 ### Local Demo Users
 The local ARM compose setup can seed demo users, resource groups, and demo database instances for manual UX testing.
 
-Seeded app users:
+Seeded app users are local access records only; sign-in still comes through WorkOS.
 
-- `demo_admin` / `demo123`
-- `demo_requester` / `demo123`
-- `demo_pm` / `demo123`
-- `demo_dba` / `demo123`
+- `demo_admin`
+- `demo_requester`
+- `demo_pm`
+- `demo_dba`
 
 See [src/docker-compose/LOCAL_DEMO.md](src/docker-compose/LOCAL_DEMO.md) for:
 
-- demo login roles and approval chains
+- demo roles and approval chains
 - demo MySQL/PostgreSQL instance credentials
 - the separate smoke-check command
 - reset and reseed instructions
@@ -82,38 +82,14 @@ Manual Installation
 ===============
 Use this repository as the source of truth: https://github.com/jruszo/Datamingle
 
-Authentication Modes
+Authentication
 ===============
-Datamingle supports exactly two deployment-level authentication modes:
-
-- `builtin`: local Datamingle username/password auth
-- `workos`: WorkOS-only login for the deployment
-
-This is controlled with the `AUTH_MODE` environment variable in `.env`. A deployment uses one mode at a time.
-
-### Builtin Auth
-Use local Datamingle accounts and passwords:
+Datamingle uses WorkOS as the only sign-in method for every deployment. Each running Datamingle instance maps to one fixed WorkOS organization.
 
 ```env
-AUTH_MODE=builtin
-```
-
-Behavior:
-
-- The SPA login page shows the local username/password form.
-- The legacy server-rendered `/login/` page also shows the local login form.
-- `/authenticate/`, `/signup/`, and `/api/auth/token/` stay enabled.
-
-### WorkOS Auth
-Use WorkOS as the only sign-in method for the deployment:
-
-```env
-AUTH_MODE=workos
 WORKOS_API_KEY=sk_test_or_live_xxx
 WORKOS_CLIENT_ID=client_xxx
 WORKOS_ORGANIZATION_ID=org_xxx
-WORKOS_REDIRECT_URI=https://tenant.datamingle.dev/api/auth/workos/callback/
-WORKOS_LOGOUT_REDIRECT_URI=https://tenant.datamingle.dev/login
 WORKOS_STAFF_EMAILS=ops@datamingle.dev,admin@datamingle.dev
 WORKOS_SUPERUSER_EMAILS=admin@datamingle.dev
 ```
@@ -121,10 +97,9 @@ WORKOS_SUPERUSER_EMAILS=admin@datamingle.dev
 Behavior:
 
 - The SPA login page shows only the WorkOS button.
-- The legacy server-rendered `/login/` page also shows only the WorkOS button.
-- Local password login is disabled.
-- `/authenticate/`, `/signup/`, and `/api/auth/token/` reject password-based login attempts.
+- Local password login, user-created passwords, and local 2FA login routes are not registered.
 - Datamingle still keeps its own local `Users`, groups, and resource-group assignments after login.
+- Superusers manage Datamingle group assignments and active/inactive state; WorkOS manages identity fields.
 
 WorkOS setup assumptions in this repo:
 
@@ -133,6 +108,7 @@ WorkOS setup assumptions in this repo:
 - Users are provisioned just-in-time on first successful WorkOS login.
 - The local Datamingle account uses the WorkOS email as the username.
 - `WORKOS_STAFF_EMAILS` and `WORKOS_SUPERUSER_EMAILS` are bootstrap allowlists for initial elevated access.
+- Datamingle derives the WorkOS callback and logout return URLs from the current request host.
 
 ### WorkOS Setup Steps
 1. Create or choose the tenant organization in your WorkOS account.
@@ -140,7 +116,7 @@ WorkOS setup assumptions in this repo:
    `https://<tenant-host>/api/auth/workos/callback/`
 3. Configure the logout return URL in WorkOS:
    `https://<tenant-host>/login`
-4. Set `AUTH_MODE=workos` and the required `WORKOS_*` values in `.env`.
+4. Set the required `WORKOS_*` values in `.env`.
 5. Rebuild the app container so the `workos` Python dependency is installed:
 
 ```bash
@@ -151,9 +127,8 @@ docker-compose -f src/docker-compose/docker-compose.local-arm.yml up -d --build 
 7. Sign in through WorkOS. A local Datamingle user will be created automatically on first login.
 
 ### Notes
-- `AUTH_MODE` is deployment-wide, not configurable per request or per organization inside one running instance.
-- Switching an existing deployment from `builtin` to `workos` disables local password login immediately after restart.
-- WorkOS mode still issues Datamingle JWTs to the SPA after the WorkOS callback completes.
+- WorkOS still issues Datamingle JWTs to the SPA after the WorkOS callback completes.
+- Existing local users may remain for permissions and audit history, but sign-in must come through WorkOS.
 
 Run Tests
 ===============

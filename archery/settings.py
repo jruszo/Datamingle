@@ -25,12 +25,9 @@ env = environ.Env(
     ),  # Reference: https://docs.djangoproject.com/en/4.0/ref/settings/#secret-key
     DATABASE_URL=(str, "mysql://root:@127.0.0.1:3306/datamingle"),
     CACHE_URL=(str, "redis://127.0.0.1:6379/0"),
-    AUTH_MODE=(str, "builtin"),
     WORKOS_API_KEY=(str, ""),
     WORKOS_CLIENT_ID=(str, ""),
     WORKOS_ORGANIZATION_ID=(str, ""),
-    WORKOS_REDIRECT_URI=(str, ""),
-    WORKOS_LOGOUT_REDIRECT_URI=(str, ""),
     WORKOS_STAFF_EMAILS=(list, []),
     WORKOS_SUPERUSER_EMAILS=(list, []),
     Q_CLUISTER_SYNC=(
@@ -89,10 +86,8 @@ DEBUG = env("DEBUG")
 
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 
-AUTH_MODE = env("AUTH_MODE", default="builtin").strip().lower()
-if AUTH_MODE not in {"builtin", "workos"}:
-    raise ImproperlyConfigured("AUTH_MODE must be either 'builtin' or 'workos'.")
-ENABLE_WORKOS_AUTH = AUTH_MODE == "workos"
+AUTH_MODE = "workos"
+ENABLE_WORKOS_AUTH = True
 
 # https://docs.djangoproject.com/en/4.0/ref/settings/#csrf-trusted-origins
 CSRF_TRUSTED_ORIGINS = env("CSRF_TRUSTED_ORIGINS")
@@ -355,8 +350,6 @@ SIMPLE_JWT = {
 WORKOS_API_KEY = env("WORKOS_API_KEY", default="")
 WORKOS_CLIENT_ID = env("WORKOS_CLIENT_ID", default="")
 WORKOS_ORGANIZATION_ID = env("WORKOS_ORGANIZATION_ID", default="")
-WORKOS_REDIRECT_URI = env("WORKOS_REDIRECT_URI", default="")
-WORKOS_LOGOUT_REDIRECT_URI = env("WORKOS_LOGOUT_REDIRECT_URI", default="")
 WORKOS_STAFF_EMAILS = [
     email.strip().lower()
     for email in env("WORKOS_STAFF_EMAILS", default=[])
@@ -368,22 +361,19 @@ WORKOS_SUPERUSER_EMAILS = [
     if email.strip()
 ]
 
-if ENABLE_WORKOS_AUTH:
-    missing_workos = [
-        key
-        for key, value in (
-            ("WORKOS_API_KEY", WORKOS_API_KEY),
-            ("WORKOS_CLIENT_ID", WORKOS_CLIENT_ID),
-            ("WORKOS_ORGANIZATION_ID", WORKOS_ORGANIZATION_ID),
-            ("WORKOS_REDIRECT_URI", WORKOS_REDIRECT_URI),
-            ("WORKOS_LOGOUT_REDIRECT_URI", WORKOS_LOGOUT_REDIRECT_URI),
-        )
-        if not value
-    ]
-    if missing_workos:
-        raise ImproperlyConfigured(
-            "Missing required WorkOS settings: " + ", ".join(missing_workos)
-        )
+missing_workos = [
+    key
+    for key, value in (
+        ("WORKOS_API_KEY", WORKOS_API_KEY),
+        ("WORKOS_CLIENT_ID", WORKOS_CLIENT_ID),
+        ("WORKOS_ORGANIZATION_ID", WORKOS_ORGANIZATION_ID),
+    )
+    if not value
+]
+if missing_workos:
+    raise ImproperlyConfigured(
+        "Missing required WorkOS settings: " + ", ".join(missing_workos)
+    )
 
 # Logging configuration
 LOGGING = {

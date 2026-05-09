@@ -27,12 +27,6 @@ type TokenPair = {
   refresh: string
 }
 
-export type AuthMode = 'builtin' | 'workos'
-
-export type AuthConfig = {
-  mode: AuthMode
-}
-
 export type CurrentUserContext = {
   id: number
   username: string
@@ -46,7 +40,6 @@ export type CurrentUserContext = {
   groups: Array<{ id: number; name: string }>
   resource_groups: Array<{ group_id: number; group_name: string }>
   permissions: string[]
-  two_factor_auth_types: string[]
 }
 
 export type SystemSettingsValue =
@@ -115,18 +108,7 @@ export type UserManagementListOptions = {
   ordering?: string
 }
 
-export type CreateUserPayload = {
-  username: string
-  display: string
-  email: string
-  password: string
-  group_ids: number[]
-}
-
 export type UpdateUserPayload = {
-  display?: string
-  email?: string
-  password?: string
   group_ids?: number[]
   is_active?: boolean
 }
@@ -349,26 +331,6 @@ function extractTokenPair(payload: unknown): TokenPair {
   throw new Error('Token response did not include access/refresh fields')
 }
 
-export function login(
-  username: string,
-  password: string,
-  authType?: 'totp' | 'sms',
-  otp?: string,
-) {
-  return apiPost<unknown>('/auth/token/', {
-    username,
-    password,
-    auth_type: authType,
-    otp,
-  }).then(extractTokenPair)
-}
-
-export function fetchAuthConfig() {
-  return apiGet<unknown>('/auth/config/').then((payload) =>
-    extractData<AuthConfig>(payload),
-  )
-}
-
 export function exchangeWorkosCode(code: string) {
   return apiPost<unknown>('/auth/workos/exchange/', { code }).then(extractTokenPair)
 }
@@ -437,12 +399,6 @@ export function fetchUser(userId: number, token: string) {
   )
 }
 
-export function createUser(payload: CreateUserPayload, token: string) {
-  return apiPost<unknown>('/v1/user/', payload, { token }).then((responsePayload) =>
-    extractData<UserManagementDetailRecord>(responsePayload),
-  )
-}
-
 export function updateUser(userId: number, payload: UpdateUserPayload, token: string) {
   return apiPut<unknown>(`/v1/user/${userId}/`, payload, { token }).then((responsePayload) =>
     extractData<UserManagementDetailRecord>(responsePayload),
@@ -493,29 +449,6 @@ export function updateInstanceTag(tagId: number, payload: UpdateInstanceTagPaylo
   return apiPut<unknown>(`/v1/instance/tag/${tagId}/`, payload, { token }).then((responsePayload) =>
     extractData<InstanceTagRecord>(responsePayload),
   )
-}
-
-export function updateCurrentUserDisplay(display: string, token: string) {
-  return apiPatch<unknown>('/v1/me/', { display }, { token }).then((payload) =>
-    extractData<CurrentUserContext>(payload),
-  )
-}
-
-export function changeCurrentUserPassword(
-  currentPassword: string,
-  newPassword: string,
-  newPasswordConfirm: string,
-  token: string,
-) {
-  return apiPost<unknown>(
-    '/v1/me/password/',
-    {
-      current_password: currentPassword,
-      new_password: newPassword,
-      new_password_confirm: newPasswordConfirm,
-    },
-    { token },
-  ).then((payload) => extractDetail(payload, 'Password updated successfully.'))
 }
 
 export function fetchGroups(

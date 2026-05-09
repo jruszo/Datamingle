@@ -1,38 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { Fingerprint, KeyRound, ShieldCheck, UserRound } from 'lucide-vue-next'
+import { computed, onMounted, ref } from 'vue'
+import { ShieldCheck, UserRound } from 'lucide-vue-next'
 
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { changeCurrentUserPassword, updateCurrentUserDisplay } from '../api'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
 
 const isLoading = ref(false)
-const isSavingProfile = ref(false)
-const isChangingPassword = ref(false)
-
 const pageError = ref('')
-const profileError = ref('')
-const profileSuccess = ref('')
-const passwordError = ref('')
-const passwordSuccess = ref('')
-
-const profileForm = reactive({
-  display: '',
-})
-
-const passwordForm = reactive({
-  currentPassword: '',
-  newPassword: '',
-  newPasswordConfirm: '',
-})
 
 const currentUser = computed(() => authStore.currentUser)
-const canChangePassword = computed(() => authStore.authMode !== 'workos')
 const isWorkosManagedUser = computed(() => currentUser.value?.is_workos_managed ?? false)
 const currentUserAvatarUrl = computed(() => currentUser.value?.avatar_url?.trim() || '')
 
@@ -73,14 +52,6 @@ const accountFacts = computed(() => {
   ]
 })
 
-const twoFactorLabels = computed(() => {
-  if (!currentUser.value || currentUser.value.two_factor_auth_types.length === 0) {
-    return ['Not enabled']
-  }
-
-  return currentUser.value.two_factor_auth_types.map((value) => value.toUpperCase())
-})
-
 function toUserFacingMessage(error: unknown, fallback: string) {
   if (!(error instanceof Error)) {
     return fallback
@@ -95,16 +66,6 @@ function toUserFacingMessage(error: unknown, fallback: string) {
   return error.message.slice(separatorIndex + separator.length)
 }
 
-function syncProfileForm() {
-  profileForm.display = currentUser.value?.display || ''
-}
-
-function resetPasswordForm() {
-  passwordForm.currentPassword = ''
-  passwordForm.newPassword = ''
-  passwordForm.newPasswordConfirm = ''
-}
-
 async function loadProfile(force = false) {
   if (!authStore.accessToken) {
     pageError.value = 'Missing access token. Please login again.'
@@ -116,7 +77,6 @@ async function loadProfile(force = false) {
 
   try {
     await authStore.loadCurrentUser(force)
-    syncProfileForm()
   } catch (error) {
     pageError.value = toUserFacingMessage(error, 'Failed to load your profile.')
   } finally {
@@ -124,69 +84,7 @@ async function loadProfile(force = false) {
   }
 }
 
-async function saveDisplayName() {
-  if (!authStore.accessToken) {
-    profileError.value = 'Missing access token. Please login again.'
-    return
-  }
-
-  const display = profileForm.display.trim()
-  profileError.value = ''
-  profileSuccess.value = ''
-
-  if (!display) {
-    profileError.value = 'Display name cannot be blank.'
-    return
-  }
-
-  isSavingProfile.value = true
-
-  try {
-    const user = await updateCurrentUserDisplay(display, authStore.accessToken)
-    authStore.setCurrentUser(user)
-    syncProfileForm()
-    profileSuccess.value = 'Display name updated.'
-  } catch (error) {
-    profileError.value = toUserFacingMessage(error, 'Failed to update display name.')
-  } finally {
-    isSavingProfile.value = false
-  }
-}
-
-async function updatePassword() {
-  if (!authStore.accessToken) {
-    passwordError.value = 'Missing access token. Please login again.'
-    return
-  }
-
-  passwordError.value = ''
-  passwordSuccess.value = ''
-
-  if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.newPasswordConfirm) {
-    passwordError.value = 'All password fields are required.'
-    return
-  }
-
-  isChangingPassword.value = true
-
-  try {
-    const detail = await changeCurrentUserPassword(
-      passwordForm.currentPassword,
-      passwordForm.newPassword,
-      passwordForm.newPasswordConfirm,
-      authStore.accessToken,
-    )
-    resetPasswordForm()
-    passwordSuccess.value = detail
-  } catch (error) {
-    passwordError.value = toUserFacingMessage(error, 'Failed to update password.')
-  } finally {
-    isChangingPassword.value = false
-  }
-}
-
 onMounted(() => {
-  void authStore.loadAuthConfig()
   void loadProfile()
 })
 </script>
@@ -217,9 +115,7 @@ onMounted(() => {
                   {{
                     isWorkosManagedUser
                       ? 'This account is managed by WorkOS. Datamingle shows the synced identity details but does not let you edit them here.'
-                      : canChangePassword
-                      ? 'Manage the account details shown across Datamingle and rotate your password without leaving the SPA.'
-                      : 'Manage the account details shown across Datamingle for your WorkOS-backed account.'
+                      : 'This local record is used for Datamingle permissions and will be linked when the matching WorkOS user signs in.'
                   }}
                 </p>
               </div>
@@ -233,15 +129,6 @@ onMounted(() => {
               <Badge variant="secondary" class="bg-white/80 text-slate-800">
                 <ShieldCheck class="h-3.5 w-3.5" />
                 {{ currentUser?.is_superuser ? 'Admin access' : 'Standard access' }}
-              </Badge>
-              <Badge
-                v-for="label in twoFactorLabels"
-                :key="label"
-                variant="secondary"
-                class="bg-white/80 text-slate-800"
-              >
-                <Fingerprint class="h-3.5 w-3.5" />
-                2FA {{ label }}
               </Badge>
             </div>
           </div>
@@ -262,119 +149,18 @@ onMounted(() => {
       {{ pageError }}
     </div>
 
-    <div class="grid gap-6 xl:grid-cols-2">
-      <Card v-if="!isWorkosManagedUser" class="border-slate-200">
-        <CardHeader>
-          <CardTitle>Display Name</CardTitle>
-          <CardDescription>
-            This is the human-readable name used across workflow and query history.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form class="space-y-4" @submit.prevent="saveDisplayName">
-            <div class="space-y-2">
-              <label class="text-sm font-medium text-slate-700" for="display-name">Display name</label>
-              <Input
-                id="display-name"
-                v-model="profileForm.display"
-                placeholder="Enter a display name"
-                autocomplete="name"
-                :disabled="isLoading || isSavingProfile"
-              />
-            </div>
-
-            <div v-if="profileError" class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-              {{ profileError }}
-            </div>
-            <div
-              v-else-if="profileSuccess"
-              class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
-            >
-              {{ profileSuccess }}
-            </div>
-
-            <Button type="submit" :disabled="isLoading || isSavingProfile">
-              {{ isSavingProfile ? 'Saving...' : 'Save display name' }}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-
-      <Card v-else class="border-slate-200">
-        <CardHeader>
-          <CardTitle>Identity</CardTitle>
-          <CardDescription>
-            Your display name and email are synced from WorkOS and can only be changed in your identity provider.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-            Datamingle will refresh these fields from WorkOS on sign-in.
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card v-if="canChangePassword" class="border-slate-200">
-        <CardHeader>
-          <CardTitle>Password</CardTitle>
-          <CardDescription>
-            Confirm your current password, then choose a new one that passes backend validation.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form class="space-y-4" @submit.prevent="updatePassword">
-            <div class="space-y-2">
-              <label class="text-sm font-medium text-slate-700" for="current-password">Current password</label>
-              <Input
-                id="current-password"
-                v-model="passwordForm.currentPassword"
-                type="password"
-                autocomplete="current-password"
-                :disabled="isChangingPassword"
-              />
-            </div>
-
-            <div class="grid gap-4 md:grid-cols-2">
-              <div class="space-y-2">
-                <label class="text-sm font-medium text-slate-700" for="new-password">New password</label>
-                <Input
-                  id="new-password"
-                  v-model="passwordForm.newPassword"
-                  type="password"
-                  autocomplete="new-password"
-                  :disabled="isChangingPassword"
-                />
-              </div>
-
-              <div class="space-y-2">
-                <label class="text-sm font-medium text-slate-700" for="confirm-password">Confirm password</label>
-                <Input
-                  id="confirm-password"
-                  v-model="passwordForm.newPasswordConfirm"
-                  type="password"
-                  autocomplete="new-password"
-                  :disabled="isChangingPassword"
-                />
-              </div>
-            </div>
-
-            <div v-if="passwordError" class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-              {{ passwordError }}
-            </div>
-            <div
-              v-else-if="passwordSuccess"
-              class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
-            >
-              {{ passwordSuccess }}
-            </div>
-
-            <Button type="submit" :disabled="isChangingPassword" class="gap-2">
-              <KeyRound class="h-4 w-4" />
-              {{ isChangingPassword ? 'Updating...' : 'Change password' }}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
+    <Card class="border-slate-200">
+      <CardHeader>
+        <CardTitle>Identity</CardTitle>
+        <CardDescription>
+          Display name, email, avatar, and sign-in are managed by WorkOS.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          Datamingle refreshes identity fields from WorkOS on sign-in. Local changes are limited to access and lifecycle settings.
+        </div>
+      </CardContent>
+    </Card>
   </section>
 </template>

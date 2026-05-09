@@ -32,9 +32,7 @@ To disable automatic seeding for local startup, set `RUN_LOCAL_DEMO_SEED` to `0`
 
 ## Demo app users
 
-All seeded demo app users use the same password:
-
-- Password: `demo123`
+Seeded demo app users are local access records only. They do not have usable Datamingle passwords; sign-in still comes through WorkOS.
 
 Created users:
 
@@ -50,7 +48,7 @@ Created users:
   - Single-stage reviewer, second-stage reviewer, and executor
   - Direct member of both demo resource groups
 
-Manual role switching is just normal login/logout with these accounts in the UI.
+Manual role switching requires signing in through WorkOS as a user linked to the matching local record, or using test helpers that force-authenticate the seeded users.
 
 ## Demo resource groups and approval chains
 
