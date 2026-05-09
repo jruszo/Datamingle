@@ -88,6 +88,11 @@ ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 
 AUTH_MODE = "workos"
 ENABLE_WORKOS_AUTH = True
+# Datamingle uses WorkOS as the sole authentication provider.
+# The previous dual-mode "builtin" local-password and 2FA login
+# flows have been removed.  Deployments must configure valid
+# WORKOS_CLIENT_ID, WORKOS_API_KEY, and WORKOS_ORGANIZATION_ID
+# or the application will fail to start with ImproperlyConfigured.
 
 # https://docs.djangoproject.com/en/4.0/ref/settings/#csrf-trusted-origins
 CSRF_TRUSTED_ORIGINS = env("CSRF_TRUSTED_ORIGINS")

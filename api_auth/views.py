@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 from django.conf import settings
 from django.core.exceptions import SuspiciousOperation
 from django.http import HttpResponseRedirect
+from django.http.request import validate_host
 from django_redis import get_redis_connection
 from rest_framework import serializers, status, permissions, views
 from rest_framework.response import Response
@@ -25,12 +26,21 @@ def _cookie_secure(request):
     return request.is_secure() or not settings.DEBUG
 
 
+def _validate_and_build_uri(request, path):
+    host = request.get_host()
+    if not validate_host(host, settings.ALLOWED_HOSTS):
+        raise SuspiciousOperation(
+            f"Request host '{host}' is not in ALLOWED_HOSTS."
+        )
+    return request.build_absolute_uri(path)
+
+
 def _workos_callback_uri(request):
-    return request.build_absolute_uri("/api/auth/workos/callback/")
+    return _validate_and_build_uri(request, "/api/auth/workos/callback/")
 
 
 def _workos_logout_return_uri(request):
-    return request.build_absolute_uri("/login")
+    return _validate_and_build_uri(request, "/login")
 
 
 def _login_redirect_with_error(message):

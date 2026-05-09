@@ -91,6 +91,11 @@ onMounted(() => {
 
 <template>
   <section class="grid gap-6">
+    <div v-if="isLoading" class="flex items-center justify-center py-20 text-sm text-slate-500">
+      Loading profile…
+    </div>
+
+    <template v-else>
     <Card class="overflow-hidden border-slate-200">
       <CardContent class="p-0">
         <div class="grid gap-0 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.9fr)]">
@@ -162,5 +167,6 @@ onMounted(() => {
         </div>
       </CardContent>
     </Card>
+    </template>
   </section>
 </template>
