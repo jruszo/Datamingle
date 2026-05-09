@@ -105,6 +105,7 @@ class CurrentUser(views.APIView):
     def get(self, request):
         return success_response(data=self._serialize_user(request.user))
 
+
 class UserList(generics.ListAPIView):
     """
     List all users or create a new user.
@@ -157,6 +158,7 @@ class UserList(generics.ListAPIView):
         page_user = self.paginate_queryset(queryset=users)
         serializer_obj = self.get_serializer(page_user, many=True)
         return self.get_paginated_response(serializer_obj.data)
+
 
 class UserDetail(views.APIView):
     """

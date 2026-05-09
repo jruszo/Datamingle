@@ -29,9 +29,7 @@ def _cookie_secure(request):
 def _validate_and_build_uri(request, path):
     host = request.get_host()
     if not validate_host(host, settings.ALLOWED_HOSTS):
-        raise SuspiciousOperation(
-            f"Request host '{host}' is not in ALLOWED_HOSTS."
-        )
+        raise SuspiciousOperation(f"Request host '{host}' is not in ALLOWED_HOSTS.")
     return request.build_absolute_uri(path)
 
 
