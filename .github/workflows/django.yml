@@ -102,8 +102,14 @@ jobs:
     - name: Run Tests
       env:
         SECRET_KEY: ${{ secrets.SECRET_KEY }}
+        WORKOS_API_KEY: ${{ secrets.WORKOS_API_KEY }}
+        WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
+        WORKOS_ORGANIZATION_ID: ${{ secrets.WORKOS_ORGANIZATION_ID }}
       run: |
         export SECRET_KEY="${SECRET_KEY:-django-insecure-ci-only-test-key}"
+        export WORKOS_API_KEY="${WORKOS_API_KEY:-ci-dummy-key}"
+        export WORKOS_CLIENT_ID="${WORKOS_CLIENT_ID:-ci-dummy-id}"
+        export WORKOS_ORGANIZATION_ID="${WORKOS_ORGANIZATION_ID:-ci-dummy-org}"
         python manage.py makemigrations
         python manage.py makemigrations sql
         pytest --cov --cov-report xml
