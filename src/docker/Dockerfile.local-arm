@@ -13,8 +13,6 @@ RUN apt-get update \
         mariadb-client \
         build-essential \
         default-libmysqlclient-dev \
-        libldap2-dev \
-        libsasl2-dev \
         libpq-dev \
         unixodbc-dev \
         curl \
