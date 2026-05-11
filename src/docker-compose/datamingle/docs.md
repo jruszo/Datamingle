@@ -7,10 +7,11 @@ reference for the renamed Datamingle compose stack.
 ## Service Naming
 
 The application service is named `datamingle` in compose and the running app
-container is `datamingle-app`.
+container is `datamingle-app`. The frontend dev service is named `frontend`
+and exposes Vite on `http://localhost:5173`.
 
 ```bash
-docker-compose -f src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle
+docker-compose -f src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend
 docker exec datamingle-app python manage.py migrate --noinput
 docker exec datamingle-app python manage.py smoke_local_demo
 ```

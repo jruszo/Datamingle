@@ -161,3 +161,26 @@ services:
     entrypoint: >-
       bash -lc "source /opt/venv4datamingle/bin/activate &&
       celery -A archery beat -l info --schedule /tmp/celerybeat-schedule"
+
+  frontend:
+    image: node:22-bookworm-slim
+    container_name: datamingle-frontend
+    restart: always
+    working_dir: /opt/datamingle/frontend
+    depends_on:
+      datamingle:
+        condition: service_started
+    ports:
+      - "5173:5173"
+    volumes:
+      - "../..:/opt/datamingle"
+      - frontend_node_modules:/opt/datamingle/frontend/node_modules
+    environment:
+      VITE_API_BASE_URL: /api
+      VITE_BACKEND_PROXY_TARGET: http://datamingle:9123
+    entrypoint: >-
+      bash -lc "npm ci &&
+      npm run dev -- --host 0.0.0.0"
+
+volumes:
+  frontend_node_modules:

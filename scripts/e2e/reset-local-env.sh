@@ -31,7 +31,7 @@ clear_directory "$DOWNLOAD_ROOT/DataExportFile"
 clear_directory "$DOWNLOAD_ROOT/dictionary"
 
 log "Rebuilding and starting local Docker stack"
-"${COMPOSE[@]}" up -d --build datamingle
+"${COMPOSE[@]}" up -d --build datamingle frontend
 
 log "Waiting for datamingle-app container"
 for _ in $(seq 1 60); do

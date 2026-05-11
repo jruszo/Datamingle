@@ -120,7 +120,7 @@ WorkOS setup assumptions in this repo:
 5. Rebuild the app container so the `workos` Python dependency is installed:
 
 ```bash
-docker-compose -f src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle
+docker-compose -f src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend
 ```
 
 6. Restart the deployment and open `/login/`.
