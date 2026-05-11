@@ -8,7 +8,7 @@ from django.utils import timezone
 from common.config import SysConfig
 from common.task_queue import delete_schedule, schedule, task_info
 from sql.engines import get_engine
-from sql.models import Config, Instance
+from sql.models import Config, Instance, TaskSchedule
 
 logger = logging.getLogger("default")
 
@@ -70,7 +70,11 @@ def schedule_inventory_refresh(run_at=None):
 
 def ensure_inventory_refresh_schedule(force=False):
     existing_schedule = get_inventory_refresh_schedule()
-    if existing_schedule and not force:
+    if (
+        existing_schedule
+        and existing_schedule.backend == TaskSchedule.BACKEND_CELERY
+        and not force
+    ):
         return existing_schedule
     return schedule_inventory_refresh()
 

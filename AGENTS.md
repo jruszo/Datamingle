@@ -20,6 +20,7 @@
 ## Migrations
 
 - Do not hand-write Django migrations for normal model changes.
+- Do not edit existing Django migration files. Treat committed migrations as historical records, even when they contain old names or removed dependencies.
 - Generate migrations by running `makemigrations` in the app container after syncing changed files if needed.
 - Copy generated migration files back out to the host repo and commit them.
 - Before finishing, verify migration drift with:

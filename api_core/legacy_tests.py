@@ -113,20 +113,13 @@ class SystemSettingsTaskBackendTest(TestCase):
         self.sys_config.replace(json.dumps({}))
         self.superuser.delete()
 
-    def test_get_system_settings_includes_task_backend_options(self):
+    def test_get_system_settings_includes_background_job_options(self):
         response = self.client.get("/api/v1/system-settings/")
         payload = response.json()
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(payload["data"]["settings"]["task_backend"], "django_q")
-        self.assertIn(
-            {"value": "django_q", "label": "Django Q"},
-            payload["data"]["options"]["task_backends"],
-        )
-        self.assertIn(
-            {"value": "celery", "label": "Celery"},
-            payload["data"]["options"]["task_backends"],
-        )
+        self.assertNotIn("task_backend", payload["data"]["settings"])
+        self.assertNotIn("task_backends", payload["data"]["options"])
         self.assertEqual(
             payload["data"]["settings"]["inventory_refresh_interval"], "24h"
         )
@@ -141,7 +134,13 @@ class SystemSettingsTaskBackendTest(TestCase):
     def test_put_system_settings_saves_inventory_refresh_interval(self):
         response = self.client.put(
             "/api/v1/system-settings/",
-            data=json.dumps({"inventory_refresh_interval": "6h"}),
+            data=json.dumps(
+                {
+                    "inventory_refresh_interval": "6h",
+                    "celery_broker_url": "redis://example:6379/5",
+                    "celery_result_backend": "redis://example:6379/6",
+                }
+            ),
             content_type="application/json",
         )
 
@@ -158,7 +157,13 @@ class SystemSettingsTaskBackendTest(TestCase):
     ):
         response = self.client.put(
             "/api/v1/system-settings/",
-            data=json.dumps({"inventory_refresh_interval": "12h"}),
+            data=json.dumps(
+                {
+                    "inventory_refresh_interval": "12h",
+                    "celery_broker_url": "redis://example:6379/5",
+                    "celery_result_backend": "redis://example:6379/6",
+                }
+            ),
             content_type="application/json",
         )
 
@@ -170,20 +175,30 @@ class SystemSettingsTaskBackendTest(TestCase):
         self.assertFalse(response.json()["data"]["inventory_refresh_schedule_synced"])
         self.assertEqual(self.sys_config.get("inventory_refresh_interval"), "12h")
 
-    def test_put_system_settings_requires_broker_url_for_celery(self):
+    def test_put_system_settings_requires_broker_url(self):
         response = self.client.put(
             "/api/v1/system-settings/",
-            data=json.dumps({"task_backend": "celery", "celery_broker_url": ""}),
+            data=json.dumps(
+                {
+                    "celery_broker_url": "",
+                    "celery_result_backend": "redis://example:6379/6",
+                }
+            ),
             content_type="application/json",
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("celery_broker_url", response.json())
 
-    def test_put_system_settings_rejects_blank_broker_url_for_celery(self):
+    def test_put_system_settings_rejects_blank_broker_url(self):
         response = self.client.put(
             "/api/v1/system-settings/",
-            data=json.dumps({"task_backend": "celery", "celery_broker_url": "   "}),
+            data=json.dumps(
+                {
+                    "celery_broker_url": "   ",
+                    "celery_result_backend": "redis://example:6379/6",
+                }
+            ),
             content_type="application/json",
         )
 
@@ -195,8 +210,8 @@ class SystemSettingsTaskBackendTest(TestCase):
             "/api/v1/system-settings/",
             data=json.dumps(
                 {
-                    "task_backend": "celery",
                     "celery_broker_url": "redis://example:6379/5",
+                    "celery_result_backend": "redis://example:6379/6",
                     "celery_task_soft_time_limit": 60,
                     "celery_task_time_limit": 60,
                 }
@@ -212,8 +227,8 @@ class SystemSettingsTaskBackendTest(TestCase):
             "/api/v1/system-settings/",
             data=json.dumps(
                 {
-                    "task_backend": "celery",
                     "celery_broker_url": "redis://example:6379/5",
+                    "celery_result_backend": "redis://example:6379/6",
                     "celery_task_soft_time_limit": 0,
                     "celery_task_time_limit": -1,
                 }
@@ -225,12 +240,11 @@ class SystemSettingsTaskBackendTest(TestCase):
         self.assertIn("celery_task_soft_time_limit", response.json())
         self.assertIn("celery_task_time_limit", response.json())
 
-    def test_put_system_settings_saves_celery_backend_config(self):
+    def test_put_system_settings_saves_celery_config(self):
         response = self.client.put(
             "/api/v1/system-settings/",
             data=json.dumps(
                 {
-                    "task_backend": "celery",
                     "celery_broker_url": "redis://example:6379/5",
                     "celery_result_backend": "redis://example:6379/6",
                     "celery_task_default_queue": "workers",
@@ -243,12 +257,11 @@ class SystemSettingsTaskBackendTest(TestCase):
         payload = response.json()
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(payload["data"]["settings"]["task_backend"], "celery")
+        self.assertNotIn("task_backend", payload["data"]["settings"])
         self.assertEqual(
             payload["data"]["settings"]["celery_broker_url"],
             "redis://example:6379/5",
         )
-        self.assertEqual(self.sys_config.get("task_backend"), "celery")
         self.assertEqual(
             self.sys_config.get("celery_task_default_queue"),
             "workers",

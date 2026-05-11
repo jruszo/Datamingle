@@ -21,9 +21,7 @@ from sql.models import Config, TaskSchedule
 
 logger = logging.getLogger("default")
 
-TASK_BACKEND_DJANGO_Q = "django_q"
 TASK_BACKEND_CELERY = "celery"
-TASK_BACKEND_CHOICES = (TASK_BACKEND_DJANGO_Q, TASK_BACKEND_CELERY)
 
 
 @dataclass
@@ -186,18 +184,7 @@ def task_backend_info(full=False):
 
 
 def current_task_backend():
-    config_backend = (SysConfig().get("task_backend", "") or "").strip().lower()
-    if config_backend in TASK_BACKEND_CHOICES:
-        return config_backend
-
-    default_backend = (
-        (getattr(settings, "DEFAULT_TASK_BACKEND", TASK_BACKEND_DJANGO_Q) or "")
-        .strip()
-        .lower()
-    )
-    if default_backend in TASK_BACKEND_CHOICES:
-        return default_backend
-    return TASK_BACKEND_DJANGO_Q
+    return TASK_BACKEND_CELERY
 
 
 def celery_runtime_settings():
@@ -259,120 +246,6 @@ class BaseTaskBackend:
         if timeout in (None, "", -1):
             return None
         return int(timeout)
-
-
-class DjangoQTaskBackend(BaseTaskBackend):
-    backend_id = TASK_BACKEND_DJANGO_Q
-
-    def enqueue_payload(self, payload, task_name, timeout=None):
-        from django_q.tasks import async_task as django_q_async_task
-
-        timeout_value = self._normalized_timeout(timeout)
-        return django_q_async_task(
-            "common.task_queue.execute_payload",
-            payload,
-            task_name=task_name,
-            timeout=timeout_value if timeout_value is not None else -1,
-        )
-
-    def schedule_payload(
-        self, name, payload, run_at, task_name, callable_path, timeout
-    ):
-        from django_q.models import Schedule as DjangoQSchedule
-        from django_q.tasks import schedule as django_q_schedule
-
-        run_at_value = _normalize_run_at(run_at)
-        timeout_value = self._normalized_timeout(timeout)
-
-        with transaction.atomic():
-            TaskSchedule.objects.update_or_create(
-                name=name,
-                defaults={
-                    "backend": self.backend_id,
-                    "task_name": task_name,
-                    "callable_path": callable_path,
-                    "payload": payload,
-                    "run_at": run_at_value,
-                    "status": TaskSchedule.STATUS_SCHEDULED,
-                    "backend_job_id": "",
-                    "last_error": "",
-                    "completed_at": None,
-                    "cancelled_at": None,
-                },
-            )
-            DjangoQSchedule.objects.filter(name=name).delete()
-            django_q_schedule(
-                "common.task_queue.execute_payload",
-                payload,
-                name=name,
-                schedule_type="O",
-                next_run=run_at_value,
-                repeats=1,
-                timeout=timeout_value if timeout_value is not None else -1,
-            )
-        return task_info(name)
-
-    def cancel_scheduled(self, name):
-        from django_q.models import Schedule as DjangoQSchedule
-
-        with transaction.atomic():
-            DjangoQSchedule.objects.filter(name=name).delete()
-            TaskSchedule.objects.filter(name=name).update(
-                status=TaskSchedule.STATUS_CANCELLED,
-                cancelled_at=_now(),
-            )
-
-    def health_snapshot(self, full=False):
-        info = {"label": "Django Q"}
-        try:
-            import django_q
-            from django_q.brokers import get_broker
-            from django_q.models import Failure, Success
-            from django_q.status import Stat
-
-            broker = get_broker()
-            stats = Stat.get_all(broker=broker)
-            queue_size = broker.queue_size()
-            lock_size = broker.lock_size()
-            if lock_size:
-                queue_size = f"{queue_size}({lock_size})"
-            clusters = []
-            for stat in stats:
-                uptime = (timezone.now() - stat.tob).total_seconds()
-                hours, remainder = divmod(uptime, 3600)
-                minutes, seconds = divmod(remainder, 60)
-                clusters.append(
-                    {
-                        "host": stat.host,
-                        "cluster_id": stat.cluster_id,
-                        "state": stat.status,
-                        "pool": len(stat.workers),
-                        "tq": stat.task_q_size,
-                        "rq": stat.done_q_size,
-                        "rc": stat.reincarnations,
-                        "up": f"{int(hours)}:{int(minutes):02d}:{int(seconds):02d}",
-                    }
-                )
-            info.update(
-                {
-                    "version": ".".join(str(i) for i in django_q.VERSION),
-                    "broker": {
-                        "queued": queue_size,
-                        "success": Success.objects.count(),
-                        "failures": Failure.objects.count(),
-                        "info": broker.info() if full else None,
-                    },
-                    "clusters": (
-                        clusters
-                        if clusters
-                        else "No running cluster information found. Check django_q status."
-                    ),
-                    "conf": django_q.conf.Conf.conf if full else None,
-                }
-            )
-        except Exception as exc:
-            info["error"] = f"Failed to get django_q info: {exc}"
-        return info
 
 
 class CeleryTaskBackend(BaseTaskBackend):
@@ -471,10 +344,7 @@ class CeleryTaskBackend(BaseTaskBackend):
 
 
 def get_task_backend():
-    backend_id = current_task_backend()
-    if backend_id == TASK_BACKEND_CELERY:
-        return CeleryTaskBackend()
-    return DjangoQTaskBackend()
+    return CeleryTaskBackend()
 
 
 def _encode_task_payload(func, args, kwargs, hook, task_name, schedule_name):

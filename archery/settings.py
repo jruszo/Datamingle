@@ -30,10 +30,6 @@ env = environ.Env(
     WORKOS_ORGANIZATION_ID=(str, ""),
     WORKOS_STAFF_EMAILS=(list, []),
     WORKOS_SUPERUSER_EMAILS=(list, []),
-    Q_CLUISTER_SYNC=(
-        bool,
-        False,
-    ),  # qcluster sync mode; set to True for local debugging if needed
     # CSRF_TRUSTED_ORIGINS=subdomain.example.com,subdomain.example2.com subdomain.example.com
     CSRF_TRUSTED_ORIGINS=(list, []),
     ENABLED_ENGINES=(
@@ -70,7 +66,6 @@ env = environ.Env(
     CURRENT_AUDITOR=(str, "sql.utils.workflow_audit:AuditV2"),
     PASSWORD_MIXIN_PATH=(str, "sql.plugins.password:DummyMixin"),
     FIELD_ENCRYPTION_KEYS=(str, ""),
-    TASK_BACKEND=(str, "django_q"),
     CELERY_BROKER_URL=(str, ""),
     CELERY_RESULT_BACKEND=(str, ""),
     CELERY_TASK_DEFAULT_QUEUE=(str, "default"),
@@ -131,10 +126,6 @@ CURRENT_AUDITOR = env("CURRENT_AUDITOR")
 PASSWORD_MIXIN_PATH = env("PASSWORD_MIXIN_PATH")
 
 FIELD_ENCRYPTION_KEYS = env("FIELD_ENCRYPTION_KEYS")
-DEFAULT_TASK_BACKEND = env("TASK_BACKEND", default="django_q").strip().lower()
-if DEFAULT_TASK_BACKEND not in {"django_q", "celery"}:
-    raise ImproperlyConfigured("TASK_BACKEND must be either 'django_q' or 'celery'.")
-
 # Application definition
 INSTALLED_APPS = (
     "django.contrib.auth",
@@ -142,7 +133,6 @@ INSTALLED_APPS = (
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "django_q",
     "sql",
     "sql_api",
     "api_core",
@@ -270,21 +260,6 @@ DATABASES = {
     }
 }
 
-# Django-Q
-Q_CLUSTER = {
-    "name": "datamingle",
-    "workers": env("Q_CLUISTER_WORKERS", default=4),
-    "recycle": 500,
-    "timeout": env("Q_CLUISTER_TIMEOUT", default=60),
-    "compress": True,
-    "cpu_affinity": 1,
-    "save_limit": 0,
-    "queue_limit": 50,
-    "label": "Django Q",
-    "django_redis": "default",
-    "sync": env("Q_CLUISTER_SYNC"),  # Set to True for local synchronous debugging
-}
-
 # Celery
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="")
 CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default="")
@@ -295,15 +270,10 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 
-if DEFAULT_TASK_BACKEND == "celery":
-    if not CELERY_BROKER_URL:
-        raise ImproperlyConfigured(
-            "CELERY_BROKER_URL is required when TASK_BACKEND is 'celery'."
-        )
-    if not CELERY_RESULT_BACKEND:
-        raise ImproperlyConfigured(
-            "CELERY_RESULT_BACKEND is required when TASK_BACKEND is 'celery'."
-        )
+if not CELERY_BROKER_URL:
+    raise ImproperlyConfigured("CELERY_BROKER_URL is required.")
+if not CELERY_RESULT_BACKEND:
+    raise ImproperlyConfigured("CELERY_RESULT_BACKEND is required.")
 
 # Cache settings
 CACHES = {
@@ -385,14 +355,6 @@ LOGGING = {
             "backupCount": 5,
             "formatter": "verbose",
         },
-        "django-q": {
-            "level": "DEBUG",
-            "class": "logging.handlers.RotatingFileHandler",
-            "filename": "logs/qcluster.log",
-            "maxBytes": 1024 * 1024 * 100,  # 5 MB
-            "backupCount": 5,
-            "formatter": "verbose",
-        },
         "console": {
             "level": "DEBUG",
             "class": "logging.StreamHandler",
@@ -403,11 +365,6 @@ LOGGING = {
         "default": {  # default logs
             "handlers": ["console", "default"],
             "level": "WARNING",
-        },
-        "django-q": {  # logs for django_q module
-            "handlers": ["console", "django-q"],
-            "level": "WARNING",
-            "propagate": False,
         },
         # 'django.db': {  # print SQL statements for development
         #     'handlers': ['console', 'default'],

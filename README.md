@@ -158,7 +158,7 @@ Dependencies
 - Markdown rendering [marked](https://github.com/markedjs/marked)
 
 ### Backend
-- Queue tasks [django-q](https://github.com/Koed00/django-q)
+- Queue tasks [Celery](https://docs.celeryq.dev/)
 - MySQL connector [mysqlclient-python](https://github.com/PyMySQL/mysqlclient-python)
 - MsSQL connector [pyodbc](https://github.com/mkleehammer/pyodbc)
 - Redis connector [redis-py](https://github.com/andymccurdy/redis-py)
