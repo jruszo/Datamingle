@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-COMPOSE_FILE="$ROOT_DIR/src/docker-compose/docker-compose.local-arm.yml"
+COMPOSE_FILE="$ROOT_DIR/src/docker-compose/docker-compose.local-dev.yml"
 DOWNLOAD_ROOT="$ROOT_DIR/src/docker-compose/datamingle/downloads"
 COMPOSE=(docker-compose -f "$COMPOSE_FILE")
 

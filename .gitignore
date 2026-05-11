@@ -15,7 +15,8 @@ sonar-project.properties
 .scannerwork
 .env
 src/docker-compose/.env
-src/docker-compose/.env.local-arm
+src/docker-compose/.env.local-dev
+src/docker-compose/.env.local-dev.example
 local_settings.py
 src/docker-compose-dev
 .coverage

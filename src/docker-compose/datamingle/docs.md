@@ -10,7 +10,7 @@ The application service is named `datamingle` in compose and the running app
 container is `datamingle-app`.
 
 ```bash
-docker-compose -f src/docker-compose/docker-compose.local-arm.yml up -d --build datamingle
+docker-compose -f src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle
 docker exec datamingle-app python manage.py migrate --noinput
 docker exec datamingle-app python manage.py smoke_local_demo
 ```

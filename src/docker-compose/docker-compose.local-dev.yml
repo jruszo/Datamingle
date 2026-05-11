@@ -80,12 +80,12 @@ services:
       retries: 20
 
   datamingle:
-    image: datamingle-app:local-arm
+    image: datamingle-app:local-dev
     container_name: datamingle-app
     restart: always
     build:
       context: ../..
-      dockerfile: src/docker/Dockerfile.local-arm
+      dockerfile: src/docker/Dockerfile.local-dev
     depends_on:
       redis:
         condition: service_healthy
@@ -112,10 +112,10 @@ services:
       GUNICORN_RELOAD: "1"
     entrypoint: "bash /opt/datamingle/src/docker/startup.sh"
     env_file:
-      - .env.local-arm
+      - .env.local-dev
 
   celery:
-    image: datamingle-app:local-arm
+    image: datamingle-app:local-dev
     container_name: datamingle-celery
     restart: always
     depends_on:
@@ -133,13 +133,13 @@ services:
       - "./datamingle/logs:/opt/datamingle/logs"
       - "./datamingle/keys:/opt/datamingle/keys"
     env_file:
-      - .env.local-arm
+      - .env.local-dev
     entrypoint: >-
       bash -lc "source /opt/venv4datamingle/bin/activate &&
       celery -A archery worker -l info -Q ${CELERY_TASK_DEFAULT_QUEUE:-datamingle-default}"
 
   celerybeat:
-    image: datamingle-app:local-arm
+    image: datamingle-app:local-dev
     container_name: datamingle-celerybeat
     restart: always
     depends_on:
@@ -157,7 +157,7 @@ services:
       - "./datamingle/logs:/opt/datamingle/logs"
       - "./datamingle/keys:/opt/datamingle/keys"
     env_file:
-      - .env.local-arm
+      - .env.local-dev
     entrypoint: >-
       bash -lc "source /opt/venv4datamingle/bin/activate &&
       celery -A archery beat -l info --schedule /tmp/celerybeat-schedule"

@@ -17,7 +17,7 @@ The local compose file sets `RUN_LOCAL_DEMO_SEED=1` on the `datamingle-app` cont
 On rebuild or recreate, startup runs:
 
 ```bash
-docker-compose -f src/docker-compose/docker-compose.local-arm.yml up -d --build datamingle
+docker-compose -f src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle
 ```
 
 The app container then runs:
@@ -108,8 +108,8 @@ The local ARM compose services are intentionally ephemeral:
 If you want to recreate the initial SQL content from scratch, tear down the local stack and bring it back up again:
 
 ```bash
-docker-compose -f src/docker-compose/docker-compose.local-arm.yml down -v
-docker-compose -f src/docker-compose/docker-compose.local-arm.yml up -d --build datamingle
+docker-compose -f src/docker-compose/docker-compose.local-dev.yml down -v
+docker-compose -f src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle
 ```
 
 That recreates the databases, reruns migrations, and reapplies the local demo seed.
