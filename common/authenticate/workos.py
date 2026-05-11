@@ -55,8 +55,25 @@ def _decode_workos_access_token(token):
         raise SuspiciousOperation("Unable to decode the WorkOS access token.") from exc
 
 
+def _require_workos_settings():
+    missing = [
+        key
+        for key, value in (
+            ("WORKOS_API_KEY", settings.WORKOS_API_KEY),
+            ("WORKOS_CLIENT_ID", settings.WORKOS_CLIENT_ID),
+            ("WORKOS_ORGANIZATION_ID", settings.WORKOS_ORGANIZATION_ID),
+        )
+        if not value
+    ]
+    if missing:
+        raise ImproperlyConfigured(
+            "Missing required WorkOS settings: " + ", ".join(missing)
+        )
+
+
 class WorkOSAuthClient:
     def __init__(self):
+        _require_workos_settings()
         workos_client = _dynamic_import_workos()
         self.client = workos_client(
             api_key=settings.WORKOS_API_KEY,

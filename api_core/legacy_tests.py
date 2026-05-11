@@ -9,6 +9,7 @@ from django.http import HttpResponse
 from django.urls import Resolver404, resolve
 from rest_framework.test import APITestCase, APIClient
 from rest_framework import status
+from rest_framework_simplejwt.tokens import RefreshToken
 from common.config import SysConfig
 from sql.utils.workflow_audit import AuditException, AuditSetting
 from sql.engines import ReviewSet
@@ -29,7 +30,6 @@ from sql.models import (
     WorkflowLog,
     InstanceTag,
     WorkflowAuditSetting,
-    TwoFactorAuthConfig,
     QueryLog,
     QueryPrivileges,
     QueryPrivilegesApply,
@@ -41,7 +41,6 @@ from sql.models import (
 )
 from common.utils.const import WorkflowAction, WorkflowStatus, WorkflowType
 import json
-import pyotp
 
 User = get_user_model()
 
@@ -56,6 +55,17 @@ def assert_success_envelope(testcase, response):
     testcase.assertIn("detail", payload)
     testcase.assertIn("data", payload)
     return payload["data"]
+
+
+def token_pair_for_user(user):
+    refresh = RefreshToken.for_user(user)
+    return {"refresh": str(refresh), "access": str(refresh.access_token)}
+
+
+def authenticate_client(client, user):
+    token_pair = token_pair_for_user(user)
+    client.credentials(HTTP_AUTHORIZATION="Bearer " + token_pair["access"])
+    return token_pair
 
 
 class CacheIsolatedAPITestCase(APITestCase):
@@ -273,13 +283,7 @@ class TestUser(CacheIsolatedAPITestCase):
         )
         self.view_group_permission = Permission.objects.get(codename="view_group")
         self.menu_system_permission = Permission.objects.get(codename="menu_system")
-        r = self.client.post(
-            "/api/auth/token/",
-            {"username": "test_user", "password": "test_password"},
-            format="json",
-        )
-        self.token = response_data(r)["access"]
-        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + self.token)
+        self.token = authenticate_client(self.client, self.user)["access"]
 
     def tearDown(self):
         Instance.objects.all().delete()
@@ -358,68 +362,13 @@ class TestUser(CacheIsolatedAPITestCase):
         )
 
         self.client.credentials()
-        self.member_user.set_password("member_password")
-        self.member_user.save(update_fields=["password"])
-        login_response = self.client.post(
-            "/api/auth/token/",
-            {"username": self.member_user.username, "password": "member_password"},
-            format="json",
-        )
-        token = response_data(login_response)["access"]
-        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
+        authenticate_client(self.client, self.member_user)
 
         response = self.client.get("/api/v1/me/", format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         permissions = response_data(response)["permissions"]
         self.assertIn("sql.menu_sqlworkflow", permissions)
         self.assertIn("sql.sql_submit", permissions)
-
-    def test_update_current_user_profile(self):
-        """Authenticated users can update their own display name."""
-        r = self.client.patch("/api/v1/me/", {"display": "Updated Self"}, format="json")
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.user.refresh_from_db()
-        self.assertEqual(self.user.display, "Updated Self")
-        self.assertEqual(assert_success_envelope(self, r)["display"], "Updated Self")
-
-    def test_change_current_user_password(self):
-        """Authenticated users can change their own password."""
-        new_password = "StrongerPass123!"
-        r = self.client.post(
-            "/api/v1/me/password/",
-            {
-                "current_password": "test_password",
-                "new_password": new_password,
-                "new_password_confirm": new_password,
-            },
-            format="json",
-        )
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.user.refresh_from_db()
-        self.assertTrue(self.user.check_password(new_password))
-
-        self.client.credentials()
-        login_response = self.client.post(
-            "/api/auth/token/",
-            {"username": self.user.username, "password": new_password},
-            format="json",
-        )
-        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
-        self.assertIn("access", response_data(login_response))
-
-    def test_change_current_user_password_rejects_wrong_current_password(self):
-        """Password change requires the existing password."""
-        r = self.client.post(
-            "/api/v1/me/password/",
-            {
-                "current_password": "wrong-password",
-                "new_password": "StrongerPass123!",
-                "new_password_confirm": "StrongerPass123!",
-            },
-            format="json",
-        )
-        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("current_password", r.json())
 
     def test_success_envelope_shape_for_paginated_and_detail_endpoints(self):
         """Success responses should use unified envelope for list and detail."""
@@ -459,28 +408,8 @@ class TestUser(CacheIsolatedAPITestCase):
         self.assertEqual(payload["group_ids"], [self.group.id])
         self.assertEqual(payload["groups"][0]["name"], self.group.name)
 
-    def test_create_user(self):
-        """Test creating user."""
-        json_data = {
-            "username": "test_user2",
-            "password": "test_password2",
-            "display": "Test User 2",
-            "email": "test_user2@datamingle.test",
-            "group_ids": [self.group.id],
-        }
-        r = self.client.post("/api/v1/user/", json_data, format="json")
-        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-        payload = response_data(r)
-        self.assertEqual(payload["username"], "test_user2")
-        self.assertEqual(payload["email"], "test_user2@datamingle.test")
-        self.assertEqual(payload["group_ids"], [self.group.id])
-        created_user = User.objects.get(username="test_user2")
-        self.assertTrue(created_user.is_active)
-        self.assertFalse(created_user.is_staff)
-        self.assertFalse(created_user.is_superuser)
-
     def test_update_user(self):
-        """Test updating user."""
+        """Superusers can update access fields but not identity fields."""
         self.member_user.set_password("member_password")
         self.member_user.save(update_fields=["password"])
         json_data = {
@@ -494,8 +423,8 @@ class TestUser(CacheIsolatedAPITestCase):
         )
         user = User.objects.get(pk=self.member_user.id)
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(user.display, "Updated Display Name")
-        self.assertEqual(user.email, "updated@datamingle.test")
+        self.assertEqual(user.display, "Group Member")
+        self.assertEqual(user.email, "")
         self.assertTrue(user.check_password("member_password"))
         self.assertEqual(
             list(user.groups.values_list("id", flat=True)), [self.group.id]
@@ -522,16 +451,13 @@ class TestUser(CacheIsolatedAPITestCase):
         self.assertTrue(self.member_user.is_active)
 
     def test_delete_user(self):
-        """Test deleting user."""
-        json_data = {
-            "username": "test_user2",
-            "password": "test_password2",
-            "display": "Test User 2",
-        }
-        r1 = self.client.post("/api/v1/user/", json_data, format="json")
-        r2 = self.client.delete(
-            f'/api/v1/user/{response_data(r1)["id"]}/', format="json"
+        """Superusers can delete existing local access records."""
+        managed_user = User.objects.create(
+            username="test_user2",
+            display="Test User 2",
+            workos_user_id="workos_test_user2",
         )
+        r2 = self.client.delete(f"/api/v1/user/{managed_user.id}/", format="json")
         self.assertEqual(r2.status_code, status.HTTP_200_OK)
         self.assertEqual(User.objects.filter(username="test_user2").count(), 0)
 
@@ -761,52 +687,9 @@ class TestUser(CacheIsolatedAPITestCase):
         self.assertEqual(payload[0]["id"], self.instance.id)
         self.assertIn("test_instance", payload[0]["label"])
 
-    def test_user_auth(self):
-        """Test user authentication check."""
-        json_data = {"password": "test_password"}
-        r = self.client.post(f"/api/v1/user/auth/", json_data, format="json")
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json()["detail"], "Authentication successful.")
 
-    def test_2fa_config(self):
-        """Test user 2FA configuration."""
-        json_data = {"auth_type": "totp", "enable": "false"}
-        r = self.client.post(f"/api/v1/user/2fa/", json_data, format="json")
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(TwoFactorAuthConfig.objects.count(), 0)
-
-    def test_2fa_save(self):
-        """Test saving user 2FA configuration."""
-        json_data = {
-            "auth_type": "totp",
-            "key": "ZUGRIJZP6H7LIOAL4LH5JA4GSXXT3WOK",
-        }
-        r = self.client.post(f"/api/v1/user/2fa/save/", json_data, format="json")
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(TwoFactorAuthConfig.objects.count(), 1)
-
-    def test_2fa_state(self):
-        """Test querying user 2FA status."""
-        r = self.client.get(f"/api/v1/user/2fa/state/", format="json")
-        r_data = response_data(r)
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r_data["totp"], "disabled")
-        self.assertEqual(r_data["sms"], "disabled")
-
-    def test_2fa_verify(self):
-        """Test 2FA code verification."""
-        json_data = {
-            "otp": "123456",
-            "key": "ZUGRIJZP6H7LIOAL4LH5JA4GSXXT3WOK",
-            "auth_type": "totp",
-        }
-        r = self.client.post(f"/api/v1/user/2fa/verify/", json_data, format="json")
-        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(r.json()["errors"], "Invalid verification code.")
-
-
-class TestTokenAuth2FA(CacheIsolatedAPITestCase):
-    """Test token auth with stateless 2FA checks."""
+class TestSPATokenHelpers(CacheIsolatedAPITestCase):
+    """Test token refresh and verification after WorkOS issues SPA JWTs."""
 
     def setUp(self):
         self.user = User(
@@ -819,55 +702,10 @@ class TestTokenAuth2FA(CacheIsolatedAPITestCase):
 
     def tearDown(self):
         self.user.delete()
-        TwoFactorAuthConfig.objects.all().delete()
         SysConfig().purge()
 
-    def test_token_requires_2fa_when_user_has_totp(self):
-        secret = pyotp.random_base32(32)
-        TwoFactorAuthConfig.objects.create(
-            auth_type="totp",
-            secret_key=secret,
-            user=self.user,
-        )
-        r = self.client.post(
-            "/api/auth/token/",
-            {"username": self.user.username, "password": "test_password"},
-            format="json",
-        )
-        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(r.json()["code"][0], "2fa_required")
-        self.assertEqual(r.json()["available_auth_types"], ["totp"])
-
-    def test_token_totp_success(self):
-        secret = pyotp.random_base32(32)
-        TwoFactorAuthConfig.objects.create(
-            auth_type="totp",
-            secret_key=secret,
-            user=self.user,
-        )
-        otp = pyotp.TOTP(secret).now()
-        r = self.client.post(
-            "/api/auth/token/",
-            {
-                "username": self.user.username,
-                "password": "test_password",
-                "auth_type": "totp",
-                "otp": otp,
-            },
-            format="json",
-        )
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertIn("access", response_data(r))
-        self.assertIn("refresh", response_data(r))
-
     def test_token_refresh_success_envelope(self):
-        login_resp = self.client.post(
-            "/api/auth/token/",
-            {"username": self.user.username, "password": "test_password"},
-            format="json",
-        )
-        self.assertEqual(login_resp.status_code, status.HTTP_200_OK)
-        refresh_token = response_data(login_resp)["refresh"]
+        refresh_token = token_pair_for_user(self.user)["refresh"]
 
         r = self.client.post(
             "/api/auth/token/refresh/",
@@ -879,13 +717,7 @@ class TestTokenAuth2FA(CacheIsolatedAPITestCase):
         self.assertIn("access", refreshed)
 
     def test_token_verify_success_envelope(self):
-        login_resp = self.client.post(
-            "/api/auth/token/",
-            {"username": self.user.username, "password": "test_password"},
-            format="json",
-        )
-        self.assertEqual(login_resp.status_code, status.HTTP_200_OK)
-        access_token = response_data(login_resp)["access"]
+        access_token = token_pair_for_user(self.user)["access"]
 
         r = self.client.post(
             "/api/auth/token/verify/",
@@ -916,52 +748,6 @@ class TestTokenAuth2FA(CacheIsolatedAPITestCase):
         self.assertIn("detail", r.json())
         self.assertIn("code", r.json())
         self.assertNotIn("data", r.json())
-
-    def test_token_enforce_2fa_requires_setup(self):
-        SysConfig().set("enforce_2fa", True)
-        r = self.client.post(
-            "/api/auth/token/",
-            {"username": self.user.username, "password": "test_password"},
-            format="json",
-        )
-        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(r.json()["code"][0], "2fa_setup_required")
-
-    def test_request_sms_login_otp_requires_sms_config(self):
-        r = self.client.post(
-            "/api/auth/token/sms/",
-            {"username": self.user.username, "password": "test_password"},
-            format="json",
-        )
-        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(
-            r.json()["errors"], "SMS 2FA is not configured for this account."
-        )
-
-    @patch("api_auth.views.get_redis_connection")
-    @patch("api_auth.views.get_authenticator")
-    def test_request_sms_login_otp_success(
-        self, mock_get_authenticator, mock_get_redis
-    ):
-        TwoFactorAuthConfig.objects.create(
-            auth_type="sms",
-            phone="13800138000",
-            user=self.user,
-        )
-        mock_auth = Mock()
-        mock_auth.get_captcha.return_value = {"status": 0, "msg": "ok"}
-        mock_get_authenticator.return_value = mock_auth
-        mock_redis = Mock()
-        mock_get_redis.return_value = mock_redis
-
-        r = self.client.post(
-            "/api/auth/token/sms/",
-            {"username": self.user.username, "password": "test_password"},
-            format="json",
-        )
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(r.json()["detail"], "ok")
-        mock_redis.set.assert_called_once()
 
 
 class TestQueryAPI(CacheIsolatedAPITestCase):
@@ -1004,13 +790,7 @@ class TestQueryAPI(CacheIsolatedAPITestCase):
         self.ins.resource_group.add(self.res_group)
         self.ins.instance_tag.add(self.read_tag)
 
-        r = self.client.post(
-            "/api/auth/token/",
-            {"username": "query_user", "password": "test_password"},
-            format="json",
-        )
-        self.token = response_data(r)["access"]
-        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + self.token)
+        self.token = authenticate_client(self.client, self.user)["access"]
 
     def tearDown(self):
         self.user.delete()
@@ -1509,13 +1289,7 @@ class TestInstance(CacheIsolatedAPITestCase):
             user="ins_user",
             password="some_str",
         )
-        r = self.client.post(
-            "/api/auth/token/",
-            {"username": "test_user", "password": "test_password"},
-            format="json",
-        )
-        self.token = response_data(r)["access"]
-        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + self.token)
+        self.token = authenticate_client(self.client, self.user)["access"]
 
     def tearDown(self):
         User.objects.all().delete()
@@ -1723,14 +1497,7 @@ class TestInstance(CacheIsolatedAPITestCase):
         other_user.set_password("test_password")
         other_user.save()
         other_client = APIClient()
-        login_response = other_client.post(
-            "/api/auth/token/",
-            {"username": "tagless_user", "password": "test_password"},
-            format="json",
-        )
-        other_client.credentials(
-            HTTP_AUTHORIZATION="Bearer " + response_data(login_response)["access"]
-        )
+        authenticate_client(other_client, other_user)
 
         r = other_client.get("/api/v1/instance/tag/", format="json")
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
@@ -2160,13 +1927,7 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
         ).delete()
 
     def _login(self, user):
-        r = self.client.post(
-            "/api/auth/token/",
-            {"username": user.username, "password": "test_password"},
-            format="json",
-        )
-        token = response_data(r)["access"]
-        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
+        authenticate_client(self.client, user)
 
     @patch("api_access.views.async_task")
     def test_create_instance_request(self, _async_task):
@@ -2468,13 +2229,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.wl = WorkflowLog.objects.create(
             audit_id=self.audit1.audit_id, operation_type=1
         )
-        r = self.client.post(
-            "/api/auth/token/",
-            {"username": "test_user", "password": "test_password"},
-            format="json",
-        )
-        self.token = response_data(r)["access"]
-        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + self.token)
+        self.token = authenticate_client(self.client, self.user)["access"]
         self.notify_patcher = patch("sql.notify.auto_notify")
         self.notify_patcher.start()
 
@@ -2500,15 +2255,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.notify_patcher.stop()
 
     def _login_as_user(self, username, password="test_password"):
-        login = self.client.post(
-            "/api/auth/token/",
-            {"username": username, "password": password},
-            format="json",
-        )
-        self.client.credentials(
-            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
-        )
-        return login
+        user = User.objects.get(username=username)
+        return authenticate_client(self.client, user)
 
     def _create_mysql_workflow(self, status="workflow_review_pass"):
         mysql_instance = Instance.objects.create(
@@ -2602,14 +2350,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             db_name="some_db",
             syntax_type=2,
         )
-        login = self.client.post(
-            "/api/auth/token/",
-            {"username": submitter.username, "password": "test_password"},
-            format="json",
-        )
-        self.client.credentials(
-            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
-        )
+        authenticate_client(self.client, submitter)
 
         r = self.client.get("/api/v1/workflow/?scope=mine", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
@@ -2655,14 +2396,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             access_level=InstanceAccessLevel.QUERY_DML,
             valid_date=datetime.now().date() + timedelta(days=1),
         )
-        login = self.client.post(
-            "/api/auth/token/",
-            {"username": temp_user.username, "password": "test_password"},
-            format="json",
-        )
-        self.client.credentials(
-            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
-        )
+        authenticate_client(self.client, temp_user)
 
         r = self.client.get("/api/v1/workflow/submission-metadata/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
@@ -2694,14 +2428,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             access_level=InstanceAccessLevel.QUERY_DML_DDL,
             valid_date=datetime.now().date() + timedelta(days=1),
         )
-        login = self.client.post(
-            "/api/auth/token/",
-            {"username": temp_user.username, "password": "test_password"},
-            format="json",
-        )
-        self.client.credentials(
-            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
-        )
+        authenticate_client(self.client, temp_user)
 
         r = self.client.get("/api/v1/workflow/submission-metadata/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
@@ -2861,14 +2588,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             access_level=InstanceAccessLevel.QUERY_DML,
             valid_date=datetime.now().date() + timedelta(days=1),
         )
-        login = self.client.post(
-            "/api/auth/token/",
-            {"username": temp_user.username, "password": "test_password"},
-            format="json",
-        )
-        self.client.credentials(
-            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
-        )
+        authenticate_client(self.client, temp_user)
 
         r = self.client.get(
             f"/api/v1/workflow/approval-preview/?group_id={self.res_group.group_id}",
@@ -3050,14 +2770,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             valid_date=datetime.now().date() + timedelta(days=1),
         )
 
-        login = self.client.post(
-            "/api/auth/token/",
-            {"username": "workflow_temp_user", "password": "test_password"},
-            format="json",
-        )
-        self.client.credentials(
-            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
-        )
+        authenticate_client(self.client, temp_user)
 
         response = self.client.get("/api/v1/workflow/metadata/", format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -3124,14 +2837,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         audit_user.save()
         audit_user.user_permissions.add(Permission.objects.get(codename="audit_user"))
 
-        login = self.client.post(
-            "/api/auth/token/",
-            {"username": "workflow_audit_user", "password": "test_password"},
-            format="json",
-        )
-        self.client.credentials(
-            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
-        )
+        authenticate_client(self.client, audit_user)
 
         response = self.client.get(f"/api/v1/workflow/{self.wf1.id}/", format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -4176,14 +3882,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         )
         user2.set_password("test_password")
         user2.save()
-        r_login = self.client.post(
-            "/api/auth/token/",
-            {"username": "workflow_user2", "password": "test_password"},
-            format="json",
-        )
-        self.client.credentials(
-            HTTP_AUTHORIZATION="Bearer " + response_data(r_login)["access"]
-        )
+        authenticate_client(self.client, user2)
         r = self.client.post(
             f"/api/v1/workflow/{self.wf1.id}/reviews/",
             {
@@ -4497,24 +4196,10 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
         )
         self.instance.resource_group.add(self.res_group)
 
-        login = self.client.post(
-            "/api/auth/token/",
-            {"username": "permission_user", "password": "test_password"},
-            format="json",
-        )
-        self.client.credentials(
-            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
-        )
+        authenticate_client(self.client, self.user)
 
     def _login_as(self, username, password="test_password"):
-        login = self.client.post(
-            "/api/auth/token/",
-            {"username": username, "password": password},
-            format="json",
-        )
-        self.client.credentials(
-            HTTP_AUTHORIZATION="Bearer " + response_data(login)["access"]
-        )
+        authenticate_client(self.client, User.objects.get(username=username))
 
     def tearDown(self):
         TemporaryInstanceGrant.objects.all().delete()
@@ -4810,13 +4495,7 @@ class TestDashboardAPI(CacheIsolatedAPITestCase):
             cost_time="0.1",
         )
 
-        login_response = self.client.post(
-            "/api/auth/token/",
-            {"username": "dashboard_user", "password": "test_password"},
-            format="json",
-        )
-        self.token = response_data(login_response)["access"]
-        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + self.token)
+        self.token = authenticate_client(self.client, self.user)["access"]
 
     def tearDown(self):
         QueryLog.objects.all().delete()
@@ -4888,13 +4567,7 @@ class TestDashboardAPI(CacheIsolatedAPITestCase):
         no_perm_user.set_password("test_password")
         no_perm_user.save()
 
-        login_response = self.client.post(
-            "/api/auth/token/",
-            {"username": "dashboard_no_perm", "password": "test_password"},
-            format="json",
-        )
-        token = response_data(login_response)["access"]
-        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
+        authenticate_client(self.client, no_perm_user)
 
         response = self.client.get("/api/v1/dashboard/", format="json")
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
@@ -4936,13 +4609,7 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
         User.objects.all().delete()
 
     def authenticate(self, username, password):
-        response = self.client.post(
-            "/api/auth/token/",
-            {"username": username, "password": password},
-            format="json",
-        )
-        token = response_data(response)["access"]
-        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
+        authenticate_client(self.client, User.objects.get(username=username))
 
     def test_staff_can_get_system_settings(self):
         self.authenticate("staff_user", "staff_password")
@@ -5201,15 +4868,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
         return user
 
     def authenticate(self, user):
-        response = self.client.post(
-            "/api/auth/token/",
-            {"username": user.username, "password": self.password},
-            format="json",
-        )
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        token = response_data(response)["access"]
-        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
-        return token
+        return authenticate_client(self.client, user)["access"]
 
     def archive_payload(self, **overrides):
         payload = {

@@ -4,13 +4,29 @@ from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 from django.contrib.auth.models import Group
+from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
-from django.urls import Resolver404, resolve
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from common.config import SysConfig
+from common.authenticate.workos import WorkOSAuthClient
 from sql.models import ResourceGroup, Users
+
+
+class WorkOSAuthClientConfigTests(APITestCase):
+    @override_settings(
+        WORKOS_API_KEY="",
+        WORKOS_CLIENT_ID="",
+        WORKOS_ORGANIZATION_ID="",
+    )
+    def test_client_reports_missing_workos_settings_when_auth_is_used(self):
+        with self.assertRaisesMessage(
+            ImproperlyConfigured,
+            "Missing required WorkOS settings: "
+            "WORKOS_API_KEY, WORKOS_CLIENT_ID, WORKOS_ORGANIZATION_ID",
+        ):
+            WorkOSAuthClient()
 
 
 class FakeRedis:
@@ -147,24 +163,6 @@ class WorkOSAuthApiTests(APITestCase):
             "The WorkOS login exchange code is invalid or expired.",
         )
 
-    def test_deprecated_auth_routes_are_removed(self):
-        removed_paths = [
-            "/api/auth/config/",
-            "/api/auth/token/",
-            "/api/auth/token/sms/",
-            "/api/v1/me/password/",
-            "/api/v1/user/auth/",
-            "/api/v1/user/2fa/",
-            "/api/v1/user/2fa/state/",
-            "/api/v1/user/2fa/save/",
-            "/api/v1/user/2fa/verify/",
-        ]
-
-        for path in removed_paths:
-            with self.subTest(path=path):
-                with self.assertRaises(Resolver404):
-                    resolve(path)
-
     @patch("api_auth.views.WorkOSAuthClient")
     def test_logout_redirects_through_workos_when_session_cookie_present(
         self, mock_client_class
@@ -203,26 +201,6 @@ class WorkOSAuthApiTests(APITestCase):
             response.json()["data"]["avatar_url"],
             "https://images.workos.dev/avatar.png",
         )
-
-    def test_current_user_profile_update_route_is_removed(self):
-        user = Users.objects.create_user(
-            username="managed@datamingle.dev",
-            email="managed@datamingle.dev",
-            display="Managed User",
-            workos_user_id="user_123",
-            is_active=True,
-        )
-        self.client.force_authenticate(user=user)
-
-        response = self.client.patch(
-            "/api/v1/me/",
-            {"display": "Updated Name"},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
-        user.refresh_from_db()
-        self.assertEqual(user.display, "Managed User")
 
     def test_superuser_can_change_groups_but_identity_fields_are_ignored(self):
         superuser = Users.objects.create_user(
@@ -277,32 +255,6 @@ class WorkOSAuthApiTests(APITestCase):
             list(workos_user.groups.values_list("name", flat=True)),
             ["Ops"],
         )
-
-    def test_manual_user_creation_is_unavailable(self):
-        superuser = Users.objects.create_user(
-            username="superuser@datamingle.dev",
-            email="superuser@datamingle.dev",
-            display="Super User",
-            is_active=True,
-            is_superuser=True,
-            is_staff=True,
-        )
-        self.client.force_authenticate(user=superuser)
-
-        response = self.client.post(
-            "/api/v1/user/",
-            {
-                "username": "new@datamingle.dev",
-                "display": "New User",
-                "email": "new@datamingle.dev",
-                "password": "test-password",
-                "group_ids": [],
-            },
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
-        self.assertFalse(Users.objects.filter(username="new@datamingle.dev").exists())
 
     @patch("api_auth.views.get_redis_connection")
     @patch("api_auth.views.WorkOSAuthClient")

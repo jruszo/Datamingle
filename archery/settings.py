@@ -90,9 +90,10 @@ AUTH_MODE = "workos"
 ENABLE_WORKOS_AUTH = True
 # Datamingle uses WorkOS as the sole authentication provider.
 # The previous dual-mode "builtin" local-password and 2FA login
-# flows have been removed.  Deployments must configure valid
-# WORKOS_CLIENT_ID, WORKOS_API_KEY, and WORKOS_ORGANIZATION_ID
-# or the application will fail to start with ImproperlyConfigured.
+# flows have been removed. Deployments must configure valid
+# WORKOS_CLIENT_ID, WORKOS_API_KEY, and WORKOS_ORGANIZATION_ID for
+# interactive sign-in. The credentials are validated when WorkOS auth
+# is used so non-auth processes, such as Celery workers, can start.
 
 # https://docs.djangoproject.com/en/4.0/ref/settings/#csrf-trusted-origins
 CSRF_TRUSTED_ORIGINS = env("CSRF_TRUSTED_ORIGINS")
@@ -365,20 +366,6 @@ WORKOS_SUPERUSER_EMAILS = [
     for email in env("WORKOS_SUPERUSER_EMAILS", default=[])
     if email.strip()
 ]
-
-missing_workos = [
-    key
-    for key, value in (
-        ("WORKOS_API_KEY", WORKOS_API_KEY),
-        ("WORKOS_CLIENT_ID", WORKOS_CLIENT_ID),
-        ("WORKOS_ORGANIZATION_ID", WORKOS_ORGANIZATION_ID),
-    )
-    if not value
-]
-if missing_workos:
-    raise ImproperlyConfigured(
-        "Missing required WorkOS settings: " + ", ".join(missing_workos)
-    )
 
 # Logging configuration
 LOGGING = {
