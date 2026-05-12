@@ -56,7 +56,7 @@ This file tracks the migration work needed to remove the legacy Bootstrap/Django
 ## Verification
 
 - [x] Run backend targeted tests in `datamingle-app` container.
-- [x] Run migration drift check with `docker exec datamingle-app python manage.py makemigrations sql --check`.
+- [x] Run migration drift check with `docker exec -w /opt/datamingle/backend datamingle-app python manage.py makemigrations sql --check`.
 - [x] Run frontend `npm run build` from `frontend/`.
 - [x] Run relevant Playwright specs or add/run focused specs for new SPA areas.
 - [x] Review git diff for unintended changes and summarize remaining cleanup risks.

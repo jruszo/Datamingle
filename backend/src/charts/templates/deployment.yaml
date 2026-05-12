@@ -73,18 +73,18 @@ spec:
           volumeMounts:
           - name: archery-settings
             subPath: local_settings.py
-            mountPath: /opt/archery/local_settings.py
+            mountPath: /opt/datamingle/backend/local_settings.py
           - name: archery-settings
             subPath: init-archery.sh
-            mountPath: /opt/archery/src/docker/init-archery.sh
+            mountPath: /opt/datamingle/backend/src/docker/init-archery.sh
           - name: archery-settings
             subPath: createsuperuser.py
-            mountPath: /opt/archery/src/docker/createsuperuser.py
-          - mountPath: /opt/archery/downloads
+            mountPath: /opt/datamingle/backend/src/docker/createsuperuser.py
+          - mountPath: /opt/datamingle/backend/downloads
             name: archery-download
-          - mountPath: /opt/archery/src/script
+          - mountPath: /opt/datamingle/backend/src/script
             name: archery-script
-          command: ['/bin/bash','/opt/archery/src/docker/init-archery.sh']
+          command: ['/bin/bash','/opt/datamingle/backend/src/docker/init-archery.sh']
       containers:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"

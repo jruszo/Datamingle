@@ -15,6 +15,15 @@
 
 </div>
 
+Repository Layout
+===============
+This repository is organized as a monorepo:
+
+- `backend/` contains the Django API, backend Docker files, Helm chart, and backend Python dependencies.
+- `frontend/` contains the Vue/Vite SPA.
+- `agent/` is reserved for the upcoming Datamingle agent module.
+- `scripts/` contains repo-level helper scripts.
+
 Fork Attribution
 ===============
 Datamingle is a fork of [Archery](https://github.com/hhyo/Archery), and we retain attribution in accordance with the Apache-2.0 license.
@@ -43,7 +52,7 @@ Quick Start
 Public Datamingle demo: coming soon.
 
 ### Docker
-Use the Docker and compose files in this repository (`src/docker` and `src/docker-compose`).
+Use the Docker and compose files in this repository (`backend/src/docker` and `backend/src/docker-compose`).
 
 Existing local Docker data directories from before the Datamingle rename may
 still have the application database under the old `archery` name. Copy that data
@@ -54,7 +63,7 @@ scripts/docker/migrate-archery-db-to-datamingle.sh
 ```
 
 The script defaults to the local ARM MySQL container, `datamingle-mysql`. If you
-are using `src/docker-compose/docker-compose.yml`, where the MySQL container is
+are using `backend/src/docker-compose/docker-compose.yml`, where the MySQL container is
 named `mysql`, override the container name:
 
 ```bash
@@ -71,7 +80,7 @@ Seeded app users are local access records only; sign-in still comes through Work
 - `demo_pm`
 - `demo_dba`
 
-See [src/docker-compose/LOCAL_DEMO.md](src/docker-compose/LOCAL_DEMO.md) for:
+See [backend/src/docker-compose/LOCAL_DEMO.md](backend/src/docker-compose/LOCAL_DEMO.md) for:
 
 - demo roles and approval chains
 - demo MySQL/PostgreSQL instance credentials
@@ -120,7 +129,7 @@ WorkOS setup assumptions in this repo:
 5. Rebuild the app container so the `workos` Python dependency is installed:
 
 ```bash
-docker-compose -f src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend
+docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend
 ```
 
 6. Restart the deployment and open `/login/`.
@@ -133,6 +142,7 @@ docker-compose -f src/docker-compose/docker-compose.local-dev.yml up -d --build 
 Run Tests
 ===============
 ```bash
+cd backend
 python manage.py test -v 3
 ```
 

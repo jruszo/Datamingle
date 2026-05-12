@@ -2,7 +2,7 @@
 
 set -eo pipefail
 
-cd /opt/datamingle
+cd /opt/datamingle/backend
 
 echo Switch Python runtime environment
 source /opt/venv4datamingle/bin/activate

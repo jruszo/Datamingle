@@ -17,13 +17,13 @@ The local compose file sets `RUN_LOCAL_DEMO_SEED=1` on the `datamingle-app` cont
 On rebuild or recreate, startup runs:
 
 ```bash
-docker-compose -f src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend
+docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend
 ```
 
 The app container then runs:
 
 ```bash
-docker exec datamingle-app python manage.py seed_local_demo
+docker exec -w /opt/datamingle/backend datamingle-app python manage.py seed_local_demo
 ```
 
 The seed is idempotent. Re-running it updates the named demo records without clearing unrelated local data.
@@ -88,7 +88,7 @@ Smoke verification is intentionally separate from seeding.
 Run it manually with:
 
 ```bash
-docker exec datamingle-app python manage.py smoke_local_demo
+docker exec -w /opt/datamingle/backend datamingle-app python manage.py smoke_local_demo
 ```
 
 This command verifies:
@@ -108,8 +108,8 @@ The local ARM compose services are intentionally ephemeral:
 If you want to recreate the initial SQL content from scratch, tear down the local stack and bring it back up again:
 
 ```bash
-docker-compose -f src/docker-compose/docker-compose.local-dev.yml down -v
-docker-compose -f src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend
+docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml down -v
+docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend
 ```
 
 That recreates the databases, reruns migrations, and reapplies the local demo seed.

@@ -1,7 +1,7 @@
 # Datamingle Local Docker Notes
 
 This file is mounted into the local Docker app container at
-`/opt/datamingle/docs/docs.md`. It gives operators and developers a short
+`/opt/datamingle/backend/docs/docs.md`. It gives operators and developers a short
 reference for the renamed Datamingle compose stack.
 
 ## Service Naming
@@ -11,9 +11,9 @@ container is `datamingle-app`. The frontend dev service is named `frontend`
 and exposes Vite on `http://localhost:5173`.
 
 ```bash
-docker-compose -f src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend
-docker exec datamingle-app python manage.py migrate --noinput
-docker exec datamingle-app python manage.py smoke_local_demo
+docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend
+docker exec -w /opt/datamingle/backend datamingle-app python manage.py migrate --noinput
+docker exec -w /opt/datamingle/backend datamingle-app python manage.py smoke_local_demo
 ```
 
 Datamingle still uses the `archery` Python package name internally for Django
@@ -44,8 +44,8 @@ MYSQL_CONTAINER=mysql scripts/docker/migrate-archery-db-to-datamingle.sh
 After migration, run the normal Django checks:
 
 ```bash
-docker exec datamingle-app python manage.py makemigrations sql --check
-docker exec datamingle-app python manage.py migrate --noinput
+docker exec -w /opt/datamingle/backend datamingle-app python manage.py makemigrations sql --check
+docker exec -w /opt/datamingle/backend datamingle-app python manage.py migrate --noinput
 ```
 
 ## Local Demo Credentials
