@@ -2,7 +2,6 @@ export {
   createGroup,
   createInstanceTag,
   createResourceGroup,
-  createUser,
   deleteGroup,
   deleteResourceGroup,
   deleteUser,

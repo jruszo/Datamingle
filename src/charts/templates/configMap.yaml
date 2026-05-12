@@ -59,10 +59,6 @@ data:
     echo Collect all static files into STATIC_ROOT
     python3 manage.py collectstatic -v0 --noinput
 
-    echo Start Django Q cluster
-    supervisord -c /etc/supervisord.conf
-
-
     echo Start services
     settings=${1:-"archery.settings"}
     ip=${2:-"127.0.0.1"}

@@ -73,7 +73,7 @@ def execute(workflow_id, user=None, execution_options=None):
 
 def execute_callback(task):
     """Callback for async tasks to persist execution result.
-    Uses django-q hook with the full task object.
+    Uses the task queue hook with the full task object.
     task.result is the actual result.
     """
     # https://stackoverflow.com/questions/7835272/django-operationalerror-2006-mysql-server-has-gone-away

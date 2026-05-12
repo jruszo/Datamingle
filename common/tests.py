@@ -123,10 +123,14 @@ class InventoryRefreshTests(TestCase):
         Instance.objects.all().delete()
         self.sys_config.purge()
 
-    @patch("django_q.tasks.schedule")
+    @patch("common.task_queue._refresh_celery_runtime_config")
+    @patch("common.task_queue._celery_execute_task")
     def test_ensure_inventory_refresh_schedule_creates_single_active_schedule(
-        self, mock_schedule
+        self, mock_celery_execute_task, _mock_refresh
     ):
+        mock_celery_execute_task.return_value.apply_async.return_value.id = (
+            "inventory-task-id"
+        )
         inventory.ensure_inventory_refresh_schedule(force=True)
         inventory.ensure_inventory_refresh_schedule()
 
@@ -136,12 +140,16 @@ class InventoryRefreshTests(TestCase):
             ).count(),
             1,
         )
-        mock_schedule.assert_called_once()
+        mock_celery_execute_task.return_value.apply_async.assert_called_once()
 
-    @patch("django_q.tasks.schedule")
+    @patch("common.task_queue._refresh_celery_runtime_config")
+    @patch("common.task_queue._celery_execute_task")
     def test_force_schedule_refresh_replaces_next_run_when_interval_changes(
-        self, mock_schedule
+        self, mock_celery_execute_task, _mock_refresh
     ):
+        mock_celery_execute_task.return_value.apply_async.return_value.id = (
+            "inventory-task-id"
+        )
         self.sys_config.set("inventory_refresh_interval", "24h")
         inventory.ensure_inventory_refresh_schedule(force=True)
         first_run = TaskSchedule.objects.get(
@@ -155,15 +163,24 @@ class InventoryRefreshTests(TestCase):
         ).run_at
 
         self.assertLess(second_run, first_run)
-        self.assertEqual(mock_schedule.call_count, 2)
+        self.assertEqual(
+            mock_celery_execute_task.return_value.apply_async.call_count,
+            2,
+        )
         self.assertTrue(
             Config.objects.filter(
                 item=inventory.INVENTORY_REFRESH_SCHEDULE_LOCK_NAME
             ).exists()
         )
 
-    @patch("django_q.tasks.schedule")
-    def test_inventory_refresh_task_callback_rearms_schedule(self, mock_schedule):
+    @patch("common.task_queue._refresh_celery_runtime_config")
+    @patch("common.task_queue._celery_execute_task")
+    def test_inventory_refresh_task_callback_rearms_schedule(
+        self, mock_celery_execute_task, _mock_refresh
+    ):
+        mock_celery_execute_task.return_value.apply_async.return_value.id = (
+            "inventory-task-id"
+        )
         inventory.inventory_refresh_task_callback(Mock(success=True))
 
         self.assertTrue(
@@ -171,7 +188,7 @@ class InventoryRefreshTests(TestCase):
                 name=inventory.INVENTORY_REFRESH_SCHEDULE_NAME
             ).exists()
         )
-        mock_schedule.assert_called_once()
+        mock_celery_execute_task.return_value.apply_async.assert_called_once()
 
     @patch(
         "sql.inventory.collect_inventory_snapshot",
@@ -636,13 +653,7 @@ class TaskQueueTests(TestCase):
         TaskSchedule.objects.all().delete()
         self.sys_config.purge()
 
-    @override_settings(DEFAULT_TASK_BACKEND="django_q")
-    def test_current_task_backend_defaults_to_settings(self):
-        self.assertEqual(task_queue.current_task_backend(), "django_q")
-
-    @override_settings(DEFAULT_TASK_BACKEND="django_q")
-    def test_current_task_backend_prefers_sys_config(self):
-        self.sys_config.set("task_backend", "celery")
+    def test_current_task_backend_is_celery(self):
         self.assertEqual(task_queue.current_task_backend(), "celery")
 
     @override_settings(
@@ -819,43 +830,6 @@ class TaskQueueTests(TestCase):
         self.assertEqual(len(TASK_CALLBACK_RESULTS), 1)
         self.assertFalse(TASK_CALLBACK_RESULTS[0].success)
         self.assertEqual(TASK_CALLBACK_RESULTS[0].error, "task boom")
-
-    @patch("django_q.tasks.async_task")
-    def test_django_q_backend_enqueue_payload_uses_common_executor(
-        self, mock_async_task
-    ):
-        backend = task_queue.DjangoQTaskBackend()
-
-        backend.enqueue_payload("encoded", "demo-task", timeout=12)
-
-        mock_async_task.assert_called_once_with(
-            "common.task_queue.execute_payload",
-            "encoded",
-            task_name="demo-task",
-            timeout=12,
-        )
-
-    @patch("django_q.models.Schedule.objects.filter")
-    @patch("django_q.tasks.schedule")
-    def test_django_q_backend_schedule_payload_creates_registry(
-        self, mock_schedule, mock_schedule_filter
-    ):
-        backend = task_queue.DjangoQTaskBackend()
-        mock_schedule_filter.return_value.delete.return_value = None
-
-        backend.schedule_payload(
-            name="q-scheduled",
-            payload="encoded",
-            run_at=datetime.datetime.now(),
-            task_name="q-scheduled",
-            callable_path="common.tests.sample_task",
-            timeout=-1,
-        )
-
-        saved = TaskSchedule.objects.get(name="q-scheduled")
-        self.assertEqual(saved.backend, TaskSchedule.BACKEND_DJANGO_Q)
-        self.assertEqual(saved.status, TaskSchedule.STATUS_SCHEDULED)
-        mock_schedule.assert_called_once()
 
     @patch("common.task_queue._refresh_celery_runtime_config")
     @patch("common.task_queue._celery_execute_task")

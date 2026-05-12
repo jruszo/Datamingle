@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-COMPOSE_FILE="$ROOT_DIR/src/docker-compose/docker-compose.local-arm.yml"
+COMPOSE_FILE="$ROOT_DIR/src/docker-compose/docker-compose.local-dev.yml"
 DOWNLOAD_ROOT="$ROOT_DIR/src/docker-compose/datamingle/downloads"
 COMPOSE=(docker-compose -f "$COMPOSE_FILE")
 
@@ -31,7 +31,7 @@ clear_directory "$DOWNLOAD_ROOT/DataExportFile"
 clear_directory "$DOWNLOAD_ROOT/dictionary"
 
 log "Rebuilding and starting local Docker stack"
-"${COMPOSE[@]}" up -d --build datamingle
+"${COMPOSE[@]}" up -d --build datamingle frontend
 
 log "Waiting for datamingle-app container"
 for _ in $(seq 1 60); do

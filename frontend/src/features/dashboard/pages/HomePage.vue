@@ -347,16 +347,6 @@ onMounted(() => {
             <span class="text-sm text-slate-500">{{ row.label }}</span>
             <span class="text-sm font-medium text-slate-900">{{ row.value }}</span>
           </div>
-
-          <div class="flex flex-wrap gap-2 pt-1">
-            <Badge
-              v-for="item in currentUser?.two_factor_auth_types ?? []"
-              :key="item"
-              variant="secondary"
-            >
-              2FA: {{ item }}
-            </Badge>
-          </div>
         </CardContent>
       </Card>
 

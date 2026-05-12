@@ -82,9 +82,8 @@ export const systemSettingsSections: SystemSettingsSectionDefinition[] = [
   {
     id: 'background-jobs',
     title: 'Background Jobs',
-    description: 'Choose the async execution backend and configure optional Celery scale-out settings.',
+    description: 'Configure Celery async execution and inventory refresh scheduling.',
     fields: [
-      { key: 'task_backend', label: 'Task backend', input: 'select', optionSource: 'task_backends', defaultValue: 'django_q' },
       {
         key: 'inventory_refresh_interval',
         label: 'Inventory refresh interval',
@@ -97,33 +96,28 @@ export const systemSettingsSections: SystemSettingsSectionDefinition[] = [
         label: 'Celery broker URL',
         input: 'password',
         placeholder: 'redis://host:6379/1',
-        showWhen: { key: 'task_backend', equals: 'celery' },
       },
       {
         key: 'celery_result_backend',
         label: 'Celery result backend',
         input: 'password',
         placeholder: 'redis://host:6379/2',
-        showWhen: { key: 'task_backend', equals: 'celery' },
       },
       {
         key: 'celery_task_default_queue',
         label: 'Celery default queue',
         input: 'text',
         defaultValue: 'default',
-        showWhen: { key: 'task_backend', equals: 'celery' },
       },
       {
         key: 'celery_task_soft_time_limit',
         label: 'Celery soft time limit (seconds)',
         input: 'number',
-        showWhen: { key: 'task_backend', equals: 'celery' },
       },
       {
         key: 'celery_task_time_limit',
         label: 'Celery hard time limit (seconds)',
         input: 'number',
-        showWhen: { key: 'task_backend', equals: 'celery' },
       },
     ],
   },
@@ -208,17 +202,13 @@ export const systemSettingsSections: SystemSettingsSectionDefinition[] = [
   {
     id: 'login-security',
     title: 'Login, Access, And Defaults',
-    description: 'Configure login defaults, first-login assignments, API user allowlists, and login-hardening thresholds.',
+    description: 'Configure first-login assignments, API user allowlists, and session display defaults.',
     fields: [
       { key: 'index_path_url', label: 'Default landing path', input: 'text', placeholder: 'sqlworkflow' },
       { key: 'default_auth_group', label: 'Default auth groups', input: 'multiselect', optionSource: 'auth_groups' },
       { key: 'default_resource_group', label: 'Default resource groups', input: 'multiselect', optionSource: 'resource_groups' },
       { key: 'api_user_whitelist', label: 'API user whitelist', input: 'multiselect', optionSource: 'users' },
-      { key: 'lock_time_threshold', label: 'Account lock time (seconds)', input: 'number' },
-      { key: 'lock_cnt_threshold', label: 'Failed login lock count', input: 'number' },
-      { key: 'sign_up_enabled', label: 'Allow sign-up', input: 'checkbox' },
       { key: 'watermark_enabled', label: 'Enable watermark', input: 'checkbox' },
-      { key: 'enforce_2fa', label: 'Enforce 2FA', input: 'checkbox' },
     ],
   },
   {

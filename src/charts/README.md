@@ -26,14 +26,10 @@ Run the command below, replacing `${your archery password}` with your target Arc
 
 For MySQL storage persistence, configure it using the options in `values.yaml`.
 
-## 4. LDAP Settings
+## 4. Access Methods
 
-To enable LDAP, modify the related settings in `settings.py` under `configMap` in `values.yaml`.
-
-## 5. Access Methods
-
-5.1 Local access: `kubectl port-forward pods/archery-xxxxxx 9123:9123`  
-5.2 External cluster access: configure `svc` as `NodePort` or `LoadBalancer`, or enable `ingress`.
+4.1 Local access: `kubectl port-forward pods/archery-xxxxxx 9123:9123`  
+4.2 External cluster access: configure `svc` as `NodePort` or `LoadBalancer`, or enable `ingress`.
 
 Default username: `admin`  
 Password: the value configured in section 2.3

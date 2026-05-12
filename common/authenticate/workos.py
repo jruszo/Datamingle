@@ -25,17 +25,12 @@ class WorkOSAuthenticationResult:
         ).strip()
 
 
-def _require_workos_mode():
-    if not settings.ENABLE_WORKOS_AUTH:
-        raise ImproperlyConfigured("WorkOS authentication is not enabled.")
-
-
 def _dynamic_import_workos():
     try:
         from workos import WorkOSClient  # type: ignore
     except ImportError as exc:
         raise ImproperlyConfigured(
-            "The 'workos' package is required when AUTH_MODE=workos."
+            "The 'workos' package is required for Datamingle authentication."
         ) from exc
     return WorkOSClient
 
@@ -60,20 +55,36 @@ def _decode_workos_access_token(token):
         raise SuspiciousOperation("Unable to decode the WorkOS access token.") from exc
 
 
+def _require_workos_settings():
+    missing = [
+        key
+        for key, value in (
+            ("WORKOS_API_KEY", settings.WORKOS_API_KEY),
+            ("WORKOS_CLIENT_ID", settings.WORKOS_CLIENT_ID),
+            ("WORKOS_ORGANIZATION_ID", settings.WORKOS_ORGANIZATION_ID),
+        )
+        if not value
+    ]
+    if missing:
+        raise ImproperlyConfigured(
+            "Missing required WorkOS settings: " + ", ".join(missing)
+        )
+
+
 class WorkOSAuthClient:
     def __init__(self):
-        _require_workos_mode()
+        _require_workos_settings()
         workos_client = _dynamic_import_workos()
         self.client = workos_client(
             api_key=settings.WORKOS_API_KEY,
             client_id=settings.WORKOS_CLIENT_ID,
         )
 
-    def get_authorization_url(self, state):
+    def get_authorization_url(self, state, redirect_uri):
         return self.client.user_management.get_authorization_url(
             provider="authkit",
             organization_id=settings.WORKOS_ORGANIZATION_ID,
-            redirect_uri=settings.WORKOS_REDIRECT_URI,
+            redirect_uri=redirect_uri,
             state=state,
         )
 
@@ -115,8 +126,8 @@ class WorkOSAuthClient:
             session_id=str(session_id),
         )
 
-    def get_logout_url(self, session_id):
+    def get_logout_url(self, session_id, return_to):
         return self.client.user_management.get_logout_url(
             session_id=session_id,
-            return_to=settings.WORKOS_LOGOUT_REDIRECT_URI,
+            return_to=return_to,
         )

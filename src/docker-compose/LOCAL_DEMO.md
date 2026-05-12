@@ -1,6 +1,6 @@
 # Local Demo Bootstrap
 
-The local ARM compose environment can seed a manual-testing setup for workflow UX and approval flows during app startup.
+The local dev compose environment can seed a manual-testing setup for workflow UX and approval flows during app startup.
 
 ## What gets created
 
@@ -17,7 +17,7 @@ The local compose file sets `RUN_LOCAL_DEMO_SEED=1` on the `datamingle-app` cont
 On rebuild or recreate, startup runs:
 
 ```bash
-docker-compose -f src/docker-compose/docker-compose.local-arm.yml up -d --build datamingle
+docker-compose -f src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend
 ```
 
 The app container then runs:
@@ -32,9 +32,7 @@ To disable automatic seeding for local startup, set `RUN_LOCAL_DEMO_SEED` to `0`
 
 ## Demo app users
 
-All seeded demo app users use the same password:
-
-- Password: `demo123`
+Seeded demo app users are local access records only. They do not have usable Datamingle passwords; sign-in still comes through WorkOS.
 
 Created users:
 
@@ -50,7 +48,7 @@ Created users:
   - Single-stage reviewer, second-stage reviewer, and executor
   - Direct member of both demo resource groups
 
-Manual role switching is just normal login/logout with these accounts in the UI.
+Manual role switching requires signing in through WorkOS as a user linked to the matching local record, or using test helpers that force-authenticate the seeded users.
 
 ## Demo resource groups and approval chains
 
@@ -110,8 +108,8 @@ The local ARM compose services are intentionally ephemeral:
 If you want to recreate the initial SQL content from scratch, tear down the local stack and bring it back up again:
 
 ```bash
-docker-compose -f src/docker-compose/docker-compose.local-arm.yml down -v
-docker-compose -f src/docker-compose/docker-compose.local-arm.yml up -d --build datamingle
+docker-compose -f src/docker-compose/docker-compose.local-dev.yml down -v
+docker-compose -f src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend
 ```
 
 That recreates the databases, reruns migrations, and reapplies the local demo seed.

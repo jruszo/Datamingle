@@ -19,7 +19,6 @@ const settingsModule: FeatureModule = {
     { path: '/settings/instance-tags/new', name: 'settings-instance-tags-new', component: SettingsInstanceTagDetailPage, meta: { title: 'Instance Tags', access: { anyPermissions: ['sql.menu_instance'] } } },
     { path: '/settings/instance-tags/:tagId', name: 'settings-instance-tags-detail', component: SettingsInstanceTagDetailPage, meta: { title: 'Instance Tags', access: { anyPermissions: ['sql.menu_instance'] } } },
     { path: '/settings/users', name: 'settings-users', component: SettingsUsersPage, meta: { title: 'User Management', access: { requiresSuperuser: true } } },
-    { path: '/settings/users/new', name: 'settings-users-new', component: SettingsUserDetailPage, meta: { title: 'User Management', access: { requiresSuperuser: true } } },
     { path: '/settings/users/:userId', name: 'settings-users-detail', component: SettingsUserDetailPage, meta: { title: 'User Management', access: { requiresSuperuser: true } } },
     { path: '/settings/groups', name: 'settings-groups', component: SettingsGroupsPage, meta: { title: 'Permission Groups', access: { requiredPermissions: ['sql.menu_system', 'auth.view_group'] } } },
     { path: '/settings/groups/new', name: 'settings-groups-new', component: SettingsGroupDetailPage, meta: { title: 'Permission Groups', access: { requiredPermissions: ['sql.menu_system', 'auth.view_group'] } } },

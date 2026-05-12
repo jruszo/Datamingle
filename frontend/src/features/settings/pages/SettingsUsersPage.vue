@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useDebounceFn } from '@vueuse/core'
-import { Plus, RefreshCw } from 'lucide-vue-next'
+import { RefreshCw } from 'lucide-vue-next'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -216,7 +216,7 @@ watch(searchQuery, () => {
     <div class="space-y-1">
       <h2 class="text-2xl font-semibold text-slate-900">User Management</h2>
       <p class="text-sm text-slate-600">
-        Superusers can create accounts, assign Django auth groups, and control user lifecycle state.
+        Superusers can assign Django auth groups and control user lifecycle state for WorkOS-provisioned accounts.
       </p>
     </div>
 
@@ -224,7 +224,7 @@ watch(searchQuery, () => {
       <CardHeader>
         <CardTitle>Users</CardTitle>
         <CardDescription>
-          Search, sort, and maintain Datamingle accounts without leaving the SPA.
+          Search, sort, and maintain Datamingle access records without leaving the SPA.
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-5">
@@ -265,12 +265,6 @@ watch(searchQuery, () => {
             <Button variant="outline" @click="loadUsers">
               <RefreshCw class="h-4 w-4" />
               Refresh
-            </Button>
-            <Button v-if="canManageUsers" as-child>
-              <RouterLink to="/settings/users/new">
-                <Plus class="h-4 w-4" />
-                Add user
-              </RouterLink>
             </Button>
           </template>
 

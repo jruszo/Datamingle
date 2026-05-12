@@ -1,5 +1,6 @@
 import logging
 
+from django.conf import settings as django_settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.db import transaction
@@ -44,7 +45,6 @@ AUTO_REVIEW_DB_TYPES = (
 )
 STORAGE_TYPE_OPTIONS = ("local", "sftp", "s3c", "azure")
 SMS_PROVIDER_OPTIONS = ("disabled", "aliyun", "tencent")
-TASK_BACKEND_OPTIONS = ("django_q", "celery")
 INVENTORY_REFRESH_INTERVAL_OPTIONS = INVENTORY_REFRESH_INTERVAL_CHOICES
 
 SYSTEM_SETTINGS_SCHEMA = (
@@ -75,26 +75,36 @@ SYSTEM_SETTINGS_SCHEMA = (
     {"name": "admin_query_limit", "kind": "int", "default": None},
     {"name": "max_export_rows", "kind": "int", "default": None},
     {
-        "name": "task_backend",
-        "kind": "choice",
-        "choices": TASK_BACKEND_OPTIONS,
-        "default": "django_q",
-    },
-    {
         "name": "inventory_refresh_interval",
         "kind": "choice",
         "choices": INVENTORY_REFRESH_INTERVAL_OPTIONS,
         "default": "24h",
     },
-    {"name": "celery_broker_url", "kind": "string", "default": ""},
-    {"name": "celery_result_backend", "kind": "string", "default": ""},
+    {
+        "name": "celery_broker_url",
+        "kind": "string",
+        "default": django_settings.CELERY_BROKER_URL,
+    },
+    {
+        "name": "celery_result_backend",
+        "kind": "string",
+        "default": django_settings.CELERY_RESULT_BACKEND,
+    },
     {
         "name": "celery_task_default_queue",
         "kind": "string",
-        "default": "default",
+        "default": django_settings.CELERY_TASK_DEFAULT_QUEUE,
     },
-    {"name": "celery_task_soft_time_limit", "kind": "int", "default": None},
-    {"name": "celery_task_time_limit", "kind": "int", "default": None},
+    {
+        "name": "celery_task_soft_time_limit",
+        "kind": "int",
+        "default": django_settings.CELERY_TASK_SOFT_TIME_LIMIT,
+    },
+    {
+        "name": "celery_task_time_limit",
+        "kind": "int",
+        "default": django_settings.CELERY_TASK_TIME_LIMIT,
+    },
     {
         "name": "storage_type",
         "kind": "choice",
@@ -285,13 +295,6 @@ def build_system_settings_options():
             {"value": "aliyun", "label": "Aliyun"},
             {"value": "tencent", "label": "Tencent Cloud"},
         ],
-        "task_backends": [
-            {
-                "value": backend,
-                "label": "Django Q" if backend == "django_q" else "Celery",
-            }
-            for backend in TASK_BACKEND_OPTIONS
-        ],
         "inventory_refresh_intervals": [
             {"value": interval, "label": interval}
             for interval in INVENTORY_REFRESH_INTERVAL_OPTIONS
@@ -394,38 +397,35 @@ class SystemSettingsSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
-        if attrs.get("task_backend") == "celery":
-            errors = {}
-            broker_url = (attrs.get("celery_broker_url") or "").strip()
-            if not broker_url:
-                errors["celery_broker_url"] = (
-                    "Celery broker URL is required when Celery is enabled."
-                )
+        errors = {}
+        broker_url = (attrs.get("celery_broker_url") or "").strip()
+        if not broker_url:
+            errors["celery_broker_url"] = "Celery broker URL is required."
 
-            soft_limit = attrs.get("celery_task_soft_time_limit")
-            hard_limit = attrs.get("celery_task_time_limit")
+        soft_limit = attrs.get("celery_task_soft_time_limit")
+        hard_limit = attrs.get("celery_task_time_limit")
 
-            if soft_limit is not None and soft_limit <= 0:
-                errors["celery_task_soft_time_limit"] = (
-                    "Celery soft time limit must be a positive integer."
-                )
-            if hard_limit is not None and hard_limit <= 0:
-                errors["celery_task_time_limit"] = (
-                    "Celery hard time limit must be a positive integer."
-                )
-            if (
-                soft_limit is not None
-                and hard_limit is not None
-                and soft_limit > 0
-                and hard_limit > 0
-                and soft_limit >= hard_limit
-            ):
-                errors["celery_task_soft_time_limit"] = (
-                    "Celery soft time limit must be less than the hard time limit."
-                )
+        if soft_limit is not None and soft_limit <= 0:
+            errors["celery_task_soft_time_limit"] = (
+                "Celery soft time limit must be a positive integer."
+            )
+        if hard_limit is not None and hard_limit <= 0:
+            errors["celery_task_time_limit"] = (
+                "Celery hard time limit must be a positive integer."
+            )
+        if (
+            soft_limit is not None
+            and hard_limit is not None
+            and soft_limit > 0
+            and hard_limit > 0
+            and soft_limit >= hard_limit
+        ):
+            errors["celery_task_soft_time_limit"] = (
+                "Celery soft time limit must be less than the hard time limit."
+            )
 
-            if errors:
-                raise serializers.ValidationError(errors)
+        if errors:
+            raise serializers.ValidationError(errors)
         return attrs
 
     @staticmethod

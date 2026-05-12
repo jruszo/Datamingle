@@ -2,11 +2,9 @@ from rest_framework import views, generics, status, permissions
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from drf_spectacular.utils import extend_schema
-from django.conf import settings
 from django.db.models import Count, Q
 from api_users.serializers import (
     UserManagementReadSerializer,
-    UserManagementCreateSerializer,
     UserManagementUpdateSerializer,
     GroupSerializer,
     PermissionSerializer,
@@ -15,26 +13,14 @@ from api_users.serializers import (
     ResourceGroupUserLookupSerializer,
     ResourceGroupInstanceLookupSerializer,
     CurrentUserSerializer,
-    CurrentUserProfileUpdateSerializer,
-    CurrentUserPasswordChangeSerializer,
-    TwoFASerializer,
-    UserAuthSerializer,
-    TwoFAVerifySerializer,
-    TwoFASaveSerializer,
 )
 from api_core.pagination import CustomizedPagination
 from api_users.filters import UserFilter
 from api_core.response import success_response
-from django_redis import get_redis_connection
 from django.contrib.auth.models import Group, Permission
-from django.contrib.auth import authenticate
 from django.http import Http404
-from sql.models import Users, ResourceGroup, TwoFactorAuthConfig, Instance
+from sql.models import Users, ResourceGroup, Instance
 from sql.utils.resource_group import user_groups, active_instance_grants
-from common.twofa import get_authenticator
-import random
-import json
-import time
 
 
 def _require_any_permission(request, *perm_list):
@@ -68,19 +54,6 @@ def _validate_user_management_lifecycle(request_user, target_user, action):
         if action == "delete":
             raise ValidationError("You cannot delete the last active superuser.")
         raise ValidationError("You cannot deactivate the last active superuser.")
-
-
-def _response_from_authenticator(result, default_error_message):
-    if result.get("status") == 0:
-        return success_response(
-            data=result.get("data", {}),
-            detail=result.get("msg", "ok"),
-            status_code=status.HTTP_200_OK,
-        )
-    return Response(
-        {"errors": result.get("msg", default_error_message)},
-        status=status.HTTP_400_BAD_REQUEST,
-    )
 
 
 class CurrentUser(views.APIView):
@@ -120,13 +93,6 @@ class CurrentUser(views.APIView):
                 .order_by("group_id")
             ),
             "permissions": sorted(permissions),
-            "two_factor_auth_types": sorted(
-                set(
-                    TwoFactorAuthConfig.objects.filter(user=user).values_list(
-                        "auth_type", flat=True
-                    )
-                )
-            ),
         }
         serializer = CurrentUserSerializer(payload)
         return serializer.data
@@ -138,56 +104,6 @@ class CurrentUser(views.APIView):
     )
     def get(self, request):
         return success_response(data=self._serialize_user(request.user))
-
-    @extend_schema(
-        summary="Update Current User Profile",
-        request=CurrentUserProfileUpdateSerializer,
-        responses={200: CurrentUserSerializer},
-        description="Update the authenticated user's editable profile fields.",
-    )
-    def patch(self, request):
-        serializer = CurrentUserProfileUpdateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        if request.user.workos_user_id:
-            raise ValidationError(
-                "Profile fields synced from WorkOS cannot be edited in Datamingle."
-            )
-
-        request.user.display = serializer.validated_data["display"]
-        request.user.save(update_fields=["display"])
-
-        return success_response(
-            data=self._serialize_user(request.user),
-            detail="Profile updated successfully.",
-        )
-
-
-class CurrentUserPassword(views.APIView):
-    """Change the authenticated user's password."""
-
-    permission_classes = [permissions.IsAuthenticated]
-
-    @extend_schema(
-        summary="Change Current User Password",
-        request=CurrentUserPasswordChangeSerializer,
-        description="Change the authenticated user's password.",
-    )
-    def post(self, request):
-        if settings.AUTH_MODE == "workos":
-            raise ValidationError(
-                "Password changes are disabled while WorkOS authentication is active."
-            )
-
-        serializer = CurrentUserPasswordChangeSerializer(
-            data=request.data, context={"request": request}
-        )
-        serializer.is_valid(raise_exception=True)
-
-        request.user.set_password(serializer.validated_data["new_password"])
-        request.user.save(update_fields=["password"])
-
-        return success_response(detail="Password updated successfully.")
 
 
 class UserList(generics.ListAPIView):
@@ -233,7 +149,6 @@ class UserList(generics.ListAPIView):
 
     @extend_schema(
         summary="User List",
-        request=UserManagementCreateSerializer,
         responses={200: UserManagementReadSerializer},
         description="List all users (filtering, pagination).",
     )
@@ -243,24 +158,6 @@ class UserList(generics.ListAPIView):
         page_user = self.paginate_queryset(queryset=users)
         serializer_obj = self.get_serializer(page_user, many=True)
         return self.get_paginated_response(serializer_obj.data)
-
-    @extend_schema(
-        summary="Create User",
-        request=UserManagementCreateSerializer,
-        responses={201: UserManagementReadSerializer},
-        description="Create a user.",
-    )
-    def post(self, request):
-        _require_superuser(request)
-        serializer = UserManagementCreateSerializer(data=request.data)
-        if serializer.is_valid():
-            user = serializer.save()
-            return success_response(
-                data=UserManagementReadSerializer(user).data,
-                detail="User created successfully.",
-                status_code=status.HTTP_201_CREATED,
-            )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class UserDetail(views.APIView):
@@ -640,169 +537,3 @@ class ResourceGroupInstanceLookup(views.APIView):
             )
         serializer = self.serializer_class(instances, many=True)
         return success_response(data=serializer.data)
-
-
-class UserAuth(views.APIView):
-    """
-    User authentication check.
-    """
-
-    permission_classes = [permissions.IsAuthenticated]
-
-    @extend_schema(
-        summary="User Authentication Check",
-        request=UserAuthSerializer,
-        description="User authentication check.",
-    )
-    def post(self, request):
-        # Parameter validation
-        serializer = UserAuthSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        password = serializer.validated_data["password"]
-        user = request.user
-
-        user = authenticate(username=user.username, password=password)
-        if not user:
-            return Response(
-                {"errors": "Incorrect username or password."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        return success_response(detail="Authentication successful.")
-
-
-class TwoFA(views.APIView):
-    """
-    Configure 2FA.
-    """
-
-    permission_classes = [permissions.IsAuthenticated]
-
-    @extend_schema(
-        summary="Configure 2FA", request=TwoFASerializer, description="Configure 2FA."
-    )
-    def post(self, request):
-        # Parameter validation
-        serializer = TwoFASerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        enable = serializer.validated_data["enable"]
-        auth_type = serializer.validated_data["auth_type"]
-        user = request.user
-
-        authenticator = get_authenticator(user=user, auth_type=auth_type)
-        if enable == "true":
-            if auth_type == "totp":
-                # Enable 2FA - generate secret key first
-                result = authenticator.generate_key()
-            elif auth_type == "sms":
-                # Enable 2FA - send SMS verification code first
-                phone = serializer.validated_data["phone"]
-                otp = "{:06d}".format(random.randint(0, 999999))
-                result = authenticator.get_captcha(phone=phone, otp=otp)
-                if result["status"] == 0:
-                    r = get_redis_connection("default")
-                    data = {"otp": otp, "update_time": int(time.time())}
-                    r.set(f"captcha-{phone}", json.dumps(data), 300)
-            else:
-                # Enable 2FA
-                result = authenticator.enable()
-        else:
-            result = authenticator.disable(auth_type)
-
-        return _response_from_authenticator(result, "Failed to update 2FA settings.")
-
-
-class TwoFAState(views.APIView):
-    """
-    Query user 2FA configuration status.
-    """
-
-    permission_classes = [permissions.IsAuthenticated]
-
-    @extend_schema(
-        summary="Query 2FA Configuration",
-        description="Query 2FA configuration status.",
-    )
-    def get(self, request):
-        data = {}
-        user = request.user
-        configs = TwoFactorAuthConfig.objects.filter(user=user)
-        data["totp"] = "enabled" if configs.filter(auth_type="totp") else "disabled"
-        data["sms"] = "enabled" if configs.filter(auth_type="sms") else "disabled"
-
-        return success_response(data=data)
-
-
-class TwoFASave(views.APIView):
-    """
-    Save 2FA configuration (TOTP).
-    """
-
-    permission_classes = [permissions.IsAuthenticated]
-
-    @extend_schema(
-        summary="Save 2FA Configuration",
-        request=TwoFASaveSerializer,
-        description="Save 2FA configuration.",
-    )
-    def post(self, request):
-        # Parameter validation
-        serializer = TwoFASaveSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        auth_type = serializer.validated_data["auth_type"]
-        key = serializer.validated_data.get("key")
-        phone = serializer.validated_data.get("phone")
-        user = request.user
-
-        authenticator = get_authenticator(user=user, auth_type=auth_type)
-        if auth_type == "sms":
-            result = authenticator.save(phone)
-        else:
-            result = authenticator.save(key)
-
-        return _response_from_authenticator(result, "Failed to save 2FA settings.")
-
-
-class TwoFAVerify(views.APIView):
-    """
-    Verify 2FA code.
-    """
-
-    permission_classes = [permissions.IsAuthenticated]
-
-    @extend_schema(
-        summary="Verify 2FA Code",
-        request=TwoFAVerifySerializer,
-        description="Verify 2FA code.",
-    )
-    def post(self, request):
-        # Parameter validation
-        serializer = TwoFAVerifySerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        otp = serializer.validated_data["otp"]
-        key = serializer.validated_data.get("key")
-        phone = serializer.validated_data.get("phone")
-        user = request.user
-        twofa_config = TwoFactorAuthConfig.objects.filter(user=user)
-        if not twofa_config and not key:
-            return Response(
-                {"errors": "User has not configured 2FA."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        auth_type = serializer.validated_data["auth_type"]
-        authenticator = get_authenticator(user=user, auth_type=auth_type)
-        if auth_type == "sms":
-            result = authenticator.verify(otp, phone)
-        else:
-            result = authenticator.verify(otp, key)
-
-        return _response_from_authenticator(result, "2FA verification failed.")

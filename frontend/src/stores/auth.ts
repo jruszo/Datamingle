@@ -1,14 +1,12 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
-import { fetchAuthConfig, fetchCurrentUserContext, type AuthMode, type CurrentUserContext } from '@/shared/auth/api'
+import { fetchCurrentUserContext, type CurrentUserContext } from '@/shared/auth/api'
 import { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, setStoredTokens } from '@/shared/auth/auth'
 
 export const useAuthStore = defineStore('auth', () => {
   const accessToken = ref(localStorage.getItem(ACCESS_TOKEN_KEY) || '')
   const refreshToken = ref(localStorage.getItem(REFRESH_TOKEN_KEY) || '')
-  const authMode = ref<AuthMode>('builtin')
-  const authConfigRequest = ref<Promise<AuthMode> | null>(null)
   const currentUser = ref<CurrentUserContext | null>(null)
   const currentUserRequest = ref<Promise<CurrentUserContext> | null>(null)
 
@@ -37,24 +35,6 @@ export const useAuthStore = defineStore('auth', () => {
 
   function setCurrentUser(user: CurrentUserContext | null) {
     currentUser.value = user
-  }
-
-  async function loadAuthConfig(force = false) {
-    if (authConfigRequest.value && !force) {
-      return authConfigRequest.value
-    }
-
-    const request = fetchAuthConfig()
-      .then((config) => {
-        authMode.value = config.mode
-        return config.mode
-      })
-      .finally(() => {
-        authConfigRequest.value = null
-      })
-
-    authConfigRequest.value = request
-    return request
   }
 
   async function loadCurrentUser(force = false) {
@@ -88,14 +68,12 @@ export const useAuthStore = defineStore('auth', () => {
   return {
     accessToken,
     refreshToken,
-    authMode,
     currentUser,
     isAuthenticated,
     setTokens,
     syncTokens,
     clearTokens,
     setCurrentUser,
-    loadAuthConfig,
     loadCurrentUser,
   }
 })

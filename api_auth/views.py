@@ -1,30 +1,20 @@
 import json
-import random
 import secrets
-import time
 from urllib.parse import urlencode
 
 from django.conf import settings
-from django.contrib.auth import authenticate
 from django.core.exceptions import SuspiciousOperation
 from django.http import HttpResponseRedirect
+from django.http.request import validate_host
 from django_redis import get_redis_connection
-from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status, permissions, views
 from rest_framework.response import Response
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
-    TokenRefreshView,
-    TokenVerifyView,
-)
+from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
 
 from common.auth import init_user
 from common.authenticate.workos import WorkOSAuthClient
-from common.config import SysConfig
-from common.twofa import get_authenticator
-from sql.models import TwoFactorAuthConfig, Users
+from sql.models import Users
 from api_core.response import success_response
 
 WORKOS_STATE_COOKIE_NAME = "datamingle_workos_state"
@@ -32,12 +22,23 @@ WORKOS_SESSION_COOKIE_NAME = "datamingle_workos_session_id"
 WORKOS_EXCHANGE_PREFIX = "workos-exchange-code:"
 
 
-def _is_workos_mode():
-    return settings.AUTH_MODE == "workos"
-
-
 def _cookie_secure(request):
     return request.is_secure() or not settings.DEBUG
+
+
+def _validate_and_build_uri(request, path):
+    host = request.get_host()
+    if not validate_host(host, settings.ALLOWED_HOSTS):
+        raise SuspiciousOperation(f"Request host '{host}' is not in ALLOWED_HOSTS.")
+    return request.build_absolute_uri(path)
+
+
+def _workos_callback_uri(request):
+    return _validate_and_build_uri(request, "/api/auth/workos/callback/")
+
+
+def _workos_logout_return_uri(request):
+    return _validate_and_build_uri(request, "/login")
 
 
 def _login_redirect_with_error(message):
@@ -64,10 +65,7 @@ def _get_unique_user_by_email(email):
 
 
 def _provision_or_update_workos_user(auth_result):
-    if (
-        auth_result.organization_id
-        and auth_result.organization_id != settings.WORKOS_ORGANIZATION_ID
-    ):
+    if auth_result.organization_id != settings.WORKOS_ORGANIZATION_ID:
         raise SuspiciousOperation("WorkOS returned an unexpected organization.")
 
     user = Users.objects.filter(workos_user_id=auth_result.user_id).first()
@@ -136,116 +134,6 @@ def _provision_or_update_workos_user(auth_result):
     return user
 
 
-class TokenSMSCaptchaSerializer(serializers.Serializer):
-    username = serializers.CharField(label="Username")
-    password = serializers.CharField(label="Password")
-
-    def validate(self, attrs):
-        username = attrs.get("username")
-        password = attrs.get("password")
-        user = authenticate(username=username, password=password)
-        if not user:
-            raise serializers.ValidationError(
-                {"errors": "Incorrect username or password."}
-            )
-        attrs["user"] = user
-        return attrs
-
-
-class SPATokenObtainPairSerializer(TokenObtainPairSerializer):
-    otp = serializers.CharField(required=False, label="One-time password/code")
-    auth_type = serializers.ChoiceField(
-        choices=["totp", "sms"], required=False, label="2FA method"
-    )
-
-    def validate(self, attrs):
-        otp = attrs.pop("otp", None)
-        auth_type = attrs.pop("auth_type", None)
-        data = super().validate(attrs)
-        user = self.user
-
-        configured_auth_types = sorted(
-            set(
-                TwoFactorAuthConfig.objects.filter(user=user).values_list(
-                    "auth_type", flat=True
-                )
-            )
-        )
-        enforce_2fa = bool(SysConfig().get("enforce_2fa", False))
-        requires_2fa = bool(configured_auth_types) or enforce_2fa
-        if not requires_2fa:
-            return data
-
-        if enforce_2fa and not configured_auth_types:
-            raise serializers.ValidationError(
-                {
-                    "errors": "2FA is required but not configured for this account.",
-                    "code": "2fa_setup_required",
-                }
-            )
-
-        if not auth_type:
-            raise serializers.ValidationError(
-                {
-                    "errors": "2FA code is required.",
-                    "code": "2fa_required",
-                    "available_auth_types": configured_auth_types,
-                }
-            )
-
-        if auth_type not in configured_auth_types:
-            raise serializers.ValidationError(
-                {
-                    "errors": "Unsupported auth_type for this account.",
-                    "code": "2fa_invalid_method",
-                    "available_auth_types": configured_auth_types,
-                }
-            )
-
-        if not otp:
-            raise serializers.ValidationError(
-                {
-                    "errors": "Missing otp.",
-                    "code": "2fa_required",
-                    "available_auth_types": configured_auth_types,
-                }
-            )
-
-        authenticator = get_authenticator(user=user, auth_type=auth_type)
-        verify_result = authenticator.verify(str(otp))
-        if verify_result.get("status") != 0:
-            raise serializers.ValidationError(
-                {
-                    "errors": verify_result.get("msg", "Invalid verification code."),
-                    "code": "2fa_invalid",
-                }
-            )
-
-        return data
-
-
-class SPATokenObtainPairView(TokenObtainPairView):
-    permission_classes = [permissions.AllowAny]
-    serializer_class = SPATokenObtainPairSerializer
-
-    def post(self, request, *args, **kwargs):
-        if _is_workos_mode():
-            return Response(
-                {
-                    "errors": (
-                        "Password login is disabled while WorkOS authentication is active."
-                    )
-                },
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        response = super().post(request, *args, **kwargs)
-        if response.status_code < 400:
-            return success_response(
-                data=response.data, status_code=response.status_code
-            )
-        return response
-
-
 class SPATokenRefreshView(TokenRefreshView):
     permission_classes = [permissions.AllowAny]
 
@@ -270,61 +158,15 @@ class SPATokenVerifyView(TokenVerifyView):
         return response
 
 
-class TokenSMSCaptchaView(views.APIView):
-    permission_classes = [permissions.AllowAny]
-
-    @extend_schema(
-        summary="Request SMS Login OTP",
-        request=TokenSMSCaptchaSerializer,
-        description="Validate username/password and send an SMS verification code for token login.",
-    )
-    def post(self, request):
-        serializer = TokenSMSCaptchaSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.validated_data["user"]
-
-        try:
-            sms_config = TwoFactorAuthConfig.objects.get(user=user, auth_type="sms")
-        except TwoFactorAuthConfig.DoesNotExist:
-            return Response(
-                {"errors": "SMS 2FA is not configured for this account."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        otp = "{:06d}".format(random.randint(0, 999999))
-        authenticator = get_authenticator(user=user, auth_type="sms")
-        result = authenticator.get_captcha(phone=sms_config.phone, otp=otp)
-        if result.get("status") != 0:
-            return Response(
-                {"errors": result.get("msg", "Failed to send SMS verification code.")},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        r = get_redis_connection("default")
-        data = {"otp": otp, "update_time": int(time.time())}
-        r.set(f"captcha-{sms_config.phone}", json.dumps(data), 300)
-        return success_response()
-
-
-class AuthConfigView(views.APIView):
-    permission_classes = [permissions.AllowAny]
-
-    def get(self, request):
-        return success_response(data={"mode": settings.AUTH_MODE})
-
-
 class WorkOSAuthorizeView(views.APIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
-        if not _is_workos_mode():
-            return Response(
-                {"errors": "WorkOS authentication is not enabled."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         state = secrets.token_urlsafe(32)
-        authorization_url = WorkOSAuthClient().get_authorization_url(state=state)
+        authorization_url = WorkOSAuthClient().get_authorization_url(
+            state=state,
+            redirect_uri=_workos_callback_uri(request),
+        )
         response = HttpResponseRedirect(authorization_url)
         response.set_cookie(
             WORKOS_STATE_COOKIE_NAME,
@@ -341,9 +183,6 @@ class WorkOSCallbackView(views.APIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
-        if not _is_workos_mode():
-            return _login_redirect_with_error("WorkOS authentication is not enabled.")
-
         code = request.query_params.get("code", "").strip()
         state = request.query_params.get("state", "").strip()
         expected_state = request.COOKIES.get(WORKOS_STATE_COOKIE_NAME, "")
@@ -404,12 +243,6 @@ class WorkOSExchangeView(views.APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        if not _is_workos_mode():
-            return Response(
-                {"errors": "WorkOS authentication is not enabled."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         serializer = WorkOSExchangeSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
@@ -448,17 +281,16 @@ class WorkOSLogoutView(views.APIView):
 
     def get(self, request):
         session_id = request.COOKIES.get(WORKOS_SESSION_COOKIE_NAME, "")
-        redirect_url = "/login"
+        redirect_url = _workos_logout_return_uri(request)
 
-        if _is_workos_mode():
-            redirect_url = settings.WORKOS_LOGOUT_REDIRECT_URI
-            if session_id:
-                try:
-                    redirect_url = WorkOSAuthClient().get_logout_url(
-                        session_id=session_id
-                    )
-                except Exception:
-                    redirect_url = settings.WORKOS_LOGOUT_REDIRECT_URI
+        if session_id:
+            try:
+                redirect_url = WorkOSAuthClient().get_logout_url(
+                    session_id=session_id,
+                    return_to=redirect_url,
+                )
+            except Exception:
+                redirect_url = _workos_logout_return_uri(request)
 
         response = HttpResponseRedirect(redirect_url)
         response.delete_cookie(WORKOS_SESSION_COOKIE_NAME)

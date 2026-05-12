@@ -6,7 +6,6 @@ import os
 from datetime import timedelta
 import environ
 import logging
-from django.core.exceptions import ImproperlyConfigured
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -19,24 +18,18 @@ environ.Env.read_env(os.path.join(BASE_DIR, ".env"))
 env = environ.Env(
     DEBUG=(bool, False),
     ALLOWED_HOSTS=(list, ["*"]),
+    TRUST_X_FORWARDED_PROTO=(bool, False),
     SECRET_KEY=(
         str,
         "",
     ),  # Reference: https://docs.djangoproject.com/en/4.0/ref/settings/#secret-key
     DATABASE_URL=(str, "mysql://root:@127.0.0.1:3306/datamingle"),
     CACHE_URL=(str, "redis://127.0.0.1:6379/0"),
-    AUTH_MODE=(str, "builtin"),
     WORKOS_API_KEY=(str, ""),
     WORKOS_CLIENT_ID=(str, ""),
     WORKOS_ORGANIZATION_ID=(str, ""),
-    WORKOS_REDIRECT_URI=(str, ""),
-    WORKOS_LOGOUT_REDIRECT_URI=(str, ""),
     WORKOS_STAFF_EMAILS=(list, []),
     WORKOS_SUPERUSER_EMAILS=(list, []),
-    Q_CLUISTER_SYNC=(
-        bool,
-        False,
-    ),  # qcluster sync mode; set to True for local debugging if needed
     # CSRF_TRUSTED_ORIGINS=subdomain.example.com,subdomain.example2.com subdomain.example.com
     CSRF_TRUSTED_ORIGINS=(list, []),
     ENABLED_ENGINES=(
@@ -73,7 +66,6 @@ env = environ.Env(
     CURRENT_AUDITOR=(str, "sql.utils.workflow_audit:AuditV2"),
     PASSWORD_MIXIN_PATH=(str, "sql.plugins.password:DummyMixin"),
     FIELD_ENCRYPTION_KEYS=(str, ""),
-    TASK_BACKEND=(str, "django_q"),
     CELERY_BROKER_URL=(str, ""),
     CELERY_RESULT_BACKEND=(str, ""),
     CELERY_TASK_DEFAULT_QUEUE=(str, "default"),
@@ -89,16 +81,23 @@ DEBUG = env("DEBUG")
 
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 
-AUTH_MODE = env("AUTH_MODE", default="builtin").strip().lower()
-if AUTH_MODE not in {"builtin", "workos"}:
-    raise ImproperlyConfigured("AUTH_MODE must be either 'builtin' or 'workos'.")
-ENABLE_WORKOS_AUTH = AUTH_MODE == "workos"
+AUTH_MODE = "workos"
+ENABLE_WORKOS_AUTH = True
+# Datamingle uses WorkOS as the sole authentication provider.
+# The previous dual-mode "builtin" local-password and 2FA login
+# flows have been removed. Deployments must configure valid
+# WORKOS_CLIENT_ID, WORKOS_API_KEY, and WORKOS_ORGANIZATION_ID for
+# interactive sign-in. The credentials are validated when WorkOS auth
+# is used so non-auth processes, such as Celery workers, can start.
 
 # https://docs.djangoproject.com/en/4.0/ref/settings/#csrf-trusted-origins
 CSRF_TRUSTED_ORIGINS = env("CSRF_TRUSTED_ORIGINS")
 
 # Fix 404 redirects behind nginx deployment
 USE_X_FORWARDED_HOST = True
+TRUST_X_FORWARDED_PROTO = env("TRUST_X_FORWARDED_PROTO")
+if TRUST_X_FORWARDED_PROTO:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # Request limits
 DATA_UPLOAD_MAX_MEMORY_SIZE = 15728640
@@ -130,10 +129,6 @@ CURRENT_AUDITOR = env("CURRENT_AUDITOR")
 PASSWORD_MIXIN_PATH = env("PASSWORD_MIXIN_PATH")
 
 FIELD_ENCRYPTION_KEYS = env("FIELD_ENCRYPTION_KEYS")
-DEFAULT_TASK_BACKEND = env("TASK_BACKEND", default="django_q").strip().lower()
-if DEFAULT_TASK_BACKEND not in {"django_q", "celery"}:
-    raise ImproperlyConfigured("TASK_BACKEND must be either 'django_q' or 'celery'.")
-
 # Application definition
 INSTALLED_APPS = (
     "django.contrib.auth",
@@ -141,7 +136,6 @@ INSTALLED_APPS = (
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "django_q",
     "sql",
     "sql_api",
     "api_core",
@@ -269,21 +263,6 @@ DATABASES = {
     }
 }
 
-# Django-Q
-Q_CLUSTER = {
-    "name": "datamingle",
-    "workers": env("Q_CLUISTER_WORKERS", default=4),
-    "recycle": 500,
-    "timeout": env("Q_CLUISTER_TIMEOUT", default=60),
-    "compress": True,
-    "cpu_affinity": 1,
-    "save_limit": 0,
-    "queue_limit": 50,
-    "label": "Django Q",
-    "django_redis": "default",
-    "sync": env("Q_CLUISTER_SYNC"),  # Set to True for local synchronous debugging
-}
-
 # Celery
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="")
 CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default="")
@@ -293,16 +272,6 @@ CELERY_TASK_TIME_LIMIT = env("CELERY_TASK_TIME_LIMIT", default=0) or None
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
-
-if DEFAULT_TASK_BACKEND == "celery":
-    if not CELERY_BROKER_URL:
-        raise ImproperlyConfigured(
-            "CELERY_BROKER_URL is required when TASK_BACKEND is 'celery'."
-        )
-    if not CELERY_RESULT_BACKEND:
-        raise ImproperlyConfigured(
-            "CELERY_RESULT_BACKEND is required when TASK_BACKEND is 'celery'."
-        )
 
 # Cache settings
 CACHES = {
@@ -355,8 +324,6 @@ SIMPLE_JWT = {
 WORKOS_API_KEY = env("WORKOS_API_KEY", default="")
 WORKOS_CLIENT_ID = env("WORKOS_CLIENT_ID", default="")
 WORKOS_ORGANIZATION_ID = env("WORKOS_ORGANIZATION_ID", default="")
-WORKOS_REDIRECT_URI = env("WORKOS_REDIRECT_URI", default="")
-WORKOS_LOGOUT_REDIRECT_URI = env("WORKOS_LOGOUT_REDIRECT_URI", default="")
 WORKOS_STAFF_EMAILS = [
     email.strip().lower()
     for email in env("WORKOS_STAFF_EMAILS", default=[])
@@ -367,23 +334,6 @@ WORKOS_SUPERUSER_EMAILS = [
     for email in env("WORKOS_SUPERUSER_EMAILS", default=[])
     if email.strip()
 ]
-
-if ENABLE_WORKOS_AUTH:
-    missing_workos = [
-        key
-        for key, value in (
-            ("WORKOS_API_KEY", WORKOS_API_KEY),
-            ("WORKOS_CLIENT_ID", WORKOS_CLIENT_ID),
-            ("WORKOS_ORGANIZATION_ID", WORKOS_ORGANIZATION_ID),
-            ("WORKOS_REDIRECT_URI", WORKOS_REDIRECT_URI),
-            ("WORKOS_LOGOUT_REDIRECT_URI", WORKOS_LOGOUT_REDIRECT_URI),
-        )
-        if not value
-    ]
-    if missing_workos:
-        raise ImproperlyConfigured(
-            "Missing required WorkOS settings: " + ", ".join(missing_workos)
-        )
 
 # Logging configuration
 LOGGING = {
@@ -403,14 +353,6 @@ LOGGING = {
             "backupCount": 5,
             "formatter": "verbose",
         },
-        "django-q": {
-            "level": "DEBUG",
-            "class": "logging.handlers.RotatingFileHandler",
-            "filename": "logs/qcluster.log",
-            "maxBytes": 1024 * 1024 * 100,  # 5 MB
-            "backupCount": 5,
-            "formatter": "verbose",
-        },
         "console": {
             "level": "DEBUG",
             "class": "logging.StreamHandler",
@@ -421,11 +363,6 @@ LOGGING = {
         "default": {  # default logs
             "handlers": ["console", "default"],
             "level": "WARNING",
-        },
-        "django-q": {  # logs for django_q module
-            "handlers": ["console", "django-q"],
-            "level": "WARNING",
-            "propagate": False,
         },
         # 'django.db': {  # print SQL statements for development
         #     'handlers': ['console', 'default'],

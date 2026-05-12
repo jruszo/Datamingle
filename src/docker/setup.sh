@@ -27,7 +27,7 @@ apt-get update
 percona-release setup -y ps-57
 apt-get install -yq --no-install-recommends percona-toolkit
 percona-release disable  ps-57
-apt-get install -yq --no-install-recommends gcc libmariadb-dev libldap2-dev libsasl2-dev ldap-utils
+apt-get install -yq --no-install-recommends gcc libmariadb-dev
 apt-get clean
 ln -snf /usr/share/zoneinfo/$TZ /etc/localtime
 echo $TZ > /etc/timezone

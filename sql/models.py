@@ -1210,12 +1210,8 @@ class Config(models.Model):
 class TaskSchedule(models.Model):
     """Backend-agnostic registry for one-off scheduled tasks."""
 
-    BACKEND_DJANGO_Q = "django_q"
     BACKEND_CELERY = "celery"
-    BACKEND_CHOICES = (
-        (BACKEND_DJANGO_Q, "Django Q"),
-        (BACKEND_CELERY, "Celery"),
-    )
+    BACKEND_CHOICES = ((BACKEND_CELERY, "Celery"),)
 
     STATUS_SCHEDULED = "scheduled"
     STATUS_RUNNING = "running"
@@ -1235,7 +1231,7 @@ class TaskSchedule(models.Model):
         "Task Backend",
         max_length=20,
         choices=BACKEND_CHOICES,
-        default=BACKEND_DJANGO_Q,
+        default=BACKEND_CELERY,
     )
     task_name = models.CharField("Task Name", max_length=255, default="", blank=True)
     callable_path = models.CharField(

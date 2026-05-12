@@ -3,7 +3,6 @@ from django.test import TestCase
 
 from common.utils.const import WorkflowType
 from sql.local_demo import (
-    DEMO_APP_PASSWORD,
     managed_demo_instance_names,
     managed_demo_resource_group_names,
     managed_demo_usernames,
@@ -48,7 +47,7 @@ class TestLocalDemoSeed(TestCase):
         )
 
         requester = Users.objects.get(username="demo_requester")
-        self.assertTrue(requester.check_password(DEMO_APP_PASSWORD))
+        self.assertFalse(requester.has_usable_password())
         self.assertEqual(requester.groups.values_list("name", flat=True).get(), "RD")
         self.assertTrue(requester.has_perm("sql.sqlexport_submit"))
         self.assertTrue(requester.has_perm("sql.menu_sqlexportworkflow"))

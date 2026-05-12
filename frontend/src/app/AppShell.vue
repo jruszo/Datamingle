@@ -174,34 +174,10 @@ async function logout() {
   mailboxStore.stopPolling()
   mailboxStore.reset()
   authStore.clearTokens()
-
-  const cachedAuthMode = authStore.authMode
-  if (cachedAuthMode === 'workos') {
-    window.location.assign(publicApiUrl('/auth/workos/logout/'))
-    return
-  }
-
-  try {
-    const resolvedAuthMode = await Promise.race([
-      authStore.loadAuthConfig(),
-      new Promise<typeof cachedAuthMode>((resolve) => {
-        window.setTimeout(() => resolve(cachedAuthMode), 400)
-      }),
-    ])
-
-    if (resolvedAuthMode === 'workos') {
-      window.location.assign(publicApiUrl('/auth/workos/logout/'))
-      return
-    }
-  } catch {
-    // Fall back to local sign-out if auth config cannot be loaded quickly.
-  }
-
-  await router.push('/login')
+  window.location.assign(publicApiUrl('/auth/workos/logout/'))
 }
 
 onMounted(() => {
-  void authStore.loadAuthConfig()
   void loadCurrentUser()
   if (authStore.isAuthenticated) {
     mailboxStore.startPolling()

@@ -1,6 +1,4 @@
 from django.contrib.auth.models import Group, Permission
-from django.contrib.auth.password_validation import validate_password
-from django.core.exceptions import ValidationError
 from django.db import transaction
 from rest_framework import serializers
 
@@ -44,109 +42,16 @@ class UserManagementReadSerializer(serializers.ModelSerializer):
         )
 
 
-class UserManagementCreateSerializer(serializers.ModelSerializer):
-    group_ids = serializers.PrimaryKeyRelatedField(
-        source="groups", queryset=Group.objects.all(), many=True, required=False
-    )
-    email = serializers.EmailField(required=False, allow_blank=True)
-    password = serializers.CharField(write_only=True, trim_whitespace=False)
-
-    def validate_display(self, value):
-        display = value.strip()
-        if not display:
-            raise serializers.ValidationError("Display name cannot be blank.")
-        return display
-
-    def validate_email(self, value):
-        return value.strip()
-
-    def validate_password(self, password):
-        try:
-            validate_password(password)
-        except ValidationError as msg:
-            raise serializers.ValidationError(msg.messages) from msg
-        return password
-
-    def create(self, validated_data):
-        groups = validated_data.pop("groups", [])
-        password = validated_data.pop("password")
-        with transaction.atomic():
-            user = Users(
-                is_active=True,
-                is_staff=False,
-                is_superuser=False,
-                **validated_data,
-            )
-            user.set_password(password)
-            user.save()
-            user.groups.set(groups)
-        return user
-
-    class Meta:
-        model = Users
-        fields = ("username", "display", "email", "password", "group_ids")
-
-
 class UserManagementUpdateSerializer(serializers.ModelSerializer):
     group_ids = serializers.PrimaryKeyRelatedField(
         source="groups", queryset=Group.objects.all(), many=True, required=False
     )
-    password = serializers.CharField(
-        write_only=True, required=False, allow_blank=True, trim_whitespace=False
-    )
-    email = serializers.EmailField(required=False, allow_blank=True)
-
-    def validate_display(self, value):
-        display = value.strip()
-        if not display:
-            raise serializers.ValidationError("Display name cannot be blank.")
-        return display
-
-    def validate_email(self, value):
-        return value.strip()
-
-    def validate(self, attrs):
-        if self.instance and self.instance.workos_user_id:
-            current_display = (self.instance.display or "").strip()
-            current_email = (self.instance.email or "").strip()
-            next_display = attrs.get("display", current_display)
-            next_email = attrs.get("email", current_email)
-
-            if next_display != current_display:
-                raise serializers.ValidationError(
-                    {"display": "Display name is managed by WorkOS for this user."}
-                )
-            if next_email != current_email:
-                raise serializers.ValidationError(
-                    {"email": "Email is managed by WorkOS for this user."}
-                )
-            if attrs.get("password") not in (None, ""):
-                raise serializers.ValidationError(
-                    {"password": "Password is managed by WorkOS for this user."}
-                )
-
-        password = attrs.get("password")
-        if password == "":
-            attrs.pop("password")
-            return attrs
-
-        if password is not None:
-            try:
-                validate_password(password, user=self.instance)
-            except ValidationError as msg:
-                raise serializers.ValidationError({"password": msg.messages}) from msg
-
-        return attrs
 
     def update(self, instance, validated_data):
         groups = validated_data.pop("groups", None)
-        password = validated_data.pop("password", None)
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
-
-        if password:
-            instance.set_password(password)
 
         with transaction.atomic():
             instance.save()
@@ -157,7 +62,7 @@ class UserManagementUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Users
-        fields = ("display", "email", "password", "group_ids", "is_active")
+        fields = ("group_ids", "is_active")
 
 
 class GroupSerializer(serializers.ModelSerializer):
@@ -271,10 +176,6 @@ class ResourceGroupInstanceLookupSerializer(serializers.ModelSerializer):
         fields = ("id", "instance_name", "db_type", "host", "label")
 
 
-class UserAuthSerializer(serializers.Serializer):
-    password = serializers.CharField(label="Password", trim_whitespace=False)
-
-
 class CurrentUserGroupSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     name = serializers.CharField()
@@ -298,115 +199,3 @@ class CurrentUserSerializer(serializers.Serializer):
     groups = CurrentUserGroupSerializer(many=True)
     resource_groups = CurrentUserResourceGroupSerializer(many=True)
     permissions = serializers.ListField(child=serializers.CharField())
-    two_factor_auth_types = serializers.ListField(child=serializers.CharField())
-
-
-class CurrentUserProfileUpdateSerializer(serializers.Serializer):
-    display = serializers.CharField(max_length=50)
-
-    def validate_display(self, value):
-        display = value.strip()
-        if not display:
-            raise serializers.ValidationError("Display name cannot be blank.")
-        return display
-
-
-class CurrentUserPasswordChangeSerializer(serializers.Serializer):
-    current_password = serializers.CharField(write_only=True, trim_whitespace=False)
-    new_password = serializers.CharField(write_only=True, trim_whitespace=False)
-    new_password_confirm = serializers.CharField(write_only=True, trim_whitespace=False)
-
-    def validate_current_password(self, value):
-        user = self.context["request"].user
-        if not user.check_password(value):
-            raise serializers.ValidationError("Incorrect current password.")
-        return value
-
-    def validate(self, attrs):
-        if attrs["new_password"] != attrs["new_password_confirm"]:
-            raise serializers.ValidationError(
-                {"new_password_confirm": "Passwords do not match."}
-            )
-
-        if attrs["current_password"] == attrs["new_password"]:
-            raise serializers.ValidationError(
-                {
-                    "new_password": (
-                        "New password must be different from the current password."
-                    )
-                }
-            )
-
-        try:
-            validate_password(attrs["new_password"], user=self.context["request"].user)
-        except ValidationError as msg:
-            raise serializers.ValidationError({"new_password": msg.messages}) from msg
-
-        return attrs
-
-
-class TwoFASerializer(serializers.Serializer):
-    enable = serializers.ChoiceField(
-        choices=["true", "false"], label="Enable or disable"
-    )
-    phone = serializers.CharField(required=False, label="Phone number")
-    auth_type = serializers.ChoiceField(
-        choices=["totp", "sms"],
-        label="Verification type: totp-Google Authenticator, sms-SMS code",
-    )
-
-    def validate(self, attrs):
-        auth_type = attrs.get("auth_type")
-        enable = attrs.get("enable")
-
-        if auth_type == "sms" and enable == "true" and not attrs.get("phone"):
-            raise serializers.ValidationError({"errors": "Missing phone."})
-
-        return attrs
-
-
-class TwoFAStateSerializer(serializers.Serializer):
-    pass
-
-
-class TwoFASaveSerializer(serializers.Serializer):
-    key = serializers.CharField(required=False, label="Secret key")
-    phone = serializers.CharField(required=False, label="Phone number")
-    auth_type = serializers.ChoiceField(
-        choices=["disabled", "totp", "sms"],
-        label="Verification type: disabled-off, totp-Google Authenticator, sms-SMS code",
-    )
-
-    def validate(self, attrs):
-        auth_type = attrs.get("auth_type")
-        key = attrs.get("key")
-        phone = attrs.get("phone")
-
-        if auth_type == "sms" and not phone:
-            raise serializers.ValidationError({"errors": "Missing phone."})
-
-        if auth_type == "totp" and not key:
-            raise serializers.ValidationError({"errors": "Missing key."})
-
-        return attrs
-
-
-class TwoFAVerifySerializer(serializers.Serializer):
-    otp = serializers.RegexField(
-        r"^\d{6}$", label="One-time password / code", max_length=6
-    )
-    key = serializers.CharField(required=False, label="Secret key")
-    phone = serializers.CharField(required=False, label="Phone number")
-    auth_type = serializers.ChoiceField(
-        choices=["totp", "sms"], label="Verification method"
-    )
-
-    def validate(self, attrs):
-        auth_type = attrs.get("auth_type")
-
-        if auth_type == "sms" and not attrs.get("phone"):
-            raise serializers.ValidationError({"errors": "Missing phone."})
-        if auth_type == "totp" and not attrs.get("key"):
-            raise serializers.ValidationError({"errors": "Missing key."})
-
-        return attrs

@@ -18,7 +18,6 @@ User = get_user_model()
         "django.contrib.sessions",
         "django.contrib.messages",
         "django.contrib.staticfiles",
-        "django_q",
         "sql",
         "sql_api",
         "api_core",

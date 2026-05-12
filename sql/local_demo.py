@@ -6,7 +6,6 @@ from django.db import transaction
 from common.utils.const import WorkflowType
 from sql.models import Instance, InstanceTag, ResourceGroup, Users, WorkflowAuditSetting
 
-DEMO_APP_PASSWORD = "demo123"
 DEMO_DB_PASSWORD = "demo123"
 
 AUTH_GROUP_PERMISSION_CODES = OrderedDict(
@@ -303,7 +302,7 @@ def _seed_users(auth_groups, resource_groups, log):
         user.is_active = True
         user.is_staff = config["is_staff"]
         user.is_superuser = config["is_superuser"]
-        user.set_password(DEMO_APP_PASSWORD)
+        user.set_unusable_password()
         user.save()
         user.groups.set([auth_groups[name] for name in config["auth_groups"]])
         user.resource_group.set(

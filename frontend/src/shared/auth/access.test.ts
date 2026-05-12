@@ -17,7 +17,6 @@ function buildUser(overrides: Partial<CurrentUserContext> = {}): CurrentUserCont
     groups: [],
     resource_groups: [],
     permissions: [],
-    two_factor_auth_types: [],
     ...overrides,
   }
 }

@@ -10,9 +10,9 @@
 
 - Prefer running Django and other Python app commands inside the app container, not on the host.
 - The local development app container is `datamingle-app`.
-- The local compose file in use is `src/docker-compose/docker-compose.local-arm.yml`.
-- Rebuild the app container with:
-  - `docker-compose -f src/docker-compose/docker-compose.local-arm.yml up -d --build datamingle`
+- The local compose file in use is `src/docker-compose/docker-compose.local-dev.yml`.
+- Rebuild the app and frontend containers with:
+  - `docker-compose -f src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend`
 - Run Django commands with:
   - `docker exec datamingle-app python manage.py <command>`
 - If container code is not bind-mounted for a file you changed, copy the file into the container with `docker cp` before running containerized commands.
@@ -20,6 +20,7 @@
 ## Migrations
 
 - Do not hand-write Django migrations for normal model changes.
+- Do not edit existing Django migration files. Treat committed migrations as historical records, even when they contain old names or removed dependencies.
 - Generate migrations by running `makemigrations` in the app container after syncing changed files if needed.
 - Copy generated migration files back out to the host repo and commit them.
 - Before finishing, verify migration drift with:

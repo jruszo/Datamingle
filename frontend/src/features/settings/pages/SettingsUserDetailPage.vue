@@ -16,7 +16,6 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import {
-  createUser,
   deleteUser,
   fetchGroups,
   fetchUser,
@@ -35,7 +34,6 @@ const loadedUser = ref<UserManagementDetailRecord | null>(null)
 const username = ref('')
 const displayName = ref('')
 const email = ref('')
-const password = ref('')
 const selectedGroupIds = ref<number[]>([])
 const availableFilter = ref('')
 const selectedFilter = ref('')
@@ -49,16 +47,11 @@ const pageError = ref('')
 const formError = ref('')
 const formSuccess = ref('')
 
-const isCreateMode = computed(() => route.name === 'settings-users-new')
 const userId = computed(() => {
-  if (isCreateMode.value) {
-    return null
-  }
   const value = Number(route.params.userId)
   return Number.isFinite(value) ? value : null
 })
 const canManageUsers = computed(() => authStore.currentUser?.is_superuser ?? false)
-const isWorkosManagedUser = computed(() => loadedUser.value?.is_workos_managed ?? false)
 const selectedGroupSet = computed(() => new Set(selectedGroupIds.value))
 const normalizedAvailableFilter = computed(() => availableFilter.value.trim().toLowerCase())
 const normalizedSelectedFilter = computed(() => selectedFilter.value.trim().toLowerCase())
@@ -89,7 +82,6 @@ function applyUser(user: UserManagementDetailRecord) {
   username.value = user.username
   displayName.value = user.display
   email.value = user.email
-  password.value = ''
   selectedGroupIds.value = [...user.group_ids].sort((left, right) => left - right)
 }
 
@@ -209,7 +201,6 @@ async function loadPage() {
   username.value = ''
   displayName.value = ''
   email.value = ''
-  password.value = ''
   selectedGroupIds.value = []
   availableSelection.value = []
   selectedSelection.value = []
@@ -223,10 +214,6 @@ async function loadPage() {
     }
 
     await loadAllGroups()
-
-    if (isCreateMode.value) {
-      return
-    }
 
     if (!userId.value) {
       pageError.value = 'Invalid user identifier.'
@@ -248,48 +235,11 @@ async function saveUser() {
     return
   }
 
-  const trimmedUsername = username.value.trim()
-  const trimmedDisplayName = displayName.value.trim()
-  const trimmedEmail = email.value.trim()
-  const trimmedPassword = password.value.trim()
-
-  if (isCreateMode.value && !trimmedUsername) {
-    formError.value = 'Username cannot be blank.'
-    return
-  }
-
-  if (!trimmedDisplayName) {
-    formError.value = 'Display name cannot be blank.'
-    return
-  }
-
-  if (isCreateMode.value && !trimmedPassword) {
-    formError.value = 'Password cannot be blank when creating a user.'
-    return
-  }
-
   isSaving.value = true
   formError.value = ''
   formSuccess.value = ''
 
   try {
-    if (isCreateMode.value) {
-      const createdUser = await createUser(
-        {
-          username: trimmedUsername,
-          display: trimmedDisplayName,
-          email: trimmedEmail,
-          password: trimmedPassword,
-          group_ids: [...selectedGroupIds.value].sort((left, right) => left - right),
-        },
-        requireToken(),
-      )
-      applyUser(createdUser)
-      formSuccess.value = 'User created successfully.'
-      await router.replace(`/settings/users/${createdUser.id}`)
-      return
-    }
-
     if (!userId.value) {
       throw new Error('Missing user identifier.')
     }
@@ -299,13 +249,6 @@ async function saveUser() {
       {
         group_ids: [...selectedGroupIds.value].sort((left, right) => left - right),
         is_active: loadedUser.value?.is_active ?? true,
-        ...(!isWorkosManagedUser.value
-          ? {
-              display: trimmedDisplayName,
-              email: trimmedEmail,
-              ...(trimmedPassword ? { password: trimmedPassword } : {}),
-            }
-          : {}),
       },
       requireToken(),
     )
@@ -319,7 +262,7 @@ async function saveUser() {
 }
 
 async function toggleUserStatus() {
-  if (isCreateMode.value || !userId.value || !loadedUser.value) {
+  if (!userId.value || !loadedUser.value) {
     return
   }
 
@@ -353,7 +296,7 @@ async function toggleUserStatus() {
 }
 
 async function removeUserAccount() {
-  if (isCreateMode.value || !userId.value || !loadedUser.value) {
+  if (!userId.value || !loadedUser.value) {
     return
   }
 
@@ -416,18 +359,16 @@ watch(
 
     <Card class="border-slate-200">
       <CardHeader>
-        <CardTitle>{{ isCreateMode ? 'Create User' : 'Edit User' }}</CardTitle>
+        <CardTitle>Edit User</CardTitle>
         <CardDescription>
           Assign Django auth groups and manage account lifecycle from the Datamingle SPA.
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-6">
         <div
-          v-if="isWorkosManagedUser"
           class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
         >
-          This user is managed by WorkOS. Display name, email, and password changes must be made in the identity
-          provider. Group assignments and active status remain editable in Datamingle.
+          Identity and sign-in are managed by WorkOS. Group assignments and active status remain editable in Datamingle.
         </div>
 
         <div class="grid gap-4 md:grid-cols-2">
@@ -436,7 +377,7 @@ watch(
             <Input
               id="user-username"
               v-model="username"
-              :disabled="isLoading || !isCreateMode"
+              :disabled="true"
               placeholder="e.g. jdoe"
             />
           </div>
@@ -446,7 +387,7 @@ watch(
             <Input
               id="user-display"
               v-model="displayName"
-              :disabled="isLoading || isWorkosManagedUser"
+              :disabled="true"
               placeholder="e.g. Jane Doe"
             />
           </div>
@@ -456,21 +397,8 @@ watch(
             <Input
               id="user-email"
               v-model="email"
-              :disabled="isLoading || isWorkosManagedUser"
+              :disabled="true"
               placeholder="jane.doe@example.com"
-            />
-          </div>
-
-          <div class="space-y-2">
-            <label for="user-password" class="text-sm font-medium text-slate-900">
-              {{ isCreateMode ? 'Password' : 'Reset password' }}
-            </label>
-            <Input
-              id="user-password"
-              v-model="password"
-              :disabled="isLoading || isWorkosManagedUser"
-              type="password"
-              :placeholder="isCreateMode ? 'Create a password' : 'Leave blank to keep the current password'"
             />
           </div>
         </div>
@@ -566,7 +494,6 @@ watch(
       <CardFooter class="justify-between border-t border-slate-200 pt-6">
         <div class="flex flex-wrap gap-2">
           <Button
-            v-if="!isCreateMode"
             variant="outline"
             :disabled="isTogglingStatus || !loadedUser"
             @click="toggleUserStatus"
@@ -574,7 +501,6 @@ watch(
             {{ loadedUser?.is_active ? 'Deactivate user' : 'Reactivate user' }}
           </Button>
           <Button
-            v-if="!isCreateMode"
             variant="destructive"
             :disabled="isDeleting"
             @click="removeUserAccount"
@@ -585,7 +511,7 @@ watch(
         </div>
         <Button :disabled="isLoading || isSaving || !canManageUsers" @click="saveUser">
           <Save class="h-4 w-4" />
-          {{ isCreateMode ? 'Create user' : 'Save' }}
+          Save
         </Button>
       </CardFooter>
     </Card>

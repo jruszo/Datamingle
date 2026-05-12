@@ -4,12 +4,29 @@ from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 from django.contrib.auth.models import Group
+from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from common.config import SysConfig
+from common.authenticate.workos import WorkOSAuthClient
 from sql.models import ResourceGroup, Users
+
+
+class WorkOSAuthClientConfigTests(APITestCase):
+    @override_settings(
+        WORKOS_API_KEY="",
+        WORKOS_CLIENT_ID="",
+        WORKOS_ORGANIZATION_ID="",
+    )
+    def test_client_reports_missing_workos_settings_when_auth_is_used(self):
+        with self.assertRaisesMessage(
+            ImproperlyConfigured,
+            "Missing required WorkOS settings: "
+            "WORKOS_API_KEY, WORKOS_CLIENT_ID, WORKOS_ORGANIZATION_ID",
+        ):
+            WorkOSAuthClient()
 
 
 class FakeRedis:
@@ -27,13 +44,9 @@ class FakeRedis:
 
 
 @override_settings(
-    AUTH_MODE="workos",
-    ENABLE_WORKOS_AUTH=True,
     WORKOS_API_KEY="sk_test_123",
     WORKOS_CLIENT_ID="client_test_123",
     WORKOS_ORGANIZATION_ID="org_test_123",
-    WORKOS_REDIRECT_URI="https://tenant.datamingle.dev/api/auth/workos/callback/",
-    WORKOS_LOGOUT_REDIRECT_URI="https://tenant.datamingle.dev/login",
     WORKOS_STAFF_EMAILS=["staff@datamingle.dev"],
     WORKOS_SUPERUSER_EMAILS=["admin@datamingle.dev"],
 )
@@ -67,6 +80,10 @@ class WorkOSAuthApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_302_FOUND)
         self.assertEqual(response.url, "https://workos.example/authorize")
         self.assertIn("datamingle_workos_state", response.cookies)
+        mock_client_class.return_value.get_authorization_url.assert_called_once_with(
+            state=response.cookies["datamingle_workos_state"].value,
+            redirect_uri="http://testserver/api/auth/workos/callback/",
+        )
 
     @patch("api_auth.views.get_redis_connection")
     @patch("api_auth.views.WorkOSAuthClient")
@@ -146,26 +163,6 @@ class WorkOSAuthApiTests(APITestCase):
             "The WorkOS login exchange code is invalid or expired.",
         )
 
-    def test_password_login_is_disabled_in_workos_mode(self):
-        user = Users.objects.create_user(
-            username="builtin-user",
-            password="test-password",
-            display="Builtin User",
-        )
-        try:
-            response = self.client.post(
-                "/api/auth/token/",
-                {"username": user.username, "password": "test-password"},
-                format="json",
-            )
-            self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-            self.assertEqual(
-                response.json()["errors"],
-                "Password login is disabled while WorkOS authentication is active.",
-            )
-        finally:
-            user.delete()
-
     @patch("api_auth.views.WorkOSAuthClient")
     def test_logout_redirects_through_workos_when_session_cookie_present(
         self, mock_client_class
@@ -180,12 +177,10 @@ class WorkOSAuthApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_302_FOUND)
         self.assertEqual(response.url, "https://workos.example/logout")
         self.assertEqual(response.cookies["datamingle_workos_session_id"].value, "")
-
-    def test_auth_config_reports_workos_mode(self):
-        response = self.client.get("/api/auth/config/")
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.json()["data"], {"mode": "workos"})
+        mock_client_class.return_value.get_logout_url.assert_called_once_with(
+            session_id="session_123",
+            return_to="http://testserver/login",
+        )
 
     def test_current_user_context_marks_workos_managed_users(self):
         user = Users.objects.create_user(
@@ -207,31 +202,7 @@ class WorkOSAuthApiTests(APITestCase):
             "https://images.workos.dev/avatar.png",
         )
 
-    def test_current_user_profile_update_is_blocked_for_workos_managed_users(self):
-        user = Users.objects.create_user(
-            username="managed@datamingle.dev",
-            email="managed@datamingle.dev",
-            display="Managed User",
-            workos_user_id="user_123",
-            is_active=True,
-        )
-        self.client.force_authenticate(user=user)
-
-        response = self.client.patch(
-            "/api/v1/me/",
-            {"display": "Updated Name"},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(
-            response.json()[0],
-            "Profile fields synced from WorkOS cannot be edited in Datamingle.",
-        )
-        user.refresh_from_db()
-        self.assertEqual(user.display, "Managed User")
-
-    def test_superuser_can_change_groups_but_not_identity_fields_for_workos_users(self):
+    def test_superuser_can_change_groups_but_identity_fields_are_ignored(self):
         superuser = Users.objects.create_user(
             username="superuser@datamingle.dev",
             email="superuser@datamingle.dev",
@@ -250,7 +221,7 @@ class WorkOSAuthApiTests(APITestCase):
         new_group = Group.objects.create(name="Ops")
         self.client.force_authenticate(user=superuser)
 
-        reject_response = self.client.put(
+        update_response = self.client.put(
             f"/api/v1/user/{workos_user.id}/",
             {
                 "display": "Updated Name",
@@ -260,8 +231,14 @@ class WorkOSAuthApiTests(APITestCase):
             },
             format="json",
         )
-        self.assertEqual(reject_response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("display", reject_response.json())
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
+        workos_user.refresh_from_db()
+        self.assertEqual(workos_user.display, "Managed User")
+        self.assertEqual(workos_user.email, "managed@datamingle.dev")
+        self.assertEqual(
+            list(workos_user.groups.values_list("name", flat=True)),
+            ["Ops"],
+        )
 
         allow_response = self.client.put(
             f"/api/v1/user/{workos_user.id}/",
@@ -308,3 +285,30 @@ class WorkOSAuthApiTests(APITestCase):
             "unexpected+organization",
             response.url,
         )
+
+    @patch("api_auth.views.get_redis_connection")
+    @patch("api_auth.views.WorkOSAuthClient")
+    def test_callback_rejects_missing_organization(
+        self, mock_client_class, mock_redis_connection
+    ):
+        mock_redis_connection.return_value = self.redis
+        mock_client = mock_client_class.return_value
+        mock_client.authenticate_with_code.return_value = SimpleNamespace(
+            user_id="user_123",
+            email="staff@datamingle.dev",
+            first_name="Staff",
+            last_name="User",
+            profile_picture_url="",
+            organization_id="",
+            session_id="session_123",
+            display_name="Staff User",
+        )
+
+        self.client.cookies["datamingle_workos_state"] = "state_123"
+        response = self.client.get(
+            "/api/auth/workos/callback/",
+            {"code": "code_123", "state": "state_123"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_302_FOUND)
+        self.assertIn("unexpected+organization", response.url)
