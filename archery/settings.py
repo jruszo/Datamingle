@@ -18,6 +18,7 @@ environ.Env.read_env(os.path.join(BASE_DIR, ".env"))
 env = environ.Env(
     DEBUG=(bool, False),
     ALLOWED_HOSTS=(list, ["*"]),
+    TRUST_X_FORWARDED_PROTO=(bool, False),
     SECRET_KEY=(
         str,
         "",
@@ -94,7 +95,9 @@ CSRF_TRUSTED_ORIGINS = env("CSRF_TRUSTED_ORIGINS")
 
 # Fix 404 redirects behind nginx deployment
 USE_X_FORWARDED_HOST = True
-SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+TRUST_X_FORWARDED_PROTO = env("TRUST_X_FORWARDED_PROTO")
+if TRUST_X_FORWARDED_PROTO:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # Request limits
 DATA_UPLOAD_MAX_MEMORY_SIZE = 15728640
