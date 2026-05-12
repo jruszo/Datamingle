@@ -1,5 +1,7 @@
 import os
 
+from django.core.exceptions import ImproperlyConfigured
+
 try:
     from celery import Celery
 except ImportError:
@@ -19,6 +21,19 @@ if Celery is not None:
     from common.task_queue import celery_runtime_settings
 
     runtime_settings = celery_runtime_settings()
+    missing_settings = [
+        setting_name
+        for setting_name, value in (
+            ("CELERY_BROKER_URL", runtime_settings["broker_url"]),
+            ("CELERY_RESULT_BACKEND", runtime_settings["result_backend"]),
+        )
+        if not value
+    ]
+    if missing_settings:
+        raise ImproperlyConfigured(
+            f"{', '.join(missing_settings)} required to initialize Celery."
+        )
+
     overrides = {}
     if runtime_settings["broker_url"]:
         overrides["broker_url"] = runtime_settings["broker_url"]

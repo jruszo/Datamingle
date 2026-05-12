@@ -235,13 +235,6 @@ async function saveUser() {
     return
   }
 
-  const trimmedUsername = username.value.trim()
-
-  if (!trimmedUsername) {
-    formError.value = 'Username cannot be blank.'
-    return
-  }
-
   isSaving.value = true
   formError.value = ''
   formSuccess.value = ''

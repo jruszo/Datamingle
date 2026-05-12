@@ -6,7 +6,6 @@ import os
 from datetime import timedelta
 import environ
 import logging
-from django.core.exceptions import ImproperlyConfigured
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -95,6 +94,7 @@ CSRF_TRUSTED_ORIGINS = env("CSRF_TRUSTED_ORIGINS")
 
 # Fix 404 redirects behind nginx deployment
 USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # Request limits
 DATA_UPLOAD_MAX_MEMORY_SIZE = 15728640
@@ -269,11 +269,6 @@ CELERY_TASK_TIME_LIMIT = env("CELERY_TASK_TIME_LIMIT", default=0) or None
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
-
-if not CELERY_BROKER_URL:
-    raise ImproperlyConfigured("CELERY_BROKER_URL is required.")
-if not CELERY_RESULT_BACKEND:
-    raise ImproperlyConfigured("CELERY_RESULT_BACKEND is required.")
 
 # Cache settings
 CACHES = {
