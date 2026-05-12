@@ -10,11 +10,11 @@
 
 - Prefer running Django and other Python app commands inside the app container, not on the host.
 - The local development app container is `datamingle-app`.
-- The local compose file in use is `src/docker-compose/docker-compose.local-dev.yml`.
+- The local compose file in use is `backend/src/docker-compose/docker-compose.local-dev.yml`.
 - Rebuild the app and frontend containers with:
-  - `docker-compose -f src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend`
+  - `docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend`
 - Run Django commands with:
-  - `docker exec datamingle-app python manage.py <command>`
+  - `docker exec -w /opt/datamingle/backend datamingle-app python manage.py <command>`
 - If container code is not bind-mounted for a file you changed, copy the file into the container with `docker cp` before running containerized commands.
 
 ## Migrations
@@ -24,14 +24,14 @@
 - Generate migrations by running `makemigrations` in the app container after syncing changed files if needed.
 - Copy generated migration files back out to the host repo and commit them.
 - Before finishing, verify migration drift with:
-  - `docker exec datamingle-app python manage.py makemigrations sql --check`
+  - `docker exec -w /opt/datamingle/backend datamingle-app python manage.py makemigrations sql --check`
 
 ## Linting And Verification
 
 - For Python formatting, use Black.
 - The repo CI lint behavior matches:
-  - `black --check .`
-- If Black reports drift, format the affected files locally with `black <paths>` and rerun `black --check .`.
+  - `black --check backend`
+- If Black reports drift, format the affected files locally with `black <paths>` and rerun `black --check backend`.
 - For frontend verification, run:
   - `npm run build` from `frontend/`
 - For backend verification, prefer targeted Django tests in the container over host execution.

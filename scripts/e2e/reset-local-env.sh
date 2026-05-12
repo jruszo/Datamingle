@@ -3,8 +3,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-COMPOSE_FILE="$ROOT_DIR/src/docker-compose/docker-compose.local-dev.yml"
-DOWNLOAD_ROOT="$ROOT_DIR/src/docker-compose/datamingle/downloads"
+COMPOSE_FILE="$ROOT_DIR/backend/src/docker-compose/docker-compose.local-dev.yml"
+DOWNLOAD_ROOT="$ROOT_DIR/backend/src/docker-compose/datamingle/downloads"
 COMPOSE=(docker-compose -f "$COMPOSE_FILE")
 
 log() {
@@ -31,7 +31,7 @@ clear_directory "$DOWNLOAD_ROOT/DataExportFile"
 clear_directory "$DOWNLOAD_ROOT/dictionary"
 
 log "Rebuilding and starting local Docker stack"
-"${COMPOSE[@]}" up -d --build datamingle frontend
+"${COMPOSE[@]}" up -d --build datamingle celery celerybeat frontend
 
 log "Waiting for datamingle-app container"
 for _ in $(seq 1 60); do
@@ -49,7 +49,7 @@ fi
 
 log "Waiting for smoke_local_demo to pass"
 for attempt in $(seq 1 40); do
-  if docker exec datamingle-app python manage.py smoke_local_demo; then
+  if docker exec -w /opt/datamingle/backend datamingle-app python manage.py smoke_local_demo; then
     log "Local demo smoke passed"
     exit 0
   fi

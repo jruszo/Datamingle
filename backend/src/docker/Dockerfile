@@ -5,7 +5,7 @@ FROM ${BASE_IMAGE}
 SHELL ["/bin/bash", "-c"]
 COPY . /opt/datamingle/
 
-WORKDIR /opt/
+WORKDIR /opt/datamingle/backend
 
 RUN useradd nginx
 # Datamingle
@@ -14,9 +14,9 @@ RUN apt-get update \
     && if [ ! -d /opt/venv4datamingle ]; then for old_venv in /opt/venv4a*; do [ -d "$old_venv" ] && mv "$old_venv" /opt/venv4datamingle && break; done; fi \
     && if [ ! -d /opt/venv4datamingle ]; then echo "ERROR: No Python virtualenv found at /opt/venv4datamingle or /opt/venv4a*" >&2; exit 1; fi \
     && source /opt/venv4datamingle/bin/activate \
-    && pip install -r /opt/datamingle/requirements.txt \
-    && cp -f /opt/datamingle/src/docker/nginx.conf /etc/nginx/ \
-    && cp -f /opt/datamingle/src/docker/supervisord.conf /etc/ \
+    && pip install -r /opt/datamingle/backend/requirements.txt \
+    && cp -f /opt/datamingle/backend/src/docker/nginx.conf /etc/nginx/ \
+    && cp -f /opt/datamingle/backend/supervisord.conf /etc/ \
     && apt-get -yq remove gcc curl \
     && apt-get clean \
     && rm -rf /var/cache/apt/* \
@@ -26,4 +26,4 @@ RUN apt-get update \
 EXPOSE 9123
 
 #start service
-ENTRYPOINT ["bash", "/opt/datamingle/src/docker/startup.sh"]
+ENTRYPOINT ["bash", "/opt/datamingle/backend/src/docker/startup.sh"]

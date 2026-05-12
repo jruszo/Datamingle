@@ -41,7 +41,7 @@ function issueDemoTokens(username: DemoUser) {
   ].join('; ')
   const output = execFileSync(
     'docker',
-    ['exec', 'datamingle-app', 'python', 'manage.py', 'shell', '-c', script],
+    ['exec', '-w', '/opt/datamingle/backend', 'datamingle-app', 'python', 'manage.py', 'shell', '-c', script],
     {
       cwd: REPO_ROOT,
       encoding: 'utf8',
@@ -49,7 +49,21 @@ function issueDemoTokens(username: DemoUser) {
     },
   )
 
-  return JSON.parse(output.trim()) as { access: string; refresh: string }
+  return parseJsonLine<{ access: string; refresh: string }>(output)
+}
+
+function parseJsonLine<T>(output: string): T {
+  const jsonLine = output
+    .trim()
+    .split(/\r?\n/)
+    .reverse()
+    .find((line) => line.trim().startsWith('{'))
+
+  if (!jsonLine) {
+    throw new Error(`Expected JSON object in command output:\n${output}`)
+  }
+
+  return JSON.parse(jsonLine) as T
 }
 
 export function uniqueWorkflowName(prefix: string) {
@@ -60,7 +74,7 @@ export function uniqueWorkflowName(prefix: string) {
 export function seedLocalDemo() {
   execFileSync(
     'docker',
-    ['exec', 'datamingle-app', 'python', 'manage.py', 'seed_local_demo'],
+    ['exec', '-w', '/opt/datamingle/backend', 'datamingle-app', 'python', 'manage.py', 'seed_local_demo'],
     {
       cwd: REPO_ROOT,
       stdio: 'pipe',
@@ -228,6 +242,8 @@ export function setSystemConfigValues(values: Record<string, boolean | number | 
     'docker',
     [
       'exec',
+      '-w',
+      '/opt/datamingle/backend',
       'datamingle-app',
       'python',
       'manage.py',

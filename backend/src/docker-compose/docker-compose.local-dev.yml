@@ -84,8 +84,8 @@ services:
     container_name: datamingle-app
     restart: always
     build:
-      context: ../..
-      dockerfile: src/docker/Dockerfile.local-dev
+      context: ../../..
+      dockerfile: backend/src/docker/Dockerfile.local-dev
     depends_on:
       redis:
         condition: service_healthy
@@ -100,17 +100,17 @@ services:
     ports:
       - "9123:9123"
     volumes:
-      - "../..:/opt/datamingle"
-      - "./datamingle/settings.py:/opt/datamingle/local_settings.py"
-      - "./datamingle/docs.md:/opt/datamingle/docs/docs.md"
-      - "./datamingle/downloads:/opt/datamingle/downloads"
-      - "./datamingle/logs:/opt/datamingle/logs"
-      - "./datamingle/keys:/opt/datamingle/keys"
+      - "../../..:/opt/datamingle"
+      - "./datamingle/settings.py:/opt/datamingle/backend/local_settings.py"
+      - "./datamingle/docs.md:/opt/datamingle/backend/docs/docs.md"
+      - "./datamingle/downloads:/opt/datamingle/backend/downloads"
+      - "./datamingle/logs:/opt/datamingle/backend/logs"
+      - "./datamingle/keys:/opt/datamingle/backend/keys"
     environment:
       RUN_MIGRATIONS_ON_START: "1"
       RUN_LOCAL_DEMO_SEED: "1"
       GUNICORN_RELOAD: "1"
-    entrypoint: "bash /opt/datamingle/src/docker/startup.sh"
+    entrypoint: "bash /opt/datamingle/backend/src/docker/startup.sh"
     env_file:
       - .env.local-dev
 
@@ -126,16 +126,17 @@ services:
       datamingle:
         condition: service_started
     volumes:
-      - "../..:/opt/datamingle"
-      - "./datamingle/settings.py:/opt/datamingle/local_settings.py"
-      - "./datamingle/docs.md:/opt/datamingle/docs/docs.md"
-      - "./datamingle/downloads:/opt/datamingle/downloads"
-      - "./datamingle/logs:/opt/datamingle/logs"
-      - "./datamingle/keys:/opt/datamingle/keys"
+      - "../../..:/opt/datamingle"
+      - "./datamingle/settings.py:/opt/datamingle/backend/local_settings.py"
+      - "./datamingle/docs.md:/opt/datamingle/backend/docs/docs.md"
+      - "./datamingle/downloads:/opt/datamingle/backend/downloads"
+      - "./datamingle/logs:/opt/datamingle/backend/logs"
+      - "./datamingle/keys:/opt/datamingle/backend/keys"
     env_file:
       - .env.local-dev
     entrypoint: >-
-      bash -lc "source /opt/venv4datamingle/bin/activate &&
+      bash -lc "cd /opt/datamingle/backend &&
+      source /opt/venv4datamingle/bin/activate &&
       celery -A archery worker -l info -Q ${CELERY_TASK_DEFAULT_QUEUE:-datamingle-default}"
 
   celerybeat:
@@ -150,16 +151,17 @@ services:
       datamingle:
         condition: service_started
     volumes:
-      - "../..:/opt/datamingle"
-      - "./datamingle/settings.py:/opt/datamingle/local_settings.py"
-      - "./datamingle/docs.md:/opt/datamingle/docs/docs.md"
-      - "./datamingle/downloads:/opt/datamingle/downloads"
-      - "./datamingle/logs:/opt/datamingle/logs"
-      - "./datamingle/keys:/opt/datamingle/keys"
+      - "../../..:/opt/datamingle"
+      - "./datamingle/settings.py:/opt/datamingle/backend/local_settings.py"
+      - "./datamingle/docs.md:/opt/datamingle/backend/docs/docs.md"
+      - "./datamingle/downloads:/opt/datamingle/backend/downloads"
+      - "./datamingle/logs:/opt/datamingle/backend/logs"
+      - "./datamingle/keys:/opt/datamingle/backend/keys"
     env_file:
       - .env.local-dev
     entrypoint: >-
-      bash -lc "source /opt/venv4datamingle/bin/activate &&
+      bash -lc "cd /opt/datamingle/backend &&
+      source /opt/venv4datamingle/bin/activate &&
       celery -A archery beat -l info --schedule /tmp/celerybeat-schedule"
 
   frontend:
@@ -173,7 +175,7 @@ services:
     ports:
       - "5173:5173"
     volumes:
-      - "../..:/opt/datamingle"
+      - "../../..:/opt/datamingle"
       - frontend_node_modules:/opt/datamingle/frontend/node_modules
     environment:
       VITE_API_BASE_URL: /api
