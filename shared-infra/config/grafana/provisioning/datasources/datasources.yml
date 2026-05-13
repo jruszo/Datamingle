@@ -1,0 +1,40 @@
+apiVersion: 1
+prune: true
+
+datasources:
+  - name: Cortex
+    type: prometheus
+    access: proxy
+    url: http://cortex:9009/prometheus
+    isDefault: true
+    jsonData:
+      httpHeaderName1: X-Scope-OrgID
+      timeInterval: 15s
+    secureJsonData:
+      httpHeaderValue1: local-dev
+
+  - name: Prometheus Local
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+
+  - name: Quickwit Traces
+    type: quickwit-quickwit-datasource
+    access: proxy
+    url: http://quickwit:7280/api/v1
+    jsonData:
+      index: otel-traces-v0_7
+
+  - name: Quickwit Logs
+    type: quickwit-quickwit-datasource
+    access: proxy
+    url: http://quickwit:7280/api/v1
+    jsonData:
+      index: otel-logs-v0_7
+      logMessageField: body
+      logLevelField: severity_text
+
+  - name: Jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger-query:16686

@@ -1,0 +1,28 @@
+version: 0.8
+cluster_id: datamingle-shared-quickwit
+node_id: quickwit-1
+enabled_services:
+  - control_plane
+  - indexer
+  - janitor
+  - metastore
+  - searcher
+listen_address: 0.0.0.0
+advertise_address: quickwit
+data_dir: /quickwit/qwdata
+metastore_uri: postgres://quickwit:quickwit@quickwit-postgres:5432/quickwit
+default_index_root_uri: s3://quickwit-indexes/indexes
+
+storage:
+  s3:
+    endpoint: http://minio:9000
+    region: local
+    access_key_id: minioadmin
+    secret_access_key: minioadmin
+    force_path_style_access: true
+
+indexer:
+  enable_otlp_endpoint: true
+
+jaeger:
+  enable_endpoint: true
