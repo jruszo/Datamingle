@@ -1,0 +1,161 @@
+name: datamingle-shared-infra
+
+services:
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: datamingle-shared-minio
+    restart: always
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - shared_minio_data:/data
+
+  minio-init:
+    image: quay.io/minio/mc:latest
+    container_name: datamingle-shared-minio-init
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >-
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 2; done &&
+      mc mb --ignore-existing local/cortex-blocks &&
+      mc mb --ignore-existing local/cortex-ruler &&
+      mc mb --ignore-existing local/cortex-alertmanager &&
+      mc mb --ignore-existing local/quickwit-indexes"
+
+  quickwit-postgres:
+    image: postgres:16-alpine
+    container_name: datamingle-shared-quickwit-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: quickwit
+      POSTGRES_USER: quickwit
+      POSTGRES_PASSWORD: quickwit
+    volumes:
+      - shared_quickwit_postgres_data:/var/lib/postgresql/data
+
+  cortex:
+    image: cortexproject/cortex:v1.20.1
+    container_name: datamingle-shared-cortex
+    restart: always
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    command:
+      - "-config.file=/etc/cortex/cortex.yaml"
+    ports:
+      - "9009:9009"
+    volumes:
+      - "./config/cortex/cortex.yaml:/etc/cortex/cortex.yaml:ro"
+      - "./config/cortex/runtime-config.yaml:/etc/cortex/runtime-config.yaml:ro"
+      - "./config/cortex/rules:/rules"
+      - shared_cortex_data:/data
+
+  quickwit:
+    image: quickwit/quickwit:0.8.2
+    container_name: datamingle-shared-quickwit
+    restart: always
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+      quickwit-postgres:
+        condition: service_started
+    command: ["run", "--config", "/etc/quickwit/quickwit.yaml"]
+    ports:
+      - "7280:7280"
+      - "7281:7281"
+    environment:
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      QW_DISABLE_TELEMETRY: "1"
+      QW_ENABLE_OPENTELEMETRY_OTLP_EXPORTER: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://quickwit:7281
+    volumes:
+      - "./config/quickwit/quickwit-node-1.yaml:/etc/quickwit/quickwit.yaml:ro"
+      - shared_quickwit_node_1_data:/quickwit/qwdata
+
+  quickwit-worker:
+    image: quickwit/quickwit:0.8.2
+    container_name: datamingle-shared-quickwit-worker
+    restart: always
+    depends_on:
+      quickwit:
+        condition: service_started
+    command: ["run", "--config", "/etc/quickwit/quickwit.yaml"]
+    environment:
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      QW_DISABLE_TELEMETRY: "1"
+    volumes:
+      - "./config/quickwit/quickwit-node-2.yaml:/etc/quickwit/quickwit.yaml:ro"
+      - shared_quickwit_node_2_data:/quickwit/qwdata
+
+  jaeger-query:
+    image: jaegertracing/jaeger-query:1.60
+    container_name: datamingle-shared-jaeger-query
+    restart: always
+    depends_on:
+      quickwit:
+        condition: service_started
+    ports:
+      - "16686:16686"
+    environment:
+      SPAN_STORAGE_TYPE: grpc
+      GRPC_STORAGE_SERVER: quickwit:7281
+      GRPC_STORAGE_TLS: "false"
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: datamingle-shared-prometheus
+    restart: always
+    depends_on:
+      cortex:
+        condition: service_started
+      quickwit:
+        condition: service_started
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    ports:
+      - "9090:9090"
+    volumes:
+      - "./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro"
+      - shared_prometheus_data:/prometheus
+
+  grafana:
+    image: grafana/grafana-oss:11.5.2
+    container_name: datamingle-shared-grafana
+    restart: always
+    depends_on:
+      cortex:
+        condition: service_started
+      quickwit:
+        condition: service_started
+      jaeger-query:
+        condition: service_started
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_INSTALL_PLUGINS: https://github.com/quickwit-oss/quickwit-datasource/releases/download/v0.5.0/quickwit-quickwit-datasource-0.5.0.zip;quickwit-quickwit-datasource
+    volumes:
+      - "./config/grafana/provisioning:/etc/grafana/provisioning:ro"
+      - shared_grafana_data:/var/lib/grafana
+
+volumes:
+  shared_cortex_data:
+  shared_grafana_data:
+  shared_minio_data:
+  shared_prometheus_data:
+  shared_quickwit_node_1_data:
+  shared_quickwit_node_2_data:
+  shared_quickwit_postgres_data:

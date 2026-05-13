@@ -21,6 +21,7 @@ This repository is organized as a monorepo:
 
 - `backend/` contains the Django API, backend Docker files, Helm chart, and backend Python dependencies.
 - `frontend/` contains the Vue/Vite SPA.
+- `shared-infra/` contains the local shared observability stack for Cortex, Quickwit, Grafana, Jaeger, Prometheus, and MinIO.
 - `agent/` is reserved for the upcoming Datamingle agent module.
 - `scripts/` contains repo-level helper scripts.
 
@@ -53,6 +54,17 @@ Public Datamingle demo: coming soon.
 
 ### Docker
 Use the Docker and compose files in this repository (`backend/src/docker` and `backend/src/docker-compose`).
+
+The shared observability infrastructure lives outside the app stack in
+`shared-infra/`. It is a dedicated local stack for tenant-shared services used
+to test metrics and trace ingestion:
+
+```bash
+docker-compose -f shared-infra/docker-compose.yml up -d
+```
+
+See [shared-infra/README.md](shared-infra/README.md) for service URLs, tenant
+headers, and reset instructions.
 
 Existing local Docker data directories from before the Datamingle rename may
 still have the application database under the old `archery` name. Copy that data
