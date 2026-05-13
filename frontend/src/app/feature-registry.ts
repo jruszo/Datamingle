@@ -3,6 +3,7 @@ import authModule from '@/features/auth/manifest'
 import dashboardModule from '@/features/dashboard/manifest'
 import reportsModule from '@/features/reports/manifest'
 import inventoryModule from '@/features/inventory/manifest'
+import agentsModule from '@/features/agents/manifest'
 import instanceOperationsModule from '@/features/instance-operations/manifest'
 import workflowsModule from '@/features/workflows/manifest'
 import archivesModule from '@/features/archives/manifest'
@@ -20,6 +21,7 @@ const builtInFeatureModules: FeatureModule[] = [
   dashboardModule,
   reportsModule,
   inventoryModule,
+  agentsModule,
   instanceOperationsModule,
   workflowsModule,
   archivesModule,

@@ -4,6 +4,7 @@
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 import os
 from datetime import timedelta
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 import environ
 import logging
 
@@ -28,8 +29,11 @@ env = environ.Env(
     WORKOS_API_KEY=(str, ""),
     WORKOS_CLIENT_ID=(str, ""),
     WORKOS_ORGANIZATION_ID=(str, ""),
+    WORKOS_BASE_URL=(str, "https://api.workos.com/"),
     WORKOS_STAFF_EMAILS=(list, []),
     WORKOS_SUPERUSER_EMAILS=(list, []),
+    DATAMINGLE_AGENT_API_KEY_BACKEND=(str, "workos"),
+    CHANNEL_LAYER_URL=(str, ""),
     # CSRF_TRUSTED_ORIGINS=subdomain.example.com,subdomain.example2.com subdomain.example.com
     CSRF_TRUSTED_ORIGINS=(list, []),
     ENABLED_ENGINES=(
@@ -131,11 +135,13 @@ PASSWORD_MIXIN_PATH = env("PASSWORD_MIXIN_PATH")
 FIELD_ENCRYPTION_KEYS = env("FIELD_ENCRYPTION_KEYS")
 # Application definition
 INSTALLED_APPS = (
+    "daphne",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "channels",
     "sql",
     "sql_api",
     "api_core",
@@ -147,6 +153,7 @@ INSTALLED_APPS = (
     "api_queries",
     "api_access",
     "api_mailbox",
+    "api_agents",
     "api_admin",
     "common",
     "rest_framework",
@@ -188,6 +195,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "archery.wsgi.application"
+ASGI_APPLICATION = "archery.asgi.application"
 
 # Internationalization
 LANGUAGE_CODE = "en-us"
@@ -278,6 +286,29 @@ CACHES = {
     "default": env.cache(),
 }
 
+
+def _redis_url_for_channels(raw_url):
+    parsed = urlparse(raw_url)
+    query = dict(parse_qsl(parsed.query))
+    password = query.pop("PASSWORD", "") or query.pop("password", "")
+    if password and not parsed.password:
+        netloc = parsed.hostname or ""
+        if parsed.port:
+            netloc = f"{netloc}:{parsed.port}"
+        netloc = f":{password}@{netloc}"
+        parsed = parsed._replace(netloc=netloc)
+    parsed = parsed._replace(query=urlencode(query))
+    return urlunparse(parsed)
+
+
+CHANNEL_LAYER_URL = env("CHANNEL_LAYER_URL", default="") or env("CACHE_URL")
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {"hosts": [_redis_url_for_channels(CHANNEL_LAYER_URL)]},
+    }
+}
+
 # https://docs.djangoproject.com/en/3.2/ref/settings/#std-setting-DEFAULT_AUTO_FIELD
 DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
 
@@ -324,6 +355,10 @@ SIMPLE_JWT = {
 WORKOS_API_KEY = env("WORKOS_API_KEY", default="")
 WORKOS_CLIENT_ID = env("WORKOS_CLIENT_ID", default="")
 WORKOS_ORGANIZATION_ID = env("WORKOS_ORGANIZATION_ID", default="")
+WORKOS_BASE_URL = env("WORKOS_BASE_URL", default="https://api.workos.com/")
+DATAMINGLE_AGENT_API_KEY_BACKEND = env(
+    "DATAMINGLE_AGENT_API_KEY_BACKEND", default="workos"
+)
 WORKOS_STAFF_EMAILS = [
     email.strip().lower()
     for email in env("WORKOS_STAFF_EMAILS", default=[])
