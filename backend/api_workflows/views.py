@@ -1653,11 +1653,37 @@ class WorkflowExecutionCreate(views.APIView):
                         ) from None
                     selected_executor = resolved_executor.executor_id
                 # Set workflow status to queuing
-                agent_command = dispatch_sql_workflow_to_agent(
-                    workflow,
-                    user=user,
-                    executor=selected_executor,
-                )
+                try:
+                    agent_command = dispatch_sql_workflow_to_agent(
+                        workflow,
+                        user=user,
+                        executor=selected_executor,
+                    )
+                except ValueError as exc:
+                    logger.warning(
+                        "Failed to dispatch SQL workflow to agent",
+                        exc_info=True,
+                    )
+                    error_detail = str(exc) or exc.__class__.__name__
+                    raise serializers.ValidationError(
+                        {
+                            "errors": (
+                                "Unable to dispatch workflow to agent: "
+                                f"{error_detail}"
+                            )
+                        }
+                    ) from None
+                except Exception as exc:
+                    logger.exception("Failed to dispatch SQL workflow to agent")
+                    error_detail = str(exc) or exc.__class__.__name__
+                    raise serializers.ValidationError(
+                        {
+                            "errors": (
+                                "Unable to dispatch workflow to agent: "
+                                f"{error_detail}"
+                            )
+                        }
+                    ) from None
                 if agent_command is None:
                     workflow.status = "workflow_queuing"
                     workflow.save(update_fields=["status"])

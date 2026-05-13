@@ -97,6 +97,55 @@ class AgentModelTests(APITestCase):
         self.assertEqual(agent.desired_config_revision, 2)
         self.assertEqual(agent.config_revisions.count(), 1)
 
+    @patch(
+        "api_agents.models.Agent.bump_desired_config_revision",
+        side_effect=RuntimeError("revision failed"),
+    )
+    def test_assignment_save_rolls_back_when_revision_bump_fails(self, _mock_bump):
+        agent = Agent.objects.create(name="agent-a")
+        instance = create_instance()
+
+        with self.assertRaises(RuntimeError):
+            AgentInstanceAssignment.objects.create(
+                agent=agent,
+                instance=instance,
+                command_enabled=True,
+            )
+
+        self.assertFalse(
+            AgentInstanceAssignment.objects.filter(
+                agent=agent,
+                instance=instance,
+            ).exists()
+        )
+        agent.refresh_from_db()
+        self.assertEqual(agent.desired_config_revision, 1)
+
+    def test_assignment_delete_rolls_back_when_revision_bump_fails(self):
+        agent = Agent.objects.create(name="agent-a")
+        instance = create_instance()
+        assignment = AgentInstanceAssignment.objects.create(
+            agent=agent,
+            instance=instance,
+            command_enabled=True,
+        )
+
+        with patch(
+            "api_agents.models.Agent.bump_desired_config_revision",
+            side_effect=RuntimeError("revision failed"),
+        ):
+            with self.assertRaises(RuntimeError):
+                assignment.delete()
+
+        self.assertTrue(
+            AgentInstanceAssignment.objects.filter(
+                agent=agent,
+                instance=instance,
+            ).exists()
+        )
+        agent.refresh_from_db()
+        self.assertEqual(agent.desired_config_revision, 2)
+
     def test_duplicate_command_assignment_is_rejected(self):
         instance = create_instance()
         first = Agent.objects.create(name="agent-a")

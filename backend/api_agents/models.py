@@ -131,26 +131,30 @@ class AgentInstanceAssignment(models.Model):
 
     def save(self, *args, **kwargs):
         self.full_clean()
-        super().save(*args, **kwargs)
-        self.agent.bump_desired_config_revision(
-            summary={
-                "action": "assignment.saved",
-                "assignment_id": self.pk,
-                "instance_id": self.instance_id,
-            }
-        )
-        transaction.on_commit(lambda: self._notify_config_changed("assignment.saved"))
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            self.agent.bump_desired_config_revision(
+                summary={
+                    "action": "assignment.saved",
+                    "assignment_id": self.pk,
+                    "instance_id": self.instance_id,
+                }
+            )
+            transaction.on_commit(
+                lambda: self._notify_config_changed("assignment.saved")
+            )
 
     def delete(self, *args, **kwargs):
         agent = self.agent
         instance_id = self.instance_id
-        result = super().delete(*args, **kwargs)
-        agent.bump_desired_config_revision(
-            summary={"action": "assignment.deleted", "instance_id": instance_id}
-        )
-        transaction.on_commit(
-            lambda: self._notify_config_changed("assignment.deleted", agent=agent)
-        )
+        with transaction.atomic():
+            result = super().delete(*args, **kwargs)
+            agent.bump_desired_config_revision(
+                summary={"action": "assignment.deleted", "instance_id": instance_id}
+            )
+            transaction.on_commit(
+                lambda: self._notify_config_changed("assignment.deleted", agent=agent)
+            )
         return result
 
     def _notify_config_changed(self, reason, agent=None):
