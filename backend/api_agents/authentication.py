@@ -28,7 +28,10 @@ class AgentAPIKeyAuthentication(authentication.BaseAuthentication):
     keyword = "Bearer"
 
     def authenticate(self, request):
-        header = authentication.get_authorization_header(request).decode("utf-8")
+        try:
+            header = authentication.get_authorization_header(request).decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise AuthenticationFailed("Invalid agent authorization header.") from exc
         if not header:
             return None
 

@@ -21,11 +21,24 @@ func LoadOrCreateInstallID(dataDir string) (string, error) {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return "", err
 	}
+	path := installIDPath(dataDir)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		if os.IsExist(err) {
+			return LoadInstallID(dataDir)
+		}
+		return "", err
+	}
+	defer file.Close()
+
 	installID, err := generateInstallID()
 	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(installIDPath(dataDir), []byte(installID+"\n"), 0o600); err != nil {
+	if _, err := file.WriteString(installID + "\n"); err != nil {
+		return "", err
+	}
+	if err := file.Close(); err != nil {
 		return "", err
 	}
 	return installID, nil

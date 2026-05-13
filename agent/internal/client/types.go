@@ -1,6 +1,10 @@
 package client
 
-import "time"
+import (
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
 type RegisterRequest struct {
 	InstallID      string `json:"install_id"`
@@ -37,13 +41,14 @@ type ModuleConfig struct {
 }
 
 type Assignment struct {
-	ID             int64          `json:"id"`
-	InstanceID     int64          `json:"instance_id"`
-	Name           string         `json:"instance_name,omitempty"`
-	DBType         string         `json:"db_type,omitempty"`
-	Host           string         `json:"host,omitempty"`
-	Port           int            `json:"port,omitempty"`
-	Username       string         `json:"username,omitempty"`
+	ID         int64  `json:"id"`
+	InstanceID int64  `json:"instance_id"`
+	Name       string `json:"instance_name,omitempty"`
+	DBType     string `json:"db_type,omitempty"`
+	Host       string `json:"host,omitempty"`
+	Port       int    `json:"port,omitempty"`
+	Username   string `json:"username,omitempty"`
+	// Password is sensitive and must not be logged or printed.
 	Password       string         `json:"password,omitempty"`
 	Database       string         `json:"database,omitempty"`
 	Charset        string         `json:"charset,omitempty"`
@@ -52,6 +57,25 @@ type Assignment struct {
 	Capabilities   []string       `json:"capabilities,omitempty"`
 	CommandEnabled bool           `json:"command_enabled"`
 	Raw            map[string]any `json:"raw,omitempty"`
+}
+
+type assignmentJSON Assignment
+
+func (a Assignment) Redacted() Assignment {
+	redacted := a
+	if redacted.Password != "" {
+		redacted.Password = "<redacted>"
+	}
+	return redacted
+}
+
+func (a Assignment) MarshalJSON() ([]byte, error) {
+	redacted := assignmentJSON(a.Redacted())
+	return json.Marshal(redacted)
+}
+
+func (a Assignment) String() string {
+	return fmt.Sprintf("%+v", assignmentJSON(a.Redacted()))
 }
 
 type SSLConfig struct {

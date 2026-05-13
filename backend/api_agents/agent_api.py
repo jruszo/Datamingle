@@ -9,6 +9,13 @@ from api_agents.authentication import AgentAPIKeyAuthentication
 from api_agents.models import AgentCommand, AgentCommandStatus, AgentStatus
 from api_agents.services import build_agent_config, complete_agent_workflow_command
 
+TERMINAL_COMMAND_STATUSES = {
+    AgentCommandStatus.SUCCEEDED,
+    AgentCommandStatus.FAILED,
+    AgentCommandStatus.CANCELLED,
+    AgentCommandStatus.EXPIRED,
+}
+
 
 class IsAuthenticatedAgent(permissions.BasePermission):
     def has_permission(self, request, view):
@@ -84,10 +91,10 @@ class AgentRegisterView(views.APIView):
         now = timezone.now()
         agent.install_id = install_id
         agent.name = data.get("name") or agent.name
-        agent.hostname = data.get("hostname", "")
-        agent.platform = data.get("platform", "")
-        agent.architecture = data.get("architecture", "")
-        agent.agent_version = data.get("agent_version", "")
+        agent.hostname = data.get("hostname") or agent.hostname
+        agent.platform = data.get("platform") or agent.platform
+        agent.architecture = data.get("architecture") or agent.architecture
+        agent.agent_version = data.get("agent_version") or agent.agent_version
         agent.last_seen_at = now
         agent.last_connected_at = agent.last_connected_at or now
         agent.last_config_revision = (
@@ -141,16 +148,17 @@ class AgentHeartbeatView(views.APIView):
         if agent.install_id and agent.install_id != data["install_id"]:
             raise PermissionDenied("Agent install ID does not match.")
 
+        now = timezone.now()
         metadata = dict(agent.metadata or {})
         metadata["module_health"] = data["module_health"]
         metadata["heartbeat"] = {
             "status": data["status"],
             "config_revision": data["config_revision"],
-            "received_at": timezone.now().isoformat(),
+            "received_at": now.isoformat(),
         }
         agent.metadata = metadata
         agent.status = data["status"]
-        agent.last_seen_at = timezone.now()
+        agent.last_seen_at = now
         agent.last_config_revision = data["config_revision"]
         agent.save(
             update_fields=[
@@ -275,6 +283,11 @@ class AgentCommandProgressView(views.APIView):
             )
         serializer = AgentCommandProgressSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        if command.status in TERMINAL_COMMAND_STATUSES:
+            return Response(
+                {"detail": "Command is already finished.", "status": command.status},
+                status=status.HTTP_409_CONFLICT,
+            )
         data = serializer.validated_data
         now = timezone.now()
         _set_command_lease(command, data, now)
@@ -302,6 +315,8 @@ class AgentCommandFinishView(views.APIView):
         serializer = AgentCommandFinishSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+        if command.status in TERMINAL_COMMAND_STATUSES:
+            return Response({"status": command.status}, status=status.HTTP_200_OK)
         command.status = AgentCommandStatus.SUCCEEDED
         command.result = data.get("result", {})
         command.finished_at = timezone.now()
@@ -342,6 +357,8 @@ class AgentCommandFailView(views.APIView):
         serializer = AgentCommandFailSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+        if command.status in TERMINAL_COMMAND_STATUSES:
+            return Response({"status": command.status}, status=status.HTTP_200_OK)
         command.status = AgentCommandStatus.FAILED
         command.error = data.get("error", {})
         command.finished_at = timezone.now()
@@ -382,6 +399,8 @@ class AgentCommandCancelledView(views.APIView):
         serializer = AgentCommandFinishSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+        if command.status in TERMINAL_COMMAND_STATUSES:
+            return Response({"status": command.status}, status=status.HTTP_200_OK)
         command.status = AgentCommandStatus.CANCELLED
         command.result = data.get("result", {})
         command.finished_at = timezone.now()

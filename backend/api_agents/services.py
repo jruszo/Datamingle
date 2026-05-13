@@ -9,8 +9,12 @@ from urllib.parse import urljoin
 
 from django_redis import get_redis_connection
 from django.conf import settings
-from django.core.exceptions import ImproperlyConfigured, PermissionDenied
-from django.db import transaction
+from django.core.exceptions import (
+    ImproperlyConfigured,
+    ObjectDoesNotExist,
+    PermissionDenied,
+)
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 import requests
 
@@ -106,7 +110,7 @@ class LocalAgentAPIKeyProvider:
         return authenticate_local_agent_api_key(api_key)
 
     def revoke(self, agent):
-        agent.api_key_hash = ""
+        agent.api_key_hash = None
         agent.api_key_prefix = ""
         agent.save(update_fields=["api_key_hash", "api_key_prefix", "update_time"])
 
@@ -132,7 +136,7 @@ class WorkOSAgentAPIKeyProvider:
 
         value = api_key["value"]
         agent.workos_api_key_id = api_key["id"]
-        agent.api_key_hash = ""
+        agent.api_key_hash = None
         agent.api_key_prefix = (
             api_key.get("obfuscated_value") or value[:AGENT_KEY_VISIBLE_PREFIX_LENGTH]
         )
@@ -179,6 +183,9 @@ class WorkOSAgentAPIKeyProvider:
         if not agent.workos_api_key_id:
             return
         workos_client().api_keys.delete_api_key(agent.workos_api_key_id)
+        agent.workos_api_key_id = ""
+        agent.api_key_prefix = ""
+        agent.save(update_fields=["workos_api_key_id", "api_key_prefix", "update_time"])
 
 
 def authenticate_local_agent_api_key(api_key):
@@ -371,64 +378,84 @@ def command_capable_assignment_for_instance(instance_id):
 
 
 def dispatch_sql_workflow_to_agent(workflow, user=None, executor=None):
-    existing_command = (
-        AgentCommand.objects.select_related("agent", "instance")
-        .filter(
-            workflow_type="sql_workflow",
-            workflow_id=str(workflow.id),
-            status__in=(
-                AgentCommandStatus.QUEUED,
-                AgentCommandStatus.DISPATCHED,
-                AgentCommandStatus.ACCEPTED,
-                AgentCommandStatus.RUNNING,
-            ),
+    with transaction.atomic():
+        workflow = (
+            SqlWorkflow.objects.select_for_update()
+            .select_related("instance")
+            .get(pk=workflow.pk)
         )
-        .order_by("-create_time")
-        .first()
-    )
-    if existing_command is not None:
-        workflow.status = "workflow_executing"
-        workflow.save(update_fields=["status"])
-        resolve_mailbox_items(workflow, category="execution_needed")
-        if existing_command.status in {
-            AgentCommandStatus.QUEUED,
-            AgentCommandStatus.DISPATCHED,
-        }:
-            dispatch_agent_command(existing_command)
-        return existing_command
+        existing_command = (
+            AgentCommand.objects.select_related("agent", "instance")
+            .filter(
+                workflow_type="sql_workflow",
+                workflow_id=str(workflow.id),
+                status__in=(
+                    AgentCommandStatus.QUEUED,
+                    AgentCommandStatus.DISPATCHED,
+                    AgentCommandStatus.ACCEPTED,
+                    AgentCommandStatus.RUNNING,
+                ),
+            )
+            .order_by("-create_time")
+            .first()
+        )
+        if existing_command is not None:
+            workflow.status = "workflow_executing"
+            workflow.save(update_fields=["status"])
+            resolve_mailbox_items(workflow, category="execution_needed")
+            command = existing_command
+        else:
+            assignment = command_capable_assignment_for_instance(workflow.instance_id)
+            if assignment is None:
+                return None
 
-    assignment = command_capable_assignment_for_instance(workflow.instance_id)
-    if assignment is None:
-        return None
+            try:
+                content = workflow.sqlworkflowcontent
+            except ObjectDoesNotExist as exc:
+                raise ValueError(
+                    f"SQL workflow {workflow.id} is missing SQL content."
+                ) from exc
 
-    content = workflow.sqlworkflowcontent
-    command_type = (
-        AgentCommandType.SCHEMA_CHANGE
-        if workflow.syntax_type == 1
-        else AgentCommandType.QUERY_EXECUTE
-    )
-    command = AgentCommand.objects.create(
-        agent=assignment.agent,
-        instance=workflow.instance,
-        workflow_type="sql_workflow",
-        workflow_id=str(workflow.id),
-        command_type=command_type,
-        idempotency_key=f"sql_workflow:{workflow.id}",
-        payload={
-            "workflow_id": workflow.id,
-            "workflow_name": workflow.workflow_name,
-            "db_name": workflow.db_name,
-            "schema_name": workflow.schema_name,
-            "syntax_type": workflow.syntax_type,
-            "sql": content.sql_content,
-            "executor": executor or "direct",
-            "submitted_by": getattr(user, "username", "") if user else "",
-        },
-    )
-    workflow.status = "workflow_executing"
-    workflow.save(update_fields=["status"])
-    resolve_mailbox_items(workflow, category="execution_needed")
-    dispatch_agent_command(command)
+            command_type = (
+                AgentCommandType.SCHEMA_CHANGE
+                if workflow.syntax_type == 1
+                else AgentCommandType.QUERY_EXECUTE
+            )
+            try:
+                with transaction.atomic():
+                    command = AgentCommand.objects.create(
+                        agent=assignment.agent,
+                        instance=workflow.instance,
+                        workflow_type="sql_workflow",
+                        workflow_id=str(workflow.id),
+                        command_type=command_type,
+                        idempotency_key=f"sql_workflow:{workflow.id}",
+                        payload={
+                            "workflow_id": workflow.id,
+                            "workflow_name": workflow.workflow_name,
+                            "db_name": workflow.db_name,
+                            "schema_name": workflow.schema_name,
+                            "syntax_type": workflow.syntax_type,
+                            "sql": content.sql_content,
+                            "executor": executor or "direct",
+                            "submitted_by": (
+                                getattr(user, "username", "") if user else ""
+                            ),
+                        },
+                    )
+            except IntegrityError:
+                command = AgentCommand.objects.select_related("agent", "instance").get(
+                    idempotency_key=f"sql_workflow:{workflow.id}"
+                )
+            workflow.status = "workflow_executing"
+            workflow.save(update_fields=["status"])
+            resolve_mailbox_items(workflow, category="execution_needed")
+
+    if command.status in {
+        AgentCommandStatus.QUEUED,
+        AgentCommandStatus.DISPATCHED,
+    }:
+        dispatch_agent_command(command)
     return command
 
 
@@ -472,17 +499,18 @@ def complete_agent_workflow_command(command, outcome, message="", payload=None):
     workflow.save(update_fields=["status", "finish_time"])
     clear_agent_execution_caches(workflow)
 
-    audit_id = Audit.detail_by_workflow_id(
+    audit = Audit.detail_by_workflow_id(
         workflow_id=workflow.id, workflow_type=WorkflowType.SQL_REVIEW
-    ).audit_id
-    Audit.add_log(
-        audit_id=audit_id,
-        operation_type=6,
-        operation_type_desc="Execution finished",
-        operation_info=f"Agent execution result: {stage_status}",
-        operator="",
-        operator_display="System",
     )
+    if audit is not None:
+        Audit.add_log(
+            audit_id=audit.audit_id,
+            operation_type=6,
+            operation_type_desc="Execution finished",
+            operation_info=f"Agent execution result: {stage_status}",
+            operator="",
+            operator_display="System",
+        )
     sys_config = SysConfig()
     is_notified = (
         "Execute" in sys_config.get("notify_phase_control").split(",")

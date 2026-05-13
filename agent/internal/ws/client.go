@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -76,6 +77,10 @@ func (c Client) runOnce(ctx context.Context, handler Handler) error {
 	conn, response, err := c.Dialer.DialContext(ctx, c.Endpoint, c.Header)
 	if err != nil {
 		if response != nil {
+			if response.Body != nil {
+				_, _ = io.Copy(io.Discard, response.Body)
+				_ = response.Body.Close()
+			}
 			return fmt.Errorf("websocket dial failed: %s: %w", response.Status, err)
 		}
 		return err

@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Count
 from django.db.models import Q
@@ -75,7 +76,11 @@ class AgentListCreateView(generics.ListAPIView):
     def post(self, request):
         serializer = AgentCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        agent = serializer.save()
+        organization_id = (
+            getattr(request.user, "organization_id", "")
+            or settings.WORKOS_ORGANIZATION_ID
+        )
+        agent = serializer.save(organization_id=organization_id)
         issued_key = issue_agent_api_key(agent)
         data = AgentDetailSerializer(agent).data
         data["api_key"] = issued_key.value
@@ -136,7 +141,7 @@ class AgentAssignmentListReplaceView(views.APIView):
         agent = self.get_agent(agent_id)
         serializer = AgentAssignmentReplaceSerializer(
             data=request.data,
-            context={"agent": agent},
+            context={"agent": agent, "request": request},
         )
         serializer.is_valid(raise_exception=True)
 
@@ -239,7 +244,7 @@ class AgentToolArtifactListCreateView(generics.ListAPIView):
     serializer_class = AgentToolArtifactSerializer
 
     def get_queryset(self):
-        return AgentToolArtifact.objects.all()
+        return AgentToolArtifact.objects.order_by("id")
 
     def post(self, request):
         serializer = AgentToolArtifactSerializer(data=request.data)

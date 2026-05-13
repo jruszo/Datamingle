@@ -93,7 +93,10 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
 
     def _authorization_bearer(self):
         headers = dict(self.scope.get("headers") or [])
-        value = headers.get(b"authorization", b"").decode("utf-8")
+        try:
+            value = headers.get(b"authorization", b"").decode("utf-8")
+        except UnicodeDecodeError:
+            return ""
         parts = value.split()
         if len(parts) == 2 and parts[0].lower() == "bearer":
             return parts[1]
@@ -140,12 +143,16 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
             revision = int(revision)
         except (TypeError, ValueError):
             revision = 0
-        self.agent.last_config_revision = revision
-        metadata = dict(self.agent.metadata or {})
+        agent = Agent.objects.only(
+            "metadata", "last_config_revision", "last_seen_at"
+        ).get(pk=self.agent.pk)
+        metadata = dict(agent.metadata or {})
         metadata["last_config_hash"] = config_hash
-        self.agent.metadata = metadata
-        self.agent.last_seen_at = timezone.now()
-        self.agent.save(
+        now = timezone.now()
+        agent.last_config_revision = revision
+        agent.metadata = metadata
+        agent.last_seen_at = now
+        agent.save(
             update_fields=[
                 "last_config_revision",
                 "metadata",
@@ -153,30 +160,41 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
                 "update_time",
             ]
         )
+        self.agent.last_config_revision = revision
+        self.agent.metadata = metadata
+        self.agent.last_seen_at = now
 
     @database_sync_to_async
     def _store_metadata(self, key, value):
-        metadata = dict(self.agent.metadata or {})
+        agent = Agent.objects.only("metadata", "last_seen_at").get(pk=self.agent.pk)
+        metadata = dict(agent.metadata or {})
         metadata[key] = value
+        now = timezone.now()
+        agent.metadata = metadata
+        agent.last_seen_at = now
+        agent.save(update_fields=["metadata", "last_seen_at", "update_time"])
         self.agent.metadata = metadata
-        self.agent.last_seen_at = timezone.now()
-        self.agent.save(update_fields=["metadata", "last_seen_at", "update_time"])
+        self.agent.last_seen_at = now
 
     @database_sync_to_async
     def _store_module_status(self, content):
-        metadata = dict(self.agent.metadata or {})
+        agent = Agent.objects.only("metadata", "last_seen_at").get(pk=self.agent.pk)
+        metadata = dict(agent.metadata or {})
         statuses = dict(metadata.get("module_status") or {})
         module_name = content.get("module")
+        now = timezone.now()
         if module_name:
             statuses[module_name] = {
                 "status": content.get("status", ""),
                 "message": content.get("message", ""),
-                "updated_at": timezone.now().isoformat(),
+                "updated_at": now.isoformat(),
             }
         metadata["module_status"] = statuses
+        agent.metadata = metadata
+        agent.last_seen_at = now
+        agent.save(update_fields=["metadata", "last_seen_at", "update_time"])
         self.agent.metadata = metadata
-        self.agent.last_seen_at = timezone.now()
-        self.agent.save(update_fields=["metadata", "last_seen_at", "update_time"])
+        self.agent.last_seen_at = now
 
     @database_sync_to_async
     def _append_command_progress(self, content):

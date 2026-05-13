@@ -2,12 +2,14 @@ package placeholder
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/jruszo/datamingle/agent/internal/modules"
 )
 
 type Module struct {
+	mu           sync.RWMutex
 	name         string
 	capabilities []string
 	enabled      bool
@@ -27,15 +29,23 @@ func (m *Module) Capabilities() []string {
 }
 
 func (m *Module) ApplyConfig(ctx context.Context, cfg modules.Config) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.enabled = cfg.Enabled
 	m.revision = cfg.Revision
 	return nil
 }
 
 func (m *Module) Health(ctx context.Context) modules.Health {
+	m.mu.RLock()
+	enabled := m.enabled
+	revision := m.revision
+	m.mu.RUnlock()
+
 	status := "disabled"
 	message := "module placeholder is waiting for implementation"
-	if m.enabled {
+	if enabled {
 		status = "degraded"
 	}
 	return modules.Health{
@@ -44,12 +54,15 @@ func (m *Module) Health(ctx context.Context) modules.Health {
 		Message:   message,
 		UpdatedAt: time.Now().UTC(),
 		Details: map[string]any{
-			"revision": m.revision,
+			"revision": revision,
 		},
 	}
 }
 
 func (m *Module) Stop(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.enabled = false
 	return nil
 }

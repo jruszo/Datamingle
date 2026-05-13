@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-sql-driver/mysql"
 
@@ -146,21 +147,42 @@ func (e *Executor) schemaChange(ctx context.Context, assignment client.Assignmen
 	if executor != "direct" {
 		return Result{}, fmt.Errorf("%s execution requires external online schema tooling, which is not installed yet", executor)
 	}
+	if !isSafeDDL(sqlText) {
+		return Result{}, fmt.Errorf("schema.change only allows approved single-statement DDL")
+	}
 	db, err := openMySQL(assignment, stringValueOrDefault(command.Payload, "db_name", assignment.Database))
 	if err != nil {
 		return Result{}, err
 	}
 	defer db.Close()
-	result, err := db.ExecContext(ctx, sqlText)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return Result{}, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, sqlText)
 	if err != nil {
 		return Result{}, err
 	}
 	affectedRows, _ := result.RowsAffected()
+	if err := tx.Commit(); err != nil {
+		return Result{}, err
+	}
+	finished := e.now()
 	return Result{
 		Message: "schema change executed",
 		Payload: map[string]any{
 			"affected_rows":     affectedRows,
-			"execution_seconds": e.now().Sub(started).Seconds(),
+			"execution_seconds": finished.Sub(started).Seconds(),
+			"audit": map[string]any{
+				"assignment_id": assignment.ID,
+				"instance_id":   assignment.InstanceID,
+				"executor":      executor,
+				"sql":           sqlText,
+				"started_at":    started.UTC().Format(time.RFC3339Nano),
+				"finished_at":   finished.UTC().Format(time.RFC3339Nano),
+				"result":        "committed",
+			},
 		},
 	}, nil
 }
@@ -176,6 +198,7 @@ func openMySQL(assignment client.Assignment, database string) (*sql.DB, error) {
 	cfg.Timeout = 10 * time.Second
 	cfg.ReadTimeout = 30 * time.Second
 	cfg.WriteTimeout = 30 * time.Second
+	cfg.MultiStatements = false
 	if assignment.Charset != "" {
 		cfg.Params = map[string]string{"charset": assignment.Charset}
 	}
@@ -189,13 +212,185 @@ func openMySQL(assignment client.Assignment, database string) (*sql.DB, error) {
 }
 
 func isReadOnlySQL(sqlText string) bool {
-	trimmed := strings.TrimSpace(strings.TrimRight(sqlText, ";"))
-	lowered := strings.ToLower(trimmed)
-	return strings.HasPrefix(lowered, "select ") ||
-		strings.HasPrefix(lowered, "show ") ||
-		strings.HasPrefix(lowered, "explain ") ||
-		strings.HasPrefix(lowered, "describe ") ||
-		strings.HasPrefix(lowered, "desc ")
+	normalized, ok := normalizeSingleSQLStatement(sqlText)
+	if !ok {
+		return false
+	}
+	return hasSQLPrefix(normalized, "select") ||
+		hasSQLPrefix(normalized, "explain") ||
+		hasSQLPrefix(normalized, "describe") ||
+		hasSQLPrefix(normalized, "desc")
+}
+
+func isSafeDDL(sqlText string) bool {
+	normalized, ok := normalizeSingleSQLStatement(sqlText)
+	if !ok {
+		return false
+	}
+	return hasSQLPrefix(normalized, "create table") ||
+		hasSQLPrefix(normalized, "alter table") ||
+		hasSQLPrefix(normalized, "create index") ||
+		hasSQLPrefix(normalized, "drop index")
+}
+
+func normalizeSingleSQLStatement(sqlText string) (string, bool) {
+	stripped := stripSQLComments(sqlText)
+	trimmed := strings.TrimSpace(stripped)
+	trimmed = strings.TrimRightFunc(trimmed, func(r rune) bool {
+		return unicode.IsSpace(r) || r == ';'
+	})
+	trimmed = strings.TrimSpace(trimmed)
+	if trimmed == "" || containsSemicolonOutsideLiterals(trimmed) {
+		return "", false
+	}
+	return strings.ToLower(strings.Join(strings.Fields(trimmed), " ")), true
+}
+
+func hasSQLPrefix(sqlText, prefix string) bool {
+	return sqlText == prefix || strings.HasPrefix(sqlText, prefix+" ")
+}
+
+func stripSQLComments(sqlText string) string {
+	var out strings.Builder
+	inSingle := false
+	inDouble := false
+	inBacktick := false
+	for i := 0; i < len(sqlText); i++ {
+		ch := sqlText[i]
+		if inSingle {
+			out.WriteByte(ch)
+			if ch == '\\' && i+1 < len(sqlText) {
+				i++
+				out.WriteByte(sqlText[i])
+				continue
+			}
+			if ch == '\'' {
+				if i+1 < len(sqlText) && sqlText[i+1] == '\'' {
+					i++
+					out.WriteByte(sqlText[i])
+					continue
+				}
+				inSingle = false
+			}
+			continue
+		}
+		if inDouble {
+			out.WriteByte(ch)
+			if ch == '\\' && i+1 < len(sqlText) {
+				i++
+				out.WriteByte(sqlText[i])
+				continue
+			}
+			if ch == '"' {
+				inDouble = false
+			}
+			continue
+		}
+		if inBacktick {
+			out.WriteByte(ch)
+			if ch == '`' {
+				inBacktick = false
+			}
+			continue
+		}
+
+		switch {
+		case ch == '\'':
+			inSingle = true
+			out.WriteByte(ch)
+		case ch == '"':
+			inDouble = true
+			out.WriteByte(ch)
+		case ch == '`':
+			inBacktick = true
+			out.WriteByte(ch)
+		case ch == '-' && i+1 < len(sqlText) && sqlText[i+1] == '-' && (i+2 == len(sqlText) || isSQLCommentSpace(sqlText[i+2])):
+			i += 2
+			for i < len(sqlText) && sqlText[i] != '\n' {
+				i++
+			}
+			if i < len(sqlText) {
+				out.WriteByte('\n')
+			}
+		case ch == '#':
+			for i < len(sqlText) && sqlText[i] != '\n' {
+				i++
+			}
+			if i < len(sqlText) {
+				out.WriteByte('\n')
+			}
+		case ch == '/' && i+1 < len(sqlText) && sqlText[i+1] == '*':
+			i += 2
+			for i+1 < len(sqlText) && !(sqlText[i] == '*' && sqlText[i+1] == '/') {
+				if sqlText[i] == '\n' {
+					out.WriteByte('\n')
+				} else {
+					out.WriteByte(' ')
+				}
+				i++
+			}
+			if i+1 < len(sqlText) {
+				i++
+			}
+		default:
+			out.WriteByte(ch)
+		}
+	}
+	return out.String()
+}
+
+func isSQLCommentSpace(ch byte) bool {
+	return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n'
+}
+
+func containsSemicolonOutsideLiterals(sqlText string) bool {
+	inSingle := false
+	inDouble := false
+	inBacktick := false
+	for i := 0; i < len(sqlText); i++ {
+		ch := sqlText[i]
+		if inSingle {
+			if ch == '\\' && i+1 < len(sqlText) {
+				i++
+				continue
+			}
+			if ch == '\'' {
+				if i+1 < len(sqlText) && sqlText[i+1] == '\'' {
+					i++
+					continue
+				}
+				inSingle = false
+			}
+			continue
+		}
+		if inDouble {
+			if ch == '\\' && i+1 < len(sqlText) {
+				i++
+				continue
+			}
+			if ch == '"' {
+				inDouble = false
+			}
+			continue
+		}
+		if inBacktick {
+			if ch == '`' {
+				inBacktick = false
+			}
+			continue
+		}
+		switch ch {
+		case '\'':
+			inSingle = true
+		case '"':
+			inDouble = true
+		case '`':
+			inBacktick = true
+		case ';':
+			return true
+		}
+	}
+	return false
 }
 
 func stringValue(payload map[string]any, key string) string {

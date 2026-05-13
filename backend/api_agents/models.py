@@ -29,7 +29,7 @@ class Agent(models.Model):
     )
     api_key_prefix = models.CharField(max_length=32, blank=True, default="")
     api_key_hash = models.CharField(
-        max_length=64, blank=True, default="", db_index=True
+        max_length=64, blank=True, default=None, null=True, db_index=True, unique=True
     )
     hostname = models.CharField(max_length=255, blank=True, default="")
     platform = models.CharField(max_length=64, blank=True, default="")
@@ -97,6 +97,9 @@ class AgentInstanceAssignment(models.Model):
     modules = models.JSONField(default=list, blank=True)
     capabilities = models.JSONField(default=list, blank=True)
     command_enabled = models.BooleanField(default=False)
+    active_command_instance_id = models.PositiveIntegerField(
+        null=True, blank=True, unique=True, editable=False
+    )
     metrics_enabled = models.BooleanField(default=True)
     online_schema_enabled = models.BooleanField(default=False)
     logs_enabled = models.BooleanField(default=False)
@@ -105,6 +108,9 @@ class AgentInstanceAssignment(models.Model):
 
     def clean(self):
         super().clean()
+        self.active_command_instance_id = (
+            self.instance_id if self.enabled and self.command_enabled else None
+        )
         if self.enabled and self.command_enabled:
             duplicate = AgentInstanceAssignment.objects.filter(
                 instance=self.instance,
@@ -216,7 +222,9 @@ class AgentCommand(models.Model):
         default=AgentCommandStatus.QUEUED,
         db_index=True,
     )
-    idempotency_key = models.CharField(max_length=128, blank=True, db_index=True)
+    idempotency_key = models.CharField(
+        max_length=128, blank=True, default=None, null=True, unique=True
+    )
     payload = models.JSONField(default=dict, blank=True)
     result = models.JSONField(default=dict, blank=True)
     error = models.JSONField(default=dict, blank=True)
@@ -238,6 +246,11 @@ class AgentCommand(models.Model):
             message=message,
             payload=payload or {},
         )
+
+    def save(self, *args, **kwargs):
+        if not self.idempotency_key:
+            self.idempotency_key = None
+        super().save(*args, **kwargs)
 
     class Meta:
         db_table = "agent_command"

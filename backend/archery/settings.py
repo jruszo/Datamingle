@@ -292,10 +292,18 @@ def _redis_url_for_channels(raw_url):
     query = dict(parse_qsl(parsed.query))
     password = query.pop("PASSWORD", "") or query.pop("password", "")
     if password and not parsed.password:
-        netloc = parsed.hostname or ""
+        if not parsed.hostname:
+            raise ValueError(f"Malformed Redis URL for channels: {raw_url!r}")
+        host = parsed.hostname
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        netloc = host
         if parsed.port:
             netloc = f"{netloc}:{parsed.port}"
-        netloc = f":{password}@{netloc}"
+        if parsed.username:
+            netloc = f"{parsed.username}:{password}@{netloc}"
+        else:
+            netloc = f":{password}@{netloc}"
         parsed = parsed._replace(netloc=netloc)
     parsed = parsed._replace(query=urlencode(query))
     return urlunparse(parsed)

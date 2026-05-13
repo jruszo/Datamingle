@@ -144,7 +144,11 @@ class AgentApiTests(APITestCase):
     def test_create_and_list_agent(self):
         response = self.client.post(
             "/api/v1/agents/",
-            {"name": "prod-agent-01", "display_name": "Production Agent"},
+            {
+                "name": "prod-agent-01",
+                "display_name": "Production Agent",
+                "organization_id": "org_evil",
+            },
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
@@ -154,6 +158,7 @@ class AgentApiTests(APITestCase):
         self.assertEqual(payload["api_key_backend"], "local")
         self.assertIn("DATAMINGLE_AGENT_API_KEY", payload["install_command"])
         agent = Agent.objects.get(name="prod-agent-01")
+        self.assertNotEqual(agent.organization_id, "org_evil")
         self.assertEqual(agent.api_key_prefix, payload["api_key"][:16])
         self.assertNotEqual(agent.api_key_hash, payload["api_key"])
 
@@ -286,7 +291,7 @@ class WorkOSAgentAPIKeyTests(APITestCase):
         agent.refresh_from_db()
         self.assertEqual(agent.workos_api_key_id, "api_key_123")
         self.assertEqual(agent.api_key_prefix, "sk_...once")
-        self.assertEqual(agent.api_key_hash, "")
+        self.assertIsNone(agent.api_key_hash)
         mock_post.assert_called_once()
         self.assertEqual(
             mock_post.call_args.kwargs["json"]["permissions"],
@@ -354,6 +359,30 @@ class AgentFacingApiTests(APITestCase):
         self.assertEqual(agent.install_id, "ins_test_123")
         self.assertEqual(agent.status, AgentStatus.ONLINE)
         self.assertEqual(agent.hostname, "db-host-01")
+
+    def test_register_does_not_clear_existing_optional_metadata(self):
+        agent = Agent.objects.create(
+            name="agent-a",
+            install_id="ins_test_123",
+            hostname="db-host-01",
+            platform="linux",
+            architecture="amd64",
+            agent_version="0.1.0",
+        )
+        self.authenticate_agent(agent)
+
+        response = self.client.post(
+            "/api/v1/agent/register/",
+            {"install_id": "ins_test_123", "config_revision": 1},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        agent.refresh_from_db()
+        self.assertEqual(agent.hostname, "db-host-01")
+        self.assertEqual(agent.platform, "linux")
+        self.assertEqual(agent.architecture, "amd64")
+        self.assertEqual(agent.agent_version, "0.1.0")
 
     def test_disabled_agent_cannot_authenticate(self):
         agent = Agent.objects.create(name="agent-a", enabled=False)
@@ -497,6 +526,55 @@ class AgentFacingApiTests(APITestCase):
         self.assertEqual(command.result["ok"], True)
         self.assertEqual(command.lease_owner, "")
         self.assertIsNone(command.lease_expires_at)
+
+    @patch("api_agents.agent_api.complete_agent_workflow_command")
+    def test_terminal_command_finish_is_idempotent(self, mock_complete):
+        agent = Agent.objects.create(name="agent-a")
+        instance = create_instance()
+        command = AgentCommand.objects.create(
+            agent=agent,
+            instance=instance,
+            workflow_type="test",
+            workflow_id="workflow-1",
+            command_type=AgentCommandType.CONNECTION_TEST,
+            status=AgentCommandStatus.SUCCEEDED,
+            result={"ok": True},
+        )
+        self.authenticate_agent(agent)
+
+        response = self.client.post(
+            f"/api/v1/agent/commands/{command.id}/finish/",
+            {"message": "duplicate", "result": {"ok": False}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_complete.assert_not_called()
+        command.refresh_from_db()
+        self.assertEqual(command.result["ok"], True)
+        self.assertFalse(command.events.filter(event_type="command.succeeded").exists())
+
+    def test_terminal_command_rejects_progress(self):
+        agent = Agent.objects.create(name="agent-a")
+        instance = create_instance()
+        command = AgentCommand.objects.create(
+            agent=agent,
+            instance=instance,
+            workflow_type="test",
+            workflow_id="workflow-1",
+            command_type=AgentCommandType.CONNECTION_TEST,
+            status=AgentCommandStatus.FAILED,
+        )
+        self.authenticate_agent(agent)
+
+        response = self.client.post(
+            f"/api/v1/agent/commands/{command.id}/progress/",
+            {"message": "late"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertFalse(command.events.filter(event_type="command.progress").exists())
 
     @patch("api_agents.services.emit_execution_finished_notifications")
     @patch("api_agents.services.notify_for_execute")

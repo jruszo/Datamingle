@@ -200,7 +200,30 @@ async function submitCreateAgent() {
 }
 
 async function copyText(value: string) {
-  await navigator.clipboard.writeText(value)
+  try {
+    await navigator.clipboard.writeText(value)
+  } catch (errorValue) {
+    console.error('Failed to copy text to clipboard.', errorValue)
+  }
+}
+
+async function fetchAllInstanceInventory(token: string) {
+  const results: InstanceInventoryRecord[] = []
+  const size = 100
+  let page = 1
+  let totalCount: number | null = null
+
+  while (totalCount === null || results.length < totalCount) {
+    const response = await fetchInstanceInventory(token, { page, size })
+    results.push(...response.results)
+    totalCount = response.count
+    if (!response.next || response.results.length === 0) {
+      break
+    }
+    page += 1
+  }
+
+  return results
 }
 
 async function openAgentDetail(agent: AgentRecord) {
@@ -216,17 +239,18 @@ async function openAgentDetail(agent: AgentRecord) {
   commandPage.value = 1
 
   try {
+    const token = requireToken()
     const [detail, inventory, commands] = await Promise.all([
-      fetchAgent(agent.id, requireToken()),
-      fetchInstanceInventory(requireToken(), { page: 1, size: 100 }),
-      fetchAgentCommands(agent.id, requireToken(), {
+      fetchAgent(agent.id, token),
+      fetchAllInstanceInventory(token),
+      fetchAgentCommands(agent.id, token, {
         page: commandPage.value,
         size: commandPageSize.value,
       }),
     ])
     selectedAgent.value = detail
-    availableInstances.value = inventory.results
-    assignmentRows.value = buildAssignmentDrafts(detail.assignments, inventory.results)
+    availableInstances.value = inventory
+    assignmentRows.value = buildAssignmentDrafts(detail.assignments, inventory)
     commandRows.value = commands.results
     commandTotalCount.value = commands.count
   } catch (errorValue) {

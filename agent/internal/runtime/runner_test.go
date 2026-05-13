@@ -20,7 +20,7 @@ func TestHandleConfigChangedRefreshesConfig(t *testing.T) {
 		if r.URL.Path != "/api/v1/agent/me/config/" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
-		return jsonResponse(client.AgentConfig{AgentID: 7, Revision: 9}), nil
+		return jsonResponse(t, client.AgentConfig{AgentID: 7, Revision: 9}), nil
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -47,16 +47,16 @@ func TestHandleCommandAvailableFetchesAcksStartsAndReportsFailure(t *testing.T) 
 		pathsMu.Unlock()
 		switch r.URL.Path {
 		case "/api/v1/agent/commands/42/":
-			return jsonResponse(client.AgentCommand{ID: 42, InstanceID: 7, CommandType: "unsupported"}), nil
+			return jsonResponse(t, client.AgentCommand{ID: 42, InstanceID: 7, CommandType: "unsupported"}), nil
 		case "/api/v1/agent/commands/42/ack/":
-			return jsonResponse(client.CommandAckResponse{Status: "accepted"}), nil
+			return jsonResponse(t, client.CommandAckResponse{Status: "accepted"}), nil
 		case "/api/v1/agent/commands/42/start/":
-			return jsonResponse(client.CommandStatusResponse{Status: "running"}), nil
+			return jsonResponse(t, client.CommandStatusResponse{Status: "running"}), nil
 		case "/api/v1/agent/commands/42/progress/":
-			return jsonResponse(client.CommandStatusResponse{Status: "running"}), nil
+			return jsonResponse(t, client.CommandStatusResponse{Status: "running"}), nil
 		case "/api/v1/agent/commands/42/fail/":
 			close(done)
-			return jsonResponse(client.CommandStatusResponse{Status: "failed"}), nil
+			return jsonResponse(t, client.CommandStatusResponse{Status: "failed"}), nil
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 			return nil, nil
@@ -126,8 +126,12 @@ func (f roundTripFunc) Do(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-func jsonResponse(value any) *http.Response {
-	raw, _ := json.Marshal(value)
+func jsonResponse(t *testing.T, value any) *http.Response {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal JSON response: %v", err)
+	}
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Status:     "200 OK",

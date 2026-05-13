@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -61,7 +62,11 @@ func EnsureArtifact(ctx context.Context, cacheDir string, artifact Artifact, htt
 	}
 	reader := io.Reader(resp.Body)
 	if artifact.SizeBytes > 0 {
-		reader = io.LimitReader(resp.Body, artifact.SizeBytes+1)
+		limit := int64(math.MaxInt64)
+		if artifact.SizeBytes < math.MaxInt64 {
+			limit = artifact.SizeBytes + 1
+		}
+		reader = io.LimitReader(resp.Body, limit)
 	}
 	written, err := io.Copy(tmp, reader)
 	if err != nil {

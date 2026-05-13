@@ -98,7 +98,7 @@ func statusCommand(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stdout, "status: not registered\n")
 		fmt.Fprintf(stdout, "install_id: unavailable (%v)\n", err)
-		return 0
+		return 1
 	}
 
 	fmt.Fprintf(stdout, "status: configured\n")

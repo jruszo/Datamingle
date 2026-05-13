@@ -5,7 +5,7 @@ Go-based host agent for Datamingle.
 This first implementation slice includes the local runtime foundation:
 
 - config loading and validation
-- API key lookup through `DATAMINGLE_AGENT_API_KEY`
+- API key lookup through the default/example `DATAMINGLE_AGENT_API_KEY` environment variable, configurable with `api_key_env`
 - durable install ID creation
 - registration/config/heartbeat REST client
 - module reconciliation interfaces
@@ -34,5 +34,6 @@ log_dir: /var/log/datamingle-agent
 runtime_dir: /run/datamingle-agent
 ```
 
-The API key is read from the environment and is never written to the config
-file.
+The API key is read from the environment named by `api_key_env` and is never
+written to the config file. `DATAMINGLE_AGENT_API_KEY` is the default/example
+name, not a required variable name.

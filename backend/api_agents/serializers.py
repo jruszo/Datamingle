@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from sql.utils.resource_group import user_instances
 from api_agents.models import (
     Agent,
     AgentCommand,
@@ -45,7 +46,7 @@ class AgentListSerializer(serializers.ModelSerializer):
 class AgentCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Agent
-        fields = ("id", "organization_id", "name", "display_name", "metadata")
+        fields = ("id", "name", "display_name", "metadata")
         read_only_fields = ("id",)
 
     def validate_name(self, value):
@@ -112,7 +113,7 @@ class AgentAssignmentSerializer(serializers.ModelSerializer):
 
 
 class AgentAssignmentReplaceItemSerializer(serializers.Serializer):
-    instance = serializers.PrimaryKeyRelatedField(queryset=Instance.objects.all())
+    instance = serializers.PrimaryKeyRelatedField(queryset=Instance.objects.none())
     enabled = serializers.BooleanField(default=True)
     modules = serializers.ListField(
         child=serializers.CharField(), required=False, default=list
@@ -128,6 +129,15 @@ class AgentAssignmentReplaceItemSerializer(serializers.Serializer):
 
 class AgentAssignmentReplaceSerializer(serializers.Serializer):
     assignments = AgentAssignmentReplaceItemSerializer(many=True)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get("request")
+        if request is not None:
+            queryset = user_instances(request.user)
+        else:
+            queryset = Instance.objects.none()
+        self.fields["assignments"].child.fields["instance"].queryset = queryset
 
     def validate_assignments(self, value):
         seen_instances = set()
@@ -200,7 +210,6 @@ class AgentCommandDetailSerializer(AgentCommandSummarySerializer):
             "error",
             "lease_owner",
             "lease_expires_at",
-            "cancel_requested_at",
             "events",
         )
 

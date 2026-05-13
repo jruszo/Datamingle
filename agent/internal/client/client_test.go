@@ -24,7 +24,7 @@ func TestRegisterSendsBearerTokenAndPayload(t *testing.T) {
 		if payload.InstallID != "ins_123" {
 			t.Fatalf("unexpected install id %q", payload.InstallID)
 		}
-		return jsonResponse(RegisterResponse{AgentID: 7, DesiredConfigRevision: 3}), nil
+		return jsonResponse(t, RegisterResponse{AgentID: 7, DesiredConfigRevision: 3}), nil
 	})
 
 	c, err := New("https://datamingle.example.com", "key_123", doer)
@@ -42,7 +42,7 @@ func TestRegisterSendsBearerTokenAndPayload(t *testing.T) {
 
 func TestFetchConfigSetsFetchedTime(t *testing.T) {
 	doer := roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		return jsonResponse(AgentConfig{AgentID: 7, Revision: 4}), nil
+		return jsonResponse(t, AgentConfig{AgentID: 7, Revision: 4}), nil
 	})
 
 	c, err := New("https://datamingle.example.com", "", doer)
@@ -64,9 +64,9 @@ func TestFetchAndAckCommandUseAgentCommandEndpoints(t *testing.T) {
 		paths = append(paths, r.URL.Path)
 		switch r.URL.Path {
 		case "/api/v1/agent/commands/42/":
-			return jsonResponse(AgentCommand{ID: 42, CommandType: "connection.test"}), nil
+			return jsonResponse(t, AgentCommand{ID: 42, CommandType: "connection.test"}), nil
 		case "/api/v1/agent/commands/42/ack/":
-			return jsonResponse(CommandAckResponse{Status: "accepted"}), nil
+			return jsonResponse(t, CommandAckResponse{Status: "accepted"}), nil
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 			return nil, nil
@@ -100,7 +100,7 @@ func TestCommandLifecycleMethodsUseAgentCommandEndpoints(t *testing.T) {
 	var paths []string
 	doer := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		paths = append(paths, r.URL.Path)
-		return jsonResponse(CommandStatusResponse{Status: "ok"}), nil
+		return jsonResponse(t, CommandStatusResponse{Status: "ok"}), nil
 	})
 
 	c, err := New("https://datamingle.example.com", "key_123", doer)
@@ -179,14 +179,39 @@ func TestWebsocketEndpointAndAuthorizationHeader(t *testing.T) {
 	}
 }
 
+func TestAssignmentRedactsPasswordWhenFormattedAndMarshaled(t *testing.T) {
+	assignment := Assignment{
+		Username: "root",
+		Password: "supersecret",
+		Host:     "db.example.com",
+	}
+
+	raw, err := json.Marshal(assignment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, output := range []string{string(raw), assignment.String()} {
+		if strings.Contains(output, "supersecret") {
+			t.Fatalf("password leaked in %q", output)
+		}
+		if !strings.Contains(output, "redacted") {
+			t.Fatalf("expected redacted marker in %q", output)
+		}
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) Do(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-func jsonResponse(value any) *http.Response {
-	raw, _ := json.Marshal(value)
+func jsonResponse(t *testing.T, value any) *http.Response {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal JSON response: %v", err)
+	}
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Status:     "200 OK",

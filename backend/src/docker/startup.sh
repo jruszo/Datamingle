@@ -39,8 +39,8 @@ GUNICORN_RELOAD_ARGS=""
 if [[ "${GUNICORN_RELOAD:-0}" == "1" ]]; then
     GUNICORN_RELOAD_ARGS="--reload"
 fi
-if [[ "${DATAMINGLE_SERVE_ASGI:-1}" == "1" ]]; then
-    daphne -b 127.0.0.1 -p 8888 --proxy-headers archery.asgi:application
+if [[ "${DATAMINGLE_SERVE_ASGI:-0}" == "1" ]]; then
+    daphne -b 127.0.0.1 -p 8888 --proxy-headers --http-timeout 600 --websocket_timeout 600 --application-close-timeout 600 archery.asgi:application
 else
     gunicorn -w 4 -b 127.0.0.1:8888 --timeout 600 ${GUNICORN_RELOAD_ARGS} archery.wsgi:application
 fi

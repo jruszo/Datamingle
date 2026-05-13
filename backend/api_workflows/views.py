@@ -1680,6 +1680,9 @@ class WorkflowExecutionCreate(views.APIView):
                         task_name=f"sqlreview-execute-{workflow_id}",
                     )
                 else:
+                    workflow.status = "workflow_executing"
+                    workflow.save(update_fields=["status"])
+                    resolve_mailbox_items(workflow, category="execution_needed")
                     del_schedule(f"sqlreview-timing-{workflow_id}")
                 # Add workflow log
                 operation_info = (
