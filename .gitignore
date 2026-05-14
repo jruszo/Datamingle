@@ -29,3 +29,5 @@ frontend/playwright-report/
 frontend/test-results/
 backend/static/
 /supervisord.pid
+agent/.tools/
+agent/coverage.out

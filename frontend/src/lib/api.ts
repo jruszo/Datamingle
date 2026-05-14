@@ -222,6 +222,125 @@ export type InstanceInventoryFilters = {
   ordering?: string
 }
 
+export type AgentStatus = 'pending' | 'online' | 'offline' | 'disabled' | 'revoked'
+
+export type AgentRecord = {
+  id: number
+  organization_id: string
+  name: string
+  display_name: string
+  status: AgentStatus
+  hostname: string
+  platform: string
+  architecture: string
+  agent_version: string
+  last_seen_at: string | null
+  last_connected_at: string | null
+  last_disconnected_at: string | null
+  last_config_revision: number
+  desired_config_revision: number
+  enabled: boolean
+  assignment_count: number
+  create_time: string
+  update_time: string
+}
+
+export type AgentAssignmentRecord = {
+  id: number
+  instance: number
+  instance_name: string
+  db_type: string
+  host: string
+  port: number
+  enabled: boolean
+  modules: string[]
+  capabilities: string[]
+  command_enabled: boolean
+  metrics_enabled: boolean
+  online_schema_enabled: boolean
+  logs_enabled: boolean
+  create_time: string
+  update_time: string
+}
+
+export type AgentCommandSummaryRecord = {
+  id: number
+  instance: number
+  instance_name: string
+  workflow_type: string
+  workflow_id: string
+  command_type: string
+  status: string
+  queued_at: string
+  started_at: string | null
+  finished_at: string | null
+  cancel_requested_at: string | null
+  create_time: string
+}
+
+export type AgentCommandEventRecord = {
+  id: number
+  event_type: string
+  message: string
+  payload: Record<string, unknown>
+  create_time: string
+}
+
+export type AgentCommandDetailRecord = AgentCommandSummaryRecord & {
+  payload: Record<string, unknown>
+  result: Record<string, unknown>
+  error: Record<string, unknown>
+  lease_owner: string
+  lease_expires_at: string | null
+  cancel_requested_at: string | null
+  events: AgentCommandEventRecord[]
+}
+
+export type AgentDetailRecord = AgentRecord & {
+  metadata: Record<string, unknown>
+  assignments: AgentAssignmentRecord[]
+  recent_commands: AgentCommandSummaryRecord[]
+}
+
+export type AgentCreatePayload = {
+  name: string
+  display_name?: string
+}
+
+export type AgentCreateResponse = AgentDetailRecord & {
+  api_key: string
+  api_key_backend: string
+  install_command: string
+}
+
+export type AgentAssignmentReplaceItem = {
+  instance: number
+  enabled: boolean
+  modules: string[]
+  capabilities: string[]
+  command_enabled: boolean
+  metrics_enabled: boolean
+  online_schema_enabled: boolean
+  logs_enabled: boolean
+}
+
+export type AgentAssignmentReplacePayload = {
+  assignments: AgentAssignmentReplaceItem[]
+}
+
+export type AgentListOptions = {
+  page?: number
+  size?: number
+  search?: string
+}
+
+export type AgentCommandListOptions = {
+  page?: number
+  size?: number
+  search?: string
+  status?: string
+}
+
 export type InstanceCreatePayload = {
   instance_name: string
   type: string
@@ -624,6 +743,103 @@ export function fetchInstanceInventory(
 export function fetchInstanceInventoryMetadata(token: string) {
   return apiGet<unknown>('/v1/instance/metadata/', { token }).then((payload) =>
     extractData<InstanceInventoryMetadata>(payload),
+  )
+}
+
+export function fetchAgents(token: string, options: AgentListOptions = {}) {
+  const params = new URLSearchParams()
+  if (options.page) {
+    params.set('page', `${options.page}`)
+  }
+  if (options.size) {
+    params.set('size', `${options.size}`)
+  }
+  if (options.search?.trim()) {
+    params.set('search', options.search.trim())
+  }
+
+  const queryString = params.toString()
+  const path = queryString ? `/v1/agents/?${queryString}` : '/v1/agents/'
+  return apiGet<unknown>(path, { token }).then((payload) =>
+    extractData<PaginatedResponse<AgentRecord>>(payload),
+  )
+}
+
+export function createAgent(payload: AgentCreatePayload, token: string) {
+  return apiPost<unknown>('/v1/agents/', payload, { token }).then((responsePayload) =>
+    extractData<AgentCreateResponse>(responsePayload),
+  )
+}
+
+export function fetchAgent(agentId: number, token: string) {
+  return apiGet<unknown>(`/v1/agents/${agentId}/`, { token }).then((payload) =>
+    extractData<AgentDetailRecord>(payload),
+  )
+}
+
+export function updateAgent(
+  agentId: number,
+  payload: Partial<Pick<AgentDetailRecord, 'display_name' | 'enabled' | 'metadata'>>,
+  token: string,
+) {
+  return apiPatch<unknown>(`/v1/agents/${agentId}/`, payload, { token }).then((responsePayload) =>
+    extractData<AgentDetailRecord>(responsePayload),
+  )
+}
+
+export function revokeAgent(agentId: number, token: string) {
+  return apiDelete<unknown>(`/v1/agents/${agentId}/`, { token }).then((responsePayload) =>
+    extractData<AgentDetailRecord>(responsePayload),
+  )
+}
+
+export function replaceAgentAssignments(
+  agentId: number,
+  payload: AgentAssignmentReplacePayload,
+  token: string,
+) {
+  return apiPut<unknown>(`/v1/agents/${agentId}/assignments/`, payload, { token }).then((responsePayload) =>
+    extractData<AgentAssignmentRecord[]>(responsePayload),
+  )
+}
+
+export function fetchAgentCommands(
+  agentId: number,
+  token: string,
+  options: AgentCommandListOptions = {},
+) {
+  const params = new URLSearchParams()
+  if (options.page) {
+    params.set('page', `${options.page}`)
+  }
+  if (options.size) {
+    params.set('size', `${options.size}`)
+  }
+  if (options.search?.trim()) {
+    params.set('search', options.search.trim())
+  }
+  if (options.status?.trim()) {
+    params.set('status', options.status.trim())
+  }
+
+  const queryString = params.toString()
+  const path = queryString
+    ? `/v1/agents/${agentId}/commands/?${queryString}`
+    : `/v1/agents/${agentId}/commands/`
+  return apiGet<unknown>(path, { token }).then((payload) =>
+    extractData<PaginatedResponse<AgentCommandSummaryRecord>>(payload),
+  )
+}
+
+export function fetchAgentCommand(agentId: number, commandId: number, token: string) {
+  return apiGet<unknown>(`/v1/agents/${agentId}/commands/${commandId}/`, { token }).then((payload) =>
+    extractData<AgentCommandDetailRecord>(payload),
+  )
+}
+
+export function cancelAgentCommand(agentId: number, commandId: number, token: string) {
+  return apiPost<unknown>(`/v1/agents/${agentId}/commands/${commandId}/cancel/`, {}, { token }).then(
+    (responsePayload) => extractData<AgentCommandDetailRecord>(responsePayload),
   )
 }
 

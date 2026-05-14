@@ -1,0 +1,93 @@
+from django.urls import path
+
+from api_agents import agent_api
+from api_agents import views
+
+urlpatterns = [
+    path(
+        "v1/agent/register/",
+        agent_api.AgentRegisterView.as_view(),
+        name="agent-register",
+    ),
+    path(
+        "v1/agent/me/config/",
+        agent_api.AgentConfigView.as_view(),
+        name="agent-config",
+    ),
+    path(
+        "v1/agent/me/heartbeat/",
+        agent_api.AgentHeartbeatView.as_view(),
+        name="agent-heartbeat",
+    ),
+    path(
+        "v1/agent/commands/<int:command_id>/",
+        agent_api.AgentCommandDetailView.as_view(),
+        name="agent-command-detail",
+    ),
+    path(
+        "v1/agent/commands/<int:command_id>/ack/",
+        agent_api.AgentCommandAckView.as_view(),
+        name="agent-command-ack",
+    ),
+    path(
+        "v1/agent/commands/<int:command_id>/start/",
+        agent_api.AgentCommandStartView.as_view(),
+        name="agent-command-start",
+    ),
+    path(
+        "v1/agent/commands/<int:command_id>/progress/",
+        agent_api.AgentCommandProgressView.as_view(),
+        name="agent-command-progress",
+    ),
+    path(
+        "v1/agent/commands/<int:command_id>/finish/",
+        agent_api.AgentCommandFinishView.as_view(),
+        name="agent-command-finish",
+    ),
+    path(
+        "v1/agent/commands/<int:command_id>/fail/",
+        agent_api.AgentCommandFailView.as_view(),
+        name="agent-command-fail",
+    ),
+    path(
+        "v1/agent/commands/<int:command_id>/cancel/",
+        agent_api.AgentCommandCancelledView.as_view(),
+        name="agent-command-cancel",
+    ),
+    path("v1/agents/", views.AgentListCreateView.as_view(), name="agent-list"),
+    path(
+        "v1/agents/<int:agent_id>/",
+        views.AgentDetailView.as_view(),
+        name="agent-detail",
+    ),
+    path(
+        "v1/agents/<int:agent_id>/assignments/",
+        views.AgentAssignmentListReplaceView.as_view(),
+        name="agent-assignments",
+    ),
+    path(
+        "v1/agents/<int:agent_id>/commands/",
+        views.AgentCommandListView.as_view(),
+        name="agent-command-list-browser",
+    ),
+    path(
+        "v1/agents/<int:agent_id>/commands/<int:command_id>/",
+        views.AgentCommandDetailView.as_view(),
+        name="agent-command-detail-browser",
+    ),
+    path(
+        "v1/agents/<int:agent_id>/commands/<int:command_id>/cancel/",
+        views.AgentCommandCancelView.as_view(),
+        name="agent-command-cancel-browser",
+    ),
+    path(
+        "v1/agents/tool-artifacts/",
+        views.AgentToolArtifactListCreateView.as_view(),
+        name="agent-tool-artifact-list",
+    ),
+    path(
+        "v1/agents/tool-artifacts/<int:artifact_id>/",
+        views.AgentToolArtifactDetailView.as_view(),
+        name="agent-tool-artifact-detail",
+    ),
+]

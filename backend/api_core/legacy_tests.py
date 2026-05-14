@@ -4005,6 +4005,29 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(workflow.status, "workflow_review_pass")
         self.assertIn("foreign keys", r.json()["errors"])
 
+    @patch(
+        "api_workflows.views.dispatch_sql_workflow_to_agent",
+        side_effect=ValueError("SQL workflow is missing SQL content."),
+    )
+    @patch("api_workflows.views._resolve_mysql_ddl_executor")
+    def test_execute_workflow_returns_validation_error_on_agent_dispatch_failure(
+        self, mock_resolve_executor, _mock_dispatch
+    ):
+        _, workflow, _, _ = self._create_mysql_workflow()
+        mock_resolve_executor.return_value = Mock(executor_id="gh-ost")
+
+        r = self.client.post(
+            f"/api/v1/workflow/{workflow.id}/executions/",
+            {"workflow_type": 2, "mode": "auto", "executor": "gh-ost"},
+            format="json",
+        )
+
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        workflow.refresh_from_db()
+        self.assertEqual(workflow.status, "workflow_review_pass")
+        self.assertIn("Unable to dispatch workflow to agent", r.json()["errors"])
+        self.assertIn("missing SQL content", r.json()["errors"])
+
     def test_execute_workflow_requires_execute_permission(self):
         self.user.user_permissions.remove(
             Permission.objects.get(codename="sql_execute")

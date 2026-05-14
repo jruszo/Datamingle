@@ -72,6 +72,7 @@ from api_workflows.serializers import (
     WorkflowContentSerializer,
     WorkflowLogListSerializer,
 )
+from api_agents.services import dispatch_sql_workflow_to_agent
 
 logger = logging.getLogger("default")
 LOAD_DATA_PATTERN = re.compile(r"^\s*load\s+data\b", re.IGNORECASE)
@@ -1652,28 +1653,76 @@ class WorkflowExecutionCreate(views.APIView):
                         ) from None
                     selected_executor = resolved_executor.executor_id
                 # Set workflow status to queuing
-                workflow.status = "workflow_queuing"
-                workflow.save(update_fields=["status"])
-                resolve_mailbox_items(workflow, category="execution_needed")
-                # Delete scheduled execution task
-                schedule_name = f"sqlreview-timing-{workflow_id}"
-                del_schedule(schedule_name)
-                # Add to execution queue
-                async_task(
-                    "sql.utils.execute_sql.execute",
-                    workflow_id,
-                    user,
-                    execution_options=(
-                        {"executor": selected_executor} if selected_executor else None
-                    ),
-                    hook="sql.utils.execute_sql.execute_callback",
-                    timeout=-1,
-                    task_name=f"sqlreview-execute-{workflow_id}",
-                )
+                try:
+                    agent_command = dispatch_sql_workflow_to_agent(
+                        workflow,
+                        user=user,
+                        executor=selected_executor,
+                    )
+                except ValueError as exc:
+                    logger.warning(
+                        "Failed to dispatch SQL workflow to agent",
+                        exc_info=True,
+                    )
+                    error_detail = str(exc) or exc.__class__.__name__
+                    raise serializers.ValidationError(
+                        {
+                            "errors": (
+                                "Unable to dispatch workflow to agent: "
+                                f"{error_detail}"
+                            )
+                        }
+                    ) from None
+                except Exception as exc:
+                    logger.exception("Failed to dispatch SQL workflow to agent")
+                    error_detail = str(exc) or exc.__class__.__name__
+                    raise serializers.ValidationError(
+                        {
+                            "errors": (
+                                "Unable to dispatch workflow to agent: "
+                                f"{error_detail}"
+                            )
+                        }
+                    ) from None
+                if agent_command is None:
+                    workflow.status = "workflow_queuing"
+                    workflow.save(update_fields=["status"])
+                    resolve_mailbox_items(workflow, category="execution_needed")
+                    # Delete scheduled execution task
+                    schedule_name = f"sqlreview-timing-{workflow_id}"
+                    del_schedule(schedule_name)
+                    # Add to execution queue
+                    async_task(
+                        "sql.utils.execute_sql.execute",
+                        workflow_id,
+                        user,
+                        execution_options=(
+                            {"executor": selected_executor}
+                            if selected_executor
+                            else None
+                        ),
+                        hook="sql.utils.execute_sql.execute_callback",
+                        timeout=-1,
+                        task_name=f"sqlreview-execute-{workflow_id}",
+                    )
+                else:
+                    workflow.status = "workflow_executing"
+                    workflow.save(update_fields=["status"])
+                    resolve_mailbox_items(workflow, category="execution_needed")
+                    del_schedule(f"sqlreview-timing-{workflow_id}")
                 # Add workflow log
-                operation_info = "Workflow queued for execution"
+                operation_info = (
+                    "Workflow dispatched to agent"
+                    if agent_command
+                    else "Workflow queued for execution"
+                )
                 if selected_executor:
                     operation_info = f"{operation_info} (executor: {selected_executor})"
+                if agent_command:
+                    operation_info = (
+                        f"{operation_info} (agent: {agent_command.agent_id}, "
+                        f"command: {agent_command.id})"
+                    )
                 Audit.add_log(
                     audit_id=audit_id,
                     operation_type=5,

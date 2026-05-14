@@ -1,0 +1,21 @@
+[Unit]
+Description=Datamingle Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/datamingle-agent/agent.env
+ExecStart=/usr/local/bin/datamingle-agent run -config /etc/datamingle-agent/agent.yaml
+Restart=always
+RestartSec=5
+User=datamingle-agent
+Group=datamingle-agent
+RuntimeDirectory=datamingle-agent
+StateDirectory=datamingle-agent
+LogsDirectory=datamingle-agent
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
