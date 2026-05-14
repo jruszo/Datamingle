@@ -1,3 +1,5 @@
+import uuid
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
@@ -227,7 +229,7 @@ class AgentCommand(models.Model):
         db_index=True,
     )
     idempotency_key = models.CharField(
-        max_length=128, blank=True, default=None, null=True, unique=True
+        max_length=128, blank=True, default="", unique=True
     )
     payload = models.JSONField(default=dict, blank=True)
     result = models.JSONField(default=dict, blank=True)
@@ -253,7 +255,7 @@ class AgentCommand(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.idempotency_key:
-            self.idempotency_key = None
+            self.idempotency_key = f"agent_command:{uuid.uuid4().hex}"
         super().save(*args, **kwargs)
 
     class Meta:

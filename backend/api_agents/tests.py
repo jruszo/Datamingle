@@ -164,6 +164,29 @@ class AgentModelTests(APITestCase):
         with self.assertRaises(ValidationError):
             duplicate.full_clean()
 
+    def test_agent_command_without_idempotency_key_gets_unique_key(self):
+        agent = Agent.objects.create(name="agent-a")
+        instance = create_instance()
+
+        first = AgentCommand.objects.create(
+            agent=agent,
+            instance=instance,
+            workflow_type="test",
+            workflow_id="workflow-1",
+            command_type=AgentCommandType.CONNECTION_TEST,
+        )
+        second = AgentCommand.objects.create(
+            agent=agent,
+            instance=instance,
+            workflow_type="test",
+            workflow_id="workflow-2",
+            command_type=AgentCommandType.CONNECTION_TEST,
+        )
+
+        self.assertTrue(first.idempotency_key)
+        self.assertTrue(second.idempotency_key)
+        self.assertNotEqual(first.idempotency_key, second.idempotency_key)
+
     def test_enabled_artifact_requires_sha256(self):
         artifact = AgentToolArtifact(
             tool_name=AgentToolArtifact.TOOL_GHOST,
