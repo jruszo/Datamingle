@@ -36,7 +36,9 @@ class AgentAPIKeyAuthentication(authentication.BaseAuthentication):
             return None
 
         parts = header.split()
-        if len(parts) != 2 or parts[0].lower() != self.keyword.lower():
+        if not parts or parts[0].lower() != self.keyword.lower():
+            return None
+        if len(parts) != 2:
             raise AuthenticationFailed("Invalid agent authorization header.")
 
         try:

@@ -1,3 +1,4 @@
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -5,13 +6,16 @@ from asgiref.sync import async_to_sync, sync_to_async
 from channels.testing import WebsocketCommunicator
 from django.core.exceptions import ValidationError
 from django.test import TransactionTestCase, override_settings
+from django.utils import timezone
 from rest_framework import status
-from rest_framework.test import APITestCase
+from rest_framework.test import APIRequestFactory, APITestCase
 
+from api_agents.authentication import AgentAPIKeyAuthentication
 from api_agents.dispatch import (
     ACTIVE_WEBSOCKET_METADATA_KEY,
     active_agent_channel_name,
     notify_config_changed,
+    send_agent_message,
 )
 from api_agents.models import (
     Agent,
@@ -80,6 +84,16 @@ def create_sql_workflow(instance, status_value="workflow_review_pass", syntax_ty
         create_user_display=workflow.engineer_display,
     )
     return workflow
+
+
+class AgentAuthenticationTests(APITestCase):
+    def test_non_agent_authorization_scheme_is_ignored(self):
+        request = APIRequestFactory().get(
+            "/api/v1/agent/me/config/",
+            HTTP_AUTHORIZATION="Basic not-agent-credentials",
+        )
+
+        self.assertIsNone(AgentAPIKeyAuthentication().authenticate(request))
 
 
 class AgentModelTests(APITestCase):
@@ -186,6 +200,31 @@ class AgentModelTests(APITestCase):
         self.assertTrue(first.idempotency_key)
         self.assertTrue(second.idempotency_key)
         self.assertNotEqual(first.idempotency_key, second.idempotency_key)
+
+    def test_mark_seen_refreshes_update_time(self):
+        agent = Agent.objects.create(name="agent-a")
+        old_update_time = timezone.now() - timedelta(days=1)
+        Agent.objects.filter(pk=agent.pk).update(update_time=old_update_time)
+        agent.refresh_from_db()
+
+        agent.mark_seen(config_revision=None)
+
+        agent.refresh_from_db()
+        self.assertGreater(agent.update_time, old_update_time)
+
+    @patch("api_agents.dispatch.active_agent_channel_name", return_value="agent.test")
+    @patch("api_agents.dispatch.get_channel_layer")
+    def test_send_agent_message_returns_false_when_channel_send_fails(
+        self, mock_get_channel_layer, _mock_active_channel_name
+    ):
+        class FailingChannelLayer:
+            async def send(self, channel_name, message):
+                raise RuntimeError("channel send failed")
+
+        mock_get_channel_layer.return_value = FailingChannelLayer()
+
+        with self.assertLogs("default", level="ERROR"):
+            self.assertFalse(send_agent_message(1, {"type": "agent.test"}))
 
     def test_enabled_artifact_requires_sha256(self):
         artifact = AgentToolArtifact(
@@ -599,6 +638,36 @@ class AgentFacingApiTests(APITestCase):
         self.assertEqual(command.lease_owner, "")
         self.assertIsNone(command.lease_expires_at)
 
+    def test_agent_marks_command_cancelled(self):
+        agent = Agent.objects.create(name="agent-a")
+        instance = create_instance()
+        command = AgentCommand.objects.create(
+            agent=agent,
+            instance=instance,
+            workflow_type="test",
+            workflow_id="workflow-1",
+            command_type=AgentCommandType.CONNECTION_TEST,
+            status=AgentCommandStatus.RUNNING,
+            payload={},
+        )
+        self.authenticate_agent(agent)
+
+        response = self.client.post(
+            f"/api/v1/agent/commands/{command.id}/cancel/",
+            {"message": "cancelled by runner"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        command.refresh_from_db()
+        self.assertEqual(command.status, AgentCommandStatus.CANCELLED)
+        self.assertTrue(
+            command.events.filter(
+                event_type="command.cancelled",
+                message="cancelled by runner",
+            ).exists()
+        )
+
     @patch("api_agents.agent_api.complete_agent_workflow_command")
     def test_terminal_command_finish_is_idempotent(self, mock_complete):
         agent = Agent.objects.create(name="agent-a")
@@ -722,6 +791,7 @@ class AgentWebsocketTests(TransactionTestCase):
 
         await communicator.disconnect()
         await sync_to_async(agent.refresh_from_db)()
+        self.assertEqual(agent.status, AgentStatus.OFFLINE)
         self.assertNotIn(ACTIVE_WEBSOCKET_METADATA_KEY, agent.metadata)
 
     def test_websocket_receives_command_available_notification(self):

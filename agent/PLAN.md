@@ -311,7 +311,7 @@ Rules:
 - `POST /api/v1/agent/commands/{id}/fail/`
   - Store redacted error and move to `failed`.
 
-- `POST /api/v1/agent/commands/{id}/cancelled/`
+- `POST /api/v1/agent/commands/{id}/cancel/`
   - Confirm cancellation and store final event.
 
 ## Websocket Protocol

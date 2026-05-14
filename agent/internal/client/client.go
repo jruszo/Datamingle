@@ -96,7 +96,7 @@ func (c *Client) FailCommand(ctx context.Context, commandID int64, payload Comma
 }
 
 func (c *Client) MarkCommandCancelled(ctx context.Context, commandID int64, payload CommandFinishRequest) (CommandStatusResponse, error) {
-	return c.commandStatusAction(ctx, commandID, "cancelled", payload)
+	return c.commandStatusAction(ctx, commandID, "cancel", payload)
 }
 
 func (c *Client) Check(ctx context.Context) error {

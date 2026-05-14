@@ -1,7 +1,12 @@
+import logging
+
 from asgiref.sync import async_to_sync
+from channels.exceptions import ChannelFull
 from channels.layers import get_channel_layer
 
 from api_agents.models import Agent
+
+logger = logging.getLogger("default")
 
 ACTIVE_WEBSOCKET_METADATA_KEY = "active_websocket"
 WEBSOCKET_CHANNEL_METADATA_KEY = "channel_name"
@@ -54,7 +59,24 @@ def send_agent_message(agent_id, message, agent=None):
     channel_name = active_agent_channel_name(agent or agent_id)
     if not channel_name:
         return False
-    async_to_sync(channel_layer.send)(channel_name, message)
+    try:
+        async_to_sync(channel_layer.send)(channel_name, message)
+    except (ChannelFull, ConnectionError, OSError) as exc:
+        logger.warning(
+            "Failed to send agent websocket message",
+            extra={
+                "agent_id": agent_id,
+                "channel_name": channel_name,
+                "error": str(exc),
+            },
+        )
+        return False
+    except Exception:
+        logger.exception(
+            "Unexpected error while sending agent websocket message",
+            extra={"agent_id": agent_id, "channel_name": channel_name},
+        )
+        return False
     return True
 
 

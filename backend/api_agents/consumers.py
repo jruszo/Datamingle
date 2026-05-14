@@ -8,6 +8,7 @@ from api_agents.dispatch import (
 )
 from api_agents.models import Agent
 from api_agents.models import AgentCommand
+from api_agents.models import AgentStatus
 from api_agents.services import AgentAPIKeyRejected, authenticate_agent_api_key
 
 
@@ -126,16 +127,19 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def _mark_disconnected(self):
-        agent = Agent.objects.only("metadata", "last_disconnected_at").get(
+        agent = Agent.objects.only("metadata", "last_disconnected_at", "status").get(
             pk=self.agent.pk
         )
         metadata = dict(agent.metadata or {})
         active_websocket = dict(metadata.get(ACTIVE_WEBSOCKET_METADATA_KEY) or {})
         if active_websocket.get(WEBSOCKET_CHANNEL_METADATA_KEY) == self.channel_name:
             metadata.pop(ACTIVE_WEBSOCKET_METADATA_KEY, None)
+            agent.status = AgentStatus.OFFLINE
         agent.metadata = metadata
         agent.last_disconnected_at = timezone.now()
-        agent.save(update_fields=["metadata", "last_disconnected_at", "update_time"])
+        agent.save(
+            update_fields=["metadata", "last_disconnected_at", "status", "update_time"]
+        )
 
     @database_sync_to_async
     def _mark_config_applied(self, revision, config_hash):

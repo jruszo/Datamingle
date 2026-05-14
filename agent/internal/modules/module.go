@@ -2,7 +2,9 @@ package modules
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"sync"
 	"time"
@@ -103,19 +105,29 @@ func (m *Manager) Apply(ctx context.Context, configs []Config) error {
 
 	applied := make([]string, 0, len(names))
 	for _, name := range names {
+		if err := ctx.Err(); err != nil {
+			return withRollbackError(fmt.Errorf("apply cancelled: %w", err), m.rollback(ctx, applied, backup))
+		}
 		if err := toApply[name].ApplyConfig(ctx, desired[name]); err != nil {
-			m.rollback(ctx, applied, backup)
-			return fmt.Errorf("apply module %s: %w", name, err)
+			return withRollbackError(fmt.Errorf("apply module %s: %w", name, err), m.rollback(ctx, applied, backup))
 		}
 		applied = append(applied, name)
+		if err := ctx.Err(); err != nil {
+			return withRollbackError(fmt.Errorf("apply cancelled: %w", err), m.rollback(ctx, applied, backup))
+		}
 	}
 
 	for _, item := range toStop {
+		if err := ctx.Err(); err != nil {
+			return withRollbackError(fmt.Errorf("stop cancelled: %w", err), m.rollback(ctx, applied, backup))
+		}
 		if err := item.module.Stop(ctx); err != nil {
-			m.rollback(ctx, applied, backup)
-			return fmt.Errorf("stop module %s: %w", item.name, err)
+			return withRollbackError(fmt.Errorf("stop module %s: %w", item.name, err), m.rollback(ctx, applied, backup))
 		}
 		applied = append(applied, item.name)
+		if err := ctx.Err(); err != nil {
+			return withRollbackError(fmt.Errorf("stop cancelled: %w", err), m.rollback(ctx, applied, backup))
+		}
 	}
 
 	m.mu.Lock()
@@ -151,7 +163,7 @@ func (m *Manager) Health(ctx context.Context) []Health {
 	return health
 }
 
-func (m *Manager) rollback(ctx context.Context, applied []string, backup map[string]Config) {
+func (m *Manager) rollback(ctx context.Context, applied []string, backup map[string]Config) error {
 	modules := map[string]Module{}
 	m.mu.RLock()
 	for _, name := range applied {
@@ -163,15 +175,30 @@ func (m *Manager) rollback(ctx context.Context, applied []string, backup map[str
 	}
 	m.mu.RUnlock()
 
+	var rollbackErrors []error
 	for _, name := range applied {
 		module, ok := modules[name]
 		if !ok {
 			continue
 		}
 		if cfg, wasActive := backup[name]; wasActive {
-			_ = module.ApplyConfig(ctx, cfg)
+			if err := module.ApplyConfig(ctx, cfg); err != nil {
+				log.Printf("module rollback apply failed for %s: %v", name, err)
+				rollbackErrors = append(rollbackErrors, fmt.Errorf("rollback apply module %s: %w", name, err))
+			}
 		} else {
-			_ = module.Stop(ctx)
+			if err := module.Stop(ctx); err != nil {
+				log.Printf("module rollback stop failed for %s: %v", name, err)
+				rollbackErrors = append(rollbackErrors, fmt.Errorf("rollback stop module %s: %w", name, err))
+			}
 		}
 	}
+	return errors.Join(rollbackErrors...)
+}
+
+func withRollbackError(primary error, rollbackErr error) error {
+	if rollbackErr == nil {
+		return primary
+	}
+	return errors.Join(primary, fmt.Errorf("rollback: %w", rollbackErr))
 }

@@ -63,9 +63,11 @@ class Agent(models.Model):
     def mark_seen(self, status=AgentStatus.ONLINE, config_revision=None):
         self.status = status
         self.last_seen_at = timezone.now()
+        update_fields = ["status", "last_seen_at", "update_time"]
         if config_revision is not None:
             self.last_config_revision = config_revision
-        self.save(update_fields=["status", "last_seen_at", "last_config_revision"])
+            update_fields.append("last_config_revision")
+        self.save(update_fields=update_fields)
 
     def bump_desired_config_revision(self, summary=None, created_by=None):
         summary = summary or {}
@@ -229,7 +231,7 @@ class AgentCommand(models.Model):
         db_index=True,
     )
     idempotency_key = models.CharField(
-        max_length=128, blank=True, default="", unique=True
+        max_length=128, unique=True, null=True, blank=True, default=None
     )
     payload = models.JSONField(default=dict, blank=True)
     result = models.JSONField(default=dict, blank=True)

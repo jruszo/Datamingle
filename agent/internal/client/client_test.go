@@ -159,7 +159,7 @@ func TestCommandLifecycleMethodsUseAgentCommandEndpoints(t *testing.T) {
 		"/api/v1/agent/commands/42/progress/",
 		"/api/v1/agent/commands/42/finish/",
 		"/api/v1/agent/commands/42/fail/",
-		"/api/v1/agent/commands/42/cancelled/",
+		"/api/v1/agent/commands/42/cancel/",
 	}, ",")
 	if strings.Join(paths, ",") != expected {
 		t.Fatalf("unexpected request path order: %v", paths)

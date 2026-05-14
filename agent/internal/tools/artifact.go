@@ -4,11 +4,18 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+)
+
+const maxArtifactDownloadBytes int64 = 512 * 1024 * 1024
+
+var (
+	safePathComponentPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+	whitespacePattern        = regexp.MustCompile(`\s+`)
 )
 
 type Artifact struct {
@@ -25,6 +32,7 @@ func EnsureArtifact(ctx context.Context, cacheDir string, artifact Artifact, htt
 	if strings.TrimSpace(cacheDir) == "" {
 		return "", fmt.Errorf("tool cache directory is required")
 	}
+	artifact = sanitizeArtifact(artifact)
 	if err := validateArtifact(artifact); err != nil {
 		return "", err
 	}
@@ -60,17 +68,17 @@ func EnsureArtifact(ctx context.Context, cacheDir string, artifact Artifact, htt
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("download %s failed: %s", artifact.DownloadURL, resp.Status)
 	}
-	reader := io.Reader(resp.Body)
-	if artifact.SizeBytes > 0 {
-		limit := int64(math.MaxInt64)
-		if artifact.SizeBytes < math.MaxInt64 {
-			limit = artifact.SizeBytes + 1
-		}
-		reader = io.LimitReader(resp.Body, limit)
+	limit := maxArtifactDownloadBytes + 1
+	if artifact.SizeBytes > 0 && artifact.SizeBytes < maxArtifactDownloadBytes {
+		limit = artifact.SizeBytes + 1
 	}
+	reader := io.LimitReader(resp.Body, limit)
 	written, err := io.Copy(tmp, reader)
 	if err != nil {
 		return "", err
+	}
+	if written > maxArtifactDownloadBytes {
+		return "", fmt.Errorf("downloaded artifact exceeded max size %d", maxArtifactDownloadBytes)
 	}
 	if artifact.SizeBytes > 0 && written > artifact.SizeBytes {
 		return "", fmt.Errorf("downloaded artifact exceeded expected size %d", artifact.SizeBytes)
@@ -119,7 +127,48 @@ func validateArtifact(artifact Artifact) error {
 	return nil
 }
 
+func sanitizeArtifact(artifact Artifact) Artifact {
+	artifact.ToolName = sanitizeArtifactValue(artifact.ToolName)
+	artifact.Version = sanitizeArtifactValue(artifact.Version)
+	artifact.Platform = sanitizeArtifactValue(artifact.Platform)
+	artifact.Architecture = sanitizeArtifactValue(artifact.Architecture)
+	artifact.DownloadURL = sanitizeArtifactValue(artifact.DownloadURL)
+	artifact.SHA256 = sanitizeArtifactValue(artifact.SHA256)
+	return artifact
+}
+
+func sanitizeArtifactValue(value string) string {
+	value = strings.ReplaceAll(value, "\x00", "")
+	value = normalizePathComponent(value)
+	return strings.TrimSpace(value)
+}
+
 func safePathComponent(value string) string {
-	replacer := strings.NewReplacer("/", "_", "\\", "_", "..", "_")
-	return replacer.Replace(strings.TrimSpace(value))
+	value = sanitizeArtifactValue(value)
+	replacer := strings.NewReplacer(
+		"/", "_",
+		"\\", "_",
+		"..", "_",
+	)
+	result := replacer.Replace(value)
+	result = whitespacePattern.ReplaceAllString(strings.TrimSpace(result), "_")
+	if result == "" || result == "." || result == ".." {
+		return "_"
+	}
+	if !safePathComponentPattern.MatchString(result) {
+		return "_"
+	}
+	return result
+}
+
+func normalizePathComponent(value string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= '！' && r <= '～' {
+			return r - 0xFEE0
+		}
+		if r == '　' {
+			return ' '
+		}
+		return r
+	}, value)
 }

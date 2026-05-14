@@ -50,9 +50,9 @@ urlpatterns = [
         name="agent-command-fail",
     ),
     path(
-        "v1/agent/commands/<int:command_id>/cancelled/",
+        "v1/agent/commands/<int:command_id>/cancel/",
         agent_api.AgentCommandCancelledView.as_view(),
-        name="agent-command-cancelled",
+        name="agent-command-cancel",
     ),
     path("v1/agents/", views.AgentListCreateView.as_view(), name="agent-list"),
     path(
