@@ -137,6 +137,9 @@ WorkOS setup assumptions in this repo:
    `https://<tenant-host>/api/auth/workos/callback/`
 3. Configure the logout return URL in WorkOS:
    `https://<tenant-host>/login`
+   For local Vite development, use:
+   - Redirect URI: `http://localhost:5173/api/auth/workos/callback/`
+   - Logout return URL: `http://localhost:5173/login`
 4. Set the required `WORKOS_*` values in `.env`.
 5. Rebuild the app container so the `workos` Python dependency is installed:
 

@@ -202,6 +202,118 @@ class WorkOSAuthApiTests(APITestCase):
             "https://images.workos.dev/avatar.png",
         )
 
+    @patch("api_auth.views.WorkOSAuthClient")
+    def test_workos_profile_can_be_loaded_and_updated(self, mock_client_class):
+        user = Users.objects.create_user(
+            username="managed@datamingle.dev",
+            email="managed@datamingle.dev",
+            display="Managed User",
+            avatar_url="",
+            workos_user_id="user_123",
+            is_active=True,
+        )
+        mock_client = mock_client_class.return_value
+        mock_client.get_user.return_value = SimpleNamespace(
+            id="user_123",
+            email="managed@datamingle.dev",
+            first_name="Managed",
+            last_name="User",
+            profile_picture_url="https://images.workos.dev/avatar.png",
+        )
+        mock_client.update_user_profile.return_value = SimpleNamespace(
+            id="user_123",
+            email="managed@datamingle.dev",
+            first_name="Updated",
+            last_name="User",
+            profile_picture_url="https://images.workos.dev/avatar.png",
+        )
+        self.client.force_authenticate(user=user)
+
+        get_response = self.client.get("/api/auth/workos/profile/", format="json")
+
+        self.assertEqual(get_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(get_response.json()["data"]["display_name"], "Managed User")
+
+        patch_response = self.client.patch(
+            "/api/auth/workos/profile/",
+            {"first_name": "Updated", "last_name": "User"},
+            format="json",
+        )
+
+        self.assertEqual(patch_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(patch_response.json()["data"]["display_name"], "Updated User")
+        mock_client.update_user_profile.assert_called_once_with(
+            user_id="user_123",
+            first_name="Updated",
+            last_name="User",
+        )
+        user.refresh_from_db()
+        self.assertEqual(user.display, "Updated User")
+        self.assertEqual(user.avatar_url, "https://images.workos.dev/avatar.png")
+
+    @patch("api_auth.views.WorkOSAuthClient")
+    def test_workos_sessions_can_be_listed_and_revoked(self, mock_client_class):
+        user = Users.objects.create_user(
+            username="managed@datamingle.dev",
+            email="managed@datamingle.dev",
+            display="Managed User",
+            workos_user_id="user_123",
+            is_active=True,
+        )
+        mock_client = mock_client_class.return_value
+        mock_client.list_sessions.return_value = SimpleNamespace(
+            data=[
+                SimpleNamespace(
+                    id="session_current",
+                    status="active",
+                    auth_method="sso",
+                    ip_address="127.0.0.1",
+                    user_agent="Current Browser",
+                    expires_at="2026-05-18T12:00:00Z",
+                    ended_at=None,
+                    created_at="2026-05-17T12:00:00Z",
+                    updated_at="2026-05-17T12:00:00Z",
+                ),
+                SimpleNamespace(
+                    id="session_other",
+                    status="active",
+                    auth_method="sso",
+                    ip_address="192.0.2.1",
+                    user_agent="Other Browser",
+                    expires_at="2026-05-18T12:00:00Z",
+                    ended_at=None,
+                    created_at="2026-05-17T12:00:00Z",
+                    updated_at="2026-05-17T12:00:00Z",
+                ),
+            ]
+        )
+        self.client.force_authenticate(user=user)
+        self.client.cookies["datamingle_workos_session_id"] = "session_current"
+
+        list_response = self.client.get("/api/auth/workos/sessions/", format="json")
+
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        sessions = list_response.json()["data"]
+        self.assertTrue(sessions[0]["is_current"])
+        self.assertFalse(sessions[1]["is_current"])
+
+        revoke_response = self.client.post(
+            "/api/auth/workos/sessions/session_other/revoke/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(revoke_response.status_code, status.HTTP_200_OK)
+        mock_client.revoke_session.assert_called_once_with(session_id="session_other")
+
+        current_response = self.client.post(
+            "/api/auth/workos/sessions/session_current/revoke/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(current_response.status_code, status.HTTP_400_BAD_REQUEST)
+
     def test_superuser_can_change_groups_but_identity_fields_are_ignored(self):
         superuser = Users.objects.create_user(
             username="superuser@datamingle.dev",
@@ -312,3 +424,53 @@ class WorkOSAuthApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_302_FOUND)
         self.assertIn("unexpected+organization", response.url)
+
+    @patch("api_users.views.WorkOSAuthClient")
+    def test_superuser_can_invite_workos_user_and_create_local_record(
+        self, mock_client_class
+    ):
+        superuser = Users.objects.create_user(
+            username="superuser@datamingle.dev",
+            email="superuser@datamingle.dev",
+            display="Super User",
+            is_active=True,
+            is_superuser=True,
+            is_staff=True,
+            workos_user_id="user_super",
+        )
+        mock_client_class.return_value.send_invitation.return_value = SimpleNamespace(
+            id="invitation_123",
+            email="new.user@datamingle.dev",
+            state="pending",
+            organization_id="org_test_123",
+            expires_at="2026-05-24T12:00:00Z",
+        )
+        self.client.force_authenticate(user=superuser)
+
+        response = self.client.post(
+            "/api/v1/user/invitations/",
+            {
+                "email": "New.User@DataMingle.dev",
+                "display": "New User",
+                "group_ids": [self.auth_group.id],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        payload = response.json()["data"]
+        self.assertEqual(payload["invitation"]["id"], "invitation_123")
+        self.assertEqual(payload["user"]["email"], "new.user@datamingle.dev")
+        mock_client_class.return_value.send_invitation.assert_called_once_with(
+            email="new.user@datamingle.dev",
+            inviter_user_id="user_super",
+        )
+
+        invited_user = Users.objects.get(email="new.user@datamingle.dev")
+        self.assertEqual(invited_user.username, "new.user@datamingle.dev")
+        self.assertEqual(invited_user.display, "New User")
+        self.assertFalse(bool(invited_user.workos_user_id))
+        self.assertEqual(
+            list(invited_user.groups.values_list("id", flat=True)),
+            [self.auth_group.id],
+        )

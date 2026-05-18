@@ -8,6 +8,7 @@ from django.http import HttpResponseRedirect
 from django.http.request import validate_host
 from django_redis import get_redis_connection
 from rest_framework import serializers, status, permissions, views
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
@@ -49,6 +50,80 @@ def _login_redirect_with_error(message):
 def _issue_local_token_pair(user):
     refresh = RefreshToken.for_user(user)
     return {"access": str(refresh.access_token), "refresh": str(refresh)}
+
+
+def _workos_attr(source, name, default=""):
+    if isinstance(source, dict):
+        return source.get(name, default)
+    return getattr(source, name, default)
+
+
+def _require_workos_linked_user(user):
+    if not user.workos_user_id:
+        raise ValidationError("This Datamingle account is not linked to a WorkOS user.")
+
+
+def _workos_display_name(first_name, last_name, fallback):
+    display_name = " ".join(
+        value for value in (first_name.strip(), last_name.strip()) if value
+    ).strip()
+    return display_name or fallback
+
+
+def _serialize_workos_profile(workos_user):
+    first_name = str(_workos_attr(workos_user, "first_name", "") or "")
+    last_name = str(_workos_attr(workos_user, "last_name", "") or "")
+    email = str(_workos_attr(workos_user, "email", "") or "").strip().lower()
+    profile_picture_url = str(
+        _workos_attr(workos_user, "profile_picture_url", "") or ""
+    ).strip()
+
+    return {
+        "id": str(_workos_attr(workos_user, "id", "") or ""),
+        "email": email,
+        "first_name": first_name,
+        "last_name": last_name,
+        "display_name": _workos_display_name(first_name, last_name, email),
+        "profile_picture_url": profile_picture_url,
+    }
+
+
+def _sync_local_user_from_workos_profile(user, workos_user):
+    profile = _serialize_workos_profile(workos_user)
+    updated_fields = []
+
+    if profile["email"] and user.email != profile["email"]:
+        user.email = profile["email"]
+        updated_fields.append("email")
+
+    if profile["display_name"] and user.display != profile["display_name"]:
+        user.display = profile["display_name"]
+        updated_fields.append("display")
+
+    if user.avatar_url != profile["profile_picture_url"]:
+        user.avatar_url = profile["profile_picture_url"]
+        updated_fields.append("avatar_url")
+
+    if updated_fields:
+        user.save(update_fields=sorted(set(updated_fields)))
+
+    return profile
+
+
+def _serialize_workos_session(workos_session, current_session_id=""):
+    session_id = str(_workos_attr(workos_session, "id", "") or "")
+    return {
+        "id": session_id,
+        "status": str(_workos_attr(workos_session, "status", "") or ""),
+        "auth_method": str(_workos_attr(workos_session, "auth_method", "") or ""),
+        "ip_address": str(_workos_attr(workos_session, "ip_address", "") or ""),
+        "user_agent": str(_workos_attr(workos_session, "user_agent", "") or ""),
+        "expires_at": str(_workos_attr(workos_session, "expires_at", "") or ""),
+        "ended_at": str(_workos_attr(workos_session, "ended_at", "") or ""),
+        "created_at": str(_workos_attr(workos_session, "created_at", "") or ""),
+        "updated_at": str(_workos_attr(workos_session, "updated_at", "") or ""),
+        "is_current": bool(current_session_id and session_id == current_session_id),
+    }
 
 
 def _normalized_allowlist(value):
@@ -274,6 +349,91 @@ class WorkOSExchangeView(views.APIView):
             )
 
         return success_response(data=_issue_local_token_pair(user))
+
+
+class WorkOSProfileUpdateSerializer(serializers.Serializer):
+    first_name = serializers.CharField(
+        allow_blank=True, required=True, trim_whitespace=True, max_length=100
+    )
+    last_name = serializers.CharField(
+        allow_blank=True, required=True, trim_whitespace=True, max_length=100
+    )
+
+    def validate(self, attrs):
+        if not attrs["first_name"] and not attrs["last_name"]:
+            raise serializers.ValidationError(
+                "Enter at least a first name or last name."
+            )
+        return attrs
+
+
+class WorkOSProfileView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        _require_workos_linked_user(request.user)
+        workos_user = WorkOSAuthClient().get_user(request.user.workos_user_id)
+        profile = _sync_local_user_from_workos_profile(request.user, workos_user)
+        return success_response(data=profile)
+
+    def patch(self, request):
+        _require_workos_linked_user(request.user)
+        serializer = WorkOSProfileUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        workos_user = WorkOSAuthClient().update_user_profile(
+            user_id=request.user.workos_user_id,
+            first_name=serializer.validated_data["first_name"],
+            last_name=serializer.validated_data["last_name"],
+        )
+        profile = _sync_local_user_from_workos_profile(request.user, workos_user)
+        return success_response(data=profile, detail="WorkOS profile updated.")
+
+
+class WorkOSSessionsView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        _require_workos_linked_user(request.user)
+        current_session_id = request.COOKIES.get(WORKOS_SESSION_COOKIE_NAME, "")
+        sessions_response = WorkOSAuthClient().list_sessions(
+            user_id=request.user.workos_user_id
+        )
+        sessions = _workos_attr(sessions_response, "data", []) or []
+        return success_response(
+            data=[
+                _serialize_workos_session(
+                    workos_session=session,
+                    current_session_id=current_session_id,
+                )
+                for session in sessions
+            ]
+        )
+
+
+class WorkOSSessionRevokeView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, session_id):
+        _require_workos_linked_user(request.user)
+        current_session_id = request.COOKIES.get(WORKOS_SESSION_COOKIE_NAME, "")
+        if current_session_id and session_id == current_session_id:
+            return Response(
+                {"errors": "Use logout to end the current browser session."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        client = WorkOSAuthClient()
+        sessions_response = client.list_sessions(user_id=request.user.workos_user_id)
+        sessions = _workos_attr(sessions_response, "data", []) or []
+        if not any(_workos_attr(session, "id") == session_id for session in sessions):
+            return Response(
+                {"errors": "The selected WorkOS session was not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        client.revoke_session(session_id=session_id)
+        return success_response(detail="WorkOS session revoked.")
 
 
 class WorkOSLogoutView(views.APIView):

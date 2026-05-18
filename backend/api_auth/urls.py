@@ -22,5 +22,20 @@ urlpatterns = [
         views.WorkOSExchangeView.as_view(),
         name="workos_exchange",
     ),
+    path(
+        "auth/workos/profile/",
+        views.WorkOSProfileView.as_view(),
+        name="workos_profile",
+    ),
+    path(
+        "auth/workos/sessions/",
+        views.WorkOSSessionsView.as_view(),
+        name="workos_sessions",
+    ),
+    path(
+        "auth/workos/sessions/<str:session_id>/revoke/",
+        views.WorkOSSessionRevokeView.as_view(),
+        name="workos_session_revoke",
+    ),
     path("auth/workos/logout/", views.WorkOSLogoutView.as_view(), name="workos_logout"),
 ]

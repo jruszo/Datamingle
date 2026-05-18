@@ -131,3 +131,34 @@ class WorkOSAuthClient:
             session_id=session_id,
             return_to=return_to,
         )
+
+    def get_user(self, user_id):
+        return self.client.user_management.get_user(user_id)
+
+    def update_user_profile(self, user_id, first_name, last_name):
+        return self.client.user_management.update_user(
+            user_id=user_id,
+            first_name=first_name,
+            last_name=last_name,
+        )
+
+    def list_sessions(self, user_id):
+        return self.client.user_management.list_sessions(user_id=user_id, limit=100)
+
+    def revoke_session(self, session_id):
+        return self.client.user_management.revoke_session(session_id=session_id)
+
+    def send_invitation(
+        self,
+        email,
+        inviter_user_id="",
+        expires_in_days=None,
+        role_slug="",
+    ):
+        return self.client.user_management.send_invitation(
+            email=email,
+            organization_id=settings.WORKOS_ORGANIZATION_ID,
+            expires_in_days=expires_in_days,
+            inviter_user_id=inviter_user_id or None,
+            role_slug=role_slug or None,
+        )

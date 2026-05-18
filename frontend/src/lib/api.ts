@@ -42,6 +42,28 @@ export type CurrentUserContext = {
   permissions: string[]
 }
 
+export type WorkosProfile = {
+  id: string
+  email: string
+  first_name: string
+  last_name: string
+  display_name: string
+  profile_picture_url: string
+}
+
+export type WorkosSessionRecord = {
+  id: string
+  status: string
+  auth_method: string
+  ip_address: string
+  user_agent: string
+  expires_at: string
+  ended_at: string
+  created_at: string
+  updated_at: string
+  is_current: boolean
+}
+
 export type SystemSettingsValue =
   | string
   | number
@@ -110,6 +132,25 @@ export type UserManagementListOptions = {
 export type UpdateUserPayload = {
   group_ids?: number[]
   is_active?: boolean
+}
+
+export type InviteWorkosUserPayload = {
+  email: string
+  display?: string
+  group_ids?: number[]
+}
+
+export type WorkosInvitationRecord = {
+  id: string
+  email: string
+  state: string
+  organization_id: string
+  expires_at: string
+}
+
+export type InviteWorkosUserResponse = {
+  user: UserManagementRecord
+  invitation: WorkosInvitationRecord
 }
 
 export type InstanceTagRecord = {
@@ -453,6 +494,33 @@ export function exchangeWorkosCode(code: string) {
   return apiPost<unknown>('/auth/workos/exchange/', { code }).then(extractTokenPair)
 }
 
+export function fetchWorkosProfile(token: string) {
+  return apiGet<unknown>('/auth/workos/profile/', { token }).then((payload) =>
+    extractData<WorkosProfile>(payload),
+  )
+}
+
+export function updateWorkosProfile(
+  payload: { first_name: string; last_name: string },
+  token: string,
+) {
+  return apiPatch<unknown>('/auth/workos/profile/', payload, { token }).then((responsePayload) =>
+    extractData<WorkosProfile>(responsePayload),
+  )
+}
+
+export function fetchWorkosSessions(token: string) {
+  return apiGet<unknown>('/auth/workos/sessions/', { token }).then((payload) =>
+    extractData<WorkosSessionRecord[]>(payload),
+  )
+}
+
+export function revokeWorkosSession(sessionId: string, token: string) {
+  return apiPost<unknown>(`/auth/workos/sessions/${sessionId}/revoke/`, {}, { token }).then(
+    (payload) => extractDetail(payload, 'WorkOS session revoked.'),
+  )
+}
+
 export function fetchCurrentUserContext(token: string) {
   return apiGet<unknown>('/v1/me/', { token }).then((payload) =>
     extractData<CurrentUserContext>(payload),
@@ -526,6 +594,12 @@ export function updateUser(userId: number, payload: UpdateUserPayload, token: st
 export function deleteUser(userId: number, token: string) {
   return apiDelete<unknown>(`/v1/user/${userId}/`, { token }).then((payload) =>
     extractDetail(payload, 'User deleted successfully.'),
+  )
+}
+
+export function inviteWorkosUser(payload: InviteWorkosUserPayload, token: string) {
+  return apiPost<unknown>('/v1/user/invitations/', payload, { token }).then((responsePayload) =>
+    extractData<InviteWorkosUserResponse>(responsePayload),
   )
 }
 

@@ -4,6 +4,7 @@ from api_users import views
 
 urlpatterns = [
     path("v1/user/", views.UserList.as_view()),
+    path("v1/user/invitations/", views.WorkOSUserInvitation.as_view()),
     path("v1/me/", views.CurrentUser.as_view()),
     path("v1/user/<int:pk>/", views.UserDetail.as_view()),
     path("v1/user/group/", views.GroupList.as_view()),
