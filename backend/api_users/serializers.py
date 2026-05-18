@@ -65,6 +65,19 @@ class UserManagementUpdateSerializer(serializers.ModelSerializer):
         fields = ("group_ids", "is_active")
 
 
+class WorkOSUserInvitationSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    display = serializers.CharField(
+        allow_blank=True, max_length=50, required=False, trim_whitespace=True
+    )
+    group_ids = serializers.PrimaryKeyRelatedField(
+        source="groups", queryset=Group.objects.all(), many=True, required=False
+    )
+
+    def validate_email(self, value):
+        return value.strip().lower()
+
+
 class GroupSerializer(serializers.ModelSerializer):
     class Meta:
         model = Group

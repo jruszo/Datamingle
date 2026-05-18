@@ -2,13 +2,22 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useDebounceFn } from '@vueuse/core'
-import { RefreshCw } from 'lucide-vue-next'
+import { MailPlus, RefreshCw, X } from 'lucide-vue-next'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table'
-import { deleteUser, fetchUsers, updateUser, type UserManagementRecord } from '../api'
+import { Input } from '@/components/ui/input'
+import {
+  deleteUser,
+  fetchGroups,
+  fetchUsers,
+  inviteWorkosUser,
+  updateUser,
+  type GroupRecord,
+  type UserManagementRecord,
+} from '../api'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
@@ -24,6 +33,14 @@ const pageSize = ref(20)
 const sortKey = ref('display')
 const sortDirection = ref<'asc' | 'desc'>('asc')
 const latestRequestId = ref(0)
+const isInviteDialogOpen = ref(false)
+const inviteEmail = ref('')
+const inviteDisplay = ref('')
+const inviteGroupIds = ref<number[]>([])
+const inviteGroups = ref<GroupRecord[]>([])
+const inviteGroupsLoading = ref(false)
+const inviteSubmitting = ref(false)
+const inviteError = ref('')
 
 const columns: DataTableColumn[] = [
   {
@@ -181,6 +198,88 @@ async function removeUser(user: UserManagementRecord) {
   }
 }
 
+async function loadInviteGroups() {
+  inviteGroupsLoading.value = true
+  inviteError.value = ''
+
+  try {
+    const collectedGroups: GroupRecord[] = []
+    let page = 1
+    let hasMore = true
+
+    while (hasMore) {
+      const response = await fetchGroups(requireToken(), {
+        page,
+        size: 100,
+        ordering: 'name',
+      })
+      collectedGroups.push(...response.results)
+      hasMore = response.next !== null
+      page += 1
+    }
+
+    inviteGroups.value = collectedGroups.sort((left, right) => left.name.localeCompare(right.name))
+  } catch (errorValue) {
+    inviteError.value = toUserFacingMessage(errorValue, 'Failed to load groups for invitation.')
+  } finally {
+    inviteGroupsLoading.value = false
+  }
+}
+
+function openInviteDialog() {
+  if (!canManageUsers.value) {
+    return
+  }
+
+  inviteEmail.value = ''
+  inviteDisplay.value = ''
+  inviteGroupIds.value = []
+  inviteError.value = ''
+  isInviteDialogOpen.value = true
+  void loadInviteGroups()
+}
+
+function closeInviteDialog() {
+  if (inviteSubmitting.value) {
+    return
+  }
+
+  isInviteDialogOpen.value = false
+}
+
+async function submitInvite() {
+  if (!canManageUsers.value || inviteSubmitting.value) {
+    return
+  }
+
+  const email = inviteEmail.value.trim()
+  if (!email) {
+    inviteError.value = 'Email is required.'
+    return
+  }
+
+  inviteSubmitting.value = true
+  inviteError.value = ''
+
+  try {
+    const response = await inviteWorkosUser(
+      {
+        email,
+        display: inviteDisplay.value.trim(),
+        group_ids: inviteGroupIds.value,
+      },
+      requireToken(),
+    )
+    feedback.value = `Invitation sent to ${response.invitation.email || email}.`
+    isInviteDialogOpen.value = false
+    await loadUsers()
+  } catch (errorValue) {
+    inviteError.value = toUserFacingMessage(errorValue, 'Failed to send WorkOS invitation.')
+  } finally {
+    inviteSubmitting.value = false
+  }
+}
+
 function handleSearchQueryChange(value: string) {
   searchQuery.value = value
   currentPage.value = 1
@@ -216,7 +315,7 @@ watch(searchQuery, () => {
     <div class="space-y-1">
       <h2 class="text-2xl font-semibold text-slate-900">User Management</h2>
       <p class="text-sm text-slate-600">
-        Superusers can assign Django auth groups and control user lifecycle state for WorkOS-provisioned accounts.
+        Superusers can invite WorkOS users, assign Django auth groups, and control local lifecycle state.
       </p>
     </div>
 
@@ -262,6 +361,10 @@ watch(searchQuery, () => {
           @update:sort-direction="sortDirection = $event"
         >
           <template #toolbar-actions>
+            <Button @click="openInviteDialog">
+              <MailPlus class="h-4 w-4" />
+              Invite user
+            </Button>
             <Button variant="outline" @click="loadUsers">
               <RefreshCw class="h-4 w-4" />
               Refresh
@@ -332,6 +435,12 @@ watch(searchQuery, () => {
               >
                 Staff
               </Badge>
+              <Badge
+                :variant="row.is_workos_managed ? 'secondary' : 'outline'"
+                :class="row.is_workos_managed ? 'bg-violet-100 text-violet-800' : 'text-slate-600'"
+              >
+                {{ row.is_workos_managed ? 'WorkOS linked' : 'WorkOS pending' }}
+              </Badge>
             </div>
           </template>
 
@@ -351,5 +460,81 @@ watch(searchQuery, () => {
         </DataTable>
       </CardContent>
     </Card>
+
+    <div
+      v-if="isInviteDialogOpen"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
+      @click.self="closeInviteDialog"
+    >
+      <div class="w-full max-w-xl rounded-lg bg-white shadow-xl">
+        <div class="flex items-start justify-between border-b border-slate-200 px-6 py-4">
+          <div>
+            <h3 class="text-lg font-semibold text-slate-900">Invite WorkOS user</h3>
+            <p class="mt-1 text-sm text-slate-600">
+              Send a WorkOS invitation and prepare the matching Datamingle access record.
+            </p>
+          </div>
+          <Button variant="ghost" size="icon" type="button" @click="closeInviteDialog">
+            <X class="h-4 w-4" />
+          </Button>
+        </div>
+
+        <form class="grid gap-5 px-6 py-5" @submit.prevent="submitInvite">
+          <p v-if="inviteError" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {{ inviteError }}
+          </p>
+
+          <div class="grid gap-2">
+            <label for="invite-email" class="text-sm font-medium text-slate-900">Email</label>
+            <Input
+              id="invite-email"
+              v-model="inviteEmail"
+              type="email"
+              autocomplete="email"
+              :disabled="inviteSubmitting"
+              placeholder="person@example.com"
+            />
+          </div>
+
+          <div class="grid gap-2">
+            <label for="invite-display" class="text-sm font-medium text-slate-900">Display name</label>
+            <Input
+              id="invite-display"
+              v-model="inviteDisplay"
+              :disabled="inviteSubmitting"
+              placeholder="Optional"
+            />
+          </div>
+
+          <div class="grid gap-2">
+            <label for="invite-groups" class="text-sm font-medium text-slate-900">Initial Datamingle groups</label>
+            <select
+              id="invite-groups"
+              v-model="inviteGroupIds"
+              multiple
+              class="min-h-36 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+              :disabled="inviteSubmitting || inviteGroupsLoading"
+            >
+              <option v-for="group in inviteGroups" :key="group.id" :value="group.id">
+                {{ group.name }}
+              </option>
+            </select>
+            <p class="text-xs text-slate-500">
+              The invited user is linked to this local record when they accept the WorkOS invitation and sign in.
+            </p>
+          </div>
+
+          <div class="flex justify-end gap-3 border-t border-slate-200 pt-4">
+            <Button variant="outline" type="button" :disabled="inviteSubmitting" @click="closeInviteDialog">
+              Cancel
+            </Button>
+            <Button type="submit" class="gap-2" :disabled="inviteSubmitting || inviteGroupsLoading">
+              <MailPlus class="h-4 w-4" />
+              {{ inviteSubmitting ? 'Sending...' : 'Send invitation' }}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
   </section>
 </template>

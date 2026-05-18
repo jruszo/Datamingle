@@ -98,6 +98,7 @@ services:
 
   jaeger-query:
     image: jaegertracing/jaeger-query:1.60
+    platform: linux/amd64
     container_name: datamingle-shared-jaeger-query
     restart: always
     depends_on:
