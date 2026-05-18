@@ -10,6 +10,8 @@ backend/archery/settings.py.dev
 backend/archery/settings_dev.py
 venv
 env
+.venv
+.venv*/
 conda311
 sonar-project.properties
 .scannerwork
