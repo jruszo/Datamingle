@@ -29,6 +29,7 @@ backend/src/docker-compose/datamingle/downloads/dictionary/
 backend/docs/
 frontend/playwright-report/
 frontend/test-results/
+/static/
 backend/static/
 /supervisord.pid
 agent/.tools/
