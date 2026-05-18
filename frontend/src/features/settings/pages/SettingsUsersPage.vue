@@ -11,11 +11,11 @@ import { DataTable, type DataTableColumn } from '@/components/ui/data-table'
 import { Input } from '@/components/ui/input'
 import {
   deleteUser,
-  fetchGroups,
+  fetchResourceGroups,
   fetchUsers,
   inviteWorkosUser,
   updateUser,
-  type GroupRecord,
+  type ResourceGroupRecord,
   type UserManagementRecord,
 } from '../api'
 import { useAuthStore } from '@/stores/auth'
@@ -36,9 +36,9 @@ const latestRequestId = ref(0)
 const isInviteDialogOpen = ref(false)
 const inviteEmail = ref('')
 const inviteDisplay = ref('')
-const inviteGroupIds = ref<number[]>([])
-const inviteGroups = ref<GroupRecord[]>([])
-const inviteGroupsLoading = ref(false)
+const inviteResourceGroupIds = ref<number[]>([])
+const inviteResourceGroups = ref<ResourceGroupRecord[]>([])
+const inviteResourceGroupsLoading = ref(false)
 const inviteSubmitting = ref(false)
 const inviteError = ref('')
 
@@ -60,8 +60,8 @@ const columns: DataTableColumn[] = [
     sortable: true,
   },
   {
-    key: 'groups',
-    label: 'Groups',
+    key: 'resource_groups',
+    label: 'Resource groups',
     sortable: false,
   },
   {
@@ -101,11 +101,11 @@ function requireToken() {
 }
 
 function groupSummary(user: UserManagementRecord) {
-  if (user.groups.length === 0) {
-    return 'No groups assigned'
+  if (user.resource_groups.length === 0) {
+    return 'No resource groups assigned'
   }
 
-  return user.groups.map((group) => group.name).join(', ')
+  return user.resource_groups.map((group) => group.group_name).join(', ')
 }
 
 async function loadUsers() {
@@ -160,20 +160,26 @@ async function toggleUserActiveState(user: UserManagementRecord) {
   const nextIsActive = !user.is_active
   const actionLabel = nextIsActive ? 'reactivate' : 'deactivate'
 
-  if (!window.confirm(`${actionLabel[0]?.toUpperCase() ?? ''}${actionLabel.slice(1)} "${user.display || user.username}"?`)) {
+  if (
+    !window.confirm(
+      `${actionLabel[0]?.toUpperCase() ?? ''}${actionLabel.slice(1)} "${user.display || user.username}"?`,
+    )
+  ) {
     return
   }
 
   try {
-    const updatedUser = await updateUser(
-      user.id,
-      {
-        group_ids: user.groups.map((group) => group.id),
-        is_active: nextIsActive,
-      },
-      requireToken(),
-    )
-    feedback.value = nextIsActive ? 'User reactivated successfully.' : 'User deactivated successfully.'
+    const payload: { resource_group_ids?: number[]; is_active: boolean } = {
+      is_active: nextIsActive,
+    }
+    if (!user.is_directory_managed) {
+      payload.resource_group_ids = user.resource_groups.map((group) => group.group_id)
+    }
+
+    const updatedUser = await updateUser(user.id, payload, requireToken())
+    feedback.value = nextIsActive
+      ? 'User reactivated successfully.'
+      : 'User deactivated successfully.'
     users.value = users.value.map((item) => (item.id === updatedUser.id ? updatedUser : item))
   } catch (errorValue) {
     error.value = toUserFacingMessage(errorValue, `Failed to ${actionLabel} the user.`)
@@ -185,7 +191,11 @@ async function removeUser(user: UserManagementRecord) {
     return
   }
 
-  if (!window.confirm(`Delete "${user.display || user.username}" from Datamingle? This cannot be undone.`)) {
+  if (
+    !window.confirm(
+      `Delete "${user.display || user.username}" from Datamingle? This cannot be undone.`,
+    )
+  ) {
     return
   }
 
@@ -198,31 +208,36 @@ async function removeUser(user: UserManagementRecord) {
   }
 }
 
-async function loadInviteGroups() {
-  inviteGroupsLoading.value = true
+async function loadInviteResourceGroups() {
+  inviteResourceGroupsLoading.value = true
   inviteError.value = ''
 
   try {
-    const collectedGroups: GroupRecord[] = []
+    const collectedGroups: ResourceGroupRecord[] = []
     let page = 1
     let hasMore = true
 
     while (hasMore) {
-      const response = await fetchGroups(requireToken(), {
+      const response = await fetchResourceGroups(requireToken(), {
         page,
         size: 100,
-        ordering: 'name',
+        ordering: 'group_name',
       })
       collectedGroups.push(...response.results)
       hasMore = response.next !== null
       page += 1
     }
 
-    inviteGroups.value = collectedGroups.sort((left, right) => left.name.localeCompare(right.name))
+    inviteResourceGroups.value = collectedGroups.sort((left, right) =>
+      left.group_name.localeCompare(right.group_name),
+    )
   } catch (errorValue) {
-    inviteError.value = toUserFacingMessage(errorValue, 'Failed to load groups for invitation.')
+    inviteError.value = toUserFacingMessage(
+      errorValue,
+      'Failed to load resource groups for invitation.',
+    )
   } finally {
-    inviteGroupsLoading.value = false
+    inviteResourceGroupsLoading.value = false
   }
 }
 
@@ -233,10 +248,10 @@ function openInviteDialog() {
 
   inviteEmail.value = ''
   inviteDisplay.value = ''
-  inviteGroupIds.value = []
+  inviteResourceGroupIds.value = []
   inviteError.value = ''
   isInviteDialogOpen.value = true
-  void loadInviteGroups()
+  void loadInviteResourceGroups()
 }
 
 function closeInviteDialog() {
@@ -266,7 +281,7 @@ async function submitInvite() {
       {
         email,
         display: inviteDisplay.value.trim(),
-        group_ids: inviteGroupIds.value,
+        resource_group_ids: inviteResourceGroupIds.value,
       },
       requireToken(),
     )
@@ -315,7 +330,8 @@ watch(searchQuery, () => {
     <div class="space-y-1">
       <h2 class="text-2xl font-semibold text-slate-900">User Management</h2>
       <p class="text-sm text-slate-600">
-        Superusers can invite WorkOS users, assign Django auth groups, and control local lifecycle state.
+        Superusers can invite users, manage fallback resource groups, and review WorkOS Directory
+        memberships.
       </p>
     </div>
 
@@ -327,7 +343,10 @@ watch(searchQuery, () => {
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-5">
-        <p v-if="error" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p
+          v-if="error"
+          class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
           {{ error }}
         </p>
         <p
@@ -353,7 +372,7 @@ watch(searchQuery, () => {
           :total-rows="totalCount"
           row-key="id"
           search-placeholder="Filter users by name, username, email, or ID"
-          :search-keys="['display', 'username', 'email', 'groups']"
+          :search-keys="['display', 'username', 'email', 'resource_groups']"
           @update:page="currentPage = $event"
           @update:page-size="handlePageSizeChange"
           @update:search-query="handleSearchQueryChange"
@@ -377,36 +396,38 @@ watch(searchQuery, () => {
           </template>
 
           <template #cell-username="{ value }">
-            <code class="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700">{{ value }}</code>
+            <code class="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700">{{
+              value
+            }}</code>
           </template>
 
           <template #cell-email="{ value }">
             <span class="text-sm text-slate-700">{{ value || 'No email address' }}</span>
           </template>
 
-          <template #cell-groups="{ row }">
+          <template #cell-resource_groups="{ row }">
             <div class="space-y-2">
               <div class="flex flex-wrap gap-2">
                 <Badge
-                  v-for="group in (row as UserManagementRecord).groups.slice(0, 2)"
-                  :key="group.id"
+                  v-for="group in (row as UserManagementRecord).resource_groups.slice(0, 2)"
+                  :key="group.group_id"
                   variant="secondary"
                   class="bg-slate-100 text-slate-700"
                 >
-                  {{ group.name }}
+                  {{ group.group_name }}
                 </Badge>
                 <Badge
-                  v-if="(row as UserManagementRecord).groups.length > 2"
+                  v-if="(row as UserManagementRecord).resource_groups.length > 2"
                   variant="secondary"
                   class="bg-slate-100 text-slate-700"
                 >
-                  +{{ (row as UserManagementRecord).groups.length - 2 }} more
+                  +{{ (row as UserManagementRecord).resource_groups.length - 2 }} more
                 </Badge>
                 <span
-                  v-if="(row as UserManagementRecord).groups.length === 0"
+                  v-if="(row as UserManagementRecord).resource_groups.length === 0"
                   class="text-xs text-slate-500"
                 >
-                  No groups assigned
+                  No resource groups assigned
                 </span>
               </div>
               <p class="text-xs text-slate-500">{{ groupSummary(row as UserManagementRecord) }}</p>
@@ -428,18 +449,22 @@ watch(searchQuery, () => {
               >
                 Superuser
               </Badge>
-              <Badge
-                v-if="row.is_staff"
-                variant="secondary"
-                class="bg-sky-100 text-sky-800"
-              >
+              <Badge v-if="row.is_staff" variant="secondary" class="bg-sky-100 text-sky-800">
                 Staff
               </Badge>
               <Badge
-                :variant="row.is_workos_managed ? 'secondary' : 'outline'"
-                :class="row.is_workos_managed ? 'bg-violet-100 text-violet-800' : 'text-slate-600'"
+                v-if="row.is_directory_managed"
+                variant="secondary"
+                class="bg-violet-100 text-violet-800"
               >
-                {{ row.is_workos_managed ? 'WorkOS linked' : 'WorkOS pending' }}
+                WorkOS directory
+              </Badge>
+              <Badge
+                v-else
+                :variant="row.is_workos_managed ? 'secondary' : 'outline'"
+                :class="row.is_workos_managed ? 'bg-slate-100 text-slate-700' : 'text-slate-600'"
+              >
+                {{ row.is_workos_managed ? 'WorkOS linked' : 'Datamingle resource groups' }}
               </Badge>
             </div>
           </template>
@@ -449,10 +474,18 @@ watch(searchQuery, () => {
               <Button as-child variant="outline" size="sm">
                 <RouterLink :to="`/settings/users/${row.id}`">Open</RouterLink>
               </Button>
-              <Button variant="outline" size="sm" @click="toggleUserActiveState(row as UserManagementRecord)">
+              <Button
+                variant="outline"
+                size="sm"
+                @click="toggleUserActiveState(row as UserManagementRecord)"
+              >
                 {{ row.is_active ? 'Deactivate' : 'Reactivate' }}
               </Button>
-              <Button variant="destructive" size="sm" @click="removeUser(row as UserManagementRecord)">
+              <Button
+                variant="destructive"
+                size="sm"
+                @click="removeUser(row as UserManagementRecord)"
+              >
                 Delete
               </Button>
             </div>
@@ -471,7 +504,8 @@ watch(searchQuery, () => {
           <div>
             <h3 class="text-lg font-semibold text-slate-900">Invite WorkOS user</h3>
             <p class="mt-1 text-sm text-slate-600">
-              Send a WorkOS invitation and prepare the matching Datamingle access record.
+              Send a WorkOS invitation and prepare fallback resource groups for customers without
+              Directory Sync.
             </p>
           </div>
           <Button variant="ghost" size="icon" type="button" @click="closeInviteDialog">
@@ -480,7 +514,10 @@ watch(searchQuery, () => {
         </div>
 
         <form class="grid gap-5 px-6 py-5" @submit.prevent="submitInvite">
-          <p v-if="inviteError" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <p
+            v-if="inviteError"
+            class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+          >
             {{ inviteError }}
           </p>
 
@@ -497,7 +534,9 @@ watch(searchQuery, () => {
           </div>
 
           <div class="grid gap-2">
-            <label for="invite-display" class="text-sm font-medium text-slate-900">Display name</label>
+            <label for="invite-display" class="text-sm font-medium text-slate-900"
+              >Display name</label
+            >
             <Input
               id="invite-display"
               v-model="inviteDisplay"
@@ -507,28 +546,43 @@ watch(searchQuery, () => {
           </div>
 
           <div class="grid gap-2">
-            <label for="invite-groups" class="text-sm font-medium text-slate-900">Initial Datamingle groups</label>
+            <label for="invite-groups" class="text-sm font-medium text-slate-900"
+              >Initial resource groups</label
+            >
             <select
               id="invite-groups"
-              v-model="inviteGroupIds"
+              v-model="inviteResourceGroupIds"
               multiple
               class="min-h-36 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
-              :disabled="inviteSubmitting || inviteGroupsLoading"
+              :disabled="inviteSubmitting || inviteResourceGroupsLoading"
             >
-              <option v-for="group in inviteGroups" :key="group.id" :value="group.id">
-                {{ group.name }}
+              <option
+                v-for="group in inviteResourceGroups"
+                :key="group.group_id"
+                :value="group.group_id"
+              >
+                {{ group.group_name }}
               </option>
             </select>
             <p class="text-xs text-slate-500">
-              The invited user is linked to this local record when they accept the WorkOS invitation and sign in.
+              These groups apply until WorkOS Directory Sync starts managing this user's membership.
             </p>
           </div>
 
           <div class="flex justify-end gap-3 border-t border-slate-200 pt-4">
-            <Button variant="outline" type="button" :disabled="inviteSubmitting" @click="closeInviteDialog">
+            <Button
+              variant="outline"
+              type="button"
+              :disabled="inviteSubmitting"
+              @click="closeInviteDialog"
+            >
               Cancel
             </Button>
-            <Button type="submit" class="gap-2" :disabled="inviteSubmitting || inviteGroupsLoading">
+            <Button
+              type="submit"
+              class="gap-2"
+              :disabled="inviteSubmitting || inviteResourceGroupsLoading"
+            >
               <MailPlus class="h-4 w-4" />
               {{ inviteSubmitting ? 'Sending...' : 'Send invitation' }}
             </Button>

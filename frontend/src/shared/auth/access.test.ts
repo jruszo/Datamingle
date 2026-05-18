@@ -11,6 +11,7 @@ function buildUser(overrides: Partial<CurrentUserContext> = {}): CurrentUserCont
     email: 'tester@example.com',
     avatar_url: '',
     is_workos_managed: false,
+    is_directory_managed: false,
     is_superuser: false,
     is_staff: false,
     is_active: true,

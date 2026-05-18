@@ -78,6 +78,7 @@ class WorkOSAuthClient:
         self.client = workos_client(
             api_key=settings.WORKOS_API_KEY,
             client_id=settings.WORKOS_CLIENT_ID,
+            base_url=settings.WORKOS_BASE_URL,
         )
 
     def get_authorization_url(self, state, redirect_uri):
@@ -161,4 +162,32 @@ class WorkOSAuthClient:
             expires_in_days=expires_in_days,
             inviter_user_id=inviter_user_id or None,
             role_slug=role_slug or None,
+        )
+
+    def verify_webhook_event(self, event_body, event_signature, secret):
+        return self.client.webhooks.verify_event(
+            event_body=event_body,
+            event_signature=event_signature,
+            secret=secret,
+        )
+
+    def list_directory_users(self, directory_id):
+        return self.client.directory_sync.list_users(
+            directory_id=directory_id,
+            limit=100,
+            order="asc",
+        )
+
+    def list_directory_groups(self, directory_id):
+        return self.client.directory_sync.list_groups(
+            directory_id=directory_id,
+            limit=100,
+            order="asc",
+        )
+
+    def list_directory_groups_for_user(self, directory_user_id):
+        return self.client.directory_sync.list_groups(
+            user_id=directory_user_id,
+            limit=100,
+            order="asc",
         )

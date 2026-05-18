@@ -69,6 +69,20 @@ class Users(AbstractUser):
         unique=True,
         db_index=True,
     )
+    workos_directory_user_id = models.CharField(
+        "WorkOS Directory User ID",
+        max_length=64,
+        blank=True,
+        null=True,
+        unique=True,
+        db_index=True,
+    )
+    workos_directory_id = models.CharField(
+        "WorkOS Directory ID", max_length=64, blank=True, default="", db_index=True
+    )
+    workos_directory_managed = models.BooleanField(
+        "WorkOS Directory Managed", default=False, db_index=True
+    )
     avatar_url = models.URLField("Avatar URL", max_length=500, blank=True, default="")
     wx_user_id = models.CharField("WeCom User ID", max_length=64, blank=True)
     feishu_open_id = models.CharField("Feishu Open ID", max_length=64, blank=True)
@@ -95,6 +109,81 @@ class Users(AbstractUser):
         db_table = "sql_users"
         verbose_name = "User Management"
         verbose_name_plural = "User Management"
+
+
+class WorkOSDirectoryGroup(models.Model):
+    """Mapping from a WorkOS Directory Sync group to a resource group."""
+
+    workos_group_id = models.CharField(
+        "WorkOS Directory Group ID", max_length=64, unique=True, db_index=True
+    )
+    directory_id = models.CharField("WorkOS Directory ID", max_length=64, db_index=True)
+    organization_id = models.CharField(
+        "WorkOS Organization ID", max_length=64, blank=True, default="", db_index=True
+    )
+    idp_id = models.CharField("Identity Provider Group ID", max_length=255, blank=True)
+    name = models.CharField("WorkOS Group Name", max_length=255)
+    resource_group = models.ForeignKey(
+        ResourceGroup,
+        verbose_name="Resource Group",
+        related_name="workos_directory_mappings",
+        on_delete=models.PROTECT,
+    )
+    is_deleted = models.BooleanField("Deleted in WorkOS", default=False, db_index=True)
+    workos_updated_at = models.DateTimeField(blank=True, null=True)
+    create_time = models.DateTimeField(auto_now_add=True)
+    sys_time = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.workos_group_id})"
+
+    class Meta:
+        managed = True
+        db_table = "workos_directory_group"
+        verbose_name = "WorkOS Directory Group"
+        verbose_name_plural = "WorkOS Directory Groups"
+
+
+class WorkOSDirectoryGroupMembership(models.Model):
+    """WorkOS-owned group membership used to rebuild resource groups."""
+
+    user = models.ForeignKey(
+        Users, related_name="workos_directory_memberships", on_delete=models.CASCADE
+    )
+    directory_group = models.ForeignKey(
+        WorkOSDirectoryGroup,
+        related_name="memberships",
+        on_delete=models.CASCADE,
+    )
+    create_time = models.DateTimeField(auto_now_add=True)
+    sys_time = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user_id}:{self.directory_group_id}"
+
+    class Meta:
+        managed = True
+        db_table = "workos_directory_group_membership"
+        unique_together = ("user", "directory_group")
+        verbose_name = "WorkOS Directory Group Membership"
+        verbose_name_plural = "WorkOS Directory Group Memberships"
+
+
+class WorkOSDirectorySyncEvent(models.Model):
+    """Processed WorkOS event IDs for idempotent webhook handling."""
+
+    event_id = models.CharField("WorkOS Event ID", max_length=64, unique=True)
+    event_type = models.CharField("WorkOS Event Type", max_length=128)
+    create_time = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.event_type}:{self.event_id}"
+
+    class Meta:
+        managed = True
+        db_table = "workos_directory_sync_event"
+        verbose_name = "WorkOS Directory Sync Event"
+        verbose_name_plural = "WorkOS Directory Sync Events"
 
 
 class TwoFactorAuthConfig(models.Model):
@@ -276,6 +365,16 @@ class Instance(models.Model, PasswordMixin):
 class PermissionRequestTarget(models.TextChoices):
     RESOURCE_GROUP = "resource_group", "Resource Group"
     INSTANCE = "instance", "Instance"
+
+
+class PermissionRequestSubject(models.TextChoices):
+    USER = "user", "User"
+    RESOURCE_GROUP = "resource_group", "Resource Group"
+
+
+class PermissionRequestDuration(models.TextChoices):
+    TEMPORARY = "temporary", "Temporary"
+    PERMANENT = "permanent", "Permanent"
 
 
 class MailboxCategory(models.TextChoices):
@@ -728,6 +827,18 @@ class PermissionRequest(models.Model, WorkflowAuditMixin):
     )
     title = models.CharField("Request Title", max_length=50)
     reason = models.CharField("Request Reason", max_length=255, blank=True, default="")
+    subject_type = models.CharField(
+        "Request Subject Type",
+        max_length=32,
+        choices=PermissionRequestSubject.choices,
+        default=PermissionRequestSubject.USER,
+    )
+    access_duration = models.CharField(
+        "Access Duration",
+        max_length=32,
+        choices=PermissionRequestDuration.choices,
+        default=PermissionRequestDuration.TEMPORARY,
+    )
     user_name = models.CharField("Requester", max_length=30)
     user_display = models.CharField("Requester Display Name", max_length=50, default="")
     valid_date = models.DateField("Valid Until")
@@ -779,7 +890,7 @@ class TemporaryResourceGroupGrant(models.Model):
 
 class TemporaryInstanceGrant(models.Model):
     grant_id = models.AutoField(primary_key=True)
-    user = models.ForeignKey(Users, on_delete=models.CASCADE)
+    user = models.ForeignKey(Users, on_delete=models.CASCADE, null=True, blank=True)
     resource_group = models.ForeignKey(ResourceGroup, on_delete=models.CASCADE)
     instance = models.ForeignKey(Instance, on_delete=models.CASCADE)
     access_level = models.CharField(
@@ -804,6 +915,35 @@ class TemporaryInstanceGrant(models.Model):
         db_table = "temporary_instance_grant"
         verbose_name = "Temporary Instance Grant"
         verbose_name_plural = "Temporary Instance Grants"
+
+
+class PermanentResourceGroupGrant(models.Model):
+    grant_id = models.AutoField(primary_key=True)
+    user = models.ForeignKey(Users, on_delete=models.CASCADE, null=True, blank=True)
+    resource_group = models.ForeignKey(ResourceGroup, on_delete=models.CASCADE)
+    instance = models.ForeignKey(
+        Instance,
+        on_delete=models.CASCADE,
+        blank=True,
+        null=True,
+        default=None,
+    )
+    source_request = models.ForeignKey(
+        PermissionRequest,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        default=None,
+    )
+    is_revoked = models.BooleanField("Revoked", default=False)
+    create_time = models.DateTimeField(auto_now_add=True)
+    sys_time = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        managed = True
+        db_table = "permanent_resource_group_grant"
+        verbose_name = "Permanent Resource Group Grant"
+        verbose_name_plural = "Permanent Resource Group Grants"
 
 
 class QueryLog(models.Model):

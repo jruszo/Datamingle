@@ -13,14 +13,21 @@ import {
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import {
   deleteUser,
-  fetchGroups,
+  fetchResourceGroups,
   fetchUser,
   updateUser,
-  type GroupRecord,
+  type ResourceGroupRecord,
   type UserManagementDetailRecord,
 } from '../api'
 import { useAuthStore } from '@/stores/auth'
@@ -29,12 +36,12 @@ const authStore = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 
-const groups = ref<GroupRecord[]>([])
+const resourceGroups = ref<ResourceGroupRecord[]>([])
 const loadedUser = ref<UserManagementDetailRecord | null>(null)
 const username = ref('')
 const displayName = ref('')
 const email = ref('')
-const selectedGroupIds = ref<number[]>([])
+const selectedResourceGroupIds = ref<number[]>([])
 const availableFilter = ref('')
 const selectedFilter = ref('')
 const availableSelection = ref<number[]>([])
@@ -52,7 +59,8 @@ const userId = computed(() => {
   return Number.isFinite(value) ? value : null
 })
 const canManageUsers = computed(() => authStore.currentUser?.is_superuser ?? false)
-const selectedGroupSet = computed(() => new Set(selectedGroupIds.value))
+const isDirectoryManaged = computed(() => loadedUser.value?.is_directory_managed ?? false)
+const selectedResourceGroupSet = computed(() => new Set(selectedResourceGroupIds.value))
 const normalizedAvailableFilter = computed(() => availableFilter.value.trim().toLowerCase())
 const normalizedSelectedFilter = computed(() => selectedFilter.value.trim().toLowerCase())
 
@@ -82,60 +90,66 @@ function applyUser(user: UserManagementDetailRecord) {
   username.value = user.username
   displayName.value = user.display
   email.value = user.email
-  selectedGroupIds.value = [...user.group_ids].sort((left, right) => left - right)
+  selectedResourceGroupIds.value = [...user.resource_group_ids].sort((left, right) => left - right)
 }
 
-function sortGroups(values: GroupRecord[]) {
+function sortGroups(values: ResourceGroupRecord[]) {
   return [...values].sort((left, right) =>
-    left.name.localeCompare(right.name, undefined, {
+    left.group_name.localeCompare(right.group_name, undefined, {
       sensitivity: 'base',
       numeric: true,
     }),
   )
 }
 
-function groupMatches(group: GroupRecord, filterValue: string) {
+function groupMatches(group: ResourceGroupRecord, filterValue: string) {
   if (!filterValue) {
     return true
   }
 
-  const haystack = `${group.name} ${group.id}`.toLowerCase()
+  const haystack = `${group.group_name} ${group.group_id}`.toLowerCase()
   return haystack.includes(filterValue)
 }
 
 const availableGroups = computed(() =>
   sortGroups(
-    groups.value
-      .filter((group) => !selectedGroupSet.value.has(group.id))
+    resourceGroups.value
+      .filter((group) => !selectedResourceGroupSet.value.has(group.group_id))
       .filter((group) => groupMatches(group, normalizedAvailableFilter.value)),
   ),
 )
 
 const assignedGroups = computed(() =>
   sortGroups(
-    groups.value
-      .filter((group) => selectedGroupSet.value.has(group.id))
+    resourceGroups.value
+      .filter((group) => selectedResourceGroupSet.value.has(group.group_id))
       .filter((group) => groupMatches(group, normalizedSelectedFilter.value)),
   ),
 )
 
 function setSelectedGroups(groupIds: number[]) {
-  selectedGroupIds.value = [...new Set(groupIds)].sort((left, right) => left - right)
+  selectedResourceGroupIds.value = [...new Set(groupIds)].sort((left, right) => left - right)
   formSuccess.value = ''
 }
 
 function addGroups(groupIds: number[]) {
+  if (isDirectoryManaged.value) {
+    return
+  }
   if (groupIds.length === 0) {
     return
   }
-  setSelectedGroups([...selectedGroupIds.value, ...groupIds])
+  setSelectedGroups([...selectedResourceGroupIds.value, ...groupIds])
 }
 
 function removeGroups(groupIds: number[]) {
+  if (isDirectoryManaged.value) {
+    return
+  }
   if (groupIds.length === 0) {
     return
   }
-  setSelectedGroups(selectedGroupIds.value.filter((value) => !groupIds.includes(value)))
+  setSelectedGroups(selectedResourceGroupIds.value.filter((value) => !groupIds.includes(value)))
 }
 
 function moveSelectedToAssigned() {
@@ -144,7 +158,7 @@ function moveSelectedToAssigned() {
 }
 
 function moveAllToAssigned() {
-  addGroups(availableGroups.value.map((group) => group.id))
+  addGroups(availableGroups.value.map((group) => group.group_id))
   availableSelection.value = []
 }
 
@@ -154,7 +168,7 @@ function moveSelectedToAvailable() {
 }
 
 function moveAllToAvailable() {
-  removeGroups(assignedGroups.value.map((group) => group.id))
+  removeGroups(assignedGroups.value.map((group) => group.group_id))
   selectedSelection.value = []
 }
 
@@ -173,12 +187,16 @@ function updateSelection(event: Event, target: 'available' | 'selected') {
 }
 
 async function loadAllGroups() {
-  const collectedGroups: GroupRecord[] = []
+  const collectedGroups: ResourceGroupRecord[] = []
   let page = 1
   let totalCount = 0
 
   while (page === 1 || collectedGroups.length < totalCount) {
-    const response = await fetchGroups(requireToken(), { page, size: 100, ordering: 'name' })
+    const response = await fetchResourceGroups(requireToken(), {
+      page,
+      size: 100,
+      ordering: 'group_name',
+    })
     collectedGroups.push(...response.results)
     totalCount = response.count
 
@@ -189,7 +207,7 @@ async function loadAllGroups() {
     page += 1
   }
 
-  groups.value = sortGroups(collectedGroups)
+  resourceGroups.value = sortGroups(collectedGroups)
 }
 
 async function loadPage() {
@@ -201,7 +219,7 @@ async function loadPage() {
   username.value = ''
   displayName.value = ''
   email.value = ''
-  selectedGroupIds.value = []
+  selectedResourceGroupIds.value = []
   availableSelection.value = []
   selectedSelection.value = []
 
@@ -243,11 +261,16 @@ async function saveUser() {
     if (!userId.value) {
       throw new Error('Missing user identifier.')
     }
+    if (isDirectoryManaged.value) {
+      throw new Error(
+        'Resource group membership for this user is managed by WorkOS Directory Sync.',
+      )
+    }
 
     const updatedUser = await updateUser(
       userId.value,
       {
-        group_ids: [...selectedGroupIds.value].sort((left, right) => left - right),
+        resource_group_ids: [...selectedResourceGroupIds.value].sort((left, right) => left - right),
         is_active: loadedUser.value?.is_active ?? true,
       },
       requireToken(),
@@ -269,7 +292,11 @@ async function toggleUserStatus() {
   const nextIsActive = !loadedUser.value.is_active
   const actionLabel = nextIsActive ? 'reactivate' : 'deactivate'
 
-  if (!window.confirm(`${actionLabel[0]?.toUpperCase() ?? ''}${actionLabel.slice(1)} "${loadedUser.value.display || loadedUser.value.username}"?`)) {
+  if (
+    !window.confirm(
+      `${actionLabel[0]?.toUpperCase() ?? ''}${actionLabel.slice(1)} "${loadedUser.value.display || loadedUser.value.username}"?`,
+    )
+  ) {
     return
   }
 
@@ -278,16 +305,20 @@ async function toggleUserStatus() {
   formSuccess.value = ''
 
   try {
-    const updatedUser = await updateUser(
-      userId.value,
-      {
-        group_ids: [...loadedUser.value.group_ids].sort((left, right) => left - right),
-        is_active: nextIsActive,
-      },
-      requireToken(),
-    )
+    const payload: { resource_group_ids?: number[]; is_active: boolean } = {
+      is_active: nextIsActive,
+    }
+    if (!loadedUser.value.is_directory_managed) {
+      payload.resource_group_ids = [...loadedUser.value.resource_group_ids].sort(
+        (left, right) => left - right,
+      )
+    }
+
+    const updatedUser = await updateUser(userId.value, payload, requireToken())
     applyUser(updatedUser)
-    formSuccess.value = nextIsActive ? 'User reactivated successfully.' : 'User deactivated successfully.'
+    formSuccess.value = nextIsActive
+      ? 'User reactivated successfully.'
+      : 'User deactivated successfully.'
   } catch (errorValue) {
     formError.value = toUserFacingMessage(errorValue, `Failed to ${actionLabel} the user.`)
   } finally {
@@ -300,7 +331,11 @@ async function removeUserAccount() {
     return
   }
 
-  if (!window.confirm(`Delete "${loadedUser.value.display || loadedUser.value.username}" from Datamingle? This cannot be undone.`)) {
+  if (
+    !window.confirm(
+      `Delete "${loadedUser.value.display || loadedUser.value.username}" from Datamingle? This cannot be undone.`,
+    )
+  ) {
     return
   }
 
@@ -348,11 +383,22 @@ watch(
         >
           {{ loadedUser.is_active ? 'Active' : 'Inactive' }}
         </Badge>
-        <Badge v-if="loadedUser.is_superuser" variant="secondary" class="bg-amber-100 text-amber-800">
+        <Badge
+          v-if="loadedUser.is_superuser"
+          variant="secondary"
+          class="bg-amber-100 text-amber-800"
+        >
           Superuser
         </Badge>
         <Badge v-if="loadedUser.is_staff" variant="secondary" class="bg-sky-100 text-sky-800">
           Staff
+        </Badge>
+        <Badge
+          v-if="loadedUser.is_directory_managed"
+          variant="secondary"
+          class="bg-violet-100 text-violet-800"
+        >
+          WorkOS Directory
         </Badge>
       </div>
     </div>
@@ -361,29 +407,33 @@ watch(
       <CardHeader>
         <CardTitle>Edit User</CardTitle>
         <CardDescription>
-          Assign Django auth groups and manage account lifecycle from the Datamingle SPA.
+          Review resource groups and manage account lifecycle from the Datamingle SPA.
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-6">
         <div
           class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
         >
-          Identity and sign-in are managed by WorkOS. Group assignments and active status remain editable in Datamingle.
+          <span v-if="isDirectoryManaged">
+            Resource group membership is managed by WorkOS Directory Sync. Active status remains
+            editable in Datamingle.
+          </span>
+          <span v-else>
+            This user uses Datamingle-managed fallback resource groups until WorkOS Directory Sync
+            manages their membership.
+          </span>
         </div>
 
         <div class="grid gap-4 md:grid-cols-2">
           <div class="space-y-2">
             <label for="user-username" class="text-sm font-medium text-slate-900">Username</label>
-            <Input
-              id="user-username"
-              v-model="username"
-              :disabled="true"
-              placeholder="e.g. jdoe"
-            />
+            <Input id="user-username" v-model="username" :disabled="true" placeholder="e.g. jdoe" />
           </div>
 
           <div class="space-y-2">
-            <label for="user-display" class="text-sm font-medium text-slate-900">Display name</label>
+            <label for="user-display" class="text-sm font-medium text-slate-900"
+              >Display name</label
+            >
             <Input
               id="user-display"
               v-model="displayName"
@@ -403,10 +453,16 @@ watch(
           </div>
         </div>
 
-        <p v-if="pageError" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p
+          v-if="pageError"
+          class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
           {{ pageError }}
         </p>
-        <p v-else-if="formError" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p
+          v-else-if="formError"
+          class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
           {{ formError }}
         </p>
         <p
@@ -418,20 +474,27 @@ watch(
 
         <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
           <div class="space-y-3">
-            <label for="available-groups-filter" class="text-sm font-medium text-slate-900">Available groups</label>
+            <label for="available-groups-filter" class="text-sm font-medium text-slate-900"
+              >Available resource groups</label
+            >
             <Input
               id="available-groups-filter"
               v-model="availableFilter"
-              :disabled="isLoading"
-              placeholder="Filter available groups"
+              :disabled="isLoading || isDirectoryManaged"
+              placeholder="Filter available resource groups"
             />
             <select
               class="min-h-[22rem] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
               multiple
+              :disabled="isLoading || isDirectoryManaged"
               @change="updateSelection($event, 'available')"
             >
-              <option v-for="group in availableGroups" :key="group.id" :value="group.id">
-                {{ group.name }}
+              <option
+                v-for="group in availableGroups"
+                :key="group.group_id"
+                :value="group.group_id"
+              >
+                {{ group.group_name }}
               </option>
             </select>
           </div>
@@ -440,7 +503,7 @@ watch(
             <Button
               variant="outline"
               size="icon"
-              :disabled="isLoading || availableSelection.length === 0"
+              :disabled="isLoading || isDirectoryManaged || availableSelection.length === 0"
               @click="moveSelectedToAssigned"
             >
               <ChevronRight class="h-4 w-4" />
@@ -448,7 +511,7 @@ watch(
             <Button
               variant="outline"
               size="icon"
-              :disabled="isLoading || availableGroups.length === 0"
+              :disabled="isLoading || isDirectoryManaged || availableGroups.length === 0"
               @click="moveAllToAssigned"
             >
               <ChevronsRight class="h-4 w-4" />
@@ -456,7 +519,7 @@ watch(
             <Button
               variant="outline"
               size="icon"
-              :disabled="isLoading || selectedSelection.length === 0"
+              :disabled="isLoading || isDirectoryManaged || selectedSelection.length === 0"
               @click="moveSelectedToAvailable"
             >
               <ChevronLeft class="h-4 w-4" />
@@ -464,7 +527,7 @@ watch(
             <Button
               variant="outline"
               size="icon"
-              :disabled="isLoading || assignedGroups.length === 0"
+              :disabled="isLoading || isDirectoryManaged || assignedGroups.length === 0"
               @click="moveAllToAvailable"
             >
               <ChevronsLeft class="h-4 w-4" />
@@ -472,20 +535,23 @@ watch(
           </div>
 
           <div class="space-y-3">
-            <label for="selected-groups-filter" class="text-sm font-medium text-slate-900">Assigned groups</label>
+            <label for="selected-groups-filter" class="text-sm font-medium text-slate-900"
+              >Assigned resource groups</label
+            >
             <Input
               id="selected-groups-filter"
               v-model="selectedFilter"
-              :disabled="isLoading"
-              placeholder="Filter assigned groups"
+              :disabled="isLoading || isDirectoryManaged"
+              placeholder="Filter assigned resource groups"
             />
             <select
               class="min-h-[22rem] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
               multiple
+              :disabled="isLoading || isDirectoryManaged"
               @change="updateSelection($event, 'selected')"
             >
-              <option v-for="group in assignedGroups" :key="group.id" :value="group.id">
-                {{ group.name }}
+              <option v-for="group in assignedGroups" :key="group.group_id" :value="group.group_id">
+                {{ group.group_name }}
               </option>
             </select>
           </div>
@@ -500,16 +566,15 @@ watch(
           >
             {{ loadedUser?.is_active ? 'Deactivate user' : 'Reactivate user' }}
           </Button>
-          <Button
-            variant="destructive"
-            :disabled="isDeleting"
-            @click="removeUserAccount"
-          >
+          <Button variant="destructive" :disabled="isDeleting" @click="removeUserAccount">
             <Trash2 class="h-4 w-4" />
             Delete user
           </Button>
         </div>
-        <Button :disabled="isLoading || isSaving || !canManageUsers" @click="saveUser">
+        <Button
+          :disabled="isLoading || isSaving || !canManageUsers || isDirectoryManaged"
+          @click="saveUser"
+        >
           <Save class="h-4 w-4" />
           Save
         </Button>

@@ -36,16 +36,17 @@ def active_resource_group_grants(user, on_date=None):
         is_revoked=False,
         valid_date__gte=active_on,
         resource_group__is_deleted=0,
-    )
+    ).select_related("user", "resource_group")
 
 
 def active_instance_grants(user, on_date=None):
     active_on = on_date or _today()
     return TemporaryInstanceGrant.objects.filter(
-        user=user,
+        Q(user=user)
+        | Q(user__isnull=True, resource_group__in=user_member_groups(user)),
         is_revoked=False,
         valid_date__gte=active_on,
-    ).select_related("instance", "resource_group")
+    ).select_related("user", "instance", "resource_group")
 
 
 def _grant_levels_for_tags(tag_codes):

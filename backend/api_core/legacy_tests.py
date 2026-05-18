@@ -33,6 +33,7 @@ from sql.models import (
     QueryLog,
     QueryPrivileges,
     QueryPrivilegesApply,
+    PermanentResourceGroupGrant,
     PermissionRequest,
     TemporaryInstanceGrant,
     TemporaryResourceGroupGrant,
@@ -40,6 +41,7 @@ from sql.models import (
     ArchiveLog,
 )
 from common.utils.const import WorkflowAction, WorkflowStatus, WorkflowType
+from sql.utils.resource_group import user_groups, user_instances
 import json
 
 User = get_user_model()
@@ -325,6 +327,7 @@ class TestUser(CacheIsolatedAPITestCase):
                 "display",
                 "email",
                 "is_workos_managed",
+                "is_directory_managed",
                 "is_active",
                 "is_superuser",
                 "is_staff",
@@ -1926,6 +1929,7 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
     def tearDown(self):
         TemporaryInstanceGrant.objects.all().delete()
         TemporaryResourceGroupGrant.objects.all().delete()
+        PermanentResourceGroupGrant.objects.all().delete()
         PermissionRequest.objects.all().delete()
         WorkflowAudit.objects.filter(workflow_type=WorkflowType.ACCESS_REQUEST).delete()
         WorkflowLog.objects.all().delete()
@@ -2017,6 +2021,7 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
         self.assertTrue(
             TemporaryInstanceGrant.objects.filter(source_request_id=request_id).exists()
         )
+        self.assertIn(self.instance, list(user_instances(self.requester)))
 
     @patch("api_access.views.async_task")
     def test_approving_group_request_creates_group_grant(self, _async_task):
@@ -2045,6 +2050,165 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
                 source_request_id=request_id
             ).exists()
         )
+        self.assertIn(self.resource_group, user_groups(self.requester))
+        self.assertIn(self.instance, list(user_instances(self.requester)))
+
+    @patch("api_access.views.async_task")
+    def test_approving_resource_group_subject_instance_request_grants_group_members(
+        self, _async_task
+    ):
+        group_member = User(
+            username="permission_resource_group_member",
+            display="Permission Resource Group Member",
+            is_active=True,
+        )
+        group_member.set_password("test_password")
+        group_member.save()
+        self.requester.resource_group.add(self.resource_group)
+        group_member.resource_group.add(self.resource_group)
+        group_instance = Instance.objects.create(
+            instance_name="permission-group-instance",
+            type="master",
+            db_type="mysql",
+            host="127.0.0.2",
+            port=3306,
+            user="root",
+            password="pwd",
+        )
+
+        self._login(self.requester)
+        create_response = self.client.post(
+            "/api/v1/access/request/",
+            {
+                "title": "Need instance access for resource group",
+                "target_type": "instance",
+                "subject_type": "resource_group",
+                "access_duration": "temporary",
+                "resource_group_id": self.resource_group.group_id,
+                "instance_id": group_instance.id,
+                "access_level": "query",
+                "valid_date": "2099-12-31",
+            },
+            format="json",
+        )
+        request_id = response_data(create_response)["request_id"]
+
+        self._login(self.reviewer)
+        review_response = self.client.post(
+            f"/api/v1/access/request/{request_id}/reviews/",
+            {"audit_status": WorkflowAction.PASS, "audit_remark": "approved"},
+            format="json",
+        )
+
+        self.assertEqual(review_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(
+            TemporaryInstanceGrant.objects.filter(
+                source_request_id=request_id,
+                user__isnull=True,
+                resource_group=self.resource_group,
+                instance=group_instance,
+            ).exists()
+        )
+        self.assertIn(group_instance, list(user_instances(group_member)))
+
+        group_instance.delete()
+        group_member.delete()
+
+    @patch("api_access.views.async_task")
+    def test_approving_permanent_self_request_adds_direct_assignment(self, _async_task):
+        self._login(self.requester)
+        create_response = self.client.post(
+            "/api/v1/access/request/",
+            {
+                "title": "Need permanent resource access",
+                "target_type": "resource_group",
+                "subject_type": "user",
+                "access_duration": "permanent",
+                "resource_group_id": self.resource_group.group_id,
+                "valid_date": "2099-12-31",
+            },
+            format="json",
+        )
+        request_id = response_data(create_response)["request_id"]
+
+        self._login(self.reviewer)
+        review_response = self.client.post(
+            f"/api/v1/access/request/{request_id}/reviews/",
+            {"audit_status": WorkflowAction.PASS, "audit_remark": "approved"},
+            format="json",
+        )
+
+        self.assertEqual(review_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(
+            PermanentResourceGroupGrant.objects.filter(
+                source_request_id=request_id, user=self.requester
+            ).exists()
+        )
+        self.assertIn(self.resource_group, self.requester.resource_group.all())
+        self.assertIn(self.resource_group, user_groups(self.requester))
+
+    @patch("api_access.views.async_task")
+    def test_approving_permanent_resource_group_request_adds_instance_to_group(
+        self, _async_task
+    ):
+        group_member = User(
+            username="permanent_group_member",
+            display="Permanent Group Member",
+            is_active=True,
+        )
+        group_member.set_password("test_password")
+        group_member.save()
+        self.requester.resource_group.add(self.resource_group)
+        group_member.resource_group.add(self.resource_group)
+        group_instance = Instance.objects.create(
+            instance_name="permission-permanent-group-instance",
+            type="master",
+            db_type="mysql",
+            host="127.0.0.3",
+            port=3306,
+            user="root",
+            password="pwd",
+        )
+
+        self._login(self.requester)
+        create_response = self.client.post(
+            "/api/v1/access/request/",
+            {
+                "title": "Need permanent group access",
+                "target_type": "instance",
+                "subject_type": "resource_group",
+                "access_duration": "permanent",
+                "resource_group_id": self.resource_group.group_id,
+                "instance_id": group_instance.id,
+                "access_level": "query",
+                "valid_date": "2099-12-31",
+            },
+            format="json",
+        )
+        request_id = response_data(create_response)["request_id"]
+
+        self._login(self.reviewer)
+        review_response = self.client.post(
+            f"/api/v1/access/request/{request_id}/reviews/",
+            {"audit_status": WorkflowAction.PASS, "audit_remark": "approved"},
+            format="json",
+        )
+
+        self.assertEqual(review_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(
+            PermanentResourceGroupGrant.objects.filter(
+                source_request_id=request_id,
+                user__isnull=True,
+                resource_group=self.resource_group,
+                instance=group_instance,
+            ).exists()
+        )
+        self.assertIn(self.resource_group, group_instance.resource_group.all())
+        self.assertIn(self.resource_group, user_groups(group_member))
+        self.assertIn(group_instance, list(user_instances(group_member)))
+
+        group_instance.delete()
+        group_member.delete()
 
     def test_active_grant_list_and_revoke(self):
         grant = TemporaryInstanceGrant.objects.create(
@@ -2078,6 +2242,36 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
         self._login(self.query_user)
 
         r = self.client.get("/api/v1/query/instance/", format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        payload = response_data(r)
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["instance_name"], self.instance.instance_name)
+
+    def test_direct_resource_group_assignment_still_controls_instance_access_for_directory_user(
+        self,
+    ):
+        self.query_user.workos_directory_managed = True
+        self.query_user.workos_directory_id = "directory_123"
+        self.query_user.workos_directory_user_id = "directory_user_query"
+        self.query_user.save(
+            update_fields=[
+                "workos_directory_managed",
+                "workos_directory_id",
+                "workos_directory_user_id",
+            ]
+        )
+        self.query_user.user_permissions.add(
+            Permission.objects.get(codename="menu_sqlquery")
+        )
+        self.query_user.resource_group.add(self.resource_group)
+        read_tag = InstanceTag.objects.create(
+            tag_code="can_read", tag_name="Can Read", active=True
+        )
+        self.instance.instance_tag.add(read_tag)
+        self._login(self.query_user)
+
+        r = self.client.get("/api/v1/query/instance/", format="json")
+
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         payload = response_data(r)
         self.assertEqual(len(payload), 1)
@@ -4240,6 +4434,7 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
     def tearDown(self):
         TemporaryInstanceGrant.objects.all().delete()
         TemporaryResourceGroupGrant.objects.all().delete()
+        PermanentResourceGroupGrant.objects.all().delete()
         PermissionRequest.objects.all().delete()
         WorkflowLog.objects.all().delete()
         WorkflowAudit.objects.all().delete()

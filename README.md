@@ -111,6 +111,7 @@ Datamingle uses WorkOS as the only sign-in method for every deployment. Each run
 WORKOS_API_KEY=sk_test_or_live_xxx
 WORKOS_CLIENT_ID=client_xxx
 WORKOS_ORGANIZATION_ID=org_xxx
+WORKOS_WEBHOOK_SECRET=whsec_xxx
 WORKOS_STAFF_EMAILS=ops@datamingle.dev,admin@datamingle.dev
 WORKOS_SUPERUSER_EMAILS=admin@datamingle.dev
 ```
@@ -119,17 +120,21 @@ Behavior:
 
 - The SPA login page shows only the WorkOS button.
 - Local password login, user-created passwords, and local 2FA login routes are not registered.
-- Datamingle still keeps its own local `Users`, groups, and resource-group assignments after login.
-- Superusers manage Datamingle group assignments and active/inactive state; WorkOS manages identity fields.
+- Datamingle still keeps its own local `Users`, auth/permission groups, and resource groups after login.
+- WorkOS Directory Sync mirrors directory groups into Datamingle resource groups and owns resource-group membership for directory-managed users.
+- Superusers manage fallback Datamingle resource-group assignments for customers without SSO/Directory Sync and can still change active/inactive state.
+- Auth groups remain permission/role levels used inside resource groups. Resource access is assigned through Datamingle resource groups. Access requests can grant temporary access to an individual user or a resource group; approved permanent requests add the user to a resource group or attach an instance to a resource group.
 
 WorkOS setup assumptions in this repo:
 
 - One Datamingle deployment maps to one tenant.
 - That deployment uses one fixed WorkOS organization via `WORKOS_ORGANIZATION_ID`.
 - Users are provisioned just-in-time on first successful WorkOS login.
+- Directory Sync users can also be created or updated from WorkOS webhooks.
 - The local Datamingle account uses the WorkOS email as the username.
 - `WORKOS_STAFF_EMAILS` and `WORKOS_SUPERUSER_EMAILS` are bootstrap allowlists for initial elevated access.
 - Datamingle derives the WorkOS callback and logout return URLs from the current request host.
+- Directory Sync group names auto-create matching Datamingle resource groups. Assign database servers to those resource groups in Datamingle.
 
 ### WorkOS Setup Steps
 1. Create or choose the tenant organization in your WorkOS account.
@@ -141,14 +146,23 @@ WorkOS setup assumptions in this repo:
    - Redirect URI: `http://localhost:5173/api/auth/workos/callback/`
    - Logout return URL: `http://localhost:5173/login`
 4. Set the required `WORKOS_*` values in `.env`.
-5. Rebuild the app container so the `workos` Python dependency is installed:
+5. Configure the WorkOS webhook endpoint:
+   `https://<tenant-host>/api/auth/workos/webhook/`
+   Include Directory Sync events and set `WORKOS_WEBHOOK_SECRET` to the endpoint signing secret.
+6. Optionally backfill an existing directory after setup:
+
+```bash
+docker exec -w /opt/datamingle/backend datamingle-app python manage.py sync_workos_directory --directory-id directory_xxx
+```
+
+7. Rebuild the app container so the `workos` Python dependency is installed:
 
 ```bash
 docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend
 ```
 
-6. Restart the deployment and open `/login/`.
-7. Sign in through WorkOS. A local Datamingle user will be created automatically on first login.
+8. Restart the deployment and open `/login/`.
+9. Sign in through WorkOS. A local Datamingle user will be created automatically on first login.
 
 ### Notes
 - WorkOS still issues Datamingle JWTs to the SPA after the WorkOS callback completes.

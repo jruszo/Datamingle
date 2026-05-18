@@ -87,7 +87,14 @@ def _validate_invited_local_user(email):
     return user
 
 
-def _create_or_update_invited_local_user(email, display_name, groups, groups_provided):
+def _create_or_update_invited_local_user(
+    email,
+    display_name,
+    groups,
+    groups_provided,
+    resource_groups,
+    resource_groups_provided,
+):
     user = _validate_invited_local_user(email)
     with transaction.atomic():
         if user is None:
@@ -104,6 +111,8 @@ def _create_or_update_invited_local_user(email, display_name, groups, groups_pro
 
         if groups_provided:
             user.groups.set(groups)
+        if resource_groups_provided:
+            user.resource_group.set(resource_groups)
 
     return user
 
@@ -150,6 +159,7 @@ class CurrentUser(views.APIView):
             "email": user.email or "",
             "avatar_url": user.avatar_url or "",
             "is_workos_managed": bool(user.workos_user_id),
+            "is_directory_managed": bool(user.workos_directory_managed),
             "is_superuser": user.is_superuser,
             "is_staff": user.is_staff,
             "is_active": user.is_active,
@@ -183,7 +193,9 @@ class UserList(generics.ListAPIView):
     filterset_class = UserFilter
     pagination_class = CustomizedPagination
     serializer_class = UserManagementReadSerializer
-    queryset = Users.objects.prefetch_related("groups").all().order_by("id")
+    queryset = (
+        Users.objects.prefetch_related("groups", "resource_group").all().order_by("id")
+    )
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -246,7 +258,9 @@ class WorkOSUserInvitation(views.APIView):
         email = serializer.validated_data["email"]
         display = serializer.validated_data.get("display", "")
         groups_provided = "groups" in serializer.validated_data
+        resource_groups_provided = "resource_groups" in serializer.validated_data
         groups = serializer.validated_data.get("groups", [])
+        resource_groups = serializer.validated_data.get("resource_groups", [])
 
         _validate_invited_local_user(email)
         invitation = WorkOSAuthClient().send_invitation(
@@ -258,6 +272,8 @@ class WorkOSUserInvitation(views.APIView):
             display_name=display,
             groups=groups,
             groups_provided=groups_provided,
+            resource_groups=resource_groups,
+            resource_groups_provided=resource_groups_provided,
         )
 
         return success_response(
@@ -279,7 +295,7 @@ class UserDetail(views.APIView):
 
     def get_object(self, pk):
         try:
-            return Users.objects.prefetch_related("groups").get(pk=pk)
+            return Users.objects.prefetch_related("groups", "resource_group").get(pk=pk)
         except Users.DoesNotExist:
             raise Http404
 

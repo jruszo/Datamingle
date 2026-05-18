@@ -3,10 +3,11 @@ import secrets
 from urllib.parse import urlencode
 
 from django.conf import settings
-from django.core.exceptions import SuspiciousOperation
+from django.core.exceptions import ImproperlyConfigured, SuspiciousOperation
 from django.http import HttpResponseRedirect
 from django.http.request import validate_host
 from django_redis import get_redis_connection
+from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status, permissions, views
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
@@ -15,6 +16,7 @@ from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
 
 from common.auth import init_user
 from common.authenticate.workos import WorkOSAuthClient
+from common.authenticate.workos_directory import process_directory_event
 from sql.models import Users
 from api_core.response import success_response
 
@@ -434,6 +436,34 @@ class WorkOSSessionRevokeView(views.APIView):
 
         client.revoke_session(session_id=session_id)
         return success_response(detail="WorkOS session revoked.")
+
+
+class WorkOSWebhookView(views.APIView):
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
+    @extend_schema(
+        summary="WorkOS Webhook",
+        description="Receive WorkOS Directory Sync webhooks and reconcile local resource-group membership.",
+    )
+    def post(self, request):
+        event_signature = request.headers.get("WorkOS-Signature", "")
+
+        try:
+            if settings.WORKOS_WEBHOOK_SECRET:
+                event = WorkOSAuthClient().verify_webhook_event(
+                    event_body=request.body,
+                    event_signature=event_signature,
+                    secret=settings.WORKOS_WEBHOOK_SECRET,
+                )
+            else:
+                event = json.loads(request.body.decode("utf-8"))
+
+            result = process_directory_event(event)
+        except (ValueError, SuspiciousOperation, ImproperlyConfigured) as exc:
+            return Response({"errors": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return success_response(data=result, detail="WorkOS webhook processed.")
 
 
 class WorkOSLogoutView(views.APIView):
