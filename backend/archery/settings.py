@@ -33,6 +33,7 @@ env = environ.Env(
     WORKOS_WEBHOOK_SECRET=(str, ""),
     WORKOS_STAFF_EMAILS=(list, []),
     WORKOS_SUPERUSER_EMAILS=(list, []),
+    WORKOS_SUPERADMIN_ROLE_SLUGS=(list, ["superadmin"]),
     DATAMINGLE_AGENT_API_KEY_BACKEND=(str, "workos"),
     CHANNEL_LAYER_URL=(str, ""),
     # CSRF_TRUSTED_ORIGINS=subdomain.example.com,subdomain.example2.com subdomain.example.com
@@ -378,6 +379,11 @@ WORKOS_SUPERUSER_EMAILS = [
     email.strip().lower()
     for email in env("WORKOS_SUPERUSER_EMAILS", default=[])
     if email.strip()
+]
+WORKOS_SUPERADMIN_ROLE_SLUGS = [
+    role_slug.strip().lower()
+    for role_slug in env("WORKOS_SUPERADMIN_ROLE_SLUGS", default=["superadmin"])
+    if role_slug.strip()
 ]
 
 # Logging configuration

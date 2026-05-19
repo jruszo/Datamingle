@@ -1,6 +1,7 @@
 import base64
 import json
 from dataclasses import dataclass
+from typing import Tuple
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured, SuspiciousOperation
@@ -15,6 +16,7 @@ class WorkOSAuthenticationResult:
     profile_picture_url: str
     organization_id: str
     session_id: str
+    role_slugs: Tuple[str, ...] = ()
 
     @property
     def display_name(self):
@@ -41,6 +43,27 @@ def _get_attr(source, name, default=""):
     return getattr(source, name, default)
 
 
+def _list_response_items(response):
+    data = _get_attr(response, "data", None)
+    if data is not None:
+        return list(data)
+    if isinstance(response, (list, tuple)):
+        return list(response)
+    return []
+
+
+def _list_response_next_after(response, items):
+    metadata = _get_attr(response, "list_metadata", None)
+    after = _get_attr(metadata, "after", "") if metadata else ""
+    if after:
+        return str(after)
+
+    has_more = bool(_get_attr(metadata, "has_more", False)) if metadata else False
+    if has_more and items:
+        return str(_get_attr(items[-1], "id", "") or "")
+    return ""
+
+
 def _decode_workos_access_token(token):
     segments = token.split(".")
     if len(segments) != 3:
@@ -53,6 +76,28 @@ def _decode_workos_access_token(token):
         return json.loads(decoded.decode("utf-8"))
     except (ValueError, json.JSONDecodeError) as exc:
         raise SuspiciousOperation("Unable to decode the WorkOS access token.") from exc
+
+
+def _normalized_claim_values(value):
+    if not value:
+        return []
+    if isinstance(value, str):
+        return [value.strip().lower()] if value.strip() else []
+    if isinstance(value, (list, tuple, set)):
+        values = []
+        for item in value:
+            values.extend(_normalized_claim_values(item))
+        return values
+    return []
+
+
+def _workos_role_slugs(access_token_payload):
+    role_slugs = set()
+    for claim_name in ("role", "roles"):
+        role_slugs.update(
+            _normalized_claim_values(access_token_payload.get(claim_name))
+        )
+    return tuple(sorted(role_slugs))
 
 
 def _require_workos_settings():
@@ -125,6 +170,7 @@ class WorkOSAuthClient:
             ).strip(),
             organization_id=str(organization_id or ""),
             session_id=str(session_id),
+            role_slugs=_workos_role_slugs(access_token_payload),
         )
 
     def get_logout_url(self, session_id, return_to):
@@ -171,23 +217,38 @@ class WorkOSAuthClient:
             secret=secret,
         )
 
+    def _paginate_directory_list(self, list_method, **params):
+        items = []
+        after = ""
+        while True:
+            request_params = {**params, "limit": 100, "order": "asc"}
+            if after:
+                request_params["after"] = after
+
+            response = list_method(**request_params)
+            page_items = _list_response_items(response)
+            items.extend(page_items)
+
+            next_after = _list_response_next_after(response, page_items)
+            if not next_after or next_after == after:
+                break
+            after = next_after
+        return items
+
     def list_directory_users(self, directory_id):
-        return self.client.directory_sync.list_users(
+        return self._paginate_directory_list(
+            self.client.directory_sync.list_users,
             directory_id=directory_id,
-            limit=100,
-            order="asc",
         )
 
     def list_directory_groups(self, directory_id):
-        return self.client.directory_sync.list_groups(
+        return self._paginate_directory_list(
+            self.client.directory_sync.list_groups,
             directory_id=directory_id,
-            limit=100,
-            order="asc",
         )
 
     def list_directory_groups_for_user(self, directory_user_id):
-        return self.client.directory_sync.list_groups(
+        return self._paginate_directory_list(
+            self.client.directory_sync.list_groups,
             user_id=directory_user_id,
-            limit=100,
-            order="asc",
         )

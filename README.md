@@ -82,15 +82,10 @@ named `mysql`, override the container name:
 MYSQL_CONTAINER=mysql scripts/docker/migrate-archery-db-to-datamingle.sh
 ```
 
-### Local Demo Users
-The local ARM compose setup can seed demo users, resource groups, and demo database instances for manual UX testing.
+### Local Demo Seed
+The local ARM compose setup seeds resource groups, auth groups, workflow settings, instance tags, and demo database instances for manual UX testing.
 
-Seeded app users are local access records only; sign-in still comes through WorkOS.
-
-- `demo_admin`
-- `demo_requester`
-- `demo_pm`
-- `demo_dba`
+It no longer seeds local app users. Sign-in and privileged access come from WorkOS.
 
 See [backend/src/docker-compose/LOCAL_DEMO.md](backend/src/docker-compose/LOCAL_DEMO.md) for:
 
@@ -114,6 +109,7 @@ WORKOS_ORGANIZATION_ID=org_xxx
 WORKOS_WEBHOOK_SECRET=whsec_xxx
 WORKOS_STAFF_EMAILS=ops@datamingle.dev,admin@datamingle.dev
 WORKOS_SUPERUSER_EMAILS=admin@datamingle.dev
+WORKOS_SUPERADMIN_ROLE_SLUGS=superadmin
 ```
 
 Behavior:
@@ -132,7 +128,8 @@ WorkOS setup assumptions in this repo:
 - Users are provisioned just-in-time on first successful WorkOS login.
 - Directory Sync users can also be created or updated from WorkOS webhooks.
 - The local Datamingle account uses the WorkOS email as the username.
-- `WORKOS_STAFF_EMAILS` and `WORKOS_SUPERUSER_EMAILS` are bootstrap allowlists for initial elevated access.
+- Users with a WorkOS role slug listed in `WORKOS_SUPERADMIN_ROLE_SLUGS` are refreshed into Datamingle superuser access on every login, including membership in the local `superadmin` auth group.
+- `WORKOS_STAFF_EMAILS` and `WORKOS_SUPERUSER_EMAILS` remain bootstrap allowlists for initial elevated access.
 - Datamingle derives the WorkOS callback and logout return URLs from the current request host.
 - Directory Sync group names auto-create matching Datamingle resource groups. Assign database servers to those resource groups in Datamingle.
 

@@ -3,7 +3,9 @@ from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from drf_spectacular.utils import extend_schema
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Prefetch, Q
+from django.contrib.auth.models import Group, Permission
+from django.http import Http404
 from api_users.serializers import (
     UserManagementReadSerializer,
     UserManagementUpdateSerializer,
@@ -21,10 +23,26 @@ from common.authenticate.workos import WorkOSAuthClient
 from api_core.pagination import CustomizedPagination
 from api_users.filters import UserFilter
 from api_core.response import success_response
-from django.contrib.auth.models import Group, Permission
-from django.http import Http404
-from sql.models import Users, ResourceGroup, Instance
+from sql.models import Users, ResourceGroup, Instance, WorkOSDirectoryGroupMembership
 from sql.utils.resource_group import user_groups, active_instance_grants
+
+
+def _user_management_prefetches():
+    return (
+        Prefetch("groups", queryset=Group.objects.order_by("id")),
+        Prefetch(
+            "resource_group",
+            queryset=ResourceGroup.objects.filter(is_deleted=0).order_by("group_id"),
+        ),
+        Prefetch(
+            "workos_directory_memberships",
+            queryset=WorkOSDirectoryGroupMembership.objects.filter(
+                directory_group__is_deleted=False,
+                directory_group__resource_group__is_deleted=0,
+            ).select_related("directory_group"),
+            to_attr="active_workos_directory_memberships",
+        ),
+    )
 
 
 def _require_any_permission(request, *perm_list):
@@ -194,7 +212,9 @@ class UserList(generics.ListAPIView):
     pagination_class = CustomizedPagination
     serializer_class = UserManagementReadSerializer
     queryset = (
-        Users.objects.prefetch_related("groups", "resource_group").all().order_by("id")
+        Users.objects.prefetch_related(*_user_management_prefetches())
+        .all()
+        .order_by("id")
     )
 
     def get_queryset(self):
@@ -295,7 +315,9 @@ class UserDetail(views.APIView):
 
     def get_object(self, pk):
         try:
-            return Users.objects.prefetch_related("groups", "resource_group").get(pk=pk)
+            return Users.objects.prefetch_related(*_user_management_prefetches()).get(
+                pk=pk
+            )
         except Users.DoesNotExist:
             raise Http404
 

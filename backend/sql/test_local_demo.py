@@ -1,3 +1,4 @@
+from django.contrib.auth.models import Group, Permission
 from django.core.management import call_command
 from django.test import TestCase
 
@@ -12,12 +13,14 @@ from sql.models import Instance, InstanceTag, ResourceGroup, Users, WorkflowAudi
 
 class TestLocalDemoSeed(TestCase):
     def test_seed_local_demo_is_idempotent(self):
+        Users.objects.create_user(username="demo_admin", email="demo_admin@example.com")
+
         call_command("seed_local_demo")
         call_command("seed_local_demo")
 
         self.assertEqual(
             Users.objects.filter(username__in=managed_demo_usernames()).count(),
-            len(managed_demo_usernames()),
+            0,
         )
         self.assertEqual(
             Instance.objects.filter(
@@ -45,29 +48,11 @@ class TestLocalDemoSeed(TestCase):
             ).count(),
             len(managed_demo_resource_group_names()),
         )
-
-        requester = Users.objects.get(username="demo_requester")
-        self.assertFalse(requester.has_usable_password())
-        self.assertEqual(requester.groups.values_list("name", flat=True).get(), "RD")
-        self.assertTrue(requester.has_perm("sql.sqlexport_submit"))
-        self.assertTrue(requester.has_perm("sql.menu_sqlexportworkflow"))
+        superadmin_group = Group.objects.get(name="superadmin")
         self.assertEqual(
-            set(requester.resource_group.values_list("group_name", flat=True)),
-            {
-                "Demo Workflow Single Stage",
-                "Demo Workflow Multi Stage",
-            },
+            superadmin_group.permissions.count(),
+            Permission.objects.count(),
         )
-
-        pm_user = Users.objects.get(username="demo_pm")
-        self.assertEqual(
-            set(pm_user.resource_group.values_list("group_name", flat=True)),
-            {"Demo Workflow Multi Stage"},
-        )
-
-        dba_user = Users.objects.get(username="demo_dba")
-        self.assertTrue(dba_user.has_perm("sql.offline_download"))
-        self.assertTrue(dba_user.has_perm("sql.menu_sqlexportworkflow"))
 
         mysql_instance = Instance.objects.get(instance_name="demo-mysql-workflow")
         self.assertEqual(mysql_instance.host, "mysql_demo")

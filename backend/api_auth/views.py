@@ -1,11 +1,15 @@
 import json
 import secrets
+from datetime import datetime, timedelta, timezone as datetime_timezone
 from urllib.parse import urlencode
 
 from django.conf import settings
+from django.contrib.auth.models import Group
 from django.core.exceptions import ImproperlyConfigured, SuspiciousOperation
 from django.http import HttpResponseRedirect
 from django.http.request import validate_host
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django_redis import get_redis_connection
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status, permissions, views
@@ -14,15 +18,16 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
 
-from common.auth import init_user
+from common.auth import SUPERADMIN_GROUP_NAME, ensure_superadmin_group, init_user
 from common.authenticate.workos import WorkOSAuthClient
-from common.authenticate.workos_directory import process_directory_event
+from common.celery_tasks import process_workos_webhook_task
 from sql.models import Users
 from api_core.response import success_response
 
 WORKOS_STATE_COOKIE_NAME = "datamingle_workos_state"
 WORKOS_SESSION_COOKIE_NAME = "datamingle_workos_session_id"
 WORKOS_EXCHANGE_PREFIX = "workos-exchange-code:"
+WORKOS_WEBHOOK_MAX_AGE_SECONDS = 300
 
 
 def _cookie_secure(request):
@@ -58,6 +63,92 @@ def _workos_attr(source, name, default=""):
     if isinstance(source, dict):
         return source.get(name, default)
     return getattr(source, name, default)
+
+
+def _json_safe_workos_value(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _json_safe_workos_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_workos_value(item) for item in value]
+
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return _json_safe_workos_value(model_dump())
+
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        return _json_safe_workos_value(to_dict())
+
+    if hasattr(value, "__dict__"):
+        return {
+            key: _json_safe_workos_value(item)
+            for key, item in vars(value).items()
+            if not key.startswith("_")
+        }
+
+    return str(value)
+
+
+def _parse_workos_webhook_timestamp(value):
+    if value in (None, ""):
+        return None
+
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(float(value), tz=datetime_timezone.utc)
+
+    raw_value = str(value).strip()
+    if not raw_value:
+        return None
+
+    try:
+        return datetime.fromtimestamp(float(raw_value), tz=datetime_timezone.utc)
+    except ValueError:
+        pass
+
+    parsed_value = parse_datetime(raw_value)
+    if parsed_value is None:
+        raise SuspiciousOperation("WorkOS webhook timestamp is invalid.")
+    if timezone.is_naive(parsed_value):
+        parsed_value = timezone.make_aware(parsed_value, datetime_timezone.utc)
+    return parsed_value
+
+
+def _workos_signature_timestamp(event_signature):
+    for part in event_signature.split(","):
+        key, separator, value = part.strip().partition("=")
+        if separator and key == "t":
+            return _parse_workos_webhook_timestamp(value)
+    return None
+
+
+def _workos_event_timestamp(event):
+    for field_name in ("created_at", "occurred_at", "timestamp"):
+        value = _workos_attr(event, field_name, None)
+        if value:
+            return _parse_workos_webhook_timestamp(value)
+    return None
+
+
+def _validate_workos_webhook_freshness(event, event_signature=""):
+    event_timestamp = _workos_signature_timestamp(
+        event_signature
+    ) or _workos_event_timestamp(event)
+    if event_timestamp is None:
+        return
+
+    now = datetime.now(datetime_timezone.utc)
+    if timezone.is_naive(event_timestamp):
+        event_timestamp = timezone.make_aware(event_timestamp, datetime_timezone.utc)
+    else:
+        event_timestamp = event_timestamp.astimezone(datetime_timezone.utc)
+
+    allowed_skew = timedelta(seconds=WORKOS_WEBHOOK_MAX_AGE_SECONDS)
+    if now - event_timestamp > allowed_skew:
+        raise SuspiciousOperation("WorkOS webhook timestamp is too old.")
+    if event_timestamp - now > allowed_skew:
+        raise SuspiciousOperation("WorkOS webhook timestamp is too far in the future.")
 
 
 def _require_workos_linked_user(user):
@@ -129,7 +220,32 @@ def _serialize_workos_session(workos_session, current_session_id=""):
 
 
 def _normalized_allowlist(value):
+    if isinstance(value, str):
+        value = [value]
     return {item.strip().lower() for item in value if item and item.strip()}
+
+
+def _workos_superadmin_role_slugs():
+    return _normalized_allowlist(settings.WORKOS_SUPERADMIN_ROLE_SLUGS)
+
+
+def _has_workos_superadmin_role(auth_result):
+    role_slugs = {
+        str(role_slug).strip().lower()
+        for role_slug in getattr(auth_result, "role_slugs", ())
+        if str(role_slug).strip()
+    }
+    return bool(role_slugs & _workos_superadmin_role_slugs())
+
+
+def _sync_workos_superadmin_access(user, should_be_superadmin):
+    if should_be_superadmin:
+        user.groups.add(ensure_superadmin_group())
+        return
+
+    superadmin_group = Group.objects.filter(name=SUPERADMIN_GROUP_NAME).first()
+    if superadmin_group:
+        user.groups.remove(superadmin_group)
 
 
 def _get_unique_user_by_email(email):
@@ -191,16 +307,15 @@ def _provision_or_update_workos_user(auth_result):
     superuser_allowlist = _normalized_allowlist(settings.WORKOS_SUPERUSER_EMAILS)
     staff_allowlist = _normalized_allowlist(settings.WORKOS_STAFF_EMAILS)
     email = auth_result.email.lower()
+    workos_superadmin = _has_workos_superadmin_role(auth_result)
+    should_be_superuser = email in superuser_allowlist or workos_superadmin
+    should_be_staff = should_be_superuser or email in staff_allowlist
 
-    if email in superuser_allowlist:
-        if not user.is_superuser:
-            user.is_superuser = True
-            updated_fields.append("is_superuser")
-        if not user.is_staff:
-            user.is_staff = True
-            updated_fields.append("is_staff")
-    elif email in staff_allowlist and not user.is_staff:
-        user.is_staff = True
+    if user.is_superuser != should_be_superuser:
+        user.is_superuser = should_be_superuser
+        updated_fields.append("is_superuser")
+    if user.is_staff != should_be_staff:
+        user.is_staff = should_be_staff
         updated_fields.append("is_staff")
 
     if updated_fields:
@@ -208,6 +323,7 @@ def _provision_or_update_workos_user(auth_result):
     elif created:
         user.save()
 
+    _sync_workos_superadmin_access(user, should_be_superuser)
     return user
 
 
@@ -459,11 +575,20 @@ class WorkOSWebhookView(views.APIView):
             else:
                 event = json.loads(request.body.decode("utf-8"))
 
-            result = process_directory_event(event)
+            event_payload = _json_safe_workos_value(event)
+            _validate_workos_webhook_freshness(event_payload, event_signature)
+            task_result = process_workos_webhook_task.delay(event_payload)
+            if isinstance(task_result, dict):
+                result = task_result
+            else:
+                result = {
+                    "queued": True,
+                    "event": str(_workos_attr(event_payload, "event", "") or ""),
+                }
         except (ValueError, SuspiciousOperation, ImproperlyConfigured) as exc:
             return Response({"errors": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        return success_response(data=result, detail="WorkOS webhook processed.")
+        return success_response(data=result, detail="WorkOS webhook queued.")
 
 
 class WorkOSLogoutView(views.APIView):

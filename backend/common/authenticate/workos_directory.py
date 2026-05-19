@@ -4,7 +4,7 @@ from datetime import timezone as datetime_timezone
 
 from django.conf import settings
 from django.core.exceptions import SuspiciousOperation
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
@@ -112,7 +112,7 @@ def _directory_user_display_name(workos_user, email):
 
 
 def _get_unique_user_by_email(email):
-    matching_users = list(Users.objects.filter(email__iexact=email))
+    matching_users = list(Users.objects.select_for_update().filter(email__iexact=email))
     if len(matching_users) > 1:
         raise SuspiciousOperation(
             "Multiple Datamingle users share the same email address."
@@ -190,9 +190,11 @@ def _directory_resource_group_ids(directory_id):
     if not directory_id:
         return set()
     return set(
-        WorkOSDirectoryGroup.objects.filter(directory_id=directory_id).values_list(
-            "resource_group_id", flat=True
-        )
+        WorkOSDirectoryGroup.objects.filter(
+            directory_id=directory_id,
+            is_deleted=False,
+            resource_group__is_deleted=0,
+        ).values_list("resource_group_id", flat=True)
     )
 
 
@@ -201,7 +203,11 @@ def apply_directory_memberships(user):
         membership.directory_group.resource_group
         for membership in WorkOSDirectoryGroupMembership.objects.select_related(
             "directory_group__resource_group"
-        ).filter(user=user, directory_group__is_deleted=False)
+        ).filter(
+            user=user,
+            directory_group__is_deleted=False,
+            directory_group__resource_group__is_deleted=0,
+        )
     ]
     directory_resource_group_ids = _directory_resource_group_ids(
         user.workos_directory_id
@@ -236,63 +242,79 @@ def upsert_directory_user(workos_user):
         )
 
     email = _directory_user_email(workos_user)
-    user = Users.objects.filter(workos_directory_user_id=directory_user_id).first()
-    if user is None and email:
-        user = _get_unique_user_by_email(email)
 
-    if user is None:
-        if not email:
-            logger.info(
-                "Skipping WorkOS directory user without an email: %s", directory_user_id
-            )
-            return None
-        if Users.objects.filter(username__iexact=email).exists():
-            raise SuspiciousOperation(
-                "Unable to provision a WorkOS directory user because the username already exists."
-            )
-        user = Users.objects.create_user(
-            username=email,
-            email=email,
-            display=_directory_user_display_name(workos_user, email),
-            is_active=True,
+    with transaction.atomic():
+        user = (
+            Users.objects.select_for_update()
+            .filter(workos_directory_user_id=directory_user_id)
+            .first()
         )
-        init_user(user)
-        user.resource_group.clear()
+        if user is None and email:
+            user = _get_unique_user_by_email(email)
 
-    state = str(_get_attr(workos_user, "state", "") or "").strip().lower()
-    next_is_active = state not in {"inactive", "deleted"}
-    updated_fields = []
+        if user is None:
+            if not email:
+                logger.info(
+                    "Skipping WorkOS directory user without an email: %s",
+                    directory_user_id,
+                )
+                return None
+            if (
+                Users.objects.select_for_update()
+                .filter(username__iexact=email)
+                .exists()
+            ):
+                raise SuspiciousOperation(
+                    "Unable to provision a WorkOS directory user because the username already exists."
+                )
+            try:
+                user = Users.objects.create_user(
+                    username=email,
+                    email=email,
+                    display=_directory_user_display_name(workos_user, email),
+                    is_active=True,
+                )
+            except IntegrityError as exc:
+                raise SuspiciousOperation(
+                    "Unable to provision a WorkOS directory user because the username already exists."
+                ) from exc
+            init_user(user)
+            user.resource_group.clear()
 
-    for field_name, value in (
-        ("workos_directory_user_id", directory_user_id),
-        ("workos_directory_id", directory_id),
-    ):
-        if getattr(user, field_name) != value:
-            setattr(user, field_name, value)
-            updated_fields.append(field_name)
+        state = str(_get_attr(workos_user, "state", "") or "").strip().lower()
+        next_is_active = state not in {"inactive", "deleted"}
+        updated_fields = []
 
-    if not user.workos_directory_managed:
-        user.workos_directory_managed = True
-        updated_fields.append("workos_directory_managed")
+        for field_name, value in (
+            ("workos_directory_user_id", directory_user_id),
+            ("workos_directory_id", directory_id),
+        ):
+            if getattr(user, field_name) != value:
+                setattr(user, field_name, value)
+                updated_fields.append(field_name)
 
-    if email and user.email != email:
-        user.email = email
-        updated_fields.append("email")
+        if not user.workos_directory_managed:
+            user.workos_directory_managed = True
+            updated_fields.append("workos_directory_managed")
 
-    display_name = _directory_user_display_name(workos_user, email or user.email)
-    if display_name and user.display != display_name:
-        user.display = display_name
-        updated_fields.append("display")
+        if email and user.email != email:
+            user.email = email
+            updated_fields.append("email")
 
-    if user.is_active != next_is_active:
-        user.is_active = next_is_active
-        updated_fields.append("is_active")
+        display_name = _directory_user_display_name(workos_user, email or user.email)
+        if display_name and user.display != display_name:
+            user.display = display_name
+            updated_fields.append("display")
 
-    if updated_fields:
-        user.save(update_fields=updated_fields)
+        if user.is_active != next_is_active:
+            user.is_active = next_is_active
+            updated_fields.append("is_active")
 
-    apply_directory_memberships(user)
-    return user
+        if updated_fields:
+            user.save(update_fields=updated_fields)
+
+        apply_directory_memberships(user)
+        return user
 
 
 def delete_directory_user(workos_user):
@@ -469,7 +491,7 @@ def sync_directory(directory_id, client=None):
         replace_directory_memberships(user, user_groups)
 
     stale_groups = WorkOSDirectoryGroup.objects.filter(
-        directory_id=directory_id
+        directory_id=directory_id, is_deleted=False
     ).exclude(workos_group_id__in=seen_group_ids)
     for mapping in stale_groups:
         delete_directory_group(

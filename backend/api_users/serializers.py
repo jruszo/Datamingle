@@ -25,27 +25,54 @@ class UserManagementReadSerializer(serializers.ModelSerializer):
     is_workos_managed = serializers.SerializerMethodField()
     is_directory_managed = serializers.SerializerMethodField()
 
+    def _prefetched_groups(self, obj):
+        cached_relations = getattr(obj, "_prefetched_objects_cache", {})
+        if "groups" in cached_relations:
+            return list(cached_relations["groups"])
+        return list(obj.groups.order_by("id"))
+
+    def _prefetched_resource_groups(self, obj):
+        cached_relations = getattr(obj, "_prefetched_objects_cache", {})
+        if "resource_group" in cached_relations:
+            return [
+                resource_group
+                for resource_group in cached_relations["resource_group"]
+                if resource_group.is_deleted == 0
+            ]
+        return list(obj.resource_group.filter(is_deleted=0).order_by("group_id"))
+
+    def _directory_resource_group_ids(self, obj):
+        memberships = getattr(obj, "active_workos_directory_memberships", None)
+        if memberships is not None:
+            return {
+                membership.directory_group.resource_group_id
+                for membership in memberships
+            }
+
+        return set(
+            obj.workos_directory_memberships.filter(
+                directory_group__is_deleted=False,
+                directory_group__resource_group__is_deleted=0,
+            )
+            .values_list("directory_group__resource_group_id", flat=True)
+            .distinct()
+        )
+
     def get_groups(self, obj):
-        groups = obj.groups.order_by("id")
         return [
             {
                 "id": group.id,
                 "name": group.name,
                 "membership_source": "datamingle",
             }
-            for group in groups
+            for group in self._prefetched_groups(obj)
         ]
 
     def get_group_ids(self, obj):
-        return list(obj.groups.order_by("id").values_list("id", flat=True))
+        return [group.id for group in self._prefetched_groups(obj)]
 
     def get_resource_groups(self, obj):
-        directory_resource_group_ids = set(
-            obj.workos_directory_memberships.filter(directory_group__is_deleted=False)
-            .values_list("directory_group__resource_group_id", flat=True)
-            .distinct()
-        )
-        resource_groups = obj.resource_group.filter(is_deleted=0).order_by("group_id")
+        directory_resource_group_ids = self._directory_resource_group_ids(obj)
         return [
             {
                 "group_id": group.group_id,
@@ -56,15 +83,11 @@ class UserManagementReadSerializer(serializers.ModelSerializer):
                     else "datamingle"
                 ),
             }
-            for group in resource_groups
+            for group in self._prefetched_resource_groups(obj)
         ]
 
     def get_resource_group_ids(self, obj):
-        return list(
-            obj.resource_group.filter(is_deleted=0)
-            .order_by("group_id")
-            .values_list("group_id", flat=True)
-        )
+        return [group.group_id for group in self._prefetched_resource_groups(obj)]
 
     def get_is_workos_managed(self, obj):
         return bool(obj.workos_user_id)

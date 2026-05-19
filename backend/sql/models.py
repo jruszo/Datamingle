@@ -48,6 +48,13 @@ class ResourceGroup(models.Model):
     def __str__(self):
         return self.group_name
 
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if self.is_deleted == 1:
+            WorkOSDirectoryGroup.objects.filter(
+                resource_group=self, is_deleted=False
+            ).update(is_deleted=True)
+
     class Meta:
         managed = True
         db_table = "resource_group"
@@ -942,6 +949,13 @@ class PermanentResourceGroupGrant(models.Model):
     class Meta:
         managed = True
         db_table = "permanent_resource_group_grant"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(user__isnull=False)
+                | models.Q(instance__isnull=False),
+                name="permanent_rg_grant_has_user_or_instance",
+            )
+        ]
         verbose_name = "Permanent Resource Group Grant"
         verbose_name_plural = "Permanent Resource Group Grants"
 

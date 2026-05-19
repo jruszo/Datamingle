@@ -20,6 +20,8 @@ backend/src/docker-compose/.env
 backend/src/docker-compose/.env.local-dev
 backend/src/docker-compose/.env.local-dev.example
 local_settings.py
+/sql/
+/src/
 src/docker-compose-dev
 .coverage
 archery_custom
