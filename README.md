@@ -145,12 +145,17 @@ WorkOS setup assumptions in this repo:
 4. Set the required `WORKOS_*` values in `.env`.
 5. Configure the WorkOS webhook endpoint:
    `https://<tenant-host>/api/auth/workos/webhook/`
-   Include Directory Sync events and set `WORKOS_WEBHOOK_SECRET` to the endpoint signing secret.
+   Include Directory Sync events. After creating the endpoint, copy its signing
+   secret from the WorkOS Dashboard and set it in `.env` as
+   `WORKOS_WEBHOOK_SECRET` before continuing.
 6. Optionally backfill an existing directory after setup:
 
 ```bash
 docker exec -w /opt/datamingle/backend datamingle-app python manage.py sync_workos_directory --directory-id directory_xxx
 ```
+
+Use the directory ID from the WorkOS Dashboard, or fetch it through the WorkOS
+API, in place of `directory_xxx`.
 
 7. Rebuild the app container so the `workos` Python dependency is installed:
 
