@@ -1,4 +1,9 @@
-import { AuthSessionExpiredError, getUsableAccessToken, notifyUnauthorized, refreshAccessToken } from '@/shared/auth/auth'
+import {
+  AuthSessionExpiredError,
+  getUsableAccessToken,
+  notifyUnauthorized,
+  refreshAccessToken,
+} from '@/shared/auth/auth'
 import {
   apiDelete,
   apiGet,
@@ -34,6 +39,7 @@ export type CurrentUserContext = {
   email: string
   avatar_url: string
   is_workos_managed: boolean
+  is_directory_managed: boolean
   is_superuser: boolean
   is_staff: boolean
   is_active: boolean
@@ -64,12 +70,7 @@ export type WorkosSessionRecord = {
   is_current: boolean
 }
 
-export type SystemSettingsValue =
-  | string
-  | number
-  | boolean
-  | Array<string | number>
-  | null
+export type SystemSettingsValue = string | number | boolean | Array<string | number> | null
 
 export type SystemSettings = Record<string, SystemSettingsValue>
 
@@ -104,6 +105,13 @@ export type GroupRecord = {
 export type UserManagementGroupRecord = {
   id: number
   name: string
+  membership_source?: 'datamingle' | 'workos_directory'
+}
+
+export type UserManagementResourceGroupRecord = {
+  group_id: number
+  group_name: string
+  membership_source?: 'datamingle' | 'workos_directory'
 }
 
 export type UserManagementRecord = {
@@ -112,14 +120,17 @@ export type UserManagementRecord = {
   display: string
   email: string
   is_workos_managed: boolean
+  is_directory_managed: boolean
   is_active: boolean
   is_superuser: boolean
   is_staff: boolean
   groups: UserManagementGroupRecord[]
+  resource_groups: UserManagementResourceGroupRecord[]
 }
 
 export type UserManagementDetailRecord = UserManagementRecord & {
   group_ids: number[]
+  resource_group_ids: number[]
 }
 
 export type UserManagementListOptions = {
@@ -131,6 +142,7 @@ export type UserManagementListOptions = {
 
 export type UpdateUserPayload = {
   group_ids?: number[]
+  resource_group_ids?: number[]
   is_active?: boolean
 }
 
@@ -138,6 +150,7 @@ export type InviteWorkosUserPayload = {
   email: string
   display?: string
   group_ids?: number[]
+  resource_group_ids?: number[]
 }
 
 export type WorkosInvitationRecord = {
@@ -761,8 +774,8 @@ export function updateResourceGroup(
 }
 
 export function deleteResourceGroup(resourceGroupId: number, token: string) {
-  return apiDelete<unknown>(`/v1/user/resourcegroup/${resourceGroupId}/`, { token }).then((payload) =>
-    extractDetail(payload, 'Resource group deleted successfully.'),
+  return apiDelete<unknown>(`/v1/user/resourcegroup/${resourceGroupId}/`, { token }).then(
+    (payload) => extractDetail(payload, 'Resource group deleted successfully.'),
   )
 }
 
@@ -778,10 +791,7 @@ export function fetchResourceGroupInstances(token: string) {
   )
 }
 
-export function fetchInstanceInventory(
-  token: string,
-  options: InstanceInventoryFilters = {},
-) {
+export function fetchInstanceInventory(token: string, options: InstanceInventoryFilters = {}) {
   const params = new URLSearchParams()
   if (options.page) {
     params.set('page', `${options.page}`)
@@ -872,8 +882,8 @@ export function replaceAgentAssignments(
   payload: AgentAssignmentReplacePayload,
   token: string,
 ) {
-  return apiPut<unknown>(`/v1/agents/${agentId}/assignments/`, payload, { token }).then((responsePayload) =>
-    extractData<AgentAssignmentRecord[]>(responsePayload),
+  return apiPut<unknown>(`/v1/agents/${agentId}/assignments/`, payload, { token }).then(
+    (responsePayload) => extractData<AgentAssignmentRecord[]>(responsePayload),
   )
 }
 
@@ -906,15 +916,17 @@ export function fetchAgentCommands(
 }
 
 export function fetchAgentCommand(agentId: number, commandId: number, token: string) {
-  return apiGet<unknown>(`/v1/agents/${agentId}/commands/${commandId}/`, { token }).then((payload) =>
-    extractData<AgentCommandDetailRecord>(payload),
+  return apiGet<unknown>(`/v1/agents/${agentId}/commands/${commandId}/`, { token }).then(
+    (payload) => extractData<AgentCommandDetailRecord>(payload),
   )
 }
 
 export function cancelAgentCommand(agentId: number, commandId: number, token: string) {
-  return apiPost<unknown>(`/v1/agents/${agentId}/commands/${commandId}/cancel/`, {}, { token }).then(
-    (responsePayload) => extractData<AgentCommandDetailRecord>(responsePayload),
-  )
+  return apiPost<unknown>(
+    `/v1/agents/${agentId}/commands/${commandId}/cancel/`,
+    {},
+    { token },
+  ).then((responsePayload) => extractData<AgentCommandDetailRecord>(responsePayload))
 }
 
 export function createInstance(payload: InstanceCreatePayload, token: string) {
@@ -930,20 +942,20 @@ export function fetchInstance(instanceId: number, token: string) {
 }
 
 export function updateInstance(instanceId: number, payload: InstanceCreatePayload, token: string) {
-  return apiPut<unknown>(`/v1/instance/${instanceId}/`, payload, { token }).then((responsePayload) =>
-    extractData<InstanceEditorRecord>(responsePayload),
+  return apiPut<unknown>(`/v1/instance/${instanceId}/`, payload, { token }).then(
+    (responsePayload) => extractData<InstanceEditorRecord>(responsePayload),
   )
 }
 
 export function testDraftInstanceConnection(payload: InstanceCreatePayload, token: string) {
-  return apiPost<unknown>('/v1/instance/test-connection/', payload, { token }).then((responsePayload) =>
-    extractDetail(responsePayload, 'Connection successful.'),
+  return apiPost<unknown>('/v1/instance/test-connection/', payload, { token }).then(
+    (responsePayload) => extractDetail(responsePayload, 'Connection successful.'),
   )
 }
 
 export function testInstanceConnection(instanceId: number, token: string) {
-  return apiPost<unknown>(`/v1/instance/${instanceId}/test-connection/`, {}, { token }).then((payload) =>
-    extractDetail(payload, 'Connection successful.'),
+  return apiPost<unknown>(`/v1/instance/${instanceId}/test-connection/`, {}, { token }).then(
+    (payload) => extractDetail(payload, 'Connection successful.'),
   )
 }
 
@@ -1155,14 +1167,14 @@ export type DataDictionaryTableDetail = {
 
 export type DataDictionaryExportResult =
   | {
-    mode: 'blob'
-    data: Blob
-    filename: string
-  }
+      mode: 'blob'
+      data: Blob
+      filename: string
+    }
   | {
-    mode: 'message'
-    detail: string
-  }
+      mode: 'message'
+      detail: string
+    }
 
 export type AuditListFilters = {
   page?: number
@@ -1528,9 +1540,9 @@ export function fetchDataDictionaryInstances(token: string) {
 export function fetchDataDictionaryDatabases(instanceId: number, token: string) {
   const params = new URLSearchParams({ instance_id: `${instanceId}` })
 
-  return apiGet<unknown>(`/v1/instance/data-dictionary/databases/?${params.toString()}`, { token }).then(
-    (payload) => extractData<DataDictionaryDatabaseList>(payload),
-  )
+  return apiGet<unknown>(`/v1/instance/data-dictionary/databases/?${params.toString()}`, {
+    token,
+  }).then((payload) => extractData<DataDictionaryDatabaseList>(payload))
 }
 
 export function fetchDataDictionaryTables(instanceId: number, dbName: string, token: string) {
@@ -1539,9 +1551,9 @@ export function fetchDataDictionaryTables(instanceId: number, dbName: string, to
     db_name: dbName,
   })
 
-  return apiGet<unknown>(`/v1/instance/data-dictionary/tables/?${params.toString()}`, { token }).then(
-    (payload) => extractData<DataDictionaryTableGroupList>(payload),
-  )
+  return apiGet<unknown>(`/v1/instance/data-dictionary/tables/?${params.toString()}`, {
+    token,
+  }).then((payload) => extractData<DataDictionaryTableGroupList>(payload))
 }
 
 export function fetchDataDictionaryTableDetail(
@@ -1556,9 +1568,9 @@ export function fetchDataDictionaryTableDetail(
     table_name: tableName,
   })
 
-  return apiGet<unknown>(`/v1/instance/data-dictionary/table/?${params.toString()}`, { token }).then(
-    (payload) => extractData<DataDictionaryTableDetail>(payload),
-  )
+  return apiGet<unknown>(`/v1/instance/data-dictionary/table/?${params.toString()}`, {
+    token,
+  }).then((payload) => extractData<DataDictionaryTableDetail>(payload))
 }
 
 export async function exportDataDictionary(
@@ -1584,13 +1596,16 @@ export async function exportDataDictionary(
     params.set('db_name', dbName)
   }
 
-  const response = await fetch(buildUrl(`/v1/instance/data-dictionary/export/?${params.toString()}`), {
-    method: 'GET',
-    headers: {
-      Accept: 'application/json',
-      Authorization: `Bearer ${authorizationToken}`,
+  const response = await fetch(
+    buildUrl(`/v1/instance/data-dictionary/export/?${params.toString()}`),
+    {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${authorizationToken}`,
+      },
     },
-  })
+  )
 
   if (!response.ok) {
     const body = await response.text()
@@ -1605,7 +1620,9 @@ export async function exportDataDictionary(
     if (response.status === 401 && !options.skipAuthRetry) {
       try {
         const refreshedAccessToken = await refreshAccessToken()
-        return exportDataDictionary(instanceId, dbName, refreshedAccessToken, { skipAuthRetry: true })
+        return exportDataDictionary(instanceId, dbName, refreshedAccessToken, {
+          skipAuthRetry: true,
+        })
       } catch (error) {
         if (error instanceof AuthSessionExpiredError) {
           notifyUnauthorized(error.message)
@@ -1619,7 +1636,9 @@ export async function exportDataDictionary(
       notifyUnauthorized(message)
     }
 
-    throw new Error(`GET /v1/instance/data-dictionary/export/ failed (${response.status}): ${message}`)
+    throw new Error(
+      `GET /v1/instance/data-dictionary/export/ failed (${response.status}): ${message}`,
+    )
   }
 
   const contentType = response.headers.get('content-type') || ''
@@ -1627,7 +1646,10 @@ export async function exportDataDictionary(
     const payload = await response.json()
     return {
       mode: 'message',
-      detail: isRecord(payload) && typeof payload.detail === 'string' ? payload.detail : 'Export completed.',
+      detail:
+        isRecord(payload) && typeof payload.detail === 'string'
+          ? payload.detail
+          : 'Export completed.',
     }
   }
 
@@ -1691,8 +1713,9 @@ export function fetchWorkflowOperationAuditLogs(
     params.set('workflow_type', `${options.workflow_type}`)
   }
 
-  return apiGet<unknown>(`/v1/audit/workflow-log/?${params.toString()}`, { token }).then((payload) =>
-    extractData<{ count: number; results: WorkflowOperationAuditLogRecord[] }>(payload),
+  return apiGet<unknown>(`/v1/audit/workflow-log/?${params.toString()}`, { token }).then(
+    (payload) =>
+      extractData<{ count: number; results: WorkflowOperationAuditLogRecord[] }>(payload),
   )
 }
 
@@ -1711,20 +1734,26 @@ export function fetchInstanceOperationDatabases(
     params.set('saved', `${options.saved}`)
   }
 
-  return apiGet<unknown>(`/v1/instance-operations/database/?${params.toString()}`, { token }).then((payload) =>
-    extractData<InstanceOperationDatabaseList>(payload),
+  return apiGet<unknown>(`/v1/instance-operations/database/?${params.toString()}`, { token }).then(
+    (payload) => extractData<InstanceOperationDatabaseList>(payload),
   )
 }
 
-export function createInstanceOperationDatabase(payload: InstanceOperationDatabasePayload, token: string) {
-  return apiPost<unknown>('/v1/instance-operations/database/', payload, { token }).then((responsePayload) =>
-    extractData<InstanceOperationDatabaseRecord>(responsePayload),
+export function createInstanceOperationDatabase(
+  payload: InstanceOperationDatabasePayload,
+  token: string,
+) {
+  return apiPost<unknown>('/v1/instance-operations/database/', payload, { token }).then(
+    (responsePayload) => extractData<InstanceOperationDatabaseRecord>(responsePayload),
   )
 }
 
-export function updateInstanceOperationDatabase(payload: InstanceOperationDatabasePayload, token: string) {
-  return apiPut<unknown>('/v1/instance-operations/database/metadata/', payload, { token }).then((responsePayload) =>
-    extractData<InstanceOperationDatabaseRecord>(responsePayload),
+export function updateInstanceOperationDatabase(
+  payload: InstanceOperationDatabasePayload,
+  token: string,
+) {
+  return apiPut<unknown>('/v1/instance-operations/database/metadata/', payload, { token }).then(
+    (responsePayload) => extractData<InstanceOperationDatabaseRecord>(responsePayload),
   )
 }
 
@@ -1743,44 +1772,63 @@ export function fetchInstanceOperationAccounts(
     params.set('saved', `${options.saved}`)
   }
 
-  return apiGet<unknown>(`/v1/instance-operations/account/?${params.toString()}`, { token }).then((payload) =>
-    extractData<InstanceOperationAccountList>(payload),
+  return apiGet<unknown>(`/v1/instance-operations/account/?${params.toString()}`, { token }).then(
+    (payload) => extractData<InstanceOperationAccountList>(payload),
   )
 }
 
-export function createInstanceOperationAccount(payload: InstanceOperationAccountPayload, token: string) {
-  return apiPost<unknown>('/v1/instance-operations/account/', payload, { token }).then((responsePayload) =>
-    extractData<InstanceOperationAccountRecord>(responsePayload),
+export function createInstanceOperationAccount(
+  payload: InstanceOperationAccountPayload,
+  token: string,
+) {
+  return apiPost<unknown>('/v1/instance-operations/account/', payload, { token }).then(
+    (responsePayload) => extractData<InstanceOperationAccountRecord>(responsePayload),
   )
 }
 
-export function updateInstanceOperationAccount(payload: InstanceOperationAccountPayload, token: string) {
-  return apiPut<unknown>('/v1/instance-operations/account/metadata/', payload, { token }).then((responsePayload) =>
-    extractData<InstanceOperationAccountRecord>(responsePayload),
+export function updateInstanceOperationAccount(
+  payload: InstanceOperationAccountPayload,
+  token: string,
+) {
+  return apiPut<unknown>('/v1/instance-operations/account/metadata/', payload, { token }).then(
+    (responsePayload) => extractData<InstanceOperationAccountRecord>(responsePayload),
   )
 }
 
-export function resetInstanceOperationAccountPassword(payload: InstanceOperationAccountPasswordPayload, token: string) {
-  return apiPost<unknown>('/v1/instance-operations/account/password/', payload, { token }).then((responsePayload) =>
-    extractData<InstanceOperationAccountRecord>(responsePayload),
+export function resetInstanceOperationAccountPassword(
+  payload: InstanceOperationAccountPasswordPayload,
+  token: string,
+) {
+  return apiPost<unknown>('/v1/instance-operations/account/password/', payload, { token }).then(
+    (responsePayload) => extractData<InstanceOperationAccountRecord>(responsePayload),
   )
 }
 
-export function updateInstanceOperationAccountLock(payload: InstanceOperationAccountLockPayload, token: string) {
-  return apiPost<unknown>('/v1/instance-operations/account/lock/', payload, { token }).then((responsePayload) =>
-    extractData<Record<string, never>>(responsePayload),
+export function updateInstanceOperationAccountLock(
+  payload: InstanceOperationAccountLockPayload,
+  token: string,
+) {
+  return apiPost<unknown>('/v1/instance-operations/account/lock/', payload, { token }).then(
+    (responsePayload) => extractData<Record<string, never>>(responsePayload),
   )
 }
 
-export function deleteInstanceOperationAccount(payload: InstanceOperationAccountDeletePayload, token: string) {
-  return apiDelete<unknown>('/v1/instance-operations/account/delete/', { token, body: payload }).then((responsePayload) =>
-    extractData<Record<string, never>>(responsePayload),
-  )
+export function deleteInstanceOperationAccount(
+  payload: InstanceOperationAccountDeletePayload,
+  token: string,
+) {
+  return apiDelete<unknown>('/v1/instance-operations/account/delete/', {
+    token,
+    body: payload,
+  }).then((responsePayload) => extractData<Record<string, never>>(responsePayload))
 }
 
-export function grantInstanceOperationAccount(payload: InstanceOperationAccountGrantPayload, token: string) {
-  return apiPost<unknown>('/v1/instance-operations/account/grant/', payload, { token }).then((responsePayload) =>
-    extractData<InstanceOperationAccountGrantResult>(responsePayload),
+export function grantInstanceOperationAccount(
+  payload: InstanceOperationAccountGrantPayload,
+  token: string,
+) {
+  return apiPost<unknown>('/v1/instance-operations/account/grant/', payload, { token }).then(
+    (responsePayload) => extractData<InstanceOperationAccountGrantResult>(responsePayload),
   )
 }
 
@@ -1802,8 +1850,8 @@ export function fetchInstanceOperationParams(
     params.set('search', options.search)
   }
 
-  return apiGet<unknown>(`/v1/instance-operations/param/?${params.toString()}`, { token }).then((payload) =>
-    extractData<InstanceOperationParamList>(payload),
+  return apiGet<unknown>(`/v1/instance-operations/param/?${params.toString()}`, { token }).then(
+    (payload) => extractData<InstanceOperationParamList>(payload),
   )
 }
 
@@ -1822,20 +1870,23 @@ export function fetchInstanceOperationParamHistory(
     params.set('size', `${options.size}`)
   }
 
-  return apiGet<unknown>(`/v1/instance-operations/param/history/?${params.toString()}`, { token }).then((payload) =>
-    extractData<InstanceOperationParamHistoryList>(payload),
-  )
+  return apiGet<unknown>(`/v1/instance-operations/param/history/?${params.toString()}`, {
+    token,
+  }).then((payload) => extractData<InstanceOperationParamHistoryList>(payload))
 }
 
-export function editInstanceOperationParam(payload: InstanceOperationParamEditPayload, token: string) {
-  return apiPost<unknown>('/v1/instance-operations/param/edit/', payload, { token }).then((responsePayload) =>
-    extractData<Record<string, never>>(responsePayload),
+export function editInstanceOperationParam(
+  payload: InstanceOperationParamEditPayload,
+  token: string,
+) {
+  return apiPost<unknown>('/v1/instance-operations/param/edit/', payload, { token }).then(
+    (responsePayload) => extractData<Record<string, never>>(responsePayload),
   )
 }
 
 export function fetchInstanceOperationDiagnosticInstances(token: string) {
-  return apiGet<unknown>('/v1/instance-operations/diagnostic/instances/', { token }).then((payload) =>
-    extractData<InstanceOperationDiagnosticInstance[]>(payload),
+  return apiGet<unknown>('/v1/instance-operations/diagnostic/instances/', { token }).then(
+    (payload) => extractData<InstanceOperationDiagnosticInstance[]>(payload),
   )
 }
 
@@ -1847,20 +1898,26 @@ export function fetchInstanceOperationDiagnosticProcesses(
   if (options.command_type) {
     params.set('command_type', options.command_type)
   }
-  return apiGet<unknown>(`/v1/instance-operations/diagnostic/processes/?${params.toString()}`, { token }).then((payload) =>
-    extractData<InstanceOperationDiagnosticList>(payload),
-  )
+  return apiGet<unknown>(`/v1/instance-operations/diagnostic/processes/?${params.toString()}`, {
+    token,
+  }).then((payload) => extractData<InstanceOperationDiagnosticList>(payload))
 }
 
-export function previewInstanceOperationDiagnosticKill(payload: InstanceOperationDiagnosticKillPayload, token: string) {
-  return apiPost<unknown>('/v1/instance-operations/diagnostic/kill/preview/', payload, { token }).then((responsePayload) =>
-    extractData<InstanceOperationDiagnosticKillPreview>(responsePayload),
-  )
+export function previewInstanceOperationDiagnosticKill(
+  payload: InstanceOperationDiagnosticKillPayload,
+  token: string,
+) {
+  return apiPost<unknown>('/v1/instance-operations/diagnostic/kill/preview/', payload, {
+    token,
+  }).then((responsePayload) => extractData<InstanceOperationDiagnosticKillPreview>(responsePayload))
 }
 
-export function killInstanceOperationDiagnosticSessions(payload: InstanceOperationDiagnosticKillPayload, token: string) {
-  return apiPost<unknown>('/v1/instance-operations/diagnostic/kill/', payload, { token }).then((responsePayload) =>
-    extractData<Record<string, never>>(responsePayload),
+export function killInstanceOperationDiagnosticSessions(
+  payload: InstanceOperationDiagnosticKillPayload,
+  token: string,
+) {
+  return apiPost<unknown>('/v1/instance-operations/diagnostic/kill/', payload, { token }).then(
+    (responsePayload) => extractData<Record<string, never>>(responsePayload),
   )
 }
 
@@ -1875,21 +1932,22 @@ export function fetchInstanceOperationDiagnosticTablespace(
   if (options.size) {
     params.set('size', `${options.size}`)
   }
-  return apiGet<unknown>(`/v1/instance-operations/diagnostic/tablespace/?${params.toString()}`, { token }).then((payload) =>
-    extractData<InstanceOperationDiagnosticList>(payload),
-  )
+  return apiGet<unknown>(`/v1/instance-operations/diagnostic/tablespace/?${params.toString()}`, {
+    token,
+  }).then((payload) => extractData<InstanceOperationDiagnosticList>(payload))
 }
 
 export function fetchInstanceOperationDiagnosticTransactions(token: string, instanceId: number) {
-  return apiGet<unknown>(`/v1/instance-operations/diagnostic/transactions/?instance_id=${instanceId}`, { token }).then((payload) =>
-    extractData<InstanceOperationDiagnosticList>(payload),
-  )
+  return apiGet<unknown>(
+    `/v1/instance-operations/diagnostic/transactions/?instance_id=${instanceId}`,
+    { token },
+  ).then((payload) => extractData<InstanceOperationDiagnosticList>(payload))
 }
 
 export function fetchInstanceOperationDiagnosticLocks(token: string, instanceId: number) {
-  return apiGet<unknown>(`/v1/instance-operations/diagnostic/locks/?instance_id=${instanceId}`, { token }).then((payload) =>
-    extractData<InstanceOperationDiagnosticList>(payload),
-  )
+  return apiGet<unknown>(`/v1/instance-operations/diagnostic/locks/?instance_id=${instanceId}`, {
+    token,
+  }).then((payload) => extractData<InstanceOperationDiagnosticList>(payload))
 }
 
 export function executeQuery(request: QueryExecuteRequest, token: string) {
@@ -1954,7 +2012,9 @@ export function fetchQueryLogs(filters: QueryLogFilters, token: string) {
 export type PermissionRequestTarget = 'resource_group' | 'instance'
 export type PermissionRequestStatus = 0 | 1 | 2 | 3
 export type PermissionInstanceAccessLevel = 'query' | 'query_dml' | 'query_dml_ddl'
-export type PermissionGrantType = 'resource_group' | 'instance'
+export type PermissionRequestSubject = 'user' | 'resource_group'
+export type PermissionRequestDuration = 'temporary' | 'permanent'
+export type PermissionGrantType = 'resource_group' | 'instance' | 'permanent_resource_group'
 
 export type PermissionResourceGroupLookupRecord = {
   group_id: number
@@ -1982,6 +2042,8 @@ export type PermissionRequestRecord = {
   instance_id: number | null
   instance_name: string
   access_level: PermissionInstanceAccessLevel | ''
+  subject_type: PermissionRequestSubject
+  access_duration: PermissionRequestDuration
   valid_date: string
   user_name: string
   user_display: string
@@ -2011,6 +2073,7 @@ export type PermissionRequestDetailRecord = PermissionRequestRecord & {
 export type PermissionGrantRecord = {
   grant_type: PermissionGrantType
   grant_id: number
+  subject_type: PermissionRequestSubject
   user_name: string
   user_display: string
   resource_group_id: number
@@ -2018,7 +2081,8 @@ export type PermissionGrantRecord = {
   instance_id: number | null
   instance_name: string
   access_level: PermissionInstanceAccessLevel | ''
-  valid_date: string
+  access_duration: PermissionRequestDuration
+  valid_date: string | null
   source_request_id: number | null
   create_time: string
 }
@@ -2039,6 +2103,8 @@ export type PermissionRequestCreatePayload = {
   title: string
   reason?: string
   target_type: PermissionRequestTarget
+  subject_type?: PermissionRequestSubject
+  access_duration?: PermissionRequestDuration
   resource_group_id: number
   instance_id?: number
   access_level?: PermissionInstanceAccessLevel
@@ -2130,10 +2196,7 @@ export function fetchPermissionInstancesLookup(token: string) {
   )
 }
 
-export function fetchPermissionRequests(
-  token: string,
-  filters: PermissionRequestListFilters = {},
-) {
+export function fetchPermissionRequests(token: string, filters: PermissionRequestListFilters = {}) {
   const queryString = buildListQueryString(filters)
   const path = queryString ? `/v1/access/request/?${queryString}` : '/v1/access/request/'
   return apiGet<unknown>(path, { token }).then((payload) =>
@@ -2182,8 +2245,8 @@ export function revokePermissionGrant(
   grantId: number,
   token: string,
 ) {
-  return apiDelete<unknown>(`/v1/access/grant/${grantType}/${grantId}/`, { token }).then((payload) =>
-    extractDetail(payload, 'Grant revoked successfully.'),
+  return apiDelete<unknown>(`/v1/access/grant/${grantType}/${grantId}/`, { token }).then(
+    (payload) => extractDetail(payload, 'Grant revoked successfully.'),
   )
 }
 
@@ -2672,17 +2735,18 @@ export async function downloadWorkflowExport(
       notifyUnauthorized(message)
     }
 
-    throw new Error(`GET /v1/workflow/${workflowId}/download/ failed (${response.status}): ${message}`)
+    throw new Error(
+      `GET /v1/workflow/${workflowId}/download/ failed (${response.status}): ${message}`,
+    )
   }
 
   const contentType = response.headers.get('content-type') || ''
   if (contentType.includes('application/json')) {
     const payload = await response.json()
-    const redirectUrl = isRecord(payload) && typeof payload.url === 'string'
-      ? payload.url
-      : isRecord(payload)
-        && isRecord(payload.data)
-        && typeof payload.data.url === 'string'
+    const redirectUrl =
+      isRecord(payload) && typeof payload.url === 'string'
+        ? payload.url
+        : isRecord(payload) && isRecord(payload.data) && typeof payload.data.url === 'string'
           ? payload.data.url
           : ''
 
@@ -2714,11 +2778,7 @@ export function fetchWorkflowContent(workflowId: number, token: string) {
   )
 }
 
-export function reviewWorkflow(
-  workflowId: number,
-  payload: WorkflowReviewPayload,
-  token: string,
-) {
+export function reviewWorkflow(workflowId: number, payload: WorkflowReviewPayload, token: string) {
   return apiPost<unknown>(`/v1/workflow/${workflowId}/reviews/`, payload, { token }).then(
     (responsePayload) => extractDetail(responsePayload, 'Workflow reviewed successfully.'),
   )
@@ -2776,36 +2836,28 @@ export function fetchArchiveDetail(archiveId: number, token: string) {
   )
 }
 
-export function reviewArchive(
-  archiveId: number,
-  payload: ArchiveReviewPayload,
-  token: string,
-) {
+export function reviewArchive(archiveId: number, payload: ArchiveReviewPayload, token: string) {
   return apiPost<unknown>(`/v1/archive/${archiveId}/reviews/`, payload, { token }).then(
     (responsePayload) => extractDetail(responsePayload, 'Archive workflow reviewed successfully.'),
   )
 }
 
 export function runArchiveNow(archiveId: number, token: string) {
-  return apiPost<unknown>(`/v1/archive/${archiveId}/run/`, {}, { token }).then(
-    (responsePayload) => extractDetail(responsePayload, 'Archive execution queued.'),
+  return apiPost<unknown>(`/v1/archive/${archiveId}/run/`, {}, { token }).then((responsePayload) =>
+    extractDetail(responsePayload, 'Archive execution queued.'),
   )
 }
 
-export function updateArchiveState(
-  archiveId: number,
-  payload: ArchiveStatePayload,
-  token: string,
-) {
+export function updateArchiveState(archiveId: number, payload: ArchiveStatePayload, token: string) {
   return apiPost<unknown>(`/v1/archive/${archiveId}/state/`, payload, { token }).then(
     (responsePayload) => extractDetail(responsePayload, 'Archive schedule updated.'),
   )
 }
 
 export function fetchArchiveLogs(archiveId: number, token: string, page = 1, size = 20) {
-  return apiGet<unknown>(`/v1/archive/${archiveId}/logs/?page=${page}&size=${size}`, { token }).then(
-    (payload) => extractData<PaginatedResponse<ArchiveLogRecord>>(payload),
-  )
+  return apiGet<unknown>(`/v1/archive/${archiveId}/logs/?page=${page}&size=${size}`, {
+    token,
+  }).then((payload) => extractData<PaginatedResponse<ArchiveLogRecord>>(payload))
 }
 
 export function updateWorkflowExecutionWindow(

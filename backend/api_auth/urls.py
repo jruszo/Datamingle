@@ -37,5 +37,8 @@ urlpatterns = [
         views.WorkOSSessionRevokeView.as_view(),
         name="workos_session_revoke",
     ),
+    path(
+        "auth/workos/webhook/", views.WorkOSWebhookView.as_view(), name="workos_webhook"
+    ),
     path("auth/workos/logout/", views.WorkOSLogoutView.as_view(), name="workos_logout"),
 ]

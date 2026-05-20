@@ -30,8 +30,10 @@ env = environ.Env(
     WORKOS_CLIENT_ID=(str, ""),
     WORKOS_ORGANIZATION_ID=(str, ""),
     WORKOS_BASE_URL=(str, "https://api.workos.com/"),
+    WORKOS_WEBHOOK_SECRET=(str, ""),
     WORKOS_STAFF_EMAILS=(list, []),
     WORKOS_SUPERUSER_EMAILS=(list, []),
+    WORKOS_SUPERADMIN_ROLE_SLUGS=(list, ["admin"]),
     DATAMINGLE_AGENT_API_KEY_BACKEND=(str, "workos"),
     CHANNEL_LAYER_URL=(str, ""),
     # CSRF_TRUSTED_ORIGINS=subdomain.example.com,subdomain.example2.com subdomain.example.com
@@ -364,6 +366,7 @@ WORKOS_API_KEY = env("WORKOS_API_KEY", default="")
 WORKOS_CLIENT_ID = env("WORKOS_CLIENT_ID", default="")
 WORKOS_ORGANIZATION_ID = env("WORKOS_ORGANIZATION_ID", default="")
 WORKOS_BASE_URL = env("WORKOS_BASE_URL", default="https://api.workos.com/")
+WORKOS_WEBHOOK_SECRET = env("WORKOS_WEBHOOK_SECRET", default="")
 DATAMINGLE_AGENT_API_KEY_BACKEND = env(
     "DATAMINGLE_AGENT_API_KEY_BACKEND", default="workos"
 )
@@ -376,6 +379,11 @@ WORKOS_SUPERUSER_EMAILS = [
     email.strip().lower()
     for email in env("WORKOS_SUPERUSER_EMAILS", default=[])
     if email.strip()
+]
+WORKOS_SUPERADMIN_ROLE_SLUGS = [
+    role_slug.strip().lower()
+    for role_slug in env("WORKOS_SUPERADMIN_ROLE_SLUGS", default=["admin"])
+    if role_slug.strip()
 ]
 
 # Logging configuration

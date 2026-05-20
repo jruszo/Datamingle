@@ -14,9 +14,11 @@ export {
   type PermissionInstanceLookupRecord,
   type PermissionRequestCreatePayload,
   type PermissionRequestDetailRecord,
+  type PermissionRequestDuration,
   type PermissionRequestListFilters,
   type PermissionRequestRecord,
   type PermissionRequestStatus,
+  type PermissionRequestSubject,
   type PermissionRequestTarget,
   type PermissionResourceGroupLookupRecord,
 } from '@/lib/api'

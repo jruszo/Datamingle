@@ -1,4 +1,6 @@
+import base64
 import json
+from datetime import datetime, timedelta, timezone as datetime_timezone
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
@@ -10,8 +12,24 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from common.config import SysConfig
+from common.auth import SUPERADMIN_GROUP_NAME
 from common.authenticate.workos import WorkOSAuthClient
-from sql.models import ResourceGroup, Users
+from common.authenticate.workos_directory import process_directory_event
+from sql.models import (
+    ResourceGroup,
+    Users,
+    WorkOSDirectoryGroup,
+    WorkOSDirectoryGroupMembership,
+    WorkOSDirectorySyncEvent,
+)
+
+
+def _jwt(payload):
+    def encode(segment):
+        raw = json.dumps(segment).encode("utf-8")
+        return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
+
+    return f"{encode({'alg': 'none'})}.{encode(payload)}."
 
 
 class WorkOSAuthClientConfigTests(APITestCase):
@@ -27,6 +45,136 @@ class WorkOSAuthClientConfigTests(APITestCase):
             "WORKOS_API_KEY, WORKOS_CLIENT_ID, WORKOS_ORGANIZATION_ID",
         ):
             WorkOSAuthClient()
+
+    def test_directory_list_methods_follow_workos_pagination(self):
+        client = WorkOSAuthClient.__new__(WorkOSAuthClient)
+        directory_sync = SimpleNamespace()
+        page_one_user = SimpleNamespace(id="directory_user_1")
+        page_two_user = SimpleNamespace(id="directory_user_2")
+        pages = [
+            SimpleNamespace(
+                data=[page_one_user],
+                list_metadata=SimpleNamespace(after="directory_user_1"),
+            ),
+            SimpleNamespace(
+                data=[page_two_user],
+                list_metadata=SimpleNamespace(after=None),
+            ),
+        ]
+        calls = []
+
+        def list_users(**kwargs):
+            calls.append(kwargs)
+            return pages.pop(0)
+
+        directory_sync.list_users = list_users
+        client.client = SimpleNamespace(directory_sync=directory_sync)
+
+        users = client.list_directory_users(directory_id="directory_123")
+
+        self.assertEqual(users, [page_one_user, page_two_user])
+        self.assertEqual(
+            calls,
+            [
+                {"directory_id": "directory_123", "limit": 100, "order": "asc"},
+                {
+                    "directory_id": "directory_123",
+                    "limit": 100,
+                    "order": "asc",
+                    "after": "directory_user_1",
+                },
+            ],
+        )
+
+    def test_authenticate_with_code_extracts_role_claims_from_access_token(self):
+        client = WorkOSAuthClient.__new__(WorkOSAuthClient)
+        client.client = SimpleNamespace(
+            user_management=SimpleNamespace(
+                authenticate_with_code=lambda **kwargs: SimpleNamespace(
+                    user=SimpleNamespace(
+                        id="user_123",
+                        email="Admin@DataMingle.dev",
+                        first_name="Admin",
+                        last_name="User",
+                        profile_picture_url="",
+                    ),
+                    organization_id="org_test_123",
+                    access_token=_jwt(
+                        {
+                            "sid": "session_123",
+                            "role": "admin",
+                            "roles": ["admin"],
+                        }
+                    ),
+                )
+            )
+        )
+
+        auth_result = client.authenticate_with_code(
+            code="code_123",
+            ip_address="127.0.0.1",
+            user_agent="test-agent",
+        )
+
+        self.assertEqual(auth_result.email, "admin@datamingle.dev")
+        self.assertEqual(
+            auth_result.role_slugs,
+            ("admin",),
+        )
+
+    def test_authenticate_with_code_refreshes_organization_membership_roles(self):
+        client = WorkOSAuthClient.__new__(WorkOSAuthClient)
+        calls = []
+
+        def list_organization_memberships(**kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                data=[
+                    SimpleNamespace(
+                        status="active",
+                        role={"slug": "admin"},
+                        roles=[{"slug": "member"}],
+                    )
+                ],
+                list_metadata=SimpleNamespace(after=None),
+            )
+
+        client.client = SimpleNamespace(
+            user_management=SimpleNamespace(
+                authenticate_with_code=lambda **kwargs: SimpleNamespace(
+                    user=SimpleNamespace(
+                        id="user_123",
+                        email="Admin@DataMingle.dev",
+                        first_name="Admin",
+                        last_name="User",
+                        profile_picture_url="",
+                    ),
+                    organization_id="org_test_123",
+                    access_token=_jwt({"sid": "session_123"}),
+                ),
+                list_organization_memberships=list_organization_memberships,
+            )
+        )
+
+        auth_result = client.authenticate_with_code(
+            code="code_123",
+            ip_address="127.0.0.1",
+            user_agent="test-agent",
+        )
+
+        self.assertEqual(auth_result.role_slugs, ("admin", "member"))
+        self.assertEqual(
+            calls,
+            [
+                {
+                    "user_id": "user_123",
+                    "organization_id": "org_test_123",
+                    "statuses": ["active"],
+                    "limit": 100,
+                    "order": "asc",
+                }
+            ],
+        )
 
 
 class FakeRedis:
@@ -61,9 +209,49 @@ class WorkOSAuthApiTests(APITestCase):
 
     def tearDown(self):
         self.sys_config.purge()
+        WorkOSDirectoryGroupMembership.objects.all().delete()
+        WorkOSDirectoryGroup.objects.all().delete()
+        WorkOSDirectorySyncEvent.objects.all().delete()
         Users.objects.all().delete()
         ResourceGroup.objects.all().delete()
         Group.objects.all().delete()
+
+    def _directory_user_payload(self, **overrides):
+        payload = {
+            "id": "directory_user_123",
+            "directory_id": "directory_123",
+            "organization_id": "org_test_123",
+            "email": "directory.user@datamingle.dev",
+            "first_name": "Directory",
+            "last_name": "User",
+            "state": "active",
+            "updated_at": "2026-05-18T12:00:00Z",
+        }
+        payload.update(overrides)
+        return payload
+
+    def _directory_group_payload(self, **overrides):
+        payload = {
+            "id": "directory_group_123",
+            "directory_id": "directory_123",
+            "organization_id": "org_test_123",
+            "idp_id": "idp_group_123",
+            "name": "Developers",
+            "updated_at": "2026-05-18T12:00:00Z",
+        }
+        payload.update(overrides)
+        return payload
+
+    def _post_workos_directory_event(self, event_type, data, event_id="event_123"):
+        with patch(
+            "api_auth.views.process_workos_webhook_task.delay",
+            side_effect=process_directory_event,
+        ):
+            return self.client.post(
+                "/api/auth/workos/webhook/",
+                {"id": event_id, "event": event_type, "data": data},
+                format="json",
+            )
 
     @patch("api_auth.views.get_redis_connection")
     @patch("api_auth.views.WorkOSAuthClient")
@@ -122,8 +310,8 @@ class WorkOSAuthApiTests(APITestCase):
         self.assertTrue(created_user.is_staff)
         self.assertTrue(created_user.is_superuser)
         self.assertEqual(
-            list(created_user.groups.values_list("name", flat=True)),
-            [self.auth_group.name],
+            set(created_user.groups.values_list("name", flat=True)),
+            {self.auth_group.name, SUPERADMIN_GROUP_NAME},
         )
         self.assertEqual(
             list(created_user.resource_group.values_list("group_name", flat=True)),
@@ -142,6 +330,67 @@ class WorkOSAuthApiTests(APITestCase):
         self.assertIn("access", payload)
         self.assertIn("refresh", payload)
         self.assertIsNone(self.redis.get(f"workos-exchange-code:{exchange_code}"))
+
+    @patch("api_auth.views.get_redis_connection")
+    @patch("api_auth.views.WorkOSAuthClient")
+    def test_callback_refreshes_workos_superadmin_role_membership(
+        self, mock_client_class, mock_redis_connection
+    ):
+        mock_redis_connection.return_value = self.redis
+        user = Users.objects.create_user(
+            username="temporary.admin@datamingle.dev",
+            email="temporary.admin@datamingle.dev",
+            display="Temporary Admin",
+            is_active=True,
+            workos_user_id="user_temp_admin",
+        )
+        mock_client = mock_client_class.return_value
+        mock_client.authenticate_with_code.return_value = SimpleNamespace(
+            user_id="user_temp_admin",
+            email="temporary.admin@datamingle.dev",
+            first_name="Temporary",
+            last_name="Admin",
+            profile_picture_url="",
+            organization_id="org_test_123",
+            session_id="session_123",
+            display_name="Temporary Admin",
+            role_slugs=("admin",),
+        )
+
+        self.client.cookies["datamingle_workos_state"] = "state_123"
+        first_response = self.client.get(
+            "/api/auth/workos/callback/",
+            {"code": "code_123", "state": "state_123"},
+        )
+
+        self.assertEqual(first_response.status_code, status.HTTP_302_FOUND)
+        user.refresh_from_db()
+        self.assertTrue(user.is_superuser)
+        self.assertTrue(user.is_staff)
+        self.assertTrue(user.groups.filter(name=SUPERADMIN_GROUP_NAME).exists())
+
+        mock_client.authenticate_with_code.return_value = SimpleNamespace(
+            user_id="user_temp_admin",
+            email="temporary.admin@datamingle.dev",
+            first_name="Temporary",
+            last_name="Admin",
+            profile_picture_url="",
+            organization_id="org_test_123",
+            session_id="session_456",
+            display_name="Temporary Admin",
+            role_slugs=("member",),
+        )
+        self.client.cookies["datamingle_workos_state"] = "state_456"
+        second_response = self.client.get(
+            "/api/auth/workos/callback/",
+            {"code": "code_456", "state": "state_456"},
+        )
+
+        self.assertEqual(second_response.status_code, status.HTTP_302_FOUND)
+        user.refresh_from_db()
+        self.assertFalse(user.is_superuser)
+        self.assertFalse(user.is_staff)
+        self.assertFalse(user.groups.filter(name=SUPERADMIN_GROUP_NAME).exists())
 
     @patch("api_auth.views.get_redis_connection")
     @patch("api_auth.views.WorkOSAuthClient")
@@ -201,6 +450,238 @@ class WorkOSAuthApiTests(APITestCase):
             response.json()["data"]["avatar_url"],
             "https://images.workos.dev/avatar.png",
         )
+
+    def test_workos_directory_group_membership_webhook_creates_resource_group(self):
+        response = self._post_workos_directory_event(
+            "dsync.group.user_added",
+            {
+                "directory_id": "directory_123",
+                "user": self._directory_user_payload(),
+                "group": self._directory_group_payload(),
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response.json()["data"]
+        self.assertTrue(payload["processed"])
+
+        user = Users.objects.get(email="directory.user@datamingle.dev")
+        self.assertTrue(user.workos_directory_managed)
+        self.assertEqual(user.workos_directory_user_id, "directory_user_123")
+        self.assertEqual(user.workos_directory_id, "directory_123")
+        self.assertEqual(
+            list(user.resource_group.values_list("group_name", flat=True)),
+            ["Developers"],
+        )
+
+        self.assertFalse(Group.objects.filter(name="Developers").exists())
+        resource_group = ResourceGroup.objects.get(group_name="Developers")
+        mapping = WorkOSDirectoryGroup.objects.get(
+            workos_group_id="directory_group_123"
+        )
+        self.assertEqual(mapping.resource_group, resource_group)
+        self.assertTrue(
+            WorkOSDirectoryGroupMembership.objects.filter(
+                user=user, directory_group=mapping
+            ).exists()
+        )
+
+        duplicate_response = self._post_workos_directory_event(
+            "dsync.group.user_added",
+            {
+                "directory_id": "directory_123",
+                "user": self._directory_user_payload(),
+                "group": self._directory_group_payload(),
+            },
+        )
+
+        self.assertEqual(duplicate_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(duplicate_response.json()["data"]["duplicate"])
+        self.assertEqual(WorkOSDirectorySyncEvent.objects.count(), 1)
+
+    def test_workos_directory_group_removed_webhook_clears_membership(self):
+        self._post_workos_directory_event(
+            "dsync.group.user_added",
+            {
+                "directory_id": "directory_123",
+                "user": self._directory_user_payload(),
+                "group": self._directory_group_payload(),
+            },
+            event_id="event_added",
+        )
+
+        response = self._post_workos_directory_event(
+            "dsync.group.user_removed",
+            {
+                "directory_id": "directory_123",
+                "user": self._directory_user_payload(),
+                "group": self._directory_group_payload(),
+            },
+            event_id="event_removed",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        user = Users.objects.get(email="directory.user@datamingle.dev")
+        self.assertEqual(
+            list(user.resource_group.values_list("group_name", flat=True)), []
+        )
+        self.assertFalse(
+            WorkOSDirectoryGroupMembership.objects.filter(user=user).exists()
+        )
+
+    def test_workos_directory_group_removed_preserves_direct_resource_group(self):
+        self._post_workos_directory_event(
+            "dsync.group.user_added",
+            {
+                "directory_id": "directory_123",
+                "user": self._directory_user_payload(),
+                "group": self._directory_group_payload(),
+            },
+            event_id="event_added",
+        )
+        user = Users.objects.get(email="directory.user@datamingle.dev")
+        direct_resource_group = ResourceGroup.objects.create(group_name="Direct Grant")
+        user.resource_group.add(direct_resource_group)
+
+        response = self._post_workos_directory_event(
+            "dsync.group.user_removed",
+            {
+                "directory_id": "directory_123",
+                "user": self._directory_user_payload(),
+                "group": self._directory_group_payload(),
+            },
+            event_id="event_removed",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        user.refresh_from_db()
+        self.assertEqual(
+            list(
+                user.resource_group.order_by("group_name").values_list(
+                    "group_name", flat=True
+                )
+            ),
+            ["Direct Grant"],
+        )
+
+    def test_directory_managed_user_rejects_manual_resource_group_updates(self):
+        superuser = Users.objects.create_user(
+            username="superuser@datamingle.dev",
+            email="superuser@datamingle.dev",
+            display="Super User",
+            is_active=True,
+            is_superuser=True,
+            is_staff=True,
+        )
+        directory_user = Users.objects.create_user(
+            username="directory.user@datamingle.dev",
+            email="directory.user@datamingle.dev",
+            display="Directory User",
+            is_active=True,
+            workos_directory_user_id="directory_user_123",
+            workos_directory_id="directory_123",
+            workos_directory_managed=True,
+        )
+        directory_user.groups.add(self.auth_group)
+        directory_user.resource_group.add(self.resource_group)
+        new_resource_group = ResourceGroup.objects.create(group_name="Ops")
+        self.client.force_authenticate(user=superuser)
+
+        group_response = self.client.put(
+            f"/api/v1/user/{directory_user.id}/",
+            {"resource_group_ids": [new_resource_group.group_id], "is_active": True},
+            format="json",
+        )
+
+        self.assertEqual(group_response.status_code, status.HTTP_400_BAD_REQUEST)
+        directory_user.refresh_from_db()
+        self.assertEqual(
+            list(directory_user.resource_group.values_list("group_name", flat=True)),
+            [self.resource_group.group_name],
+        )
+
+        status_response = self.client.put(
+            f"/api/v1/user/{directory_user.id}/",
+            {"is_active": False},
+            format="json",
+        )
+
+        self.assertEqual(status_response.status_code, status.HTTP_200_OK)
+        directory_user.refresh_from_db()
+        self.assertFalse(directory_user.is_active)
+
+    @override_settings(WORKOS_WEBHOOK_SECRET="webhook_secret_123")
+    @patch("api_auth.views.WorkOSAuthClient")
+    def test_workos_webhook_uses_signature_verification_when_secret_configured(
+        self, mock_client_class
+    ):
+        signature = f"t={int(datetime.now(datetime_timezone.utc).timestamp())},v1=abc"
+        mock_client_class.return_value.verify_webhook_event.return_value = (
+            SimpleNamespace(
+                id="event_verified",
+                event="dsync.group.created",
+                data=self._directory_group_payload(),
+            )
+        )
+
+        with patch(
+            "api_auth.views.process_workos_webhook_task.delay",
+            side_effect=process_directory_event,
+        ):
+            response = self.client.post(
+                "/api/auth/workos/webhook/",
+                b'{"id":"event_verified"}',
+                content_type="application/json",
+                HTTP_WORKOS_SIGNATURE=signature,
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_client_class.return_value.verify_webhook_event.assert_called_once_with(
+            event_body=b'{"id":"event_verified"}',
+            event_signature=signature,
+            secret="webhook_secret_123",
+        )
+        self.assertTrue(ResourceGroup.objects.filter(group_name="Developers").exists())
+
+    def test_workos_webhook_rejects_stale_event_timestamps(self):
+        stale_timestamp = (
+            datetime.now(datetime_timezone.utc) - timedelta(seconds=301)
+        ).isoformat()
+
+        with patch("api_auth.views.process_workos_webhook_task.delay") as task_delay:
+            response = self.client.post(
+                "/api/auth/workos/webhook/",
+                {
+                    "id": "event_stale",
+                    "event": "dsync.group.created",
+                    "created_at": stale_timestamp,
+                    "data": self._directory_group_payload(),
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.json()["errors"], "WorkOS webhook timestamp is too old."
+        )
+        task_delay.assert_not_called()
+
+    def test_soft_deleting_resource_group_deletes_workos_mapping(self):
+        resource_group = ResourceGroup.objects.create(group_name="Directory Team")
+        mapping = WorkOSDirectoryGroup.objects.create(
+            workos_group_id="directory_group_soft_delete",
+            directory_id="directory_123",
+            organization_id="org_test_123",
+            idp_id="idp_group_soft_delete",
+            name="Directory Team",
+            resource_group=resource_group,
+        )
+
+        resource_group.is_deleted = 1
+        resource_group.save(update_fields=["is_deleted"])
+
+        mapping.refresh_from_db()
+        self.assertTrue(mapping.is_deleted)
 
     @patch("api_auth.views.WorkOSAuthClient")
     def test_workos_profile_can_be_loaded_and_updated(self, mock_client_class):
@@ -453,6 +934,7 @@ class WorkOSAuthApiTests(APITestCase):
                 "email": "New.User@DataMingle.dev",
                 "display": "New User",
                 "group_ids": [self.auth_group.id],
+                "resource_group_ids": [self.resource_group.group_id],
             },
             format="json",
         )
@@ -473,4 +955,8 @@ class WorkOSAuthApiTests(APITestCase):
         self.assertEqual(
             list(invited_user.groups.values_list("id", flat=True)),
             [self.auth_group.id],
+        )
+        self.assertEqual(
+            list(invited_user.resource_group.values_list("group_id", flat=True)),
+            [self.resource_group.group_id],
         )

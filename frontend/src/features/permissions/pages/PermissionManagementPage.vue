@@ -32,8 +32,10 @@ import {
   type PermissionInstanceAccessLevel,
   type PermissionInstanceLookupRecord,
   type PermissionRequestDetailRecord,
+  type PermissionRequestDuration,
   type PermissionRequestRecord,
   type PermissionRequestStatus,
+  type PermissionRequestSubject,
   type PermissionRequestTarget,
   type PermissionResourceGroupLookupRecord,
 } from '../api'
@@ -97,6 +99,8 @@ const createForm = reactive({
   title: '',
   reason: '',
   target_type: 'resource_group' as PermissionRequestTarget,
+  subject_type: 'user' as PermissionRequestSubject,
+  access_duration: 'temporary' as PermissionRequestDuration,
   resource_group_id: '',
   instance_id: '',
   access_level: 'query' as PermissionInstanceAccessLevel,
@@ -150,7 +154,10 @@ function toUserFacingMessage(errorValue: unknown, fallback: string) {
   return errorValue.message.slice(separatorIndex + separator.length)
 }
 
-function formatDate(value: string) {
+function formatDate(value: string | null) {
+  if (!value) {
+    return 'Permanent'
+  }
   if (value >= UNLIMITED_VALID_DATE) {
     return 'Unlimited'
   }
@@ -204,7 +211,18 @@ function targetLabel(targetType: PermissionRequestTarget) {
 }
 
 function grantTypeLabel(grantType: PermissionGrantRecord['grant_type']) {
+  if (grantType === 'permanent_resource_group') {
+    return 'Group access'
+  }
   return grantType === 'resource_group' ? 'Group access' : 'Instance access'
+}
+
+function durationLabel(duration: PermissionRequestDuration) {
+  return duration === 'permanent' ? 'Permanent' : 'Temporary'
+}
+
+function subjectLabel(subjectType: PermissionRequestSubject, groupName = '') {
+  return subjectType === 'resource_group' ? groupName || 'Resource group' : 'Myself'
 }
 
 function accessLevelLabel(level: PermissionInstanceAccessLevel | '') {
@@ -232,6 +250,8 @@ function resetCreateForm() {
   createForm.title = ''
   createForm.reason = ''
   createForm.target_type = 'resource_group'
+  createForm.subject_type = 'user'
+  createForm.access_duration = 'temporary'
   createForm.resource_group_id = ''
   createForm.instance_id = ''
   createForm.access_level = 'query'
@@ -272,6 +292,9 @@ const filteredInstances = computed(() => {
   if (!resourceGroupId) {
     return instances.value
   }
+  if (createForm.subject_type === 'resource_group') {
+    return instances.value
+  }
 
   return instances.value.filter((instance) =>
     instance.resource_groups.some((group) => group.group_id === resourceGroupId),
@@ -285,13 +308,16 @@ const selectedRequestSummary = computed(() => {
   if (selectedRequestId.value === null) {
     return null
   }
-  return requestsPage.value.results.find((item) => item.request_id === selectedRequestId.value) ?? null
+  return (
+    requestsPage.value.results.find((item) => item.request_id === selectedRequestId.value) ?? null
+  )
 })
 
 watch(
   () => createForm.target_type,
   (targetType) => {
     if (targetType === 'resource_group') {
+      createForm.subject_type = 'user'
       createForm.instance_id = ''
       createForm.access_level = 'query'
     }
@@ -306,7 +332,9 @@ watch(
     }
 
     const currentInstanceId = Number(createForm.instance_id)
-    const stillAvailable = filteredInstances.value.some((instance) => instance.id === currentInstanceId)
+    const stillAvailable = filteredInstances.value.some(
+      (instance) => instance.id === currentInstanceId,
+    )
     if (!stillAvailable) {
       createForm.instance_id = ''
     }
@@ -403,8 +431,8 @@ async function loadRequests(options: { focusRequestId?: number; openDetail?: boo
     }
 
     if (
-      selectedRequestId.value !== null
-      && !page.results.some((item) => item.request_id === selectedRequestId.value)
+      selectedRequestId.value !== null &&
+      !page.results.some((item) => item.request_id === selectedRequestId.value)
     ) {
       selectedRequestId.value = null
       selectedRequestDetail.value = null
@@ -479,12 +507,24 @@ async function submitRequest() {
     formError.value = 'Choose a resource group first.'
     return
   }
-  if (!createForm.valid_date) {
+  if (createForm.target_type === 'resource_group' && createForm.subject_type !== 'user') {
+    formError.value = 'Resource group membership requests must be for yourself.'
+    return
+  }
+  if (createForm.access_duration === 'temporary' && !createForm.valid_date) {
     formError.value = 'Choose a valid end date.'
     return
   }
   if (createForm.target_type === 'instance' && !instanceId) {
     formError.value = 'Choose an instance for instance access requests.'
+    return
+  }
+  if (
+    createForm.target_type === 'instance' &&
+    createForm.access_duration === 'permanent' &&
+    createForm.subject_type === 'user'
+  ) {
+    formError.value = 'Permanent instance access must be requested for a resource group.'
     return
   }
 
@@ -496,10 +536,13 @@ async function submitRequest() {
         title,
         reason: createForm.reason.trim(),
         target_type: createForm.target_type,
+        subject_type: createForm.subject_type,
+        access_duration: createForm.access_duration,
         resource_group_id: resourceGroupId,
         instance_id: createForm.target_type === 'instance' ? instanceId : undefined,
         access_level: createForm.target_type === 'instance' ? createForm.access_level : undefined,
-        valid_date: createForm.valid_date,
+        valid_date:
+          createForm.access_duration === 'temporary' ? createForm.valid_date : UNLIMITED_VALID_DATE,
       },
       requireToken(),
     )
@@ -614,7 +657,12 @@ watch(grantSearch, () => {
 })
 
 watch(activeSection, (section) => {
-  if (section === 'grants' && grantsPage.value.count === 0 && !grantsLoading.value && !grantError.value) {
+  if (
+    section === 'grants' &&
+    grantsPage.value.count === 0 &&
+    !grantsLoading.value &&
+    !grantError.value
+  ) {
     void loadGrants()
   }
 })
@@ -647,15 +695,10 @@ onMounted(async () => {
     return
   }
 
-  await Promise.all([
-    loadRequests(),
-    loadGrants(),
-    loadLookups(),
-  ])
+  await Promise.all([loadRequests(), loadGrants(), loadLookups()])
 
-  const initialRequestId = typeof route.query.requestId === 'string'
-    ? Number(route.query.requestId)
-    : Number.NaN
+  const initialRequestId =
+    typeof route.query.requestId === 'string' ? Number(route.query.requestId) : Number.NaN
   if (Number.isInteger(initialRequestId) && initialRequestId > 0) {
     await loadRequestDetail(initialRequestId)
   }
@@ -664,11 +707,13 @@ onMounted(async () => {
 
 <template>
   <section class="grid gap-6">
-    <div class="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+    <div
+      class="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:flex-row lg:items-center lg:justify-between"
+    >
       <div class="space-y-1">
         <h1 class="text-2xl font-semibold text-slate-900">Permission Management</h1>
         <p class="text-sm text-slate-500">
-          Request access, review approvals, and manage active temporary grants.
+          Request access, review approvals, and manage active grants.
         </p>
       </div>
 
@@ -687,12 +732,7 @@ onMounted(async () => {
         >
           Active Access
         </Button>
-        <Button
-          v-if="canCreateRequests"
-          type="button"
-          class="gap-2"
-          @click="openCreateDialog"
-        >
+        <Button v-if="canCreateRequests" type="button" class="gap-2" @click="openCreateDialog">
           <Plus class="h-4 w-4" />
           Request access
         </Button>
@@ -802,11 +842,22 @@ onMounted(async () => {
                     <Badge variant="outline" class="border-slate-200 bg-slate-50 text-slate-600">
                       {{ targetLabel(requestItem.target_type) }}
                     </Badge>
+                    <Badge variant="outline" class="border-slate-200 bg-slate-50 text-slate-600">
+                      {{ durationLabel(requestItem.access_duration) }}
+                    </Badge>
                   </div>
                   <p class="text-sm text-slate-500">
                     {{ requestItem.resource_group_name }}
                     <span v-if="requestItem.instance_name"> / {{ requestItem.instance_name }}</span>
-                    <span v-if="requestItem.access_level"> / {{ accessLevelLabel(requestItem.access_level) }}</span>
+                    <span v-if="requestItem.access_level">
+                      / {{ accessLevelLabel(requestItem.access_level) }}</span
+                    >
+                    <span>
+                      /
+                      {{
+                        subjectLabel(requestItem.subject_type, requestItem.resource_group_name)
+                      }}</span
+                    >
                   </p>
                 </div>
                 <div class="flex items-center gap-2 text-sm text-slate-500">
@@ -822,7 +873,9 @@ onMounted(async () => {
             </button>
           </div>
 
-          <div class="flex items-center justify-between border-t border-slate-100 pt-4 text-sm text-slate-500">
+          <div
+            class="flex items-center justify-between border-t border-slate-100 pt-4 text-sm text-slate-500"
+          >
             <span>
               Page {{ requestPage }}
               <span v-if="requestsPage.count > 0">
@@ -861,7 +914,7 @@ onMounted(async () => {
             <div>
               <CardTitle>Active Access</CardTitle>
               <CardDescription>
-                Review currently active temporary grants and revoke them when needed.
+                Review currently active grants and revoke them when needed.
               </CardDescription>
             </div>
             <Badge variant="outline" class="border-slate-200 bg-slate-50 text-slate-600">
@@ -910,9 +963,14 @@ onMounted(async () => {
               <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div class="space-y-2">
                   <div class="flex flex-wrap items-center gap-2">
-                    <p class="font-medium text-slate-900">{{ grant.user_display }}</p>
+                    <p class="font-medium text-slate-900">
+                      {{ subjectLabel(grant.subject_type, grant.resource_group_name) }}
+                    </p>
                     <Badge variant="outline" class="border-slate-200 bg-slate-50 text-slate-600">
                       {{ grantTypeLabel(grant.grant_type) }}
+                    </Badge>
+                    <Badge variant="outline" class="border-slate-200 bg-slate-50 text-slate-600">
+                      {{ durationLabel(grant.access_duration) }}
                     </Badge>
                     <Badge
                       v-if="grant.access_level"
@@ -928,7 +986,11 @@ onMounted(async () => {
                   </p>
                 </div>
                 <div class="text-sm text-slate-500">
-                  Valid until {{ formatDate(grant.valid_date) }}
+                  {{
+                    grant.access_duration === 'permanent'
+                      ? 'Permanent access'
+                      : `Valid until ${formatDate(grant.valid_date)}`
+                  }}
                 </div>
               </div>
 
@@ -960,7 +1022,9 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div class="flex items-center justify-between border-t border-slate-100 pt-4 text-sm text-slate-500">
+          <div
+            class="flex items-center justify-between border-t border-slate-100 pt-4 text-sm text-slate-500"
+          >
             <span>
               Page {{ grantPage }}
               <span v-if="grantsPage.count > 0">
@@ -998,11 +1062,13 @@ onMounted(async () => {
       @click.self="closeCreateDialog"
     >
       <div class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
-        <div class="sticky top-0 flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-6 py-5">
+        <div
+          class="sticky top-0 flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-6 py-5"
+        >
           <div>
             <h2 class="text-xl font-semibold text-slate-900">Request permission</h2>
             <p class="mt-1 text-sm text-slate-500">
-              Create a temporary access request for a resource group or a single instance.
+              Create an access request for yourself or one of your resource groups.
             </p>
           </div>
           <Button variant="ghost" size="icon" type="button" @click="closeCreateDialog">
@@ -1035,7 +1101,9 @@ onMounted(async () => {
               />
             </div>
             <div class="space-y-2">
-              <label class="text-sm font-medium text-slate-700" for="request-target-type">Target type</label>
+              <label class="text-sm font-medium text-slate-700" for="request-target-type"
+                >Target type</label
+              >
               <select
                 id="request-target-type"
                 v-model="createForm.target_type"
@@ -1050,7 +1118,45 @@ onMounted(async () => {
 
           <div class="grid gap-4 md:grid-cols-2">
             <div class="space-y-2">
-              <label class="text-sm font-medium text-slate-700" for="request-resource-group">Resource group</label>
+              <label class="text-sm font-medium text-slate-700" for="request-subject-type"
+                >Request for</label
+              >
+              <select
+                id="request-subject-type"
+                v-model="createForm.subject_type"
+                :class="selectClass"
+                :disabled="createSubmitting || lookupsLoading"
+              >
+                <option value="user">Myself</option>
+                <option
+                  value="resource_group"
+                  :disabled="createForm.target_type === 'resource_group'"
+                >
+                  My resource group
+                </option>
+              </select>
+            </div>
+            <div class="space-y-2">
+              <label class="text-sm font-medium text-slate-700" for="request-duration"
+                >Access duration</label
+              >
+              <select
+                id="request-duration"
+                v-model="createForm.access_duration"
+                :class="selectClass"
+                :disabled="createSubmitting || lookupsLoading"
+              >
+                <option value="temporary">Temporary</option>
+                <option value="permanent">Permanent</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid gap-4 md:grid-cols-2">
+            <div class="space-y-2">
+              <label class="text-sm font-medium text-slate-700" for="request-resource-group"
+                >Resource group</label
+              >
               <select
                 id="request-resource-group"
                 v-model="createForm.resource_group_id"
@@ -1067,8 +1173,10 @@ onMounted(async () => {
                 </option>
               </select>
             </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium text-slate-700" for="request-valid-date">Valid until</label>
+            <div v-if="createForm.access_duration === 'temporary'" class="space-y-2">
+              <label class="text-sm font-medium text-slate-700" for="request-valid-date"
+                >Valid until</label
+              >
               <Input
                 id="request-valid-date"
                 v-model="createForm.valid_date"
@@ -1078,17 +1186,29 @@ onMounted(async () => {
             </div>
           </div>
 
-                <div class="flex flex-wrap gap-2">
-                  <Button variant="outline" size="sm" type="button" @click="setQuickValidDate(1)">1 day</Button>
-                  <Button variant="outline" size="sm" type="button" @click="setQuickValidDate(7)">7 days</Button>
-                  <Button variant="outline" size="sm" type="button" @click="setQuickValidDate(30)">30 days</Button>
-                  <Button variant="outline" size="sm" type="button" @click="setQuickValidDate(365)">1 year</Button>
-                  <Button variant="outline" size="sm" type="button" @click="setUnlimitedValidDate()">Unlimited</Button>
-                </div>
+          <div v-if="createForm.access_duration === 'temporary'" class="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" type="button" @click="setQuickValidDate(1)"
+              >1 day</Button
+            >
+            <Button variant="outline" size="sm" type="button" @click="setQuickValidDate(7)"
+              >7 days</Button
+            >
+            <Button variant="outline" size="sm" type="button" @click="setQuickValidDate(30)"
+              >30 days</Button
+            >
+            <Button variant="outline" size="sm" type="button" @click="setQuickValidDate(365)"
+              >1 year</Button
+            >
+            <Button variant="outline" size="sm" type="button" @click="setUnlimitedValidDate()"
+              >Unlimited</Button
+            >
+          </div>
 
           <div v-if="createForm.target_type === 'instance'" class="grid gap-4 md:grid-cols-2">
             <div class="space-y-2">
-              <label class="text-sm font-medium text-slate-700" for="request-instance">Instance</label>
+              <label class="text-sm font-medium text-slate-700" for="request-instance"
+                >Instance</label
+              >
               <select
                 id="request-instance"
                 v-model="createForm.instance_id"
@@ -1106,7 +1226,9 @@ onMounted(async () => {
               </select>
             </div>
             <div class="space-y-2">
-              <label class="text-sm font-medium text-slate-700" for="request-access-level">Access level</label>
+              <label class="text-sm font-medium text-slate-700" for="request-access-level"
+                >Access level</label
+              >
               <select
                 id="request-access-level"
                 v-model="createForm.access_level"
@@ -1132,9 +1254,15 @@ onMounted(async () => {
           </div>
         </div>
 
-        <div class="sticky bottom-0 flex items-center justify-end gap-3 border-t border-slate-200 bg-white px-6 py-4">
+        <div
+          class="sticky bottom-0 flex items-center justify-end gap-3 border-t border-slate-200 bg-white px-6 py-4"
+        >
           <Button variant="outline" type="button" @click="closeCreateDialog">Cancel</Button>
-          <Button type="button" :disabled="createSubmitting || lookupsLoading" @click="void submitRequest()">
+          <Button
+            type="button"
+            :disabled="createSubmitting || lookupsLoading"
+            @click="void submitRequest()"
+          >
             Submit request
           </Button>
         </div>
@@ -1184,7 +1312,9 @@ onMounted(async () => {
           <div v-else class="space-y-6">
             <div class="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div class="flex flex-wrap items-center gap-2">
-                <p class="text-lg font-semibold text-slate-900">{{ selectedRequestSummary.title }}</p>
+                <p class="text-lg font-semibold text-slate-900">
+                  {{ selectedRequestSummary.title }}
+                </p>
                 <Badge variant="outline" :class="statusClass(selectedRequestSummary.status)">
                   {{ statusLabel(selectedRequestSummary.status) }}
                 </Badge>
@@ -1197,6 +1327,21 @@ onMounted(async () => {
                 <div>
                   <p class="text-slate-400">Target</p>
                   <p>{{ targetLabel(selectedRequestSummary.target_type) }}</p>
+                </div>
+                <div>
+                  <p class="text-slate-400">Request for</p>
+                  <p>
+                    {{
+                      subjectLabel(
+                        selectedRequestSummary.subject_type,
+                        selectedRequestSummary.resource_group_name,
+                      )
+                    }}
+                  </p>
+                </div>
+                <div>
+                  <p class="text-slate-400">Duration</p>
+                  <p>{{ durationLabel(selectedRequestSummary.access_duration) }}</p>
                 </div>
                 <div>
                   <p class="text-slate-400">Resource group</p>
@@ -1251,7 +1396,13 @@ onMounted(async () => {
                             : 'border-slate-200 bg-slate-50 text-slate-600'
                       "
                     >
-                      {{ node.is_current_node ? 'Current' : node.is_passed_node ? 'Passed' : 'Pending' }}
+                      {{
+                        node.is_current_node
+                          ? 'Current'
+                          : node.is_passed_node
+                            ? 'Passed'
+                            : 'Pending'
+                      }}
                     </Badge>
                   </div>
                 </div>
@@ -1277,7 +1428,9 @@ onMounted(async () => {
                 >
                   <div class="flex flex-wrap items-center justify-between gap-2">
                     <p class="font-medium text-slate-900">{{ log.operation_type_desc }}</p>
-                    <span class="text-xs text-slate-400">{{ formatDateTime(log.operation_time) }}</span>
+                    <span class="text-xs text-slate-400">{{
+                      formatDateTime(log.operation_time)
+                    }}</span>
                   </div>
                   <p class="mt-2 text-sm text-slate-600">{{ log.operation_info }}</p>
                   <p class="mt-2 text-xs uppercase tracking-wide text-slate-400">

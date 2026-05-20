@@ -1,21 +1,17 @@
 from django.core.management.base import BaseCommand, CommandError
-from rest_framework.test import APIClient
+from django.contrib.auth.models import Group
 
 from sql.engines import get_engine
 from sql.local_demo import (
     DEMO_INSTANCES,
     DEMO_RESOURCE_GROUPS,
-    DEMO_USERS,
     managed_demo_instance_names,
     managed_demo_resource_group_names,
     managed_demo_usernames,
 )
-from sql.models import Instance, ResourceGroup, Users
-
-
-def _response_data(response):
-    payload = response.json()
-    return payload.get("data", payload)
+from common.utils.const import WorkflowType
+from sql.utils.sql_utils import filter_db_list
+from sql.models import Instance, ResourceGroup, Users, WorkflowAuditSetting
 
 
 class Command(BaseCommand):
@@ -24,15 +20,14 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         self.stdout.write("Running local demo smoke checks")
 
-        users = {
-            user.username: user
-            for user in Users.objects.filter(username__in=managed_demo_usernames())
-        }
-        missing_users = sorted(set(managed_demo_usernames()) - set(users.keys()))
-        if missing_users:
+        legacy_users = Users.objects.filter(username__in=managed_demo_usernames())
+        if legacy_users.exists():
             raise CommandError(
-                "Missing demo users: {}".format(", ".join(missing_users))
+                "Legacy seeded demo users still exist: {}".format(
+                    ", ".join(sorted(legacy_users.values_list("username", flat=True)))
+                )
             )
+        self.stdout.write("Legacy demo users removed")
 
         resource_groups = {
             group.group_name: group
@@ -62,70 +57,35 @@ class Command(BaseCommand):
                 "Missing demo instances: {}".format(", ".join(missing_instances))
             )
 
-        client = APIClient()
-        for username in DEMO_USERS.keys():
-            client.force_authenticate(user=users[username])
-            response = client.get("/api/v1/me/", format="json")
-            if response.status_code != 200:
-                raise CommandError(
-                    f"Failed to load current-user context for {username}: {response.content}"
-                )
-            self.stdout.write(f"Current-user context OK: {username}")
-        client.force_authenticate(user=None)
-
-        requester = users["demo_requester"]
-        client.force_authenticate(user=requester)
-        response = client.get("/api/v1/workflow/submission-metadata/", format="json")
-        if response.status_code != 200:
-            raise CommandError(
-                f"Submission metadata failed: {response.status_code} {response.content}"
-            )
-        metadata = _response_data(response)
-        if len(metadata.get("instances", [])) < len(DEMO_INSTANCES):
-            raise CommandError("Submission metadata is missing seeded demo instances.")
-        self.stdout.write("Workflow submission metadata OK")
-
-        response = client.get(
-            "/api/v1/workflow/export/submission-metadata/", format="json"
-        )
-        if response.status_code != 200:
-            raise CommandError(
-                f"Export submission metadata failed: {response.status_code} {response.content}"
-            )
-        export_metadata = _response_data(response)
-        if len(export_metadata.get("instances", [])) < 1:
-            raise CommandError(
-                "Export submission metadata is missing readable demo instances."
-            )
-        self.stdout.write("Export submission metadata OK")
-
         for resource_group_config in DEMO_RESOURCE_GROUPS.values():
             resource_group = resource_groups[resource_group_config["group_name"]]
-            response = client.get(
-                "/api/v1/workflow/approval-preview/",
-                {"group_id": resource_group.group_id},
-                format="json",
-            )
-            if response.status_code != 200:
-                raise CommandError(
-                    f"Approval preview failed for {resource_group.group_name}: {response.content}"
-                )
-            preview = _response_data(response)
             expected_display = " -> ".join(resource_group_config["approval_groups"])
-            if preview.get("display") != expected_display:
+            audit_setting = WorkflowAuditSetting.objects.filter(
+                group_id=resource_group.group_id,
+                workflow_type=WorkflowType.SQL_REVIEW,
+            ).first()
+            actual_display = ""
+            if audit_setting:
+                group_ids = [
+                    value
+                    for value in audit_setting.audit_auth_groups.split(",")
+                    if value
+                ]
+                groups_by_id = {
+                    str(group.id): group.name
+                    for group in Group.objects.filter(id__in=group_ids)
+                }
+                group_names = [groups_by_id.get(group_id, "") for group_id in group_ids]
+                actual_display = " -> ".join(group_names)
+            if actual_display != expected_display:
                 raise CommandError(
                     "Unexpected approval preview for {}: expected '{}', got '{}'".format(
                         resource_group.group_name,
                         expected_display,
-                        preview.get("display"),
+                        actual_display,
                     )
                 )
             self.stdout.write(f"Approval preview OK: {resource_group.group_name}")
-
-        dba_user = users["demo_dba"]
-        if not dba_user.has_perm("sql.offline_download"):
-            raise CommandError("Demo DBA is missing offline_download permission.")
-        self.stdout.write("Export download permission OK: demo_dba")
 
         for instance_config in DEMO_INSTANCES.values():
             instance = instances[instance_config["instance_name"]]
@@ -135,17 +95,18 @@ class Command(BaseCommand):
                 raise CommandError(
                     f"Connection failed for {instance.instance_name}: {connection_result.error}"
                 )
-            response = client.get(
-                "/api/v1/instance/resource/",
-                {"instance_id": instance.id, "resource_type": "database"},
-                format="json",
+            databases = engine.get_all_databases()
+            db_names = filter_db_list(
+                db_list=databases.rows,
+                db_name_regex=engine.instance.show_db_name_regex,
+                is_match_regex=True,
             )
-            if response.status_code != 200:
-                raise CommandError(
-                    f"Database listing failed for {instance.instance_name}: {response.content}"
-                )
-            payload = _response_data(response)
-            db_names = set(str(item) for item in payload.get("result", []))
+            db_names = filter_db_list(
+                db_list=db_names,
+                db_name_regex=engine.instance.denied_db_name_regex,
+                is_match_regex=False,
+            )
+            db_names = set(str(item) for item in db_names)
             expected_db_names = set(instance_config["databases"])
             if not expected_db_names.issubset(db_names):
                 raise CommandError(

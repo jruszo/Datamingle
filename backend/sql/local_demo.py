@@ -3,6 +3,7 @@ from collections import OrderedDict
 from django.contrib.auth.models import Group, Permission
 from django.db import transaction
 
+from common.auth import ensure_superadmin_group
 from common.utils.const import WorkflowType
 from sql.models import Instance, InstanceTag, ResourceGroup, Users, WorkflowAuditSetting
 
@@ -126,41 +127,11 @@ DEMO_RESOURCE_GROUPS = OrderedDict(
     }
 )
 
-DEMO_USERS = OrderedDict(
-    {
-        "demo_admin": {
-            "display": "Demo Admin",
-            "is_superuser": True,
-            "is_staff": True,
-            "auth_groups": [],
-            "resource_groups": [],
-            "role_summary": "Full-access local admin",
-        },
-        "demo_requester": {
-            "display": "Demo Requester",
-            "is_superuser": False,
-            "is_staff": False,
-            "auth_groups": ["RD"],
-            "resource_groups": ["single_stage", "multi_stage"],
-            "role_summary": "Primary workflow submitter for manual UX checks",
-        },
-        "demo_pm": {
-            "display": "Demo PM Reviewer",
-            "is_superuser": False,
-            "is_staff": False,
-            "auth_groups": ["PM"],
-            "resource_groups": ["multi_stage"],
-            "role_summary": "First-stage reviewer for multi-stage approval flow",
-        },
-        "demo_dba": {
-            "display": "Demo DBA",
-            "is_superuser": False,
-            "is_staff": False,
-            "auth_groups": ["DBA"],
-            "resource_groups": ["single_stage", "multi_stage"],
-            "role_summary": "Single-stage reviewer and final approver/executor",
-        },
-    }
+LEGACY_DEMO_USERNAMES = (
+    "demo_admin",
+    "demo_requester",
+    "demo_pm",
+    "demo_dba",
 )
 
 DEMO_INSTANCES = OrderedDict(
@@ -202,7 +173,7 @@ DEMO_INSTANCES = OrderedDict(
 
 
 def managed_demo_usernames():
-    return list(DEMO_USERS.keys())
+    return list(LEGACY_DEMO_USERNAMES)
 
 
 def managed_demo_instance_names():
@@ -222,20 +193,23 @@ def seed_local_demo(write_line=None):
         auth_groups = _seed_auth_groups(log)
         resource_groups = _seed_resource_groups(log)
         tags = _seed_instance_tags(log)
-        users = _seed_users(auth_groups, resource_groups, log)
+        _remove_legacy_seeded_users(log)
         instances = _seed_instances(resource_groups, tags, log)
         _seed_workflow_settings(auth_groups, resource_groups, log)
 
     return {
         "auth_groups": list(auth_groups.keys()),
         "resource_groups": [group.group_name for group in resource_groups.values()],
-        "users": list(users.keys()),
+        "users": [],
+        "removed_users": managed_demo_usernames(),
         "instances": [instance.instance_name for instance in instances.values()],
     }
 
 
 def _seed_auth_groups(log):
     auth_groups = {}
+    auth_groups["superadmin"] = ensure_superadmin_group()
+    log("Auth group updated: superadmin")
     for name, permission_codes in AUTH_GROUP_PERMISSION_CODES.items():
         group, created = Group.objects.get_or_create(name=name)
         permissions = list(Permission.objects.filter(codename__in=permission_codes))
@@ -293,24 +267,14 @@ def _seed_instance_tags(log):
     return tags
 
 
-def _seed_users(auth_groups, resource_groups, log):
-    users = {}
-    for username, config in DEMO_USERS.items():
-        user, created = Users.objects.get_or_create(username=username)
-        user.display = config["display"]
-        user.email = ""
-        user.is_active = True
-        user.is_staff = config["is_staff"]
-        user.is_superuser = config["is_superuser"]
-        user.set_unusable_password()
-        user.save()
-        user.groups.set([auth_groups[name] for name in config["auth_groups"]])
-        user.resource_group.set(
-            [resource_groups[name] for name in config["resource_groups"]]
-        )
-        users[username] = user
-        log("Demo user {}: {}".format("created" if created else "updated", username))
-    return users
+def _remove_legacy_seeded_users(log):
+    deleted_count, _ = Users.objects.filter(
+        username__in=managed_demo_usernames()
+    ).delete()
+    if deleted_count:
+        log(f"Removed legacy seeded demo users: {deleted_count}")
+    else:
+        log("No legacy seeded demo users to remove")
 
 
 def _seed_instances(resource_groups, tags, log):

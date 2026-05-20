@@ -13,7 +13,10 @@ from common.utils.const import WorkflowAction, WorkflowStatus, WorkflowType
 from sql.mailbox import sync_approval_notifications
 from sql.models import (
     Instance,
+    PermanentResourceGroupGrant,
     PermissionRequest,
+    PermissionRequestDuration,
+    PermissionRequestSubject,
     PermissionRequestTarget,
     ResourceGroup,
     TemporaryInstanceGrant,
@@ -102,7 +105,7 @@ def _request_queryset_for_user(user):
 
 def _grant_queryset_for_user(user, model):
     select_related_fields = ["user", "resource_group"]
-    if model is TemporaryInstanceGrant:
+    if model in {TemporaryInstanceGrant, PermanentResourceGroupGrant}:
         select_related_fields.append("instance")
     queryset = model.objects.select_related(*select_related_fields)
     if user.is_superuser:
@@ -110,7 +113,49 @@ def _grant_queryset_for_user(user, model):
     if user.has_perm("sql.query_mgtpriv"):
         group_ids = [group.group_id for group in user_member_groups(user)]
         return queryset.filter(Q(resource_group_id__in=group_ids) | Q(user=user))
-    return queryset.filter(user=user)
+    return queryset.filter(
+        Q(user=user) | Q(user__isnull=True, resource_group__in=user_member_groups(user))
+    )
+
+
+def _subject_filter(permission_request, user):
+    return (
+        {"user": user}
+        if permission_request.subject_type == PermissionRequestSubject.USER
+        else {"user": None}
+    )
+
+
+def _request_subject_is_self(permission_request):
+    return permission_request.subject_type == PermissionRequestSubject.USER
+
+
+def _subject_has_resource_group_access(resource_group, user, access_duration):
+    include_temporary = access_duration == PermissionRequestDuration.TEMPORARY
+    if not include_temporary:
+        return any(
+            group.group_id == resource_group.group_id
+            for group in user_member_groups(user)
+        )
+    return any(group.group_id == resource_group.group_id for group in user_groups(user))
+
+
+def _subject_has_instance_access(
+    instance, access_level, subject_type, user, resource_group
+):
+    if subject_type == PermissionRequestSubject.USER:
+        return _request_grants_enough(user, instance, access_level)
+
+    if instance.resource_group.filter(group_id=resource_group.group_id).exists():
+        return True
+    return TemporaryInstanceGrant.objects.filter(
+        user__isnull=True,
+        resource_group=resource_group,
+        instance=instance,
+        access_level=access_level,
+        is_revoked=False,
+        valid_date__gte=_today(),
+    ).exists()
 
 
 def _request_grants_enough(user, instance, access_level):
@@ -134,12 +179,39 @@ def _permission_request_audit_callback(request_id, workflow_status):
         return
 
     user = Users.objects.get(username=permission_request.user_name)
+    subject_filter = _subject_filter(permission_request, user)
+
+    if permission_request.access_duration == PermissionRequestDuration.PERMANENT:
+        if permission_request.target_type == PermissionRequestTarget.RESOURCE_GROUP:
+            user.resource_group.add(permission_request.resource_group)
+            PermanentResourceGroupGrant.objects.get_or_create(
+                source_request=permission_request,
+                defaults={
+                    "user": user,
+                    "resource_group": permission_request.resource_group,
+                },
+            )
+            return
+
+        permission_request.instance.resource_group.add(
+            permission_request.resource_group
+        )
+        PermanentResourceGroupGrant.objects.get_or_create(
+            source_request=permission_request,
+            defaults={
+                "user": None,
+                "resource_group": permission_request.resource_group,
+                "instance": permission_request.instance,
+            },
+        )
+        return
+
     if permission_request.target_type == PermissionRequestTarget.RESOURCE_GROUP:
         if not TemporaryResourceGroupGrant.objects.filter(
             source_request=permission_request
         ).exists():
             TemporaryResourceGroupGrant.objects.create(
-                user=user,
+                **subject_filter,
                 resource_group=permission_request.resource_group,
                 source_request=permission_request,
                 valid_date=permission_request.valid_date,
@@ -150,7 +222,7 @@ def _permission_request_audit_callback(request_id, workflow_status):
         source_request=permission_request
     ).exists():
         TemporaryInstanceGrant.objects.create(
-            user=user,
+            **subject_filter,
             resource_group=permission_request.resource_group,
             instance=permission_request.instance,
             access_level=permission_request.access_level,
@@ -224,6 +296,8 @@ class PermissionRequestListSerializer(serializers.ModelSerializer):
             "instance_id",
             "instance_name",
             "access_level",
+            "subject_type",
+            "access_duration",
             "valid_date",
             "user_name",
             "user_display",
@@ -236,6 +310,14 @@ class PermissionRequestCreateSerializer(serializers.Serializer):
     title = serializers.CharField(max_length=50)
     reason = serializers.CharField(required=False, allow_blank=True, max_length=255)
     target_type = serializers.ChoiceField(choices=PermissionRequestTarget.choices)
+    subject_type = serializers.ChoiceField(
+        choices=PermissionRequestSubject.choices,
+        default=PermissionRequestSubject.USER,
+    )
+    access_duration = serializers.ChoiceField(
+        choices=PermissionRequestDuration.choices,
+        default=PermissionRequestDuration.TEMPORARY,
+    )
     resource_group_id = serializers.IntegerField()
     instance_id = serializers.IntegerField(required=False)
     access_level = serializers.ChoiceField(
@@ -246,11 +328,33 @@ class PermissionRequestCreateSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         target_type = attrs["target_type"]
+        subject_type = attrs["subject_type"]
+        access_duration = attrs["access_duration"]
         valid_date = attrs["valid_date"]
+        request_user = self.context["request"].user
 
         if valid_date < _today():
             raise serializers.ValidationError(
                 {"errors": "valid_date cannot be in the past."}
+            )
+        if (
+            access_duration == PermissionRequestDuration.PERMANENT
+            and target_type == PermissionRequestTarget.INSTANCE
+            and subject_type == PermissionRequestSubject.USER
+        ):
+            raise serializers.ValidationError(
+                {
+                    "errors": (
+                        "Permanent instance requests must be made for a resource group."
+                    )
+                }
+            )
+        if (
+            target_type == PermissionRequestTarget.RESOURCE_GROUP
+            and subject_type != PermissionRequestSubject.USER
+        ):
+            raise serializers.ValidationError(
+                {"errors": "Resource group membership requests must be for yourself."}
             )
 
         try:
@@ -262,6 +366,16 @@ class PermissionRequestCreateSerializer(serializers.Serializer):
                 {"errors": "Resource group does not exist."}
             )
         attrs["resource_group"] = resource_group
+        if (
+            subject_type == PermissionRequestSubject.RESOURCE_GROUP
+            and not request_user.is_superuser
+            and not request_user.resource_group.filter(
+                group_id=resource_group.group_id
+            ).exists()
+        ):
+            raise serializers.ValidationError(
+                {"errors": "You can only request access for your own resource groups."}
+            )
 
         if target_type == PermissionRequestTarget.RESOURCE_GROUP:
             attrs["instance"] = None
@@ -284,9 +398,12 @@ class PermissionRequestCreateSerializer(serializers.Serializer):
         except Instance.DoesNotExist:
             raise serializers.ValidationError({"errors": "Instance does not exist."})
 
-        if not instance.resource_group.filter(
-            group_id=resource_group.group_id
-        ).exists():
+        if (
+            subject_type == PermissionRequestSubject.USER
+            and not instance.resource_group.filter(
+                group_id=resource_group.group_id
+            ).exists()
+        ):
             raise serializers.ValidationError(
                 {
                     "errors": (
@@ -306,6 +423,7 @@ class PermissionRequestReviewSerializer(serializers.Serializer):
 class ActiveGrantSerializer(serializers.Serializer):
     grant_type = serializers.CharField()
     grant_id = serializers.IntegerField()
+    subject_type = serializers.CharField()
     user_name = serializers.CharField()
     user_display = serializers.CharField()
     resource_group_id = serializers.IntegerField()
@@ -313,7 +431,8 @@ class ActiveGrantSerializer(serializers.Serializer):
     instance_id = serializers.IntegerField(allow_null=True)
     instance_name = serializers.CharField(allow_blank=True)
     access_level = serializers.CharField(allow_blank=True)
-    valid_date = serializers.DateField()
+    access_duration = serializers.CharField()
+    valid_date = serializers.DateField(allow_null=True)
     source_request_id = serializers.IntegerField(allow_null=True)
     create_time = serializers.DateTimeField()
 
@@ -358,19 +477,36 @@ def _serialize_request_detail(permission_request, request_user):
     return serializer_data
 
 
-def _serialize_active_grant(grant, grant_type):
-    if grant_type == "resource_group":
+def _grant_subject_payload(grant):
+    if grant.user_id:
+        return {
+            "subject_type": PermissionRequestSubject.USER.value,
+            "user_name": grant.user.username,
+            "user_display": grant.user.display,
+        }
+    return {
+        "subject_type": PermissionRequestSubject.RESOURCE_GROUP.value,
+        "user_name": "",
+        "user_display": "",
+    }
+
+
+def _serialize_active_grant(grant, grant_type, access_duration):
+    subject_payload = _grant_subject_payload(grant)
+    if grant_type in {"resource_group", "permanent_resource_group"} and not getattr(
+        grant, "instance_id", None
+    ):
         return {
             "grant_type": grant_type,
             "grant_id": grant.grant_id,
-            "user_name": grant.user.username,
-            "user_display": grant.user.display,
+            **subject_payload,
             "resource_group_id": grant.resource_group.group_id,
             "resource_group_name": grant.resource_group.group_name,
             "instance_id": None,
             "instance_name": "",
             "access_level": "",
-            "valid_date": grant.valid_date,
+            "access_duration": access_duration,
+            "valid_date": getattr(grant, "valid_date", None),
             "source_request_id": grant.source_request_id,
             "create_time": grant.create_time,
         }
@@ -378,14 +514,14 @@ def _serialize_active_grant(grant, grant_type):
     return {
         "grant_type": grant_type,
         "grant_id": grant.grant_id,
-        "user_name": grant.user.username,
-        "user_display": grant.user.display,
+        **subject_payload,
         "resource_group_id": grant.resource_group.group_id,
         "resource_group_name": grant.resource_group.group_name,
         "instance_id": grant.instance_id,
         "instance_name": grant.instance.instance_name,
-        "access_level": grant.access_level,
-        "valid_date": grant.valid_date,
+        "access_level": getattr(grant, "access_level", ""),
+        "access_duration": access_duration,
+        "valid_date": getattr(grant, "valid_date", None),
         "source_request_id": grant.source_request_id,
         "create_time": grant.create_time,
     }
@@ -408,11 +544,8 @@ class PermissionInstanceLookup(views.APIView):
     @extend_schema(responses={200: PermissionInstanceLookupSerializer(many=True)})
     def get(self, request):
         _require_permission(request, "sql.query_applypriv")
-        queryset = (
-            Instance.objects.filter(resource_group__is_deleted=0)
-            .prefetch_related("resource_group")
-            .distinct()
-            .order_by("instance_name")
+        queryset = Instance.objects.prefetch_related("resource_group").order_by(
+            "instance_name"
         )
         serializer = PermissionInstanceLookupSerializer(queryset, many=True)
         return success_response(data=serializer.data)
@@ -443,29 +576,50 @@ class PermissionRequestListCreate(views.APIView):
     @extend_schema(request=PermissionRequestCreateSerializer)
     def post(self, request):
         _require_permission(request, "sql.query_applypriv")
-        serializer = PermissionRequestCreateSerializer(data=request.data)
+        serializer = PermissionRequestCreateSerializer(
+            data=request.data, context={"request": request}
+        )
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         user = request.user
+        subject_type = data["subject_type"]
+        access_duration = data["access_duration"]
 
         if data["target_type"] == PermissionRequestTarget.RESOURCE_GROUP:
-            if any(
-                group.group_id == data["resource_group"].group_id
-                for group in user_groups(user)
+            if _subject_has_resource_group_access(
+                data["resource_group"],
+                user,
+                access_duration,
             ):
                 raise serializers.ValidationError(
-                    {"errors": "You already have access to this resource group."}
+                    {
+                        "errors": (
+                            "The selected subject already has access to this resource group."
+                        )
+                    }
                 )
             duplicate_qs = PermissionRequest.objects.filter(
                 user_name=user.username,
                 target_type=PermissionRequestTarget.RESOURCE_GROUP,
                 resource_group=data["resource_group"],
+                subject_type=subject_type,
+                access_duration=access_duration,
                 status=WorkflowStatus.WAITING,
             )
         else:
-            if _request_grants_enough(user, data["instance"], data["access_level"]):
+            if _subject_has_instance_access(
+                data["instance"],
+                data["access_level"],
+                subject_type,
+                user,
+                data["resource_group"],
+            ):
                 raise serializers.ValidationError(
-                    {"errors": "You already have sufficient access to this instance."}
+                    {
+                        "errors": (
+                            "The selected subject already has sufficient access to this instance."
+                        )
+                    }
                 )
             duplicate_qs = PermissionRequest.objects.filter(
                 user_name=user.username,
@@ -473,6 +627,8 @@ class PermissionRequestListCreate(views.APIView):
                 resource_group=data["resource_group"],
                 instance=data["instance"],
                 access_level=data["access_level"],
+                subject_type=subject_type,
+                access_duration=access_duration,
                 status=WorkflowStatus.WAITING,
             )
 
@@ -488,6 +644,8 @@ class PermissionRequestListCreate(views.APIView):
             access_level=data.get("access_level", ""),
             title=data["title"],
             reason=data.get("reason", ""),
+            subject_type=subject_type,
+            access_duration=access_duration,
             user_name=user.username,
             user_display=user.display,
             valid_date=data["valid_date"],
@@ -624,14 +782,24 @@ class ActiveGrantList(views.APIView):
         instance_grants = _grant_queryset_for_user(
             request.user, TemporaryInstanceGrant
         ).filter(is_revoked=False, valid_date__gte=_today())
+        permanent_group_grants = _grant_queryset_for_user(
+            request.user, PermanentResourceGroupGrant
+        ).filter(is_revoked=False)
 
-        rows = [
-            _serialize_active_grant(grant, "resource_group")
-            for grant in group_grants.order_by("-grant_id")
-        ] + [
-            _serialize_active_grant(grant, "instance")
-            for grant in instance_grants.order_by("-grant_id")
-        ]
+        rows = (
+            [
+                _serialize_active_grant(grant, "resource_group", "temporary")
+                for grant in group_grants.order_by("-grant_id")
+            ]
+            + [
+                _serialize_active_grant(grant, "instance", "temporary")
+                for grant in instance_grants.order_by("-grant_id")
+            ]
+            + [
+                _serialize_active_grant(grant, "permanent_resource_group", "permanent")
+                for grant in permanent_group_grants.order_by("-grant_id")
+            ]
+        )
 
         if search:
             rows = [
@@ -645,6 +813,7 @@ class ActiveGrantList(views.APIView):
                         row["resource_group_name"],
                         row["instance_name"],
                         row["access_level"],
+                        row["access_duration"],
                     ]
                 ).lower()
             ]
@@ -668,6 +837,10 @@ class ActiveGrantDetail(views.APIView):
             )
         elif grant_type == "instance":
             queryset = _grant_queryset_for_user(request.user, TemporaryInstanceGrant)
+        elif grant_type == "permanent_resource_group":
+            queryset = _grant_queryset_for_user(
+                request.user, PermanentResourceGroupGrant
+            )
         else:
             raise serializers.ValidationError({"errors": "Unsupported grant type."})
 
@@ -678,4 +851,9 @@ class ActiveGrantDetail(views.APIView):
 
         grant.is_revoked = True
         grant.save(update_fields=["is_revoked"])
+        if grant_type == "permanent_resource_group":
+            if grant.user_id:
+                grant.user.resource_group.remove(grant.resource_group)
+            elif grant.instance_id:
+                grant.instance.resource_group.remove(grant.resource_group)
         return success_response()

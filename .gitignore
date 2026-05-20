@@ -10,6 +10,8 @@ backend/archery/settings.py.dev
 backend/archery/settings_dev.py
 venv
 env
+.venv
+.venv*/
 conda311
 sonar-project.properties
 .scannerwork
@@ -18,6 +20,8 @@ backend/src/docker-compose/.env
 backend/src/docker-compose/.env.local-dev
 backend/src/docker-compose/.env.local-dev.example
 local_settings.py
+/sql/
+/src/
 src/docker-compose-dev
 .coverage
 archery_custom
@@ -27,6 +31,7 @@ backend/src/docker-compose/datamingle/downloads/dictionary/
 backend/docs/
 frontend/playwright-report/
 frontend/test-results/
+/static/
 backend/static/
 /supervisord.pid
 agent/.tools/
