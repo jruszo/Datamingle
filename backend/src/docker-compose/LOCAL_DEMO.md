@@ -36,8 +36,9 @@ The local demo seed no longer creates local app users. It removes legacy seeded
 records named `demo_admin`, `demo_requester`, `demo_pm`, and `demo_dba` if they
 exist.
 
-Manual testing should sign in through WorkOS. A WorkOS user with the `superadmin`
-role slug is refreshed into local Datamingle superuser access on every login.
+Manual testing should sign in through WorkOS. A WorkOS user with the built-in
+Admin role (`admin`) is refreshed into local Datamingle superuser access on
+every login.
 
 ## Demo resource groups and approval chains
 

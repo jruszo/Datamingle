@@ -109,7 +109,7 @@ WORKOS_ORGANIZATION_ID=org_xxx
 WORKOS_WEBHOOK_SECRET=whsec_xxx
 WORKOS_STAFF_EMAILS=ops@datamingle.dev,admin@datamingle.dev
 WORKOS_SUPERUSER_EMAILS=admin@datamingle.dev
-WORKOS_SUPERADMIN_ROLE_SLUGS=superadmin
+WORKOS_SUPERADMIN_ROLE_SLUGS=admin
 ```
 
 Behavior:
@@ -128,7 +128,7 @@ WorkOS setup assumptions in this repo:
 - Users are provisioned just-in-time on first successful WorkOS login.
 - Directory Sync users can also be created or updated from WorkOS webhooks.
 - The local Datamingle account uses the WorkOS email as the username.
-- Users with a WorkOS role slug listed in `WORKOS_SUPERADMIN_ROLE_SLUGS` are refreshed into Datamingle superuser access on every login, including membership in the local `superadmin` auth group.
+- Users with a WorkOS organization role slug listed in `WORKOS_SUPERADMIN_ROLE_SLUGS` are refreshed into Datamingle superuser access on every login, including membership in the local `superadmin` auth group. By default this uses WorkOS' built-in Admin role (`admin`).
 - `WORKOS_STAFF_EMAILS` and `WORKOS_SUPERUSER_EMAILS` remain bootstrap allowlists for initial elevated access.
 - Datamingle derives the WorkOS callback and logout return URLs from the current request host.
 - Directory Sync group names auto-create matching Datamingle resource groups. Assign database servers to those resource groups in Datamingle.

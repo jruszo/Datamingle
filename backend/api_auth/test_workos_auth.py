@@ -102,8 +102,8 @@ class WorkOSAuthClientConfigTests(APITestCase):
                     access_token=_jwt(
                         {
                             "sid": "session_123",
-                            "role": "member",
-                            "roles": ["superadmin", "analyst"],
+                            "role": "admin",
+                            "roles": ["admin"],
                         }
                     ),
                 )
@@ -119,7 +119,61 @@ class WorkOSAuthClientConfigTests(APITestCase):
         self.assertEqual(auth_result.email, "admin@datamingle.dev")
         self.assertEqual(
             auth_result.role_slugs,
-            ("analyst", "member", "superadmin"),
+            ("admin",),
+        )
+
+    def test_authenticate_with_code_refreshes_organization_membership_roles(self):
+        client = WorkOSAuthClient.__new__(WorkOSAuthClient)
+        calls = []
+
+        def list_organization_memberships(**kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                data=[
+                    SimpleNamespace(
+                        status="active",
+                        role={"slug": "admin"},
+                        roles=[{"slug": "member"}],
+                    )
+                ],
+                list_metadata=SimpleNamespace(after=None),
+            )
+
+        client.client = SimpleNamespace(
+            user_management=SimpleNamespace(
+                authenticate_with_code=lambda **kwargs: SimpleNamespace(
+                    user=SimpleNamespace(
+                        id="user_123",
+                        email="Admin@DataMingle.dev",
+                        first_name="Admin",
+                        last_name="User",
+                        profile_picture_url="",
+                    ),
+                    organization_id="org_test_123",
+                    access_token=_jwt({"sid": "session_123"}),
+                ),
+                list_organization_memberships=list_organization_memberships,
+            )
+        )
+
+        auth_result = client.authenticate_with_code(
+            code="code_123",
+            ip_address="127.0.0.1",
+            user_agent="test-agent",
+        )
+
+        self.assertEqual(auth_result.role_slugs, ("admin", "member"))
+        self.assertEqual(
+            calls,
+            [
+                {
+                    "user_id": "user_123",
+                    "organization_id": "org_test_123",
+                    "statuses": ["active"],
+                    "limit": 100,
+                    "order": "asc",
+                }
+            ],
         )
 
 
@@ -300,7 +354,7 @@ class WorkOSAuthApiTests(APITestCase):
             organization_id="org_test_123",
             session_id="session_123",
             display_name="Temporary Admin",
-            role_slugs=("superadmin",),
+            role_slugs=("admin",),
         )
 
         self.client.cookies["datamingle_workos_state"] = "state_123"
