@@ -34,6 +34,7 @@ type AssignmentDraft = AgentAssignmentReplaceItem & {
   db_type: string
   host: string
   port: number
+  inherited: boolean
 }
 
 const authStore = useAuthStore()
@@ -302,6 +303,7 @@ function assignmentDraftForInstance(
     metrics_enabled: assignment?.metrics_enabled ?? true,
     online_schema_enabled: assignment?.online_schema_enabled ?? false,
     logs_enabled: assignment?.logs_enabled ?? false,
+    inherited: assignment?.inherited ?? false,
   }
 }
 
@@ -319,6 +321,7 @@ function assignmentDraftForAssignment(assignment: AgentAssignmentRecord): Assign
     metrics_enabled: assignment.metrics_enabled,
     online_schema_enabled: assignment.online_schema_enabled,
     logs_enabled: assignment.logs_enabled,
+    inherited: assignment.inherited,
   }
 }
 
@@ -362,7 +365,7 @@ async function saveAssignments() {
   detailError.value = ''
   try {
     const assignments = assignmentRows.value
-      .filter((row) => row.enabled)
+      .filter((row) => row.enabled && !row.inherited)
       .map((row) => ({
         instance: row.instance,
         enabled: row.enabled,
@@ -789,7 +792,12 @@ watch([commandPage, commandPageSize], () => {
                       </tr>
                       <tr v-for="row in assignmentRows" :key="row.instance" class="align-top">
                         <td class="px-4 py-3 text-sm">
-                          <div class="font-medium text-slate-900">{{ row.instance_name }}</div>
+                          <div class="flex flex-wrap items-center gap-2">
+                            <span class="font-medium text-slate-900">{{ row.instance_name }}</span>
+                            <Badge v-if="row.inherited" variant="secondary" class="bg-slate-100 text-slate-700">
+                              Inherited
+                            </Badge>
+                          </div>
                           <div class="mt-1 text-xs text-slate-500">
                             {{ row.db_type }} · {{ row.host }}:{{ row.port }}
                           </div>
@@ -799,6 +807,7 @@ watch([commandPage, commandPageSize], () => {
                             :checked="row.enabled"
                             class="h-4 w-4 rounded border-slate-300"
                             type="checkbox"
+                            :disabled="row.inherited"
                             @change="toggleAssignment(row, ($event.target as HTMLInputElement).checked)"
                           >
                         </td>
@@ -807,7 +816,7 @@ watch([commandPage, commandPageSize], () => {
                             v-model="row.command_enabled"
                             class="h-4 w-4 rounded border-slate-300"
                             type="checkbox"
-                            :disabled="!row.enabled"
+                            :disabled="!row.enabled || row.inherited"
                           >
                         </td>
                         <td class="px-4 py-3">
@@ -815,7 +824,7 @@ watch([commandPage, commandPageSize], () => {
                             v-model="row.metrics_enabled"
                             class="h-4 w-4 rounded border-slate-300"
                             type="checkbox"
-                            :disabled="!row.enabled"
+                            :disabled="!row.enabled || row.inherited"
                           >
                         </td>
                         <td class="px-4 py-3">
@@ -823,7 +832,7 @@ watch([commandPage, commandPageSize], () => {
                             v-model="row.online_schema_enabled"
                             class="h-4 w-4 rounded border-slate-300"
                             type="checkbox"
-                            :disabled="!row.enabled || row.db_type !== 'mysql'"
+                            :disabled="!row.enabled || row.inherited || row.db_type !== 'mysql'"
                           >
                         </td>
                         <td class="px-4 py-3">
@@ -831,7 +840,7 @@ watch([commandPage, commandPageSize], () => {
                             v-model="row.logs_enabled"
                             class="h-4 w-4 rounded border-slate-300"
                             type="checkbox"
-                            :disabled="!row.enabled"
+                            :disabled="!row.enabled || row.inherited"
                           >
                         </td>
                       </tr>

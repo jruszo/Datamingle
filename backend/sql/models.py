@@ -240,6 +240,29 @@ class InstanceTag(models.Model):
         verbose_name_plural = "Instance Tag"
 
 
+class InfrastructureNode(models.Model):
+    """Server or host that owns one or more database services."""
+
+    node_name = models.CharField("Node Name", max_length=128, unique=True)
+    hostname = models.CharField("Hostname", max_length=255, blank=True, default="")
+    environment = models.CharField("Environment", max_length=64, blank=True, default="")
+    provider = models.CharField("Provider", max_length=64, blank=True, default="")
+    metadata = models.JSONField("Metadata", default=dict, blank=True)
+    enabled = models.BooleanField("Enabled", default=True)
+    create_time = models.DateTimeField("Created Time", auto_now_add=True)
+    update_time = models.DateTimeField("Updated Time", auto_now=True)
+
+    def __str__(self):
+        return self.node_name
+
+    class Meta:
+        managed = True
+        db_table = "infrastructure_node"
+        ordering = ("node_name", "id")
+        verbose_name = "Infrastructure Node"
+        verbose_name_plural = "Infrastructure Nodes"
+
+
 DB_TYPE_CHOICES = (
     ("mysql", "MySQL"),
     ("mssql", "MsSQL"),
@@ -355,6 +378,14 @@ class Instance(models.Model, PasswordMixin):
         max_length=200,
         default="",
         blank=True,
+    )
+    node = models.ForeignKey(
+        InfrastructureNode,
+        verbose_name="Infrastructure Node",
+        related_name="services",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
     )
     create_time = models.DateTimeField("Created Time", auto_now_add=True)
     update_time = models.DateTimeField("Updated Time", auto_now=True)

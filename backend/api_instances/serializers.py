@@ -2,6 +2,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from sql.models import (
+    InfrastructureNode,
     Instance,
     InstanceDatabase,
     InstanceTag,
@@ -281,6 +282,7 @@ class InstanceListSerializer(serializers.ModelSerializer):
     inventory_last_refresh_at = serializers.DateTimeField(
         source="inventory_last_success_at", read_only=True
     )
+    node_name = serializers.CharField(source="node.node_name", read_only=True)
 
     def get_resource_group_ids(self, obj):
         return list(
@@ -308,6 +310,8 @@ class InstanceListSerializer(serializers.ModelSerializer):
             "sid",
             "resource_group_ids",
             "instance_tag_ids",
+            "node",
+            "node_name",
             "inventory_status",
             "inventory_detected_hostname",
             "inventory_detected_version",
@@ -318,6 +322,7 @@ class InstanceListSerializer(serializers.ModelSerializer):
 class InstanceEditorSerializer(serializers.ModelSerializer):
     resource_group_ids = serializers.SerializerMethodField()
     instance_tag_ids = serializers.SerializerMethodField()
+    node_name = serializers.CharField(source="node.node_name", read_only=True)
 
     def get_resource_group_ids(self, obj):
         return list(
@@ -347,10 +352,17 @@ class InstanceEditorSerializer(serializers.ModelSerializer):
             "sid",
             "resource_group_ids",
             "instance_tag_ids",
+            "node",
+            "node_name",
         )
 
 
 class InstanceCreateSerializer(serializers.ModelSerializer):
+    node = serializers.PrimaryKeyRelatedField(
+        queryset=InfrastructureNode.objects.filter(enabled=True),
+        required=False,
+        allow_null=True,
+    )
     resource_group_ids = serializers.PrimaryKeyRelatedField(
         source="resource_group",
         queryset=ResourceGroup.objects.filter(is_deleted=0),
@@ -428,6 +440,7 @@ class InstanceCreateSerializer(serializers.ModelSerializer):
             "charset",
             "service_name",
             "sid",
+            "node",
             "resource_group_ids",
             "instance_tag_ids",
         )
@@ -468,6 +481,7 @@ class InstanceConnectionTestRequestSerializer(serializers.Serializer):
     sid = serializers.CharField(
         max_length=50, required=False, allow_blank=True, allow_null=True
     )
+    node = serializers.IntegerField(required=False, allow_null=True)
 
     def validate_instance_name(self, value):
         return value.strip()
@@ -531,7 +545,19 @@ class InstanceSerializer(serializers.ModelSerializer):
         extra_kwargs = {"password": {"write_only": True}}
 
 
+def infrastructure_node_queryset(current_node_id=None):
+    queryset = InfrastructureNode.objects.filter(enabled=True)
+    if current_node_id:
+        queryset = queryset | InfrastructureNode.objects.filter(pk=current_node_id)
+    return queryset
+
+
 class InstanceDetailSerializer(serializers.ModelSerializer):
+    node = serializers.PrimaryKeyRelatedField(
+        queryset=InfrastructureNode.objects.filter(enabled=True),
+        required=False,
+        allow_null=True,
+    )
     resource_group_ids = serializers.PrimaryKeyRelatedField(
         source="resource_group",
         queryset=ResourceGroup.objects.filter(is_deleted=0),
@@ -544,6 +570,12 @@ class InstanceDetailSerializer(serializers.ModelSerializer):
         many=True,
         required=False,
     )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["node"].queryset = infrastructure_node_queryset(
+            getattr(self.instance, "node_id", None)
+        )
 
     def validate_instance_name(self, value):
         instance_name = value.strip()
@@ -622,6 +654,7 @@ class InstanceDetailSerializer(serializers.ModelSerializer):
             "charset",
             "service_name",
             "sid",
+            "node",
             "resource_group_ids",
             "instance_tag_ids",
         )
@@ -713,9 +746,23 @@ class ResourceGroupLookupSerializer(serializers.ModelSerializer):
         fields = ("group_id", "group_name", "label")
 
 
+class InfrastructureNodeLookupSerializer(serializers.ModelSerializer):
+    label = serializers.SerializerMethodField()
+
+    def get_label(self, obj):
+        if obj.hostname:
+            return f"{obj.node_name} ({obj.hostname})"
+        return obj.node_name
+
+    class Meta:
+        model = InfrastructureNode
+        fields = ("id", "node_name", "hostname", "label")
+
+
 class InstanceMetadataSerializer(serializers.Serializer):
     instance_types = ChoiceOptionSerializer(many=True)
     db_types = ChoiceOptionSerializer(many=True)
+    nodes = InfrastructureNodeLookupSerializer(many=True)
     tags = InstanceTagLookupSerializer(many=True)
     resource_groups = ResourceGroupLookupSerializer(many=True)
 

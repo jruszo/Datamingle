@@ -13,6 +13,7 @@ export type FeatureNavigationItem = {
   order?: number
   access?: AccessRequirement
   matchPrefix?: string
+  children?: FeatureNavigationItem[]
 }
 
 export type AppRouteMeta = {

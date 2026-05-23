@@ -233,6 +233,8 @@ export type InstanceInventoryRecord = {
   charset: string
   service_name: string | null
   sid: string | null
+  node: number | null
+  node_name: string
   resource_group_ids: number[]
   instance_tag_ids: number[]
   inventory_status: 'never' | 'ok' | 'stale' | 'failed'
@@ -259,9 +261,17 @@ export type ResourceGroupOptionRecord = {
   label: string
 }
 
+export type InstanceNodeOptionRecord = {
+  id: number
+  node_name: string
+  hostname: string
+  label: string
+}
+
 export type InstanceInventoryMetadata = {
   instance_types: InstanceOptionRecord[]
   db_types: InstanceOptionRecord[]
+  nodes: InstanceNodeOptionRecord[]
   tags: InstanceTagOptionRecord[]
   resource_groups: ResourceGroupOptionRecord[]
 }
@@ -294,6 +304,8 @@ export type AgentRecord = {
   last_config_revision: number
   desired_config_revision: number
   enabled: boolean
+  local_node: number | null
+  local_node_name: string
   assignment_count: number
   create_time: string
   update_time: string
@@ -302,6 +314,10 @@ export type AgentRecord = {
 export type AgentAssignmentRecord = {
   id: number
   instance: number
+  node: number | null
+  node_assignment: number | null
+  local_node: number | null
+  inherited: boolean
   instance_name: string
   db_type: string
   host: string
@@ -359,6 +375,7 @@ export type AgentDetailRecord = AgentRecord & {
 export type AgentCreatePayload = {
   name: string
   display_name?: string
+  local_node?: number | null
 }
 
 export type AgentCreateResponse = AgentDetailRecord & {
@@ -388,6 +405,105 @@ export type AgentListOptions = {
   search?: string
 }
 
+export type InfrastructureAgentSummary = {
+  id: number
+  name: string
+  display_name: string
+  status: AgentStatus
+  hostname: string
+  platform: string
+  architecture: string
+  agent_version: string
+  last_seen_at: string | null
+  last_config_revision: number
+  desired_config_revision: number
+  enabled: boolean
+  assignment_id?: number
+  command_enabled?: boolean
+  metrics_enabled?: boolean
+  online_schema_enabled?: boolean
+  logs_enabled?: boolean
+  modules?: string[]
+  capabilities?: string[]
+}
+
+export type InfrastructureServiceRecord = {
+  id: number
+  instance_name: string
+  type: string
+  db_type: string
+  host: string
+  port: number
+  db_name: string
+  node: number | null
+  node_name: string
+  inventory_status: 'never' | 'ok' | 'stale' | 'failed'
+  inventory_detected_hostname: string
+  inventory_detected_version: string
+  inventory_last_refresh_at: string | null
+}
+
+export type InfrastructureNodeRecord = {
+  id: number
+  node_name: string
+  hostname: string
+  environment: string
+  provider: string
+  metadata: Record<string, unknown>
+  enabled: boolean
+  service_count: number
+  services: InfrastructureServiceRecord[]
+  local_agent: InfrastructureAgentSummary | null
+  local_agent_count: number
+  remote_manager: InfrastructureAgentSummary | null
+  create_time: string
+  update_time: string
+}
+
+export type InfrastructureNodeListOptions = {
+  page?: number
+  size?: number
+  search?: string
+}
+
+export type InfrastructureNodePayload = {
+  node_name: string
+  hostname?: string
+  environment?: string
+  provider?: string
+  metadata?: Record<string, unknown>
+  enabled?: boolean
+}
+
+export type InfrastructureNodeRemoteManagerPayload = {
+  agent: number
+  modules?: string[]
+  capabilities?: string[]
+  command_enabled: boolean
+  metrics_enabled: boolean
+  online_schema_enabled: boolean
+  logs_enabled: boolean
+}
+
+export type InfrastructureNodeRemoteManagerRecord = {
+  id: number
+  agent: number
+  agent_name: string
+  agent_display_name: string
+  agent_status: AgentStatus
+  agent_version: string
+  node: number
+  enabled: boolean
+  modules: string[]
+  capabilities: string[]
+  command_enabled: boolean
+  metrics_enabled: boolean
+  online_schema_enabled: boolean
+  logs_enabled: boolean
+  create_time: string
+  update_time: string
+}
+
 export type AgentCommandListOptions = {
   page?: number
   size?: number
@@ -411,6 +527,7 @@ export type InstanceCreatePayload = {
   charset: string
   service_name: string
   sid: string
+  node?: number | null
   resource_group_ids: number[]
   instance_tag_ids: number[]
 }
@@ -847,6 +964,69 @@ export function fetchAgents(token: string, options: AgentListOptions = {}) {
   return apiGet<unknown>(path, { token }).then((payload) =>
     extractData<PaginatedResponse<AgentRecord>>(payload),
   )
+}
+
+export function fetchInfrastructureNodes(
+  token: string,
+  options: InfrastructureNodeListOptions = {},
+) {
+  const params = new URLSearchParams()
+  if (options.page) {
+    params.set('page', `${options.page}`)
+  }
+  if (options.size) {
+    params.set('size', `${options.size}`)
+  }
+  if (options.search?.trim()) {
+    params.set('search', options.search.trim())
+  }
+
+  const queryString = params.toString()
+  const path = queryString
+    ? `/v1/infrastructure/nodes/?${queryString}`
+    : '/v1/infrastructure/nodes/'
+  return apiGet<unknown>(path, { token }).then((payload) =>
+    extractData<PaginatedResponse<InfrastructureNodeRecord>>(payload),
+  )
+}
+
+export function createInfrastructureNode(
+  token: string,
+  payload: InfrastructureNodePayload,
+) {
+  return apiPost<unknown>('/v1/infrastructure/nodes/', payload, { token }).then(
+    (responsePayload) => extractData<InfrastructureNodeRecord>(responsePayload),
+  )
+}
+
+export function updateInfrastructureNode(
+  token: string,
+  nodeId: number,
+  payload: Partial<InfrastructureNodePayload>,
+) {
+  return apiPatch<unknown>(`/v1/infrastructure/nodes/${nodeId}/`, payload, { token }).then(
+    (responsePayload) => extractData<InfrastructureNodeRecord>(responsePayload),
+  )
+}
+
+export function assignInfrastructureNodeRemoteManager(
+  token: string,
+  nodeId: number,
+  payload: InfrastructureNodeRemoteManagerPayload,
+) {
+  return apiPut<unknown>(
+    `/v1/infrastructure/nodes/${nodeId}/remote-manager/`,
+    payload,
+    { token },
+  ).then((responsePayload) =>
+    extractData<InfrastructureNodeRemoteManagerRecord>(responsePayload),
+  )
+}
+
+export function clearInfrastructureNodeRemoteManager(token: string, nodeId: number) {
+  return apiDelete<unknown>(`/v1/infrastructure/nodes/${nodeId}/remote-manager/`, {
+    token,
+  }).then((responsePayload) => extractData<Record<string, never>>(responsePayload))
 }
 
 export function createAgent(payload: AgentCreatePayload, token: string) {

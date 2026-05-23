@@ -25,6 +25,7 @@ from sql.inventory import (
     refresh_instance_inventory_snapshot,
 )
 from sql.models import (
+    InfrastructureNode,
     Instance,
     InstanceAccount,
     InstanceDatabase,
@@ -491,7 +492,10 @@ class InstanceList(generics.ListAPIView):
 
     def get_queryset(self):
         queryset = (
-            super().get_queryset().prefetch_related("instance_tag", "resource_group")
+            super()
+            .get_queryset()
+            .select_related("node")
+            .prefetch_related("instance_tag", "resource_group")
         )
         search = self.request.query_params.get("search", "").strip()
         instance_type = self.request.query_params.get("type", "").strip()
@@ -512,6 +516,8 @@ class InstanceList(generics.ListAPIView):
                 | Q(user__icontains=search)
                 | Q(inventory_detected_hostname__icontains=search)
                 | Q(inventory_detected_version__icontains=search)
+                | Q(node__node_name__icontains=search)
+                | Q(node__hostname__icontains=search)
             )
             if search.isdigit():
                 search_filter |= Q(id=int(search))
@@ -701,6 +707,9 @@ class InstanceMetadata(views.APIView):
         payload = {
             "instance_types": instance_types,
             "db_types": db_types,
+            "nodes": InfrastructureNode.objects.filter(enabled=True).order_by(
+                "node_name", "id"
+            ),
             "tags": InstanceTag.objects.filter(active=True).order_by("tag_name", "id"),
             "resource_groups": ResourceGroup.objects.filter(is_deleted=0).order_by(
                 "group_name", "group_id"

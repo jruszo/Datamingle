@@ -61,7 +61,9 @@ class AgentListCreateView(generics.ListAPIView):
     serializer_class = AgentListSerializer
 
     def get_queryset(self):
-        queryset = Agent.objects.annotate(assignment_count=Count("assignments"))
+        queryset = Agent.objects.select_related("local_node").annotate(
+            assignment_count=Count("assignments")
+        )
         search = self.request.query_params.get("search", "").strip()
         if search:
             queryset = queryset.filter(
@@ -70,6 +72,7 @@ class AgentListCreateView(generics.ListAPIView):
                 | Q(status__icontains=search)
                 | Q(hostname__icontains=search)
                 | Q(agent_version__icontains=search)
+                | Q(local_node__node_name__icontains=search)
             )
         return queryset.order_by("name", "id")
 
@@ -98,7 +101,10 @@ class AgentDetailView(views.APIView):
 
     def get_object(self, agent_id):
         return get_object_or_404(
-            Agent.objects.annotate(assignment_count=Count("assignments")), pk=agent_id
+            Agent.objects.select_related("local_node").annotate(
+                assignment_count=Count("assignments")
+            ),
+            pk=agent_id,
         )
 
     def get(self, request, agent_id):
@@ -132,7 +138,9 @@ class AgentAssignmentListReplaceView(views.APIView):
 
     def get(self, request, agent_id):
         agent = self.get_agent(agent_id)
-        assignments = agent.assignments.select_related("instance")
+        assignments = agent.assignments.select_related(
+            "instance", "node_assignment", "local_node"
+        )
         return success_response(
             data=AgentAssignmentSerializer(assignments, many=True).data
         )
@@ -146,9 +154,19 @@ class AgentAssignmentListReplaceView(views.APIView):
         serializer.is_valid(raise_exception=True)
 
         with transaction.atomic():
-            agent.assignments.all().delete()
+            inherited_instance_ids = set(
+                agent.assignments.filter(
+                    Q(node_assignment__isnull=False) | Q(local_node__isnull=False)
+                ).values_list("instance_id", flat=True)
+            )
+            agent.assignments.filter(
+                node_assignment__isnull=True,
+                local_node__isnull=True,
+            ).delete()
             assignments = []
             for item in serializer.validated_data["assignments"]:
+                if item["instance"].pk in inherited_instance_ids:
+                    continue
                 assignment = AgentInstanceAssignment(agent=agent, **item)
                 assignment.full_clean()
                 assignments.append(assignment)
@@ -164,7 +182,9 @@ class AgentAssignmentListReplaceView(views.APIView):
                 lambda: notify_config_changed(agent, reason="assignments.replaced")
             )
 
-        saved = agent.assignments.select_related("instance")
+        saved = agent.assignments.select_related(
+            "instance", "node_assignment", "local_node"
+        )
         return success_response(data=AgentAssignmentSerializer(saved, many=True).data)
 
 

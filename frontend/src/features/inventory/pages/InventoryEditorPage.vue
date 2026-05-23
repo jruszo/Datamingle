@@ -67,6 +67,7 @@ const form = reactive({
   charset: '',
   service_name: '',
   sid: '',
+  node: null as number | null,
   resource_group_ids: [] as number[],
   instance_tag_ids: [] as number[],
 })
@@ -87,6 +88,7 @@ function resetForm() {
   form.charset = ''
   form.service_name = ''
   form.sid = ''
+  form.node = null
   form.resource_group_ids = []
   form.instance_tag_ids = []
 }
@@ -107,6 +109,7 @@ function applyInstance(instance: InstanceEditorRecord) {
   form.charset = instance.charset
   form.service_name = instance.service_name ?? ''
   form.sid = instance.sid ?? ''
+  form.node = instance.node ?? null
   form.resource_group_ids = [...instance.resource_group_ids]
   form.instance_tag_ids = [...instance.instance_tag_ids]
 }
@@ -174,7 +177,7 @@ async function goToResourceGroupCreation() {
 }
 
 async function goBackToInventory() {
-  await router.push({ name: 'inventory' })
+  await router.push({ name: 'infrastructure' })
 }
 
 async function loadPage() {
@@ -189,7 +192,7 @@ async function loadPage() {
     await authStore.loadCurrentUser()
 
     if (!canManageInstance.value) {
-      pageError.value = `You do not have permission to ${isCreateMode.value ? 'create' : 'edit'} Datamingle instances.`
+      pageError.value = `You do not have permission to ${isCreateMode.value ? 'create' : 'edit'} services.`
       return
     }
 
@@ -205,17 +208,22 @@ async function loadPage() {
 
     if (!isCreateMode.value) {
       if (!instanceId.value) {
-        pageError.value = 'Invalid instance identifier.'
+        pageError.value = 'Invalid service identifier.'
         return
       }
 
       const instance = await fetchInstance(instanceId.value, requireToken())
       applyInstance(instance)
+    } else if (typeof route.query.node === 'string') {
+      const nodeId = Number(route.query.node)
+      if (Number.isFinite(nodeId) && metadata.value.nodes.some((node) => node.id === nodeId)) {
+        form.node = nodeId
+      }
     }
   } catch (errorValue) {
     pageError.value = toUserFacingMessage(
       errorValue,
-      `Failed to load the instance ${isCreateMode.value ? 'create' : 'edit'} form.`,
+      `Failed to load the service ${isCreateMode.value ? 'create' : 'edit'} form.`,
     )
   } finally {
     isLoading.value = false
@@ -227,7 +235,7 @@ function buildInstancePayload(): InstanceCreatePayload | null {
   const host = form.host.trim()
 
   if (!instanceName) {
-    formError.value = 'Instance name cannot be blank.'
+    formError.value = 'Service name cannot be blank.'
     return null
   }
   if (!host) {
@@ -256,6 +264,7 @@ function buildInstancePayload(): InstanceCreatePayload | null {
     charset: form.charset.trim(),
     service_name: form.service_name.trim(),
     sid: form.sid.trim(),
+    node: form.node,
     resource_group_ids: [...form.resource_group_ids],
     instance_tag_ids: [...form.instance_tag_ids],
   }
@@ -263,7 +272,7 @@ function buildInstancePayload(): InstanceCreatePayload | null {
 
 async function testConnection() {
   if (!canManageInstance.value) {
-    formError.value = `You do not have permission to ${isCreateMode.value ? 'create' : 'edit'} Datamingle instances.`
+    formError.value = `You do not have permission to ${isCreateMode.value ? 'create' : 'edit'} services.`
     return
   }
 
@@ -279,7 +288,7 @@ async function testConnection() {
     connectionTestMessage.value = await testDraftInstanceConnection(payload, requireToken())
     connectionTestTone.value = 'success'
   } catch (errorValue) {
-    connectionTestMessage.value = toUserFacingMessage(errorValue, 'Failed to test the instance connection.')
+    connectionTestMessage.value = toUserFacingMessage(errorValue, 'Failed to test the service connection.')
     connectionTestTone.value = 'error'
   } finally {
     isTestingConnection.value = false
@@ -288,7 +297,7 @@ async function testConnection() {
 
 async function saveInstance() {
   if (!canManageInstance.value) {
-    formError.value = `You do not have permission to ${isCreateMode.value ? 'create' : 'edit'} Datamingle instances.`
+    formError.value = `You do not have permission to ${isCreateMode.value ? 'create' : 'edit'} services.`
     return
   }
 
@@ -303,25 +312,25 @@ async function saveInstance() {
     if (isCreateMode.value) {
       await createInstance(payload, requireToken())
       await router.push({
-        name: 'inventory',
+        name: 'infrastructure',
         query: { created: payload.instance_name },
       })
       return
     }
 
     if (!instanceId.value) {
-      throw new Error('Missing instance identifier.')
+      throw new Error('Missing service identifier.')
     }
 
     await updateInstance(instanceId.value, payload, requireToken())
     await router.push({
-      name: 'inventory',
+      name: 'infrastructure',
       query: { edited: payload.instance_name },
     })
   } catch (errorValue) {
     formError.value = toUserFacingMessage(
       errorValue,
-      `Failed to ${isCreateMode.value ? 'create' : 'update'} the instance.`,
+      `Failed to ${isCreateMode.value ? 'create' : 'update'} the service.`,
     )
   } finally {
     isSaving.value = false
@@ -353,11 +362,11 @@ watch(form, () => {
         <AlertDialogHeader>
           <AlertDialogTitle>Resource group required</AlertDialogTitle>
           <AlertDialogDescription>
-            You need at least one resource group before creating an instance. Create the resource group first, then come back to inventory and add the instance.
+            You need at least one resource group before creating a service.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel @click="void goBackToInventory()">Back to inventory</AlertDialogCancel>
+          <AlertDialogCancel @click="void goBackToInventory()">Back to infrastructure</AlertDialogCancel>
           <AlertDialogAction @click="void goToResourceGroupCreation()">Create resource group</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -365,26 +374,26 @@ watch(form, () => {
 
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="space-y-1">
-        <h2 class="text-2xl font-semibold text-slate-900">{{ isCreateMode ? 'Add Instance' : 'Edit Instance' }}</h2>
+        <h2 class="text-2xl font-semibold text-slate-900">{{ isCreateMode ? 'Add Service' : 'Edit Service' }}</h2>
         <p class="text-sm text-slate-600">
           {{
             isCreateMode
-              ? 'Create a new Datamingle inventory record with the connection settings and relationships needed by the SPA.'
-              : 'Adjust the saved Datamingle inventory record, then test or save the updated connection settings.'
+              ? 'Create a new service record with the connection settings and infrastructure relationships Datamingle needs.'
+              : 'Adjust the saved service record, then test or save the updated connection settings.'
           }}
         </p>
       </div>
       <Button variant="outline" as-child>
-        <RouterLink to="/inventory">
+        <RouterLink to="/infrastructure">
           <ArrowLeft class="h-4 w-4" />
-          Back to inventory
+          Back to infrastructure
         </RouterLink>
       </Button>
     </div>
 
     <Card class="border-slate-200">
       <CardHeader>
-        <CardTitle>Instance Configuration</CardTitle>
+        <CardTitle>Service Configuration</CardTitle>
         <CardDescription>
           {{
             isCreateMode
@@ -416,7 +425,7 @@ watch(form, () => {
           <div class="space-y-6">
             <div class="grid gap-4 md:grid-cols-2">
               <div class="grid min-w-0 gap-2">
-                <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Instance Name</span>
+                <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Service Name</span>
                 <Input v-model="form.instance_name" placeholder="analytics-primary" />
               </div>
 
@@ -426,7 +435,21 @@ watch(form, () => {
               </div>
 
               <div class="grid min-w-0 gap-2">
-                <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Instance Type</span>
+                <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Node</span>
+                <select v-model.number="form.node" :class="selectClass">
+                  <option :value="null">No node</option>
+                  <option
+                    v-for="node in metadata?.nodes ?? []"
+                    :key="node.id"
+                    :value="node.id"
+                  >
+                    {{ node.label }}
+                  </option>
+                </select>
+              </div>
+
+              <div class="grid min-w-0 gap-2">
+                <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Service Type</span>
                 <select v-model="form.type" :class="selectClass">
                   <option
                     v-for="item in metadata?.instance_types ?? []"
@@ -513,7 +536,7 @@ watch(form, () => {
             <div class="grid gap-4 md:grid-cols-2">
               <label class="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
                 <input v-model="form.is_ssl" class="rounded border-slate-300" type="checkbox">
-                <span>Enable SSL for this instance</span>
+                <span>Enable SSL for this service</span>
               </label>
 
               <label class="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
@@ -546,7 +569,7 @@ watch(form, () => {
 
             <div class="grid min-w-0 gap-2">
               <div class="flex items-center justify-between gap-3">
-                <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Instance Tags</span>
+                <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Service Tags</span>
                 <Button as-child size="sm" variant="outline">
                   <RouterLink
                     :to="{
@@ -579,8 +602,8 @@ watch(form, () => {
       <CardFooter class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200">
         <p class="text-sm text-slate-500">
           {{ isCreateMode
-            ? 'Create saves the direct connection details used by Datamingle inventory and workflow access.'
-            : 'Editing updates the direct connection details used by Datamingle inventory and workflow access.' }}
+            ? 'Create saves the direct connection details used by Datamingle infrastructure and workflow access.'
+            : 'Editing updates the direct connection details used by Datamingle infrastructure and workflow access.' }}
         </p>
         <div class="flex flex-wrap items-center gap-3">
           <Button
@@ -592,7 +615,7 @@ watch(form, () => {
           </Button>
           <Button :disabled="isLoading || isSaving || isTestingConnection || !!pageError" @click="void saveInstance()">
             <Save class="h-4 w-4" />
-            {{ isSaving ? 'Saving…' : isCreateMode ? 'Create instance' : 'Save changes' }}
+            {{ isSaving ? 'Saving…' : isCreateMode ? 'Create service' : 'Save changes' }}
           </Button>
         </div>
       </CardFooter>

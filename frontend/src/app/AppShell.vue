@@ -17,6 +17,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { publicApiUrl } from '@/shared/api/http'
 import { getVisibleNavigationItems, matchesNavigationItem } from '@/app/feature-registry'
+import type { FeatureNavigationItem } from '@/app/feature-contract'
 import { useAuthStore } from '@/stores/auth'
 import { useMailboxStore } from '@/stores/mailbox'
 
@@ -28,6 +29,7 @@ const route = useRoute()
 const showAppShell = computed(() => authStore.isAuthenticated)
 const isSidebarCollapsed = ref(false)
 const isSettingsMenuOpen = ref(route.path.startsWith('/settings'))
+const primaryGroupOpenState = ref<Record<string, boolean>>({})
 const settingsSubmenuId = 'settings-submenu'
 const isMailboxMenuOpen = ref(false)
 const mailboxMenuRef = ref<HTMLElement | null>(null)
@@ -52,6 +54,37 @@ function navigationItemClass(isActive: boolean) {
 
 function isNavigationItemActive(to: string, matchPrefix?: string) {
   return matchesNavigationItem({ to, matchPrefix, label: '', section: 'primary' }, route.path)
+}
+
+function primaryGroupKey(item: FeatureNavigationItem) {
+  return `${item.label}:${item.to}`
+}
+
+function primaryGroupSubmenuId(item: FeatureNavigationItem) {
+  return `primary-submenu-${primaryGroupKey(item).replace(/[^a-zA-Z0-9_-]+/g, '-')}`
+}
+
+function isPrimaryGroupOpen(item: FeatureNavigationItem) {
+  if (matchesNavigationItem(item, route.path)) {
+    return true
+  }
+  return primaryGroupOpenState.value[primaryGroupKey(item)] ?? false
+}
+
+function togglePrimaryGroup(item: FeatureNavigationItem) {
+  if (isSidebarCollapsed.value) {
+    isSidebarCollapsed.value = false
+    primaryGroupOpenState.value = {
+      ...primaryGroupOpenState.value,
+      [primaryGroupKey(item)]: true,
+    }
+    return
+  }
+
+  primaryGroupOpenState.value = {
+    ...primaryGroupOpenState.value,
+    [primaryGroupKey(item)]: !primaryGroupOpenState.value[primaryGroupKey(item)],
+  }
 }
 
 const pageTitle = computed(() => {
@@ -243,16 +276,58 @@ watch(
         </div>
 
         <nav class="flex-1 space-y-1 p-3">
-          <RouterLink
+          <template
             v-for="item in visiblePrimaryNavigation"
             :key="item.to"
-            :to="item.to"
-            :title="isSidebarCollapsed ? item.label : undefined"
-            :class="navigationItemClass(isNavigationItemActive(item.to, item.matchPrefix))"
           >
-            <component :is="item.icon" class="h-4 w-4 shrink-0" />
-            <span v-if="!isSidebarCollapsed">{{ item.label }}</span>
-          </RouterLink>
+            <div v-if="item.children?.length" class="space-y-1">
+              <button
+                :aria-controls="primaryGroupSubmenuId(item)"
+                :aria-expanded="isPrimaryGroupOpen(item)"
+                :class="navigationItemClass(matchesNavigationItem(item, route.path))"
+                :title="isSidebarCollapsed ? item.label : undefined"
+                class="w-full"
+                type="button"
+                @click="togglePrimaryGroup(item)"
+              >
+                <component :is="item.icon" class="h-4 w-4 shrink-0" />
+                <template v-if="!isSidebarCollapsed">
+                  <span class="flex-1 text-left">{{ item.label }}</span>
+                  <ChevronDown v-if="isPrimaryGroupOpen(item)" class="h-4 w-4" />
+                  <ChevronRight v-else class="h-4 w-4" />
+                </template>
+              </button>
+
+              <div
+                v-if="!isSidebarCollapsed && isPrimaryGroupOpen(item)"
+                :id="primaryGroupSubmenuId(item)"
+                :aria-label="`${item.label} submenu`"
+                class="space-y-1 pl-7"
+                role="region"
+              >
+                <RouterLink
+                  v-for="child in item.children"
+                  :key="child.to"
+                  :to="child.to"
+                  class="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                  active-class="bg-slate-100 font-medium text-slate-900"
+                >
+                  <component :is="child.icon" class="h-4 w-4 shrink-0" />
+                  <span>{{ child.label }}</span>
+                </RouterLink>
+              </div>
+            </div>
+
+            <RouterLink
+              v-else
+              :to="item.to"
+              :title="isSidebarCollapsed ? item.label : undefined"
+              :class="navigationItemClass(isNavigationItemActive(item.to, item.matchPrefix))"
+            >
+              <component :is="item.icon" class="h-4 w-4 shrink-0" />
+              <span v-if="!isSidebarCollapsed">{{ item.label }}</span>
+            </RouterLink>
+          </template>
 
           <div v-if="hasSettingsNavigation" class="space-y-1">
             <button

@@ -22,6 +22,7 @@ test.describe.serial('SPA bootstrap parity surfaces', () => {
       const pages = [
         { path: '/inventory/data-dictionary', heading: 'Data Dictionary' },
         { path: '/audit', heading: 'Audit' },
+        { path: '/infrastructure', heading: 'Infrastructure' },
         { path: '/instance-operations/databases', heading: 'Database Management' },
         { path: '/instance-operations/accounts', heading: 'Instance Accounts' },
         { path: '/instance-operations/parameters', heading: 'Parameter Settings' },
@@ -34,12 +35,18 @@ test.describe.serial('SPA bootstrap parity surfaces', () => {
       }
 
       const navigation = admin.page.getByRole('navigation')
+      await expect(navigation.getByRole('button', { name: 'Database Management' })).toBeVisible()
       await expect(navigation.getByRole('link', { name: 'Data Dictionary' })).toBeVisible()
       await expect(navigation.getByRole('link', { name: 'Audit' })).toBeVisible()
-      await expect(navigation.getByRole('link', { name: 'Instance Databases' })).toBeVisible()
+      await expect(navigation.getByRole('link', { name: 'Infrastructure' })).toBeVisible()
+      await expect(navigation.getByRole('link', { name: 'Instance Databases' })).toHaveCount(0)
+      await expect(navigation.getByRole('link', { name: 'Queries' })).toBeVisible()
+      await expect(navigation.getByRole('link', { name: 'Workflows' })).toBeVisible()
+      await expect(navigation.getByRole('link', { name: 'Archives' })).toBeVisible()
       await expect(navigation.getByRole('link', { name: 'Instance Accounts' })).toBeVisible()
       await expect(navigation.getByRole('link', { name: 'Parameters' })).toBeVisible()
       await expect(navigation.getByRole('link', { name: 'Diagnostics' })).toBeVisible()
+      await expect(navigation.getByRole('link', { name: 'Reports' })).toBeVisible()
     } finally {
       await closeRoleSessions(admin.context)
     }
@@ -129,6 +136,187 @@ test.describe.serial('SPA bootstrap parity surfaces', () => {
       const download = await downloadPromise
       expect(download.suggestedFilename()).toBe('mock-mysql_appdb.html')
       await expect(admin.page.getByText('Data dictionary export prepared.')).toBeVisible()
+    } finally {
+      await closeRoleSessions(admin.context)
+    }
+  })
+
+  test('supports infrastructure node expansion and agent actions', async ({ browser }) => {
+    const admin = await createRoleSession(browser, 'demo_admin')
+    let provisioned = false
+    let assigned = false
+
+    function nodePayload() {
+      return paginated([
+        {
+          id: 1,
+          node_name: 'prod-node-01',
+          hostname: 'prod-db-01.internal',
+          environment: 'production',
+          provider: 'manual',
+          metadata: {},
+          enabled: true,
+          service_count: 1,
+          services: [
+            {
+              id: 101,
+              instance_name: 'orders-mysql',
+              type: 'master',
+              db_type: 'mysql',
+              host: 'prod-db-01.internal',
+              port: 3306,
+              db_name: 'orders',
+              node: 1,
+              node_name: 'prod-node-01',
+              inventory_status: 'ok',
+              inventory_detected_hostname: 'prod-db-01',
+              inventory_detected_version: '8.0',
+              inventory_last_refresh_at: '2026-05-20T08:00:00Z',
+            },
+          ],
+          local_agent: provisioned
+            ? {
+                id: 7,
+                name: 'prod-node-01-agent',
+                display_name: 'Prod Node Agent',
+                status: 'pending',
+                hostname: '',
+                platform: '',
+                architecture: '',
+                agent_version: '',
+                last_seen_at: null,
+                last_config_revision: 0,
+                desired_config_revision: 1,
+                enabled: true,
+              }
+            : null,
+          local_agent_count: provisioned ? 1 : 0,
+          remote_manager: assigned
+            ? {
+                id: 8,
+                name: 'shared-agent',
+                display_name: 'Shared Agent',
+                status: 'online',
+                hostname: 'agent-host',
+                platform: 'linux',
+                architecture: 'amd64',
+                agent_version: '0.1.0',
+                last_seen_at: '2026-05-20T08:00:00Z',
+                last_config_revision: 2,
+                desired_config_revision: 2,
+                enabled: true,
+                assignment_id: 11,
+                command_enabled: true,
+                metrics_enabled: true,
+                online_schema_enabled: false,
+                logs_enabled: false,
+                modules: [],
+                capabilities: [],
+              }
+            : null,
+          create_time: '2026-05-20T08:00:00Z',
+          update_time: '2026-05-20T08:00:00Z',
+        },
+      ])
+    }
+
+    try {
+      await admin.page.route('**/api/v1/infrastructure/nodes/**', async (route) => {
+        await route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify(envelope(nodePayload())),
+        })
+      })
+      await admin.page.route('**/api/v1/infrastructure/nodes/1/remote-manager/', async (route) => {
+        assigned = true
+        await route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify(envelope({ id: 11, agent: 8, node: 1 })),
+        })
+      })
+      await admin.page.route('**/api/v1/agents/**', async (route: Route) => {
+        if (route.request().method() === 'POST') {
+          provisioned = true
+          await route.fulfill({
+            status: 201,
+            contentType: 'application/json',
+            body: JSON.stringify(envelope({
+              id: 7,
+              organization_id: '',
+              name: 'prod-node-01-agent',
+              display_name: 'Prod Node Agent',
+              status: 'pending',
+              hostname: '',
+              platform: '',
+              architecture: '',
+              agent_version: '',
+              last_seen_at: null,
+              last_connected_at: null,
+              last_disconnected_at: null,
+              last_config_revision: 0,
+              desired_config_revision: 1,
+              enabled: true,
+              local_node: 1,
+              local_node_name: 'prod-node-01',
+              assignment_count: 0,
+              create_time: '2026-05-20T08:00:00Z',
+              update_time: '2026-05-20T08:00:00Z',
+              metadata: {},
+              assignments: [],
+              recent_commands: [],
+              api_key: 'dma_test_key',
+              api_key_backend: 'local',
+              install_command: 'sudo DATAMINGLE_AGENT_API_KEY="dma_test_key" bash',
+            })),
+          })
+          return
+        }
+
+        await route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify(envelope(paginated([
+            {
+              id: 8,
+              organization_id: '',
+              name: 'shared-agent',
+              display_name: 'Shared Agent',
+              status: 'online',
+              hostname: 'agent-host',
+              platform: 'linux',
+              architecture: 'amd64',
+              agent_version: '0.1.0',
+              last_seen_at: '2026-05-20T08:00:00Z',
+              last_connected_at: null,
+              last_disconnected_at: null,
+              last_config_revision: 2,
+              desired_config_revision: 2,
+              enabled: true,
+              local_node: null,
+              local_node_name: '',
+              assignment_count: 0,
+              create_time: '2026-05-20T08:00:00Z',
+              update_time: '2026-05-20T08:00:00Z',
+            },
+          ]))),
+        })
+      })
+
+      await admin.page.goto('/infrastructure')
+      await expect(admin.page.getByRole('heading', { name: 'Infrastructure', level: 2 })).toBeVisible()
+      await expect(admin.page.getByText('prod-node-01')).toBeVisible()
+
+      await admin.page.getByRole('button', { name: 'Expand prod-node-01' }).click()
+      await expect(admin.page.getByText('orders-mysql')).toBeVisible()
+
+      await admin.page.locator('tr', { hasText: 'prod-node-01' }).getByRole('button', { name: 'Provision' }).click()
+      await admin.page.getByRole('button', { name: 'Provision' }).last().click()
+      await expect(admin.page.locator('textarea').first()).toHaveValue('dma_test_key')
+      await admin.page.getByRole('button', { name: 'Done' }).click()
+      await expect(admin.page.getByText('Prod Node Agent')).toBeVisible()
+
+      await admin.page.locator('tr', { hasText: 'prod-node-01' }).getByRole('button', { name: 'Assign' }).click()
+      await admin.page.getByRole('button', { name: 'Assign' }).last().click()
+      await expect(admin.page.getByText('Shared Agent')).toBeVisible()
     } finally {
       await closeRoleSessions(admin.context)
     }

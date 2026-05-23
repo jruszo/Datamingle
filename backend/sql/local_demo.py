@@ -5,7 +5,14 @@ from django.db import transaction
 
 from common.auth import ensure_superadmin_group
 from common.utils.const import WorkflowType
-from sql.models import Instance, InstanceTag, ResourceGroup, Users, WorkflowAuditSetting
+from sql.models import (
+    InfrastructureNode,
+    Instance,
+    InstanceTag,
+    ResourceGroup,
+    Users,
+    WorkflowAuditSetting,
+)
 
 DEMO_DB_PASSWORD = "demo123"
 
@@ -127,6 +134,29 @@ DEMO_RESOURCE_GROUPS = OrderedDict(
     }
 )
 
+DEMO_NODES = OrderedDict(
+    {
+        "mysql_node": {
+            "node_name": "demo-mysql-node",
+            "hostname": "mysql_demo",
+            "environment": "local-dev",
+            "provider": "docker",
+        },
+        "pgsql_node": {
+            "node_name": "demo-pgsql-node",
+            "hostname": "postgres_demo",
+            "environment": "local-dev",
+            "provider": "docker",
+        },
+        "unmanaged_node": {
+            "node_name": "demo-unmanaged-node",
+            "hostname": "unmanaged-demo",
+            "environment": "local-dev",
+            "provider": "manual",
+        },
+    }
+)
+
 LEGACY_DEMO_USERNAMES = (
     "demo_admin",
     "demo_requester",
@@ -137,6 +167,7 @@ LEGACY_DEMO_USERNAMES = (
 DEMO_INSTANCES = OrderedDict(
     {
         "mysql": {
+            "node": "mysql_node",
             "instance_name": "demo-mysql-workflow",
             "type": "master",
             "db_type": "mysql",
@@ -153,6 +184,7 @@ DEMO_INSTANCES = OrderedDict(
             "databases": ["demo_orders", "demo_billing"],
         },
         "pgsql": {
+            "node": "pgsql_node",
             "instance_name": "demo-pgsql-workflow",
             "type": "master",
             "db_type": "pgsql",
@@ -193,13 +225,15 @@ def seed_local_demo(write_line=None):
         auth_groups = _seed_auth_groups(log)
         resource_groups = _seed_resource_groups(log)
         tags = _seed_instance_tags(log)
+        nodes = _seed_nodes(log)
         _remove_legacy_seeded_users(log)
-        instances = _seed_instances(resource_groups, tags, log)
+        instances = _seed_instances(nodes, resource_groups, tags, log)
         _seed_workflow_settings(auth_groups, resource_groups, log)
 
     return {
         "auth_groups": list(auth_groups.keys()),
         "resource_groups": [group.group_name for group in resource_groups.values()],
+        "nodes": [node.node_name for node in nodes.values()],
         "users": [],
         "removed_users": managed_demo_usernames(),
         "instances": [instance.instance_name for instance in instances.values()],
@@ -277,12 +311,35 @@ def _remove_legacy_seeded_users(log):
         log("No legacy seeded demo users to remove")
 
 
-def _seed_instances(resource_groups, tags, log):
+def _seed_nodes(log):
+    nodes = {}
+    for key, config in DEMO_NODES.items():
+        node, created = InfrastructureNode.objects.update_or_create(
+            node_name=config["node_name"],
+            defaults={
+                "hostname": config["hostname"],
+                "environment": config["environment"],
+                "provider": config["provider"],
+                "metadata": {},
+                "enabled": True,
+            },
+        )
+        nodes[key] = node
+        log(
+            "Infrastructure node {}: {}".format(
+                "created" if created else "updated", node.node_name
+            )
+        )
+    return nodes
+
+
+def _seed_instances(nodes, resource_groups, tags, log):
     instances = {}
     for key, config in DEMO_INSTANCES.items():
         instance, created = Instance.objects.update_or_create(
             instance_name=config["instance_name"],
             defaults={
+                "node": nodes[config["node"]],
                 "type": config["type"],
                 "db_type": config["db_type"],
                 "host": config["host"],

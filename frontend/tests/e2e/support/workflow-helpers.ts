@@ -27,7 +27,7 @@ export async function loginAs(page: Page, username: DemoUser) {
     localStorage.setItem('archery.refresh_token', issuedTokens.refresh)
   }, tokens)
   await page.goto('/')
-  await expect(page.getByRole('link', { name: 'Workflows' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Dashboard' })).toBeVisible()
 }
 
 function issueDemoTokens(username: DemoUser) {
@@ -38,7 +38,7 @@ function issueDemoTokens(username: DemoUser) {
     `user = Users.objects.get(username=${JSON.stringify(username)})`,
     'refresh = RefreshToken.for_user(user)',
     'print(json.dumps({"access": str(refresh.access_token), "refresh": str(refresh)}))',
-  ].join('; ')
+  ].join('\n')
   const output = execFileSync(
     'docker',
     ['exec', '-w', '/opt/datamingle/backend', 'datamingle-app', 'python', 'manage.py', 'shell', '-c', script],
@@ -75,6 +75,41 @@ export function seedLocalDemo() {
   execFileSync(
     'docker',
     ['exec', '-w', '/opt/datamingle/backend', 'datamingle-app', 'python', 'manage.py', 'seed_local_demo'],
+    {
+      cwd: REPO_ROOT,
+      stdio: 'pipe',
+    },
+  )
+  ensureE2eDemoUsers()
+}
+
+function ensureE2eDemoUsers() {
+  const script = [
+    'from django.contrib.auth.models import Group',
+    'from sql.models import Users',
+    'specs = {',
+    '  "demo_admin": {"display": "Demo Admin", "group": "superadmin", "staff": True, "superuser": True},',
+    '  "demo_requester": {"display": "Demo Requester", "group": "RD", "staff": False, "superuser": False},',
+    '  "demo_pm": {"display": "Demo PM", "group": "PM", "staff": False, "superuser": False},',
+    '  "demo_dba": {"display": "Demo DBA", "group": "DBA", "staff": False, "superuser": False},',
+    '}',
+    'for username, spec in specs.items():',
+    '    user, _ = Users.objects.get_or_create(username=username, defaults={"email": f"{username}@example.com"})',
+    '    user.email = f"{username}@example.com"',
+    '    user.display = spec["display"]',
+    '    user.is_staff = spec["staff"]',
+    '    user.is_superuser = spec["superuser"]',
+    '    user.is_active = True',
+    '    user.set_unusable_password()',
+    '    user.save()',
+    '    group = Group.objects.get(name=spec["group"])',
+    '    user.groups.set([group])',
+    'print("e2e demo users ready")',
+  ].join('\n')
+
+  execFileSync(
+    'docker',
+    ['exec', '-w', '/opt/datamingle/backend', 'datamingle-app', 'python', 'manage.py', 'shell', '-c', script],
     {
       cwd: REPO_ROOT,
       stdio: 'pipe',

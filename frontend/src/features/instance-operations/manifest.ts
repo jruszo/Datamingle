@@ -1,4 +1,13 @@
-import { Database, SlidersHorizontal, SquareActivity, UserRound } from 'lucide-vue-next'
+import {
+  Archive,
+  BookOpen,
+  ChartNoAxesCombined,
+  Database,
+  FileText,
+  SlidersHorizontal,
+  SquareActivity,
+  UserRound,
+} from 'lucide-vue-next'
 
 import type { FeatureModule } from '@/app/feature-contract'
 import AccountManagementPage from '@/features/instance-operations/pages/AccountManagementPage.vue'
@@ -17,35 +26,81 @@ const instanceOperationsModule: FeatureModule = {
   navigation: [
     {
       to: '/instance-operations/databases',
-      label: 'Instance Databases',
+      label: 'Database Management',
       section: 'primary',
       icon: Database,
-      order: 22,
-      access: { anyPermissions: ['sql.menu_database'] },
-    },
-    {
-      to: '/instance-operations/accounts',
-      label: 'Instance Accounts',
-      section: 'primary',
-      icon: UserRound,
-      order: 23,
-      access: { anyPermissions: ['sql.menu_instance_account'] },
-    },
-    {
-      to: '/instance-operations/parameters',
-      label: 'Parameters',
-      section: 'primary',
-      icon: SlidersHorizontal,
-      order: 24,
-      access: { anyPermissions: ['sql.menu_param'] },
-    },
-    {
-      to: '/instance-operations/diagnostics',
-      label: 'Diagnostics',
-      section: 'primary',
-      icon: SquareActivity,
-      order: 25,
-      access: { anyPermissions: ['sql.menu_dbdiagnostic'] },
+      order: 21,
+      children: [
+        {
+          to: '/queries',
+          label: 'Queries',
+          section: 'primary',
+          icon: Database,
+          order: 10,
+        },
+        {
+          to: '/workflows',
+          label: 'Workflows',
+          section: 'primary',
+          icon: FileText,
+          order: 20,
+        },
+        {
+          to: '/archives',
+          label: 'Archives',
+          section: 'primary',
+          icon: Archive,
+          order: 30,
+          access: { anyPermissions: ['sql.menu_archive'] },
+        },
+        {
+          to: '/inventory/data-dictionary',
+          label: 'Data Dictionary',
+          section: 'primary',
+          icon: BookOpen,
+          order: 40,
+          access: { anyPermissions: ['sql.menu_data_dictionary'] },
+        },
+        {
+          to: '/instance-operations/databases',
+          label: 'Databases',
+          section: 'primary',
+          icon: Database,
+          order: 50,
+          access: { anyPermissions: ['sql.menu_database'] },
+        },
+        {
+          to: '/instance-operations/accounts',
+          label: 'Instance Accounts',
+          section: 'primary',
+          icon: UserRound,
+          order: 60,
+          access: { anyPermissions: ['sql.menu_instance_account'] },
+        },
+        {
+          to: '/instance-operations/parameters',
+          label: 'Parameters',
+          section: 'primary',
+          icon: SlidersHorizontal,
+          order: 70,
+          access: { anyPermissions: ['sql.menu_param'] },
+        },
+        {
+          to: '/instance-operations/diagnostics',
+          label: 'Diagnostics',
+          section: 'primary',
+          icon: SquareActivity,
+          order: 80,
+          access: { anyPermissions: ['sql.menu_dbdiagnostic'] },
+        },
+        {
+          to: '/reports',
+          label: 'Reports',
+          section: 'primary',
+          icon: ChartNoAxesCombined,
+          order: 90,
+        },
+      ],
     },
   ],
 }

@@ -35,6 +35,7 @@ describe('feature registry', () => {
       'auth',
       'dashboard',
       'reports',
+      'infrastructure',
       'inventory',
       'agents',
       'instance-operations',
@@ -53,18 +54,9 @@ describe('feature registry', () => {
 
     expect(labels).toEqual([
       'Dashboard',
-      'Inventory',
-      'Data Dictionary',
-      'Agents',
-      'Instance Databases',
-      'Instance Accounts',
-      'Parameters',
-      'Diagnostics',
-      'Workflows',
-      'Archives',
-      'Queries',
+      'Infrastructure',
+      'Database Management',
       'Permission Management',
-      'Reports',
       'Audit',
       'Profile',
     ])
@@ -76,9 +68,23 @@ describe('feature registry', () => {
       buildUser({ permissions: ['sql.menu_instance', 'sql.menu_archive'] }),
     ).map((item) => item.label)
 
-    expect(labels).toContain('Inventory')
-    expect(labels).toContain('Archives')
+    expect(labels).toContain('Infrastructure')
+    expect(labels).toContain('Database Management')
     expect(labels).not.toContain('Permission Management')
+  })
+
+  it('keeps database management children under the grouped menu', () => {
+    const databaseMenu = getVisibleNavigationItems(
+      'primary',
+      buildUser({ permissions: ['sql.menu_param'] }),
+    ).find((item) => item.label === 'Database Management')
+
+    expect(databaseMenu?.children?.map((item) => item.label)).toEqual([
+      'Queries',
+      'Workflows',
+      'Parameters',
+      'Reports',
+    ])
   })
 
   it('resolves the first settings route from visible settings entries', () => {

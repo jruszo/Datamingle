@@ -11,9 +11,10 @@ class Command(BaseCommand):
         summary = seed_local_demo(self.stdout.write)
         self.stdout.write(
             self.style.SUCCESS(
-                "Seeded demo data: {} auth groups, {} resource groups, {} users, {} instances".format(
+                "Seeded demo data: {} auth groups, {} resource groups, {} nodes, {} users, {} instances".format(
                     len(summary["auth_groups"]),
                     len(summary["resource_groups"]),
+                    len(summary["nodes"]),
                     len(summary["users"]),
                     len(summary["instances"]),
                 )

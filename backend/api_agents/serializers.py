@@ -6,13 +6,24 @@ from api_agents.models import (
     AgentCommand,
     AgentCommandEvent,
     AgentInstanceAssignment,
+    AgentNodeAssignment,
     AgentToolArtifact,
 )
-from sql.models import Instance
+from sql.models import InfrastructureNode, Instance
+
+
+def infrastructure_node_queryset(current_node_id=None):
+    queryset = InfrastructureNode.objects.filter(enabled=True)
+    if current_node_id:
+        queryset = queryset | InfrastructureNode.objects.filter(pk=current_node_id)
+    return queryset
 
 
 class AgentListSerializer(serializers.ModelSerializer):
     assignment_count = serializers.SerializerMethodField()
+    local_node_name = serializers.CharField(
+        source="local_node.node_name", read_only=True
+    )
 
     def get_assignment_count(self, obj):
         if hasattr(obj, "assignment_count"):
@@ -37,6 +48,8 @@ class AgentListSerializer(serializers.ModelSerializer):
             "last_config_revision",
             "desired_config_revision",
             "enabled",
+            "local_node",
+            "local_node_name",
             "assignment_count",
             "create_time",
             "update_time",
@@ -44,9 +57,15 @@ class AgentListSerializer(serializers.ModelSerializer):
 
 
 class AgentCreateSerializer(serializers.ModelSerializer):
+    local_node = serializers.PrimaryKeyRelatedField(
+        queryset=InfrastructureNode.objects.filter(enabled=True),
+        required=False,
+        allow_null=True,
+    )
+
     class Meta:
         model = Agent
-        fields = ("id", "name", "display_name", "metadata")
+        fields = ("id", "name", "display_name", "metadata", "local_node")
         read_only_fields = ("id",)
 
     def validate_name(self, value):
@@ -57,9 +76,21 @@ class AgentCreateSerializer(serializers.ModelSerializer):
 
 
 class AgentUpdateSerializer(serializers.ModelSerializer):
+    local_node = serializers.PrimaryKeyRelatedField(
+        queryset=InfrastructureNode.objects.filter(enabled=True),
+        required=False,
+        allow_null=True,
+    )
+
     class Meta:
         model = Agent
-        fields = ("display_name", "enabled", "metadata")
+        fields = ("display_name", "enabled", "metadata", "local_node")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["local_node"].queryset = infrastructure_node_queryset(
+            getattr(self.instance, "local_node_id", None)
+        )
 
 
 class AgentDetailSerializer(AgentListSerializer):
@@ -75,7 +106,8 @@ class AgentDetailSerializer(AgentListSerializer):
 
     def get_assignments(self, obj):
         return AgentAssignmentSerializer(
-            obj.assignments.select_related("instance"), many=True
+            obj.assignments.select_related("instance", "node_assignment", "local_node"),
+            many=True,
         ).data
 
     def get_recent_commands(self, obj):
@@ -90,16 +122,59 @@ class AgentAssignmentSerializer(serializers.ModelSerializer):
     db_type = serializers.CharField(source="instance.db_type", read_only=True)
     host = serializers.CharField(source="instance.host", read_only=True)
     port = serializers.IntegerField(source="instance.port", read_only=True)
+    node_assignment = serializers.IntegerField(
+        source="node_assignment_id", read_only=True
+    )
+    node = serializers.IntegerField(source="node_assignment.node_id", read_only=True)
+    local_node = serializers.IntegerField(source="local_node_id", read_only=True)
+    inherited = serializers.SerializerMethodField()
+
+    def get_inherited(self, obj):
+        return bool(obj.node_assignment_id or obj.local_node_id)
 
     class Meta:
         model = AgentInstanceAssignment
         fields = (
             "id",
             "instance",
+            "node",
+            "node_assignment",
+            "local_node",
+            "inherited",
             "instance_name",
             "db_type",
             "host",
             "port",
+            "enabled",
+            "modules",
+            "capabilities",
+            "command_enabled",
+            "metrics_enabled",
+            "online_schema_enabled",
+            "logs_enabled",
+            "create_time",
+            "update_time",
+        )
+
+
+class AgentNodeAssignmentSerializer(serializers.ModelSerializer):
+    agent_name = serializers.CharField(source="agent.name", read_only=True)
+    agent_display_name = serializers.CharField(
+        source="agent.display_name", read_only=True
+    )
+    agent_status = serializers.CharField(source="agent.status", read_only=True)
+    agent_version = serializers.CharField(source="agent.agent_version", read_only=True)
+
+    class Meta:
+        model = AgentNodeAssignment
+        fields = (
+            "id",
+            "agent",
+            "agent_name",
+            "agent_display_name",
+            "agent_status",
+            "agent_version",
+            "node",
             "enabled",
             "modules",
             "capabilities",
