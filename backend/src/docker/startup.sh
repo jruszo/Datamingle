@@ -17,7 +17,7 @@ fi
 
 if [[ "${RUN_MIGRATIONS_ON_START:-0}" == "1" ]]; then
     echo Generate Django migrations
-    python3 manage.py makemigrations
+    python3 manage.py makemigrations --noinput
 
     echo Apply Django migrations
     python3 manage.py migrate --noinput
