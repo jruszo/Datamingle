@@ -3,6 +3,8 @@ import json
 import logging
 import re
 import ast
+import uuid
+from types import SimpleNamespace
 
 from django.contrib.auth.models import Group
 from django.db import transaction
@@ -16,7 +18,6 @@ from rest_framework.response import Response
 
 from common.config import SysConfig
 from common.utils.const import Const, WorkflowStatus, WorkflowType, WorkflowAction
-from sql.engines import get_engine
 from sql.engines.mysql_ddl import MysqlDDLExecutorError
 from sql.engines.models import ReviewResult, ReviewSet
 from sql.mailbox import (
@@ -25,7 +26,7 @@ from sql.mailbox import (
     sync_approval_notifications,
     sync_execution_needed_notifications,
 )
-from sql.offlinedownload import OffLineDownLoad, download_export_file
+from sql.offlinedownload import download_export_file
 from sql.models import (
     Instance,
     ResourceGroup,
@@ -72,7 +73,16 @@ from api_workflows.serializers import (
     WorkflowContentSerializer,
     WorkflowLogListSerializer,
 )
-from api_agents.services import dispatch_sql_workflow_to_agent
+from api_agents.models import AgentCommandType
+from api_agents.services import (
+    AgentCommandDispatchError,
+    AgentCommandExecutionError,
+    command_capable_assignment_for_instance,
+    dispatch_sql_workflow_to_agent,
+    filter_agent_runnable_instances,
+    review_set_from_agent_result,
+    run_agent_command_sync,
+)
 
 logger = logging.getLogger("default")
 LOAD_DATA_PATTERN = re.compile(r"^\s*load\s+data\b", re.IGNORECASE)
@@ -107,6 +117,35 @@ def _ensure_no_load_data_statements(text):
                     )
                 }
             )
+
+
+def _detected_workflow_syntax_types(sql_text, db_type="mysql"):
+    syntax_types = set()
+    for row in generate_sql(sql_text):
+        syntax_type = _classify_statement_syntax(row["sql"], db_type=db_type)
+        if syntax_type is not None:
+            syntax_types.add(syntax_type)
+    return syntax_types
+
+
+def _authorize_workflow_check_dispatch(user, instance, sql_text):
+    has_group_write_access = user_has_group_instance_access(
+        user, instance, tag_codes=["can_write"]
+    )
+    if user.is_superuser:
+        return
+
+    syntax_types = _detected_workflow_syntax_types(sql_text, db_type=instance.db_type)
+    if syntax_types and all(
+        user_has_instance_workflow_access(user, instance, syntax_type)
+        for syntax_type in syntax_types
+    ):
+        return
+    if has_group_write_access and user.has_perm("sql.sql_submit"):
+        return
+    raise serializers.ValidationError(
+        {"errors": "You do not have permission to submit SQL for this instance."}
+    )
 
 
 JSON_PARSE_ERROR_MESSAGE = (
@@ -212,7 +251,7 @@ class WorkflowScheduleSerializer(serializers.Serializer):
         ]
     )
     executor = serializers.ChoiceField(
-        choices=["direct", "gh-ost", "pt-osc"],
+        choices=["direct"],
         required=False,
         allow_null=True,
     )
@@ -380,36 +419,21 @@ def _extract_schedule_executor(schedule):
 def _get_mysql_ddl_executor_state(workflow):
     if not _is_mysql_ddl_workflow(workflow):
         return [], {}
-    engine = get_engine(instance=workflow.instance)
-    try:
-        inspection = engine.get_ddl_executor_inspection(workflow)
-        return (
-            [
-                {
-                    "id": choice.id,
-                    "label": choice.label,
-                    "kind": choice.kind,
-                }
-                for choice in inspection.available_executors
-            ],
-            inspection.blockers,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Failed to inspect MySQL DDL executors for workflow %s",
-            workflow.id,
-            exc_info=True,
-        )
-        return [], {"direct": str(exc)}
+    if command_capable_assignment_for_instance(workflow.instance_id) is None:
+        return [], {
+            "direct": "No online command-capable agent is assigned to this MySQL service."
+        }
+    return [{"id": "direct", "label": "Direct", "kind": "direct"}], {}
 
 
 def _resolve_mysql_ddl_executor(workflow, executor_id=None, preflight=False):
     if not _is_mysql_ddl_workflow(workflow):
         return None
-    engine = get_engine(instance=workflow.instance)
-    if preflight:
-        return engine.preflight_ddl_executor(workflow, executor_id)
-    return engine.resolve_ddl_executor(workflow, executor_id)
+    if executor_id not in (None, "", "direct"):
+        raise MysqlDDLExecutorError(
+            "Only direct agent execution is available for MySQL DDL workflows."
+        )
+    return SimpleNamespace(executor_id="direct", label="Direct", kind="direct")
 
 
 def _serialize_workflow_detail(workflow, user):
@@ -566,7 +590,7 @@ def _workflow_metadata_instance_groups(user):
 def _workflow_submission_scope(user):
     can_submit_directly = user.is_superuser or user.has_perm("sql.sql_submit")
     instances = (
-        user_instances(user)
+        filter_agent_runnable_instances(user_instances(user))
         .prefetch_related("resource_group")
         .order_by("instance_name", "id")
     )
@@ -660,7 +684,7 @@ def _workflow_submission_scope(user):
 
 def _export_submission_scope(user):
     instances = (
-        user_instances(user, tag_codes=["can_read"])
+        filter_agent_runnable_instances(user_instances(user, tag_codes=["can_read"]))
         .prefetch_related("resource_group")
         .order_by("instance_name", "id")
     )
@@ -788,16 +812,29 @@ class ExecuteCheck(views.APIView):
         serializer = ExecuteCheckSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         instance = serializer.get_instance()
-        # Run check through engine
         try:
             db_name = serializer.validated_data["db_name"]
             full_sql = serializer.validated_data["full_sql"].strip()
             _ensure_no_load_data_statements(full_sql)
-            check_engine = get_engine(instance=instance)
-            db_name = check_engine.escape_string(db_name)
-            check_result = check_engine.execute_check(db_name=db_name, sql=full_sql)
+            _authorize_workflow_check_dispatch(request.user, instance, full_sql)
+            command = run_agent_command_sync(
+                instance=instance,
+                command_type=AgentCommandType.WORKFLOW_CHECK,
+                workflow_type="workflow.check",
+                workflow_id=f"{request.user.username}:{uuid.uuid4().hex}",
+                payload={
+                    "db_name": db_name,
+                    "schema_name": serializer.validated_data.get("schema_name") or "",
+                    "sql": full_sql,
+                    "submitted_by": request.user.username,
+                },
+                timeout_seconds=int(SysConfig().get("max_execution_time", 60)),
+            )
+            check_result = review_set_from_agent_result(full_sql, command.result)
         except serializers.ValidationError:
             raise
+        except (AgentCommandDispatchError, AgentCommandExecutionError) as exc:
+            raise serializers.ValidationError({"errors": str(exc)})
         except Exception:
             logger.exception(
                 "Workflow SQL check failed for instance_id=%s", instance.id
@@ -812,7 +849,7 @@ class ExecuteCheck(views.APIView):
         if not (
             request.user.is_superuser
             or (has_group_write_access and request.user.has_perm("sql.sql_submit"))
-            or (has_temporary_write_access and not has_group_write_access)
+            or has_temporary_write_access
         ):
             raise serializers.ValidationError(
                 {
@@ -857,16 +894,27 @@ class WorkflowExportCheck(views.APIView):
             db_name = serializer.validated_data["db_name"]
             schema_name = serializer.validated_data.get("schema_name") or None
             full_sql = serializer.validated_data["full_sql"].strip()
-            check_engine = get_engine(instance=instance)
-            db_name = check_engine.escape_string(db_name)
-
-            export_probe = instance
-            export_probe.sql_content = full_sql
-            export_probe.db_name = db_name
-            export_probe.schema_name = schema_name or ""
-            check_result = OffLineDownLoad().pre_count_check(workflow=export_probe)
+            command = run_agent_command_sync(
+                instance=instance,
+                command_type=AgentCommandType.EXPORT_CHECK,
+                workflow_type="export.check",
+                workflow_id=f"{request.user.username}:{uuid.uuid4().hex}",
+                payload={
+                    "db_name": db_name,
+                    "schema_name": schema_name or "",
+                    "sql": full_sql,
+                    "max_export_rows": int(
+                        SysConfig().get("max_export_rows", "10000") or 10000
+                    ),
+                    "submitted_by": request.user.username,
+                },
+                timeout_seconds=int(SysConfig().get("max_execution_time", 60)),
+            )
+            check_result = review_set_from_agent_result(full_sql, command.result)
         except serializers.ValidationError:
             raise
+        except (AgentCommandDispatchError, AgentCommandExecutionError) as exc:
+            raise serializers.ValidationError({"errors": str(exc)})
         except Exception:
             logger.exception(
                 "Workflow export SQL check failed for instance_id=%s", instance.id
@@ -1074,7 +1122,9 @@ class WorkflowMetadata(views.APIView):
         payload = {
             "manual_execution_enabled": bool(SysConfig().get("manual")),
             "resource_groups": _workflow_metadata_resource_groups(request.user),
-            "instances": user_instances(request.user, tag_codes=["can_write"])
+            "instances": filter_agent_runnable_instances(
+                user_instances(request.user, tag_codes=["can_write"])
+            )
             .prefetch_related("resource_group")
             .order_by("instance_name", "id"),
         }
@@ -1684,45 +1734,15 @@ class WorkflowExecutionCreate(views.APIView):
                             )
                         }
                     ) from None
-                if agent_command is None:
-                    workflow.status = "workflow_queuing"
-                    workflow.save(update_fields=["status"])
-                    resolve_mailbox_items(workflow, category="execution_needed")
-                    # Delete scheduled execution task
-                    schedule_name = f"sqlreview-timing-{workflow_id}"
-                    del_schedule(schedule_name)
-                    # Add to execution queue
-                    async_task(
-                        "sql.utils.execute_sql.execute",
-                        workflow_id,
-                        user,
-                        execution_options=(
-                            {"executor": selected_executor}
-                            if selected_executor
-                            else None
-                        ),
-                        hook="sql.utils.execute_sql.execute_callback",
-                        timeout=-1,
-                        task_name=f"sqlreview-execute-{workflow_id}",
-                    )
-                else:
-                    workflow.status = "workflow_executing"
-                    workflow.save(update_fields=["status"])
-                    resolve_mailbox_items(workflow, category="execution_needed")
-                    del_schedule(f"sqlreview-timing-{workflow_id}")
+                del_schedule(f"sqlreview-timing-{workflow_id}")
                 # Add workflow log
-                operation_info = (
-                    "Workflow dispatched to agent"
-                    if agent_command
-                    else "Workflow queued for execution"
-                )
+                operation_info = "Workflow dispatched to agent"
                 if selected_executor:
                     operation_info = f"{operation_info} (executor: {selected_executor})"
-                if agent_command:
-                    operation_info = (
-                        f"{operation_info} (agent: {agent_command.agent_id}, "
-                        f"command: {agent_command.id})"
-                    )
+                operation_info = (
+                    f"{operation_info} (agent: {agent_command.agent_id}, "
+                    f"command: {agent_command.id})"
+                )
                 Audit.add_log(
                     audit_id=audit_id,
                     operation_type=5,

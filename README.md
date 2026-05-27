@@ -24,6 +24,11 @@ This repository is organized as a monorepo:
 - `shared-infra/` contains the local shared observability stack for Cortex, Quickwit, Grafana, Jaeger, Prometheus, and MinIO.
 - `agent/` is reserved for the upcoming Datamingle agent module.
 - `scripts/` contains repo-level helper scripts.
+- `documentation/` contains end-user documentation for the Datamingle web application.
+
+User Documentation
+===============
+Start with the [Datamingle User Documentation](documentation/README.md) for task-oriented guides covering sign-in, inventory, agents, queries, SQL workflows, data exports, archives, permissions, audit, instance operations, and administration.
 
 Fork Attribution
 ===============

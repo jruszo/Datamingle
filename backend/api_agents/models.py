@@ -212,6 +212,10 @@ class AgentCommandType(models.TextChoices):
     QUERY_EXECUTE = "query.execute", "Query Execute"
     SCHEMA_CHANGE = "schema.change", "Schema Change"
     CONNECTION_TEST = "connection.test", "Connection Test"
+    WORKFLOW_CHECK = "workflow.check", "Workflow Check"
+    WORKFLOW_EXECUTE = "workflow.execute", "Workflow Execute"
+    EXPORT_CHECK = "export.check", "Export Check"
+    EXPORT_EXECUTE = "export.execute", "Export Execute"
 
 
 class AgentCommand(models.Model):

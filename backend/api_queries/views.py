@@ -3,7 +3,11 @@ import logging
 import re
 import time
 import traceback
+import uuid
 
+import sqlparse
+from sqlparse import tokens as sqlparse_tokens
+from sqlparse.sql import Function, Identifier, IdentifierList, Parenthesis, TokenList
 from django.contrib.auth.decorators import permission_required
 from django.db import close_old_connections, connection, transaction
 from django.db.models import Q
@@ -18,6 +22,7 @@ from common.config import SysConfig
 from common.utils.const import WorkflowAction, WorkflowStatus
 from common.utils.timer import FuncTimer
 from sql.engines import get_engine
+from sql.utils.data_masking import simple_column_mask
 from sql.models import (
     Instance,
     QueryLog,
@@ -43,6 +48,14 @@ from sql.utils.workflow_audit import AuditException, get_auditor
 
 from api_core.pagination import CustomizedPagination
 from api_core.response import success_response
+from api_agents.models import AgentCommandType
+from api_agents.services import (
+    AgentCommandDispatchError,
+    AgentCommandExecutionError,
+    filter_agent_runnable_instances,
+    result_set_from_agent_result,
+    run_agent_command_sync,
+)
 from api_queries.serializers import (
     QueryDescribeResponseSerializer,
     QueryDescribeSerializer,
@@ -97,6 +110,125 @@ def _is_describe_ddl(result_data):
     return len(column_list) == 2 and "create table" in column_list[1]
 
 
+def _first_meaningful_token(statement):
+    return statement.token_first(skip_cm=True, skip_ws=True)
+
+
+def _token_is_wildcard_projection(token, inside_function=False):
+    if isinstance(token, Function):
+        return False
+    if token.ttype is sqlparse_tokens.Wildcard and not inside_function:
+        return True
+    if isinstance(token, Parenthesis):
+        return any(
+            _token_is_wildcard_projection(child, inside_function=inside_function)
+            for child in token.tokens
+        )
+    if isinstance(token, TokenList):
+        return any(
+            _token_is_wildcard_projection(child, inside_function=inside_function)
+            for child in token.tokens
+        )
+    return False
+
+
+def _statement_has_wildcard_projection(statement):
+    for token in statement.tokens:
+        if token.is_whitespace or token.ttype in sqlparse_tokens.Comment:
+            continue
+        if token.normalized.upper() == "FROM":
+            return False
+        if _token_is_wildcard_projection(token):
+            return True
+    return False
+
+
+def _identifier_table_parts(identifier):
+    return (
+        (identifier.get_parent_name() or "").strip("`").lower(),
+        (identifier.get_real_name() or identifier.get_name() or "").strip("`").lower(),
+    )
+
+
+def _append_table_identifier(tables, token):
+    if isinstance(token, IdentifierList):
+        for identifier in token.get_identifiers():
+            _append_table_identifier(tables, identifier)
+    elif isinstance(token, Identifier):
+        tables.append(_identifier_table_parts(token))
+    elif token.ttype in sqlparse_tokens.Name or token.ttype in sqlparse_tokens.Keyword:
+        tables.append(("", token.value.strip("`").lower()))
+
+
+def _referenced_table_identifiers(token_list):
+    tables = []
+    expect_table = False
+    for token in token_list.tokens:
+        if token.is_whitespace or token.ttype in sqlparse_tokens.Comment:
+            continue
+        normalized = token.normalized.upper()
+        if expect_table:
+            if isinstance(token, Parenthesis):
+                tables.extend(_referenced_table_identifiers(token))
+            else:
+                _append_table_identifier(tables, token)
+            expect_table = False
+            continue
+        if isinstance(token, TokenList) and not isinstance(token, Function):
+            tables.extend(_referenced_table_identifiers(token))
+        if normalized in {"FROM", "JOIN", "DESCRIBE", "DESC"} or normalized.endswith(
+            " JOIN"
+        ):
+            expect_table = True
+    return tables
+
+
+def _static_mysql_query_check(db_name, sql):
+    result = {"msg": "", "bad_query": False, "filtered_sql": sql, "has_star": False}
+    try:
+        stripped = sqlparse.format(sql, strip_comments=True)
+        statements = sqlparse.split(stripped)
+        if not statements:
+            raise IndexError
+        sql = statements[0].strip()
+        parsed = sqlparse.parse(sql)
+        if not parsed:
+            raise IndexError
+        statement = parsed[0]
+        result["filtered_sql"] = sql
+    except IndexError:
+        result["bad_query"] = True
+        result["msg"] = "No valid SQL statement"
+        return result
+
+    first_token = _first_meaningful_token(statement)
+    first_keyword = first_token.normalized.upper() if first_token else ""
+    if first_keyword not in {"SELECT", "SHOW", "EXPLAIN", "DESCRIBE", "DESC"}:
+        result["bad_query"] = True
+        result["msg"] = "Unsupported query syntax type!"
+    if _statement_has_wildcard_projection(statement):
+        result["has_star"] = True
+        result["msg"] = "SQL contains * "
+
+    db_name = (db_name or "").strip("`").lower()
+    references_mysql_user = any(
+        (schema == "mysql" and table == "user")
+        or (db_name == "mysql" and not schema and table == "user")
+        for schema, table in _referenced_table_identifiers(statement)
+    )
+    if references_mysql_user:
+        result["bad_query"] = True
+        result["msg"] = "You do not have permission to view this table"
+    return result
+
+
+def _mysql_quote_identifier(value):
+    value = str(value or "").strip()
+    if not value or "\x00" in value:
+        raise serializers.ValidationError({"errors": "Invalid MySQL identifier."})
+    return f"`{value.replace('`', '``')}`"
+
+
 class QueryExecute(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -134,17 +266,20 @@ class QueryExecute(views.APIView):
             raise PermissionDenied("You do not have permission to query this instance.")
 
         config = SysConfig()
-        query_result = None
         priv_check = True
         error_message = None
-        result_data = {}
         seconds_behind_master = ""
 
         try:
             query_engine = get_engine(instance=instance)
-            query_check_info = query_engine.query_check(
-                db_name=db_name, sql=sql_content
-            )
+            if instance.db_type == "mysql":
+                query_check_info = _static_mysql_query_check(db_name, sql_content)
+            else:
+                query_check_info = {
+                    "bad_query": False,
+                    "filtered_sql": sql_content,
+                    "has_star": False,
+                }
             if query_check_info.get("bad_query"):
                 raise serializers.ValidationError(
                     {"errors": query_check_info.get("msg", "Blocked SQL statement.")}
@@ -168,43 +303,31 @@ class QueryExecute(views.APIView):
                 limit_num = 0
 
             sql_content = query_engine.filter_sql(sql=sql_content, limit_num=limit_num)
-
-            query_engine.get_connection(db_name=db_name)
-            thread_id = query_engine.thread_id
             max_execution_time = int(config.get("max_execution_time", 60))
+            command = run_agent_command_sync(
+                instance=instance,
+                command_type=AgentCommandType.QUERY_EXECUTE,
+                workflow_type="query",
+                workflow_id=f"{user.username}:{uuid.uuid4().hex}",
+                payload={
+                    "db_name": db_name,
+                    "schema_name": schema_name,
+                    "tb_name": tb_name,
+                    "sql": sql_content,
+                    "limit": limit_num,
+                    "max_execution_time_ms": max_execution_time * 1000,
+                    "submitted_by": user.username,
+                },
+                timeout_seconds=max_execution_time,
+            )
+            query_result = result_set_from_agent_result(sql_content, command.result)
+            seconds_behind_master = command.result.get("seconds_behind_master", "")
 
-            schedule_name = None
-            if thread_id:
-                schedule_name = f"query-{time.time()}"
-                run_date = datetime.datetime.now() + datetime.timedelta(
-                    seconds=max_execution_time
-                )
-                add_kill_conn_schedule(schedule_name, run_date, instance.id, thread_id)
-
-            with FuncTimer() as timer:
-                seconds_behind_master = query_engine.seconds_behind_master
-                query_result = query_engine.query(
-                    db_name,
-                    sql_content,
-                    limit_num,
-                    schema_name=schema_name,
-                    tb_name=tb_name,
-                    max_execution_time=max_execution_time * 1000,
-                )
-            query_result.query_time = timer.cost
-
-            if schedule_name:
-                del_schedule(schedule_name)
-
-            if query_result.error:
-                error_message = query_result.error
-            elif config.get("data_masking"):
+            if config.get("data_masking"):
                 try:
-                    with FuncTimer() as timer:
-                        masking_result = query_engine.query_masking(
-                            db_name, sql_content, query_result
-                        )
-                    masking_result.mask_time = timer.cost
+                    started_at = time.monotonic()
+                    masking_result = simple_column_mask(instance, query_result)
+                    masking_result.mask_time = round(time.monotonic() - started_at, 3)
                     if masking_result.error:
                         if config.get("query_check"):
                             error_message = (
@@ -220,7 +343,8 @@ class QueryExecute(views.APIView):
                             result_data = query_result.__dict__.copy()
                             result_data["rows"] = query_result.to_dict()
                     else:
-                        result_data = masking_result.__dict__
+                        result_data = masking_result.__dict__.copy()
+                        result_data["rows"] = masking_result.to_dict()
                 except Exception as exc:
                     logger.exception("Data masking failed")
                     if config.get("query_check"):
@@ -239,35 +363,34 @@ class QueryExecute(views.APIView):
                 result_data["rows"] = query_result.to_dict()
         except serializers.ValidationError:
             raise
-        except Exception as exc:
+        except (AgentCommandDispatchError, AgentCommandExecutionError) as exc:
+            logger.warning("Agent query execution failed: %s", exc)
+            raise serializers.ValidationError({"errors": str(exc)})
+        except Exception:
             logger.exception("Query error while executing user SQL")
             raise serializers.ValidationError({"errors": "Query error, contact admin."})
 
-        if query_result is not None:
-            if error_message:
-                effect_rows = 0
+        if error_message:
+            effect_rows = 0
+        else:
+            result_data["seconds_behind_master"] = seconds_behind_master
+            if int(limit_num) == 0:
+                effect_rows = int(query_result.affected_rows)
             else:
-                result_data["seconds_behind_master"] = seconds_behind_master
-                if int(limit_num) == 0:
-                    effect_rows = int(query_result.affected_rows)
-                else:
-                    effect_rows = min(int(limit_num), int(query_result.affected_rows))
-                if connection.connection and not connection.is_usable():
-                    close_old_connections()
+                effect_rows = min(int(limit_num), int(query_result.affected_rows))
 
-            QueryLog.objects.create(
-                username=user.username,
-                user_display=user.display,
-                db_name=db_name,
-                instance_name=instance.instance_name,
-                sqllog=sql_content,
-                effect_row=effect_rows,
-                cost_time=query_result.query_time,
-                priv_check=priv_check,
-                hit_rule=query_result.mask_rule_hit,
-                masking=query_result.is_masked,
-            )
-
+        QueryLog.objects.create(
+            username=user.username,
+            user_display=user.display,
+            db_name=db_name,
+            instance_name=instance.instance_name,
+            sqllog=sql_content,
+            effect_row=effect_rows,
+            cost_time=query_result.query_time,
+            priv_check=priv_check,
+            hit_rule=query_result.mask_rule_hit,
+            masking=query_result.is_masked,
+        )
         if error_message:
             raise serializers.ValidationError({"errors": error_message})
 
@@ -309,7 +432,8 @@ class QueryInstanceList(views.APIView):
             type=instance_type,
             db_type=db_type or None,
             tag_codes=["can_read"],
-        ).order_by("instance_name")
+        )
+        queryset = filter_agent_runnable_instances(queryset).order_by("instance_name")
         serializer = QueryInstanceSerializer(queryset, many=True)
         return success_response(data=serializer.data)
 
@@ -340,20 +464,37 @@ class QueryDescribe(views.APIView):
             )
 
         try:
-            query_engine = get_engine(instance=instance)
-            db_name = query_engine.escape_string(data["db_name"])
-            schema_name = query_engine.escape_string(data.get("schema_name", ""))
-            tb_name = query_engine.escape_string(data["tb_name"])
-            query_result = query_engine.describe_table(
-                db_name=db_name,
-                tb_name=tb_name,
-                schema_name=schema_name,
+            db_name = data["db_name"]
+            schema_name = data.get("schema_name", "")
+            tb_name = data["tb_name"]
+            command = run_agent_command_sync(
+                instance=instance,
+                command_type=AgentCommandType.QUERY_EXECUTE,
+                workflow_type="query.describe",
+                workflow_id=f"{request.user.username}:{uuid.uuid4().hex}",
+                payload={
+                    "db_name": db_name,
+                    "schema_name": schema_name,
+                    "tb_name": tb_name,
+                    "sql": f"show create table {_mysql_quote_identifier(tb_name)};",
+                    "limit": 1,
+                    "max_execution_time_ms": int(
+                        SysConfig().get("max_execution_time", 60)
+                    )
+                    * 1000,
+                    "submitted_by": request.user.username,
+                },
+                timeout_seconds=int(SysConfig().get("max_execution_time", 60)),
             )
-        except Exception as exc:
+            query_result = result_set_from_agent_result(
+                command.payload["sql"], command.result
+            )
+        except serializers.ValidationError:
+            raise
+        except (AgentCommandDispatchError, AgentCommandExecutionError) as exc:
+            raise serializers.ValidationError({"errors": str(exc)})
+        except Exception:
             raise serializers.ValidationError({"errors": "Operation failed."})
-        finally:
-            if "query_engine" in locals():
-                query_engine.close()
 
         if query_result.error:
             raise serializers.ValidationError({"errors": query_result.error})
