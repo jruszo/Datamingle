@@ -1,5 +1,6 @@
 from django.test import SimpleTestCase
 
+from api_queries.views import _static_mysql_query_check
 from api_queries.serializers import (
     QueryExecuteSerializer,
     QueryFavoriteSerializer,
@@ -51,3 +52,26 @@ class QuerySerializerTests(SimpleTestCase):
         self.assertIn("group_name", serializer.errors)
         self.assertIn("db_name", serializer.errors)
         self.assertIn("table_list", serializer.errors)
+
+
+class StaticMysqlQueryCheckTests(SimpleTestCase):
+    def test_count_star_is_not_treated_as_select_star(self):
+        result = _static_mysql_query_check("test", "select count(*) from demo")
+
+        self.assertFalse(result["bad_query"])
+        self.assertFalse(result["has_star"])
+
+    def test_projection_wildcard_is_detected(self):
+        result = _static_mysql_query_check("test", "select demo.* from demo")
+
+        self.assertFalse(result["bad_query"])
+        self.assertTrue(result["has_star"])
+
+    def test_mysql_user_is_detected_from_identifiers(self):
+        explicit_schema = _static_mysql_query_check(
+            "test", "select count(*) from mysql.user"
+        )
+        implicit_mysql_db = _static_mysql_query_check("mysql", "select id from `user`")
+
+        self.assertTrue(explicit_schema["bad_query"])
+        self.assertTrue(implicit_mysql_db["bad_query"])

@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import patch, Mock
+import re
 
 from django.test import TestCase
 from django.core.cache import cache
@@ -13,13 +15,17 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from common.config import SysConfig
 from sql.utils.workflow_audit import AuditException, AuditSetting
 from sql.engines import ReviewSet
-from sql.engines.mysql_ddl import MysqlDDLExecutorError
 from sql.engines.models import ReviewResult, ResultSet
 from api_admin.settings import (
     DEFAULT_CHAT_MODEL,
     INVENTORY_REFRESH_INTERVAL_OPTIONS,
     NOTIFY_PHASE_OPTIONS,
 )
+from api_agents.dispatch import (
+    ACTIVE_WEBSOCKET_METADATA_KEY,
+    WEBSOCKET_CHANNEL_METADATA_KEY,
+)
+from api_agents.models import Agent, AgentInstanceAssignment, AgentStatus
 from sql.models import (
     ResourceGroup,
     Instance,
@@ -2391,15 +2397,16 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.ins = Instance.objects.create(
             instance_name="some_ins",
             type="slave",
-            db_type="redis",
+            db_type="mysql",
             host="some_host",
-            port=6379,
+            port=3306,
             user="ins_user",
             password="some_str",
         )
         self.ins.resource_group.add(self.res_group.group_id)
         self.ins.instance_tag.add(self.ins_tag.id)
         self.ins.instance_tag.add(self.read_tag.id)
+        self._create_agent_assignment(self.ins)
         self.wf1 = SqlWorkflow.objects.create(
             workflow_name="some_name",
             group_id=1,
@@ -2439,8 +2446,22 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.token = authenticate_client(self.client, self.user)["access"]
         self.notify_patcher = patch("sql.notify.auto_notify")
         self.notify_patcher.start()
+        self.workflow_agent_check_patcher = patch(
+            "api_workflows.views.run_agent_command_sync",
+            side_effect=self._agent_check_command,
+        )
+        self.workflow_serializer_agent_check_patcher = patch(
+            "api_workflows.serializers.run_agent_command_sync",
+            side_effect=self._agent_check_command,
+        )
+        self.mock_workflow_agent_check = self.workflow_agent_check_patcher.start()
+        self.mock_workflow_serializer_agent_check = (
+            self.workflow_serializer_agent_check_patcher.start()
+        )
 
     def tearDown(self):
+        self.workflow_serializer_agent_check_patcher.stop()
+        self.workflow_agent_check_patcher.stop()
         self.user.delete()
         self.group.delete()
         self.res_group.delete()
@@ -2461,6 +2482,81 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         ).delete()
         self.notify_patcher.stop()
 
+    def _create_agent_assignment(self, instance):
+        agent = Agent.objects.create(
+            name=f"agent-{instance.id}",
+            status=AgentStatus.ONLINE,
+            metadata={
+                ACTIVE_WEBSOCKET_METADATA_KEY: {
+                    WEBSOCKET_CHANNEL_METADATA_KEY: f"agent.test.{instance.id}",
+                }
+            },
+        )
+        AgentInstanceAssignment.objects.create(
+            agent=agent,
+            instance=instance,
+            command_enabled=True,
+        )
+        return agent
+
+    def _agent_check_command(self, **kwargs):
+        payload = kwargs.get("payload") or {}
+        sql = payload.get("sql") or ""
+        command_type = str(kwargs.get("command_type") or "")
+        if command_type == "export.check":
+            syntax_type = 3
+            affected_rows = 42
+            stage = "Export review"
+        elif re.match(r"^\s*(alter|create|drop|rename|truncate)\b", sql, re.I):
+            syntax_type = 1
+            affected_rows = 0
+            stage = "SQL review"
+        else:
+            syntax_type = 2
+            affected_rows = 0
+            stage = "SQL review"
+        return SimpleNamespace(
+            result={
+                "full_sql": sql,
+                "syntax_type": syntax_type,
+                "affected_rows": affected_rows,
+                "warning_count": 0,
+                "error_count": 0,
+                "review_rows": [
+                    {
+                        "id": 1,
+                        "stage": stage,
+                        "errlevel": 0,
+                        "stagestatus": "Audit completed",
+                        "errormessage": "",
+                        "sql": sql,
+                        "affected_rows": affected_rows,
+                        "sequence": "0_0_00000001",
+                        "backup_dbname": "",
+                        "execute_time": "0",
+                        "sqlsha1": "",
+                        "backup_time": "",
+                        "actual_affected_rows": affected_rows,
+                    }
+                ],
+                "column_list": [
+                    "id",
+                    "stage",
+                    "errlevel",
+                    "stagestatus",
+                    "errormessage",
+                    "sql",
+                    "affected_rows",
+                    "sequence",
+                    "backup_dbname",
+                    "execute_time",
+                    "sqlsha1",
+                    "backup_time",
+                    "actual_affected_rows",
+                ],
+            }
+        )
+
     def _login_as_user(self, username, password="test_password"):
         user = User.objects.get(username=username)
         return authenticate_client(self.client, user)
@@ -2478,6 +2574,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         mysql_instance.resource_group.add(self.res_group.group_id)
         mysql_instance.instance_tag.add(self.ins_tag.id)
         mysql_instance.instance_tag.add(self.read_tag.id)
+        self._create_agent_assignment(mysql_instance)
         workflow = SqlWorkflow.objects.create(
             workflow_name="mysql_release",
             group_id=self.res_group.group_id,
@@ -3083,22 +3180,24 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         r = self.client.post("/api/v1/workflow/sqlcheck/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
 
-    @patch("api_workflows.views.get_engine")
+    @patch(
+        "api_workflows.views.run_agent_command_sync",
+        side_effect=Exception("RuntimeError"),
+    )
     @patch("api_workflows.views.logger")
-    def test_check_inception_Exception(self, mock_logger, _get_engine):
+    def test_check_inception_Exception(self, mock_logger, _run_agent_command_sync):
         """Test workflow SQL check when inception raises an error."""
         json_data = {
             "full_sql": "use mysql",
             "db_name": "test_db",
             "instance_id": self.ins.id,
         }
-        _get_engine.side_effect = RuntimeError("RuntimeError")
         r = self.client.post("/api/v1/workflow/sqlcheck/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertDictEqual(json.loads(r.content), {"errors": "Internal Server Error"})
         mock_logger.exception.assert_called_once()
 
-    @patch("api_workflows.views.get_engine")
+    @patch("api_workflows.views.get_engine", create=True)
     def test_check(self, _get_engine):
         """Test workflow SQL check with normal return."""
         json_data = {
@@ -3162,7 +3261,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         )
         self.assertListEqual(list(sqlcheck_data["rows"][0].keys()), column_list)
 
-    @patch("api_workflows.views.get_engine")
+    @patch("api_workflows.views.get_engine", create=True)
     def test_sqlcheck_uses_unified_success_envelope(self, _get_engine):
         json_data = {
             "full_sql": "use mysql",
@@ -3180,52 +3279,23 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         data = assert_success_envelope(self, r)
         self.assertIn("rows", data)
 
-    @patch("api_workflows.views.get_engine")
-    def test_sqlcheck_ignores_schema_name_for_engine_execute_check(self, _get_engine):
+    def test_sqlcheck_sends_schema_name_to_agent_check(self):
         json_data = {
             "full_sql": "select 1",
             "db_name": "test_db",
             "schema_name": "public",
             "instance_id": self.ins.id,
         }
-        mock_engine = _get_engine.return_value
-        mock_engine.escape_string.return_value = "escaped_db"
-        mock_engine.execute_check.return_value = ReviewSet(
-            warning_count=0,
-            error_count=0,
-            column_list=[],
-            rows=[],
-        )
 
         r = self.client.post("/api/v1/workflow/sqlcheck/", json_data, format="json")
 
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        mock_engine.execute_check.assert_called_once_with(
-            db_name="escaped_db", sql="select 1"
-        )
+        payload = self.mock_workflow_agent_check.call_args.kwargs["payload"]
+        self.assertEqual(payload["db_name"], "test_db")
+        self.assertEqual(payload["schema_name"], "public")
+        self.assertEqual(payload["sql"], "select 1")
 
-    @patch("api_workflows.views.get_engine")
-    @patch("api_workflows.views.OffLineDownLoad.pre_count_check")
-    def test_export_sqlcheck(self, mock_pre_count_check, mock_get_engine):
-        review_set = ReviewSet(
-            rows=[
-                ReviewResult(
-                    errlevel=0,
-                    stagestatus="Row count completed",
-                    errormessage="None",
-                    affected_rows=42,
-                    sql="select * from demo",
-                )
-            ],
-        )
-        review_set.syntax_type = 3
-        review_set.error_count = 0
-        review_set.warning_count = 0
-        review_set.affected_rows = 42
-        mock_pre_count_check.return_value = review_set
-        mock_engine = Mock()
-        mock_engine.escape_string.return_value = "escaped_test_db"
-        mock_get_engine.return_value = mock_engine
+    def test_export_sqlcheck(self):
         r = self.client.post(
             "/api/v1/workflow/export/sqlcheck/",
             {
@@ -3240,25 +3310,18 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         payload = response_data(r)
         self.assertEqual(payload["syntax_type"], 3)
         self.assertEqual(payload["affected_rows"], 42)
-        self.assertEqual(
-            mock_pre_count_check.call_args.kwargs["workflow"].db_name,
-            "escaped_test_db",
-        )
-        self.assertEqual(
-            mock_pre_count_check.call_args.kwargs["workflow"].schema_name, "analytics"
-        )
+        command_payload = self.mock_workflow_agent_check.call_args.kwargs["payload"]
+        self.assertEqual(command_payload["db_name"], "test_db")
+        self.assertEqual(command_payload["schema_name"], "analytics")
 
-    @patch("api_workflows.views.get_engine")
-    @patch("api_workflows.views.OffLineDownLoad.pre_count_check")
+    @patch(
+        "api_workflows.views.run_agent_command_sync",
+        side_effect=Exception("COUNT(*) failed"),
+    )
     @patch("api_workflows.views.logger")
     def test_export_sqlcheck_returns_validation_error_for_count_failures(
-        self, mock_logger, mock_pre_count_check, mock_get_engine
+        self, mock_logger, _run_agent_command_sync
     ):
-        mock_engine = Mock()
-        mock_engine.escape_string.return_value = "escaped_test_db"
-        mock_get_engine.return_value = mock_engine
-        mock_pre_count_check.side_effect = Exception("COUNT(*) failed")
-
         r = self.client.post(
             "/api/v1/workflow/export/sqlcheck/",
             {
@@ -3289,10 +3352,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         )
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
 
-    @patch("api_workflows.views.OffLineDownLoad.pre_count_check")
-    def test_export_sqlcheck_requires_read_access_to_instance(
-        self, mock_pre_count_check
-    ):
+    def test_export_sqlcheck_requires_read_access_to_instance(self):
         isolated_group = ResourceGroup.objects.create(group_name="isolated_group")
         isolated_user = User.objects.create(
             username="export_only_submitter",
@@ -3318,7 +3378,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
-        mock_pre_count_check.assert_not_called()
+        self.mock_workflow_agent_check.assert_not_called()
 
     def test_submit_workflow(self):
         """Test submitting SQL release workflow."""
@@ -3340,7 +3400,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(r_data["workflow"]["engineer"], self.user.username)
         self.assertEqual(r_data["workflow"]["engineer_display"], self.user.display)
 
-    @patch("api_workflows.serializers.get_engine")
+    @patch("api_workflows.serializers.get_engine", create=True)
     def test_submit_workflow_defaults_backup_to_false(self, mock_get_engine):
         review_set = ReviewSet(
             rows=[
@@ -3376,7 +3436,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         workflow = SqlWorkflow.objects.get(id=workflow_id)
         self.assertFalse(workflow.is_backup)
 
-    @patch("api_workflows.serializers.get_engine")
+    @patch("api_workflows.serializers.get_engine", create=True)
     def test_submit_workflow_ignores_submitted_backup_flag(self, mock_get_engine):
         review_set = ReviewSet(
             rows=[
@@ -3412,25 +3472,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         workflow = SqlWorkflow.objects.get(id=workflow_id)
         self.assertFalse(workflow.is_backup)
 
-    @patch("api_workflows.serializers.OffLineDownLoad.pre_count_check")
-    @patch("api_workflows.serializers.get_engine")
-    def test_submit_export_workflow(self, mock_get_engine, mock_pre_count_check):
-        mock_get_engine.return_value.auto_backup = False
-        review_set = ReviewSet(
-            rows=[
-                ReviewResult(
-                    errlevel=0,
-                    stagestatus="Row count completed",
-                    errormessage="None",
-                    affected_rows=24,
-                    sql="select * from demo",
-                )
-            ],
-        )
-        review_set.syntax_type = 3
-        review_set.error_count = 0
-        review_set.warning_count = 0
-        mock_pre_count_check.return_value = review_set
+    def test_submit_export_workflow(self):
         json_data = {
             "workflow": {
                 "workflow_name": "Export Workflow 1",
@@ -3445,9 +3487,10 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         }
         r = self.client.post("/api/v1/workflow/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(
-            mock_pre_count_check.call_args.kwargs["workflow"].export_format, "tsv"
-        )
+        command_payload = self.mock_workflow_serializer_agent_check.call_args.kwargs[
+            "payload"
+        ]
+        self.assertEqual(command_payload["export_format"], "tsv")
         workflow_id = response_data(r)["workflow"]["id"]
         workflow = SqlWorkflow.objects.get(id=workflow_id)
         self.assertEqual(workflow.syntax_type, 3)
@@ -3456,7 +3499,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(workflow.schema_name, "analytics")
         self.assertFalse(workflow.is_backup)
 
-    @patch("api_workflows.serializers.get_engine")
+    @patch("api_workflows.serializers.get_engine", create=True)
     def test_submit_workflow_rejects_resource_group_not_attached_to_instance(
         self, mock_get_engine
     ):
@@ -3495,7 +3538,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             "Selected resource group does not belong to this instance.",
         )
 
-    @patch("api_workflows.serializers.get_engine")
+    @patch("api_workflows.serializers.get_engine", create=True)
     @patch(
         "api_workflows.serializers.user_has_group_instance_access", return_value=True
     )
@@ -3546,12 +3589,13 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         workflow = SqlWorkflow.objects.get(id=response_data(r)["workflow"]["id"])
         self.assertEqual(workflow.engineer, limited_user.username)
 
-    @patch("api_workflows.serializers.get_engine")
-    def test_submit_workflow_hides_engine_exception_details(self, mock_get_engine):
-        mock_get_engine.return_value.execute_check.side_effect = Exception(
-            "sensitive engine failure"
-        )
-
+    @patch(
+        "api_workflows.serializers.run_agent_command_sync",
+        side_effect=Exception("sensitive agent failure"),
+    )
+    def test_submit_workflow_hides_agent_exception_details(
+        self, _run_agent_command_sync
+    ):
         json_data = {
             "workflow": {
                 "workflow_name": "Release Workflow Engine Failure",
@@ -3568,7 +3612,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(r.json()["errors"], "An internal validation error occurred.")
 
     @patch("api_workflows.serializers.get_auditor")
-    @patch("api_workflows.serializers.get_engine")
+    @patch("api_workflows.serializers.get_engine", create=True)
     def test_submit_workflow_hides_save_exception_details(
         self, mock_get_engine, mock_get_auditor
     ):
@@ -3609,7 +3653,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(r.json()["errors"], "An internal validation error occurred.")
 
-    @patch("api_workflows.serializers.get_engine")
+    @patch("api_workflows.serializers.get_engine", create=True)
     def test_submit_workflow_rolls_back_when_status_update_save_fails(
         self, mock_get_engine
     ):
@@ -3665,7 +3709,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             ).exists()
         )
 
-    @patch("api_workflows.serializers.get_engine")
+    @patch("api_workflows.serializers.get_engine", create=True)
     def test_submit_export_workflow_rejects_invalid_format(self, mock_get_engine):
         mock_get_engine.return_value.auto_backup = False
         json_data = {
@@ -3686,20 +3730,10 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             json.dumps(r.json()),
         )
 
-    @patch("api_workflows.serializers.OffLineDownLoad.pre_count_check")
-    @patch("api_workflows.serializers.get_engine")
-    def test_submit_export_workflow_requires_export_submit_permission(
-        self, mock_get_engine, mock_pre_count_check
-    ):
+    def test_submit_export_workflow_requires_export_submit_permission(self):
         self.user.user_permissions.remove(
             Permission.objects.get(codename="sqlexport_submit")
         )
-        mock_get_engine.return_value.auto_backup = False
-        review_set = ReviewSet(
-            rows=[ReviewResult(sql="select * from demo", errlevel=0)]
-        )
-        review_set.syntax_type = 3
-        mock_pre_count_check.return_value = review_set
         json_data = {
             "workflow": {
                 "workflow_name": "Export Workflow 1",
@@ -4159,33 +4193,27 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             "Execution started. Please check workflow detail page for results.",
         )
 
-    @patch("api_workflows.views.async_task")
+    @patch("api_workflows.views.dispatch_sql_workflow_to_agent")
     @patch("api_workflows.views._resolve_mysql_ddl_executor")
     def test_execute_workflow_auto_passes_selected_executor(
-        self, mock_resolve_executor, mock_async_task
+        self, mock_resolve_executor, mock_dispatch_sql_workflow_to_agent
     ):
         _, workflow, _, _ = self._create_mysql_workflow()
-        mock_resolve_executor.return_value = Mock(executor_id="gh-ost")
+        mock_resolve_executor.return_value = Mock(executor_id="direct")
+        mock_dispatch_sql_workflow_to_agent.return_value = Mock(agent_id=1, id=2)
 
         r = self.client.post(
             f"/api/v1/workflow/{workflow.id}/executions/",
-            {"workflow_type": 2, "mode": "auto", "executor": "gh-ost"},
+            {"workflow_type": 2, "mode": "auto", "executor": "direct"},
             format="json",
         )
 
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(
-            mock_async_task.call_args.kwargs["execution_options"],
-            {"executor": "gh-ost"},
+            mock_dispatch_sql_workflow_to_agent.call_args.kwargs["executor"], "direct"
         )
 
-    @patch(
-        "api_workflows.views._resolve_mysql_ddl_executor",
-        side_effect=MysqlDDLExecutorError(
-            "gh-ost does not support tables with foreign keys."
-        ),
-    )
-    def test_execute_workflow_rejects_incompatible_executor(self, _mock_resolve):
+    def test_execute_workflow_rejects_unsupported_executor(self):
         _, workflow, _, _ = self._create_mysql_workflow()
 
         r = self.client.post(
@@ -4197,7 +4225,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
         workflow.refresh_from_db()
         self.assertEqual(workflow.status, "workflow_review_pass")
-        self.assertIn("foreign keys", r.json()["errors"])
+        self.assertIn("executor", json.dumps(r.json()))
 
     @patch(
         "api_workflows.views.dispatch_sql_workflow_to_agent",
@@ -4208,11 +4236,11 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self, mock_resolve_executor, _mock_dispatch
     ):
         _, workflow, _, _ = self._create_mysql_workflow()
-        mock_resolve_executor.return_value = Mock(executor_id="gh-ost")
+        mock_resolve_executor.return_value = Mock(executor_id="direct")
 
         r = self.client.post(
             f"/api/v1/workflow/{workflow.id}/executions/",
-            {"workflow_type": 2, "mode": "auto", "executor": "gh-ost"},
+            {"workflow_type": 2, "mode": "auto", "executor": "direct"},
             format="json",
         )
 
@@ -4362,7 +4390,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self, mock_resolve_executor, mock_add_schedule
     ):
         _, workflow, _, _ = self._create_mysql_workflow()
-        mock_resolve_executor.return_value = Mock(executor_id="pt-osc")
+        mock_resolve_executor.return_value = Mock(executor_id="direct")
 
         response = self.client.post(
             f"/api/v1/workflow/{workflow.id}/schedule/",
@@ -4370,7 +4398,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
                 "run_date": (datetime.now() + timedelta(hours=1)).strftime(
                     "%Y-%m-%dT%H:%M"
                 ),
-                "executor": "pt-osc",
+                "executor": "direct",
             },
             format="json",
         )
@@ -4378,7 +4406,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(
             mock_add_schedule.call_args.kwargs["execution_options"],
-            {"executor": "pt-osc"},
+            {"executor": "direct"},
         )
 
 

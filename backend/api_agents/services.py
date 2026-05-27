@@ -3,6 +3,9 @@ import hmac
 import json
 import logging
 import secrets
+import os
+import tempfile
+import time
 from dataclasses import dataclass
 from urllib.parse import quote
 from urllib.parse import urljoin
@@ -21,10 +24,10 @@ import requests
 from common.config import SysConfig
 from common.authenticate.workos import _dynamic_import_workos
 from common.utils.const import WorkflowType
+from sql.engines import ResultSet
 from sql.engines.models import ReviewResult, ReviewSet
 from sql.mailbox import emit_execution_finished_notifications, resolve_mailbox_items
 from sql.models import SqlWorkflow
-from sql.notify import notify_for_execute
 from sql.utils.workflow_audit import Audit
 from api_agents.models import (
     Agent,
@@ -39,6 +42,14 @@ from api_agents.models import (
 logger = logging.getLogger("default")
 AGENT_API_KEY_PREFIX = "dma_"
 AGENT_KEY_VISIBLE_PREFIX_LENGTH = 16
+ACTIVE_WEBSOCKET_METADATA_KEY = "active_websocket"
+WEBSOCKET_CHANNEL_METADATA_KEY = "channel_name"
+TERMINAL_COMMAND_STATUSES = {
+    AgentCommandStatus.SUCCEEDED,
+    AgentCommandStatus.FAILED,
+    AgentCommandStatus.CANCELLED,
+    AgentCommandStatus.EXPIRED,
+}
 REQUIRED_AGENT_KEY_PERMISSIONS = (
     "datamingle-agent:connect",
     "datamingle-agent:read-config",
@@ -47,6 +58,20 @@ REQUIRED_AGENT_KEY_PERMISSIONS = (
 
 
 class AgentAPIKeyRejected(Exception):
+    pass
+
+
+class AgentCommandDispatchError(Exception):
+    pass
+
+
+class AgentCommandExecutionError(Exception):
+    def __init__(self, message, command=None):
+        super().__init__(message)
+        self.command = command
+
+
+class AgentCommandTimeoutError(AgentCommandExecutionError):
     pass
 
 
@@ -350,7 +375,60 @@ def config_hash(payload):
     return hashlib.sha256(raw).hexdigest()
 
 
-def dispatch_agent_command(command):
+def agent_active_websocket_channel(agent):
+    active_websocket = dict(
+        (agent.metadata or {}).get(ACTIVE_WEBSOCKET_METADATA_KEY) or {}
+    )
+    return active_websocket.get(WEBSOCKET_CHANNEL_METADATA_KEY, "")
+
+
+def has_active_agent_websocket(agent):
+    return bool(agent_active_websocket_channel(agent))
+
+
+def command_capable_assignments(db_type="mysql", require_websocket=True):
+    assignments = (
+        AgentInstanceAssignment.objects.select_related("agent", "instance")
+        .filter(
+            enabled=True,
+            command_enabled=True,
+            agent__enabled=True,
+            agent__status=AgentStatus.ONLINE,
+            instance__db_type=db_type,
+        )
+        .order_by("-agent__last_seen_at", "agent_id")
+    )
+    if not require_websocket:
+        return assignments
+    agent_ids = [
+        assignment.agent_id
+        for assignment in assignments
+        if has_active_agent_websocket(assignment.agent)
+    ]
+    return assignments.filter(agent_id__in=agent_ids)
+
+
+def command_capable_instance_ids(db_type="mysql", require_websocket=True):
+    return sorted(
+        {
+            assignment.instance_id
+            for assignment in command_capable_assignments(
+                db_type=db_type, require_websocket=require_websocket
+            )
+        }
+    )
+
+
+def filter_agent_runnable_instances(queryset, db_type="mysql", require_websocket=True):
+    return queryset.filter(
+        db_type=db_type,
+        id__in=command_capable_instance_ids(
+            db_type=db_type, require_websocket=require_websocket
+        ),
+    )
+
+
+def dispatch_agent_command(command, require_delivery=True):
     from api_agents.dispatch import notify_command_available
 
     if command.status == AgentCommandStatus.QUEUED:
@@ -358,12 +436,23 @@ def dispatch_agent_command(command):
         command.dispatched_at = timezone.now()
         command.save(update_fields=["status", "dispatched_at", "update_time"])
         command.append_event("command.dispatched", "Command dispatched to agent.")
-    notify_command_available(command)
+    delivered = notify_command_available(command)
+    if require_delivery and not delivered:
+        command.status = AgentCommandStatus.FAILED
+        command.finished_at = timezone.now()
+        command.error = {"message": "Agent websocket is not connected."}
+        command.save(update_fields=["status", "finished_at", "error", "update_time"])
+        command.append_event(
+            "command.dispatch_failed", "Agent websocket is not connected."
+        )
+        raise AgentCommandDispatchError("Agent websocket is not connected.")
     return command
 
 
-def command_capable_assignment_for_instance(instance_id):
-    return (
+def command_capable_assignment_for_instance(
+    instance_id, db_type="mysql", require_websocket=True
+):
+    assignments = (
         AgentInstanceAssignment.objects.select_related("agent", "instance")
         .filter(
             instance_id=instance_id,
@@ -371,10 +460,130 @@ def command_capable_assignment_for_instance(instance_id):
             command_enabled=True,
             agent__enabled=True,
             agent__status=AgentStatus.ONLINE,
+            instance__db_type=db_type,
         )
         .order_by("-agent__last_seen_at", "agent_id")
-        .first()
     )
+    for assignment in assignments:
+        if require_websocket and not has_active_agent_websocket(assignment.agent):
+            continue
+        return assignment
+    return None
+
+
+def create_agent_command_for_instance(
+    *,
+    instance,
+    command_type,
+    workflow_type,
+    workflow_id,
+    payload,
+    idempotency_key=None,
+):
+    assignment = command_capable_assignment_for_instance(instance.id)
+    if assignment is None:
+        raise AgentCommandDispatchError(
+            "No online command-capable agent is assigned to this MySQL service."
+        )
+    return AgentCommand.objects.create(
+        agent=assignment.agent,
+        instance=instance,
+        workflow_type=workflow_type,
+        workflow_id=str(workflow_id),
+        command_type=command_type,
+        idempotency_key=idempotency_key,
+        payload=payload,
+    )
+
+
+def wait_for_agent_command(command, timeout_seconds=60, poll_interval=0.2):
+    deadline = time.monotonic() + max(float(timeout_seconds), 1.0)
+    while time.monotonic() < deadline:
+        command.refresh_from_db()
+        if command.status in TERMINAL_COMMAND_STATUSES:
+            return command
+        time.sleep(poll_interval)
+    command.refresh_from_db()
+    if command.status not in TERMINAL_COMMAND_STATUSES:
+        command.status = AgentCommandStatus.EXPIRED
+        command.finished_at = timezone.now()
+        command.error = {"message": "Agent command timed out."}
+        command.save(update_fields=["status", "finished_at", "error", "update_time"])
+        command.append_event("command.expired", "Agent command timed out.")
+        raise AgentCommandTimeoutError("Agent command timed out.", command=command)
+    return command
+
+
+def run_agent_command_sync(
+    *,
+    instance,
+    command_type,
+    workflow_type,
+    workflow_id,
+    payload,
+    timeout_seconds=60,
+    idempotency_key=None,
+):
+    command = create_agent_command_for_instance(
+        instance=instance,
+        command_type=command_type,
+        workflow_type=workflow_type,
+        workflow_id=workflow_id,
+        payload=payload,
+        idempotency_key=idempotency_key,
+    )
+    dispatch_agent_command(command)
+    command = wait_for_agent_command(command, timeout_seconds=timeout_seconds)
+    if command.status != AgentCommandStatus.SUCCEEDED:
+        message = (
+            command.error.get("message") if isinstance(command.error, dict) else ""
+        ) or (command.result.get("message") if isinstance(command.result, dict) else "")
+        raise AgentCommandExecutionError(
+            message or f"Agent command {command.status}.", command=command
+        )
+    return command
+
+
+def result_set_from_agent_result(full_sql, result):
+    result = result or {}
+    rows = result.get("rows") or []
+    column_list = result.get("column_list") or result.get("columns") or []
+    result_set = ResultSet(
+        full_sql=result.get("full_sql") or full_sql,
+        rows=rows,
+        column_list=column_list,
+        column_type=result.get("column_type") or [],
+        affected_rows=result.get("affected_rows", result.get("row_count", len(rows))),
+        status=result.get("status"),
+    )
+    result_set.query_time = result.get("execution_seconds", "")
+    result_set.warning = result.get("warning")
+    result_set.error = result.get("error")
+    return result_set
+
+
+def review_set_from_agent_result(full_sql, result):
+    result = result or {}
+    review_set = ReviewSet(
+        full_sql=result.get("full_sql") or full_sql,
+        affected_rows=result.get("affected_rows", 0),
+        column_list=result.get("column_list") or [],
+        status=result.get("status"),
+    )
+    review_set.checked = result.get("checked", True)
+    review_set.warning = result.get("warning")
+    review_set.error = result.get("error")
+    review_set.warning_count = int(result.get("warning_count") or 0)
+    review_set.error_count = int(result.get("error_count") or 0)
+    review_set.is_critical = bool(result.get("is_critical", False))
+    review_set.syntax_type = int(result.get("syntax_type") or 0)
+    rows = result.get("review_rows") or result.get("rows") or []
+    review_set.rows = [
+        row if isinstance(row, ReviewResult) else ReviewResult(**row)
+        for row in rows
+        if isinstance(row, dict) or isinstance(row, ReviewResult)
+    ]
+    return review_set
 
 
 def dispatch_sql_workflow_to_agent(workflow, user=None, executor=None):
@@ -384,6 +593,7 @@ def dispatch_sql_workflow_to_agent(workflow, user=None, executor=None):
             .select_related("instance")
             .get(pk=workflow.pk)
         )
+        previous_status = workflow.status
         existing_command = (
             AgentCommand.objects.select_related("agent", "instance")
             .filter(
@@ -400,14 +610,13 @@ def dispatch_sql_workflow_to_agent(workflow, user=None, executor=None):
             .first()
         )
         if existing_command is not None:
-            workflow.status = "workflow_executing"
-            workflow.save(update_fields=["status"])
-            resolve_mailbox_items(workflow, category="execution_needed")
             command = existing_command
         else:
             assignment = command_capable_assignment_for_instance(workflow.instance_id)
             if assignment is None:
-                return None
+                raise AgentCommandDispatchError(
+                    "No online command-capable agent is assigned to this MySQL service."
+                )
 
             try:
                 content = workflow.sqlworkflowcontent
@@ -417,10 +626,11 @@ def dispatch_sql_workflow_to_agent(workflow, user=None, executor=None):
                 ) from exc
 
             command_type = (
-                AgentCommandType.SCHEMA_CHANGE
-                if workflow.syntax_type == 1
-                else AgentCommandType.QUERY_EXECUTE
+                AgentCommandType.EXPORT_EXECUTE
+                if workflow.is_offline_export
+                else AgentCommandType.WORKFLOW_EXECUTE
             )
+            config = SysConfig()
             try:
                 with transaction.atomic():
                     command = AgentCommand.objects.create(
@@ -437,6 +647,10 @@ def dispatch_sql_workflow_to_agent(workflow, user=None, executor=None):
                             "schema_name": workflow.schema_name,
                             "syntax_type": workflow.syntax_type,
                             "sql": content.sql_content,
+                            "export_format": workflow.export_format,
+                            "max_export_rows": int(
+                                config.get("max_export_rows", "10000") or 10000
+                            ),
                             "executor": executor or "direct",
                             "submitted_by": (
                                 getattr(user, "username", "") if user else ""
@@ -447,15 +661,19 @@ def dispatch_sql_workflow_to_agent(workflow, user=None, executor=None):
                 command = AgentCommand.objects.select_related("agent", "instance").get(
                     idempotency_key=f"sql_workflow:{workflow.id}"
                 )
-            workflow.status = "workflow_executing"
-            workflow.save(update_fields=["status"])
-            resolve_mailbox_items(workflow, category="execution_needed")
+        workflow.status = "workflow_executing"
+        workflow.save(update_fields=["status"])
 
     if command.status in {
         AgentCommandStatus.QUEUED,
         AgentCommandStatus.DISPATCHED,
     }:
-        dispatch_agent_command(command)
+        try:
+            dispatch_agent_command(command)
+        except AgentCommandDispatchError:
+            SqlWorkflow.objects.filter(pk=workflow.pk).update(status=previous_status)
+            raise
+    resolve_mailbox_items(workflow, category="execution_needed")
     return command
 
 
@@ -472,10 +690,19 @@ def complete_agent_workflow_command(command, outcome, message="", payload=None):
 
     now = timezone.now()
     if outcome == "success":
-        workflow.status = "workflow_finish"
-        errlevel = 0
-        stage_status = "Execute Successfully"
-        error_message = message
+        try:
+            if workflow.is_offline_export:
+                _persist_agent_export_result(workflow, payload)
+            workflow.status = "workflow_finish"
+            errlevel = 0
+            stage_status = "Execute Successfully"
+            error_message = message
+        except Exception as exc:
+            logger.exception("Failed to persist agent workflow result")
+            workflow.status = "workflow_exception"
+            errlevel = 2
+            stage_status = "Execute Failed"
+            error_message = str(exc)
     elif outcome == "cancelled":
         workflow.status = "workflow_abort"
         errlevel = 1
@@ -518,6 +745,8 @@ def complete_agent_workflow_command(command, outcome, message="", payload=None):
         else True
     )
     if is_notified:
+        from sql.notify import notify_for_execute
+
         notify_for_execute(workflow)
     resolve_mailbox_items(workflow, category="execution_needed")
     emit_execution_finished_notifications(
@@ -544,6 +773,9 @@ def clear_agent_execution_caches(workflow):
 def _agent_review_result_json(workflow, errlevel, stage_status, error_message, result):
     result = result or {}
     sql = workflow.sqlworkflowcontent.sql_content
+    review_rows = result.get("review_rows") or result.get("execute_rows")
+    if review_rows:
+        return json.dumps(review_rows)
     affected_rows = result.get("affected_rows", 0)
     review_set = ReviewSet(full_sql=sql)
     review_set.rows = [
@@ -564,6 +796,37 @@ def _agent_review_result_json(workflow, errlevel, stage_status, error_message, r
         )
     ]
     return review_set.json()
+
+
+def _persist_agent_export_result(workflow, result):
+    if result.get("file_name"):
+        workflow.file_name = result["file_name"]
+        workflow.save(update_fields=["file_name"])
+        return result["file_name"]
+
+    rows = result.get("rows") or []
+    columns = result.get("column_list") or result.get("columns") or []
+    if not rows and result.get("affected_rows", 0):
+        raise ValueError("Agent export result did not include rows.")
+
+    from sql.offlinedownload import save_to_format_file
+    from sql.storage import DynamicStorage
+
+    storage = DynamicStorage()
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_name = save_to_format_file(
+                workflow.export_format, rows, workflow, columns, temp_dir
+            )
+            tmp_file = os.path.join(temp_dir, file_name)
+            with open(tmp_file, "rb") as fp:
+                storage.save(file_name, fp)
+        workflow.file_name = file_name
+        workflow.save(update_fields=["file_name"])
+        result["file_name"] = file_name
+        return file_name
+    finally:
+        storage.close()
 
 
 def command_id_or_empty(result):

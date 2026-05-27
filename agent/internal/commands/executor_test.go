@@ -29,6 +29,8 @@ func TestIsReadOnlySQL(t *testing.T) {
 		"EXPLAIN select 1",
 		"describe users",
 		"select ';' as semicolon",
+		"show databases",
+		"show create table users",
 	} {
 		if !isReadOnlySQL(sqlText) {
 			t.Fatalf("expected %q to be read-only", sqlText)
@@ -41,10 +43,42 @@ func TestIsReadOnlySQL(t *testing.T) {
 		"/* hide intent */ update users set name = 'x'",
 		"select 1; update users set name = 'x'",
 		"select 1; select 2",
-		"show databases",
 		"show grants",
 	} {
 		if isReadOnlySQL(sqlText) {
+			t.Fatalf("expected %q to be rejected", sqlText)
+		}
+	}
+}
+
+func TestClassifyWorkflowSyntax(t *testing.T) {
+	for _, sqlText := range []string{
+		"create table users (id int)",
+		"alter table users add column name varchar(255)",
+		"drop table users",
+		"rename table users to app_users",
+		"truncate table users",
+	} {
+		if classifyWorkflowSyntax(sqlText) != 1 {
+			t.Fatalf("expected %q to be DDL", sqlText)
+		}
+	}
+	for _, sqlText := range []string{
+		"insert into users(id) values (1)",
+		"update users set name = 'x'",
+		"delete from users where id = 1",
+		"replace into users(id) values (1)",
+	} {
+		if classifyWorkflowSyntax(sqlText) != 2 {
+			t.Fatalf("expected %q to be DML", sqlText)
+		}
+	}
+	for _, sqlText := range []string{
+		"select * from users",
+		"drop database prod",
+		"grant select on *.* to 'u'@'%'",
+	} {
+		if classifyWorkflowSyntax(sqlText) != 0 {
 			t.Fatalf("expected %q to be rejected", sqlText)
 		}
 	}

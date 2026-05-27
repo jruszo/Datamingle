@@ -1,12 +1,13 @@
 import logging
 import re
 import traceback
+import uuid
 
 from django.db import transaction
 from rest_framework import serializers
 
+from common.config import SysConfig
 from common.utils.const import WorkflowStatus, WorkflowType
-from sql.engines import get_engine
 from sql.models import (
     Instance,
     ResourceGroup,
@@ -16,21 +17,72 @@ from sql.models import (
     WorkflowLog,
     Users,
 )
-from sql.offlinedownload import OffLineDownLoad
 from sql.utils.resource_group import (
     user_has_group_instance_access,
     user_has_instance_query_access,
     user_has_instance_workflow_access,
 )
 from sql.utils.sql_review import can_cancel, can_execute, can_timingtask
-from sql.utils.sql_utils import generate_sql
+from sql.utils.sql_utils import generate_sql, get_syntax_type
 from sql.utils.tasks import task_info
 from sql.utils.workflow_audit import get_auditor
+from api_agents.models import AgentCommandType
+from api_agents.services import (
+    AgentCommandDispatchError,
+    AgentCommandExecutionError,
+    review_set_from_agent_result,
+    run_agent_command_sync,
+)
 
 logger = logging.getLogger("default")
 LOAD_DATA_PATTERN = re.compile(r"^\s*load\s+data\b", re.IGNORECASE)
 EXPORT_FORMAT_CHOICES = {"csv", "tsv", "sql", "xlsx"}
-DDL_EXECUTOR_CHOICES = ("direct", "gh-ost", "pt-osc")
+DDL_EXECUTOR_CHOICES = ("direct",)
+
+
+def _sysconfig_int(name, default):
+    try:
+        return int(SysConfig().get(name, str(default)) or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _classify_statement_syntax(statement, db_type="mysql"):
+    syntax_name = get_syntax_type(statement, parser=True, db_type=db_type)
+    if syntax_name not in {"DDL", "DML"}:
+        syntax_name = get_syntax_type(statement, parser=False, db_type=db_type)
+    if syntax_name == "DDL":
+        return 1
+    if syntax_name == "DML":
+        return 2
+    return None
+
+
+def _detected_workflow_syntax_types(sql_text, db_type="mysql"):
+    syntax_types = set()
+    for row in generate_sql(sql_text):
+        syntax_type = _classify_statement_syntax(row["sql"], db_type=db_type)
+        if syntax_type is not None:
+            syntax_types.add(syntax_type)
+    return syntax_types
+
+
+def _authorize_workflow_check_dispatch(
+    actor, instance, sql_text, has_group_write_access
+):
+    if actor.is_superuser:
+        return
+    syntax_types = _detected_workflow_syntax_types(sql_text, db_type=instance.db_type)
+    if syntax_types and all(
+        user_has_instance_workflow_access(actor, instance, syntax_type)
+        for syntax_type in syntax_types
+    ):
+        return
+    if has_group_write_access and actor.has_perm("sql.sql_submit"):
+        return
+    raise serializers.ValidationError(
+        {"errors": "You do not have permission to submit SQL for this instance."}
+    )
 
 
 class ExecuteCheckSerializer(serializers.Serializer):
@@ -210,11 +262,17 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
             has_group_write_access and actor.has_perm("sql.sql_submit")
         ):
             pass
+        else:
+            _authorize_workflow_check_dispatch(
+                actor,
+                instance,
+                sql_content,
+                has_group_write_access=has_group_write_access,
+            )
 
         try:
-            check_engine = get_engine(instance=instance)
+            timeout_seconds = _sysconfig_int("max_execution_time", 60)
             if is_offline_export:
-                sql_export = OffLineDownLoad()
                 export_format = (
                     (workflow_data.get("export_format") or "").lower().strip()
                 )
@@ -227,18 +285,41 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                         }
                     )
                 workflow_data["export_format"] = export_format
-                instance.sql_content = sql_content
-                instance.db_name = workflow_data["db_name"]
-                instance.schema_name = workflow_data.get("schema_name") or ""
-                instance.export_format = export_format
-                check_result = sql_export.pre_count_check(workflow=instance)
+                command = run_agent_command_sync(
+                    instance=instance,
+                    command_type=AgentCommandType.EXPORT_CHECK,
+                    workflow_type="export.check",
+                    workflow_id=f"{actor.username}:{uuid.uuid4().hex}",
+                    payload={
+                        "db_name": workflow_data["db_name"],
+                        "schema_name": workflow_data.get("schema_name") or "",
+                        "sql": sql_content,
+                        "export_format": export_format,
+                        "max_export_rows": _sysconfig_int("max_export_rows", 10000),
+                        "submitted_by": actor.username,
+                    },
+                    timeout_seconds=timeout_seconds,
+                )
             else:
                 workflow_data["export_format"] = None
-                check_result = check_engine.execute_check(
-                    db_name=workflow_data["db_name"], sql=sql_content
+                command = run_agent_command_sync(
+                    instance=instance,
+                    command_type=AgentCommandType.WORKFLOW_CHECK,
+                    workflow_type="workflow.check",
+                    workflow_id=f"{actor.username}:{uuid.uuid4().hex}",
+                    payload={
+                        "db_name": workflow_data["db_name"],
+                        "schema_name": workflow_data.get("schema_name") or "",
+                        "sql": sql_content,
+                        "submitted_by": actor.username,
+                    },
+                    timeout_seconds=timeout_seconds,
                 )
+            check_result = review_set_from_agent_result(sql_content, command.result)
         except serializers.ValidationError:
             raise
+        except (AgentCommandDispatchError, AgentCommandExecutionError) as exc:
+            raise serializers.ValidationError({"errors": str(exc)})
         except Exception:
             logger.exception("Unexpected error while validating workflow submission.")
             raise serializers.ValidationError(

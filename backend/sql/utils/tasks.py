@@ -13,10 +13,9 @@ def add_sql_schedule(name, run_date, workflow_id, execution_options=None):
     """Add or update a scheduled SQL task."""
     del_schedule(name)
     schedule(
-        "sql.utils.execute_sql.execute",
+        "sql.utils.execute_sql.dispatch_scheduled_agent_execution",
         workflow_id,
         execution_options=execution_options or None,
-        hook="sql.utils.execute_sql.execute_callback",
         name=name,
         schedule_type="O",
         next_run=run_date,

@@ -483,20 +483,27 @@ class TestExecuteSql(TestCase):
         WorkflowLog.objects.all().delete()
 
     @patch("sql.utils.execute_sql.Audit")
-    @patch("sql.engines.mysql.MysqlEngine.execute_workflow")
-    @patch("sql.engines.get_engine")
-    def test_execute(self, _get_engine, _execute_workflow, _audit):
+    @patch("sql.utils.execute_sql.dispatch_sql_workflow_to_agent")
+    def test_execute(self, _dispatch_sql_workflow_to_agent, _audit):
         _audit.detail_by_workflow_id.return_value.audit_id = 1
-        execute(self.wf.id)
-        _execute_workflow.assert_called_once()
+        _dispatch_sql_workflow_to_agent.return_value.id = 99
+        result = execute(self.wf.id)
+        self.assertEqual(result, {"agent_dispatched": True, "command_id": 99})
+        _dispatch_sql_workflow_to_agent.assert_called_once()
         _audit.add_log.assert_called_with(
             audit_id=1,
             operation_type=5,
             operation_type_desc="Execute workflow",
-            operation_info="System scheduled workflow execution",
+            operation_info="System scheduled workflow dispatched to agent",
             operator="",
             operator_display="System",
         )
+
+    def test_execute_callback_ignores_agent_dispatch_result(self):
+        task_result = MagicMock()
+        task_result.result = {"agent_dispatched": True, "command_id": 99}
+
+        execute_callback(task_result)
 
     @patch("sql.utils.execute_sql.notify_for_execute")
     @patch("sql.utils.execute_sql.Audit")
@@ -591,7 +598,7 @@ class TestTasks(TestCase):
         self.schedule = TaskSchedule.objects.create(
             name="some_name",
             task_name="some_name",
-            callable_path="sql.utils.execute_sql.execute",
+            callable_path="sql.utils.execute_sql.dispatch_scheduled_agent_execution",
             run_at=datetime.datetime.now(),
         )
 

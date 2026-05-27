@@ -17,6 +17,7 @@ from common.config import SysConfig
 from common.utils.const import WorkflowStatus, WorkflowType, WorkflowAction
 from common.utils.extend_json_encoder import ExtendJSONEncoder
 from common.utils.spa import spa_path_for_workflow
+from api_agents.services import dispatch_sql_workflow_to_agent
 from sql.engines import get_engine
 from sql.engines.models import ReviewResult, ReviewSet
 from sql.notify import notify_for_audit, EventType, notify_for_execute
@@ -333,28 +334,30 @@ def execute(request):
     mode = request.POST.get("mode")
     # System execution mode.
     if mode == "auto":
-        # Set workflow status to queued.
-        SqlWorkflow(id=workflow_id, status="workflow_queuing").save(
-            update_fields=["status"]
-        )
-        # Delete scheduled execution task.
-        schedule_name = f"sqlreview-timing-{workflow_id}"
-        del_schedule(schedule_name)
-        # Add to execution queue.
-        async_task(
-            "sql.utils.execute_sql.execute",
-            workflow_id,
-            request.user,
-            hook="sql.utils.execute_sql.execute_callback",
-            timeout=-1,
-            task_name=f"sqlreview-execute-{workflow_id}",
-        )
+        workflow = SqlWorkflow.objects.select_related(
+            "instance", "sqlworkflowcontent"
+        ).get(id=workflow_id)
+        try:
+            agent_command = dispatch_sql_workflow_to_agent(workflow, user=request.user)
+        except Exception as msg:
+            logger.error(
+                f"SQL workflow agent dispatch failed, error details: {traceback.format_exc()}"
+            )
+            return render(
+                request,
+                "error.html",
+                {"errMsg": f"Unable to dispatch workflow to agent: {msg}"},
+            )
+        del_schedule(f"sqlreview-timing-{workflow_id}")
         # Add workflow log.
         Audit.add_log(
             audit_id=audit_id,
             operation_type=5,
             operation_type_desc="Execute Workflow",
-            operation_info="Workflow queued for execution",
+            operation_info=(
+                "Workflow dispatched to agent "
+                f"(agent: {agent_command.agent_id}, command: {agent_command.id})"
+            ),
             operator=request.user.username,
             operator_display=request.user.display,
         )

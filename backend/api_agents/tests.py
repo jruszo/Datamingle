@@ -13,6 +13,7 @@ from rest_framework.test import APIRequestFactory, APITestCase
 from api_agents.authentication import AgentAPIKeyAuthentication
 from api_agents.dispatch import (
     ACTIVE_WEBSOCKET_METADATA_KEY,
+    WEBSOCKET_CHANNEL_METADATA_KEY,
     active_agent_channel_name,
     notify_config_changed,
     send_agent_message,
@@ -28,11 +29,13 @@ from api_agents.models import (
 )
 from api_agents.services import (
     REQUIRED_AGENT_KEY_PERMISSIONS,
+    AgentCommandDispatchError,
     AgentAPIKeyRejected,
     authenticate_agent_api_key,
     create_agent_api_key,
     dispatch_sql_workflow_to_agent,
     dispatch_agent_command,
+    filter_agent_runnable_instances,
     issue_agent_api_key,
 )
 from common.utils.const import WorkflowStatus, WorkflowType
@@ -84,6 +87,18 @@ def create_sql_workflow(instance, status_value="workflow_review_pass", syntax_ty
         create_user_display=workflow.engineer_display,
     )
     return workflow
+
+
+def mark_agent_websocket(agent, channel_name="agent.test"):
+    agent.status = AgentStatus.ONLINE
+    agent.metadata = {
+        **(agent.metadata or {}),
+        ACTIVE_WEBSOCKET_METADATA_KEY: {
+            WEBSOCKET_CHANNEL_METADATA_KEY: channel_name,
+        },
+    }
+    agent.save(update_fields=["status", "metadata", "update_time"])
+    return agent
 
 
 class AgentAuthenticationTests(APITestCase):
@@ -562,7 +577,8 @@ class AgentFacingApiTests(APITestCase):
         self.assertEqual(agent.last_config_revision, 3)
         self.assertEqual(agent.metadata["module_health"][0]["module"], "mysql")
 
-    def test_agent_fetches_and_acks_dispatched_command(self):
+    @patch("api_agents.dispatch.notify_command_available", return_value=True)
+    def test_agent_fetches_and_acks_dispatched_command(self, _mock_notify):
         agent = Agent.objects.create(name="agent-a")
         instance = create_instance()
         command = AgentCommand.objects.create(
@@ -718,11 +734,16 @@ class AgentFacingApiTests(APITestCase):
         self.assertFalse(command.events.filter(event_type="command.progress").exists())
 
     @patch("api_agents.services.emit_execution_finished_notifications")
-    @patch("api_agents.services.notify_for_execute")
+    @patch("sql.notify.notify_for_execute")
+    @patch("api_agents.dispatch.notify_command_available", return_value=True)
     def test_agent_workflow_command_finish_updates_sql_workflow(
-        self, _notify_for_execute, _emit_execution_finished_notifications
+        self,
+        _mock_notify_command_available,
+        _notify_for_execute,
+        _emit_execution_finished_notifications,
     ):
         agent = Agent.objects.create(name="agent-a", status=AgentStatus.ONLINE)
+        mark_agent_websocket(agent)
         instance = create_instance()
         AgentInstanceAssignment.objects.create(
             agent=agent,
@@ -747,6 +768,49 @@ class AgentFacingApiTests(APITestCase):
         workflow.refresh_from_db()
         self.assertEqual(workflow.status, "workflow_finish")
         self.assertIn("agent finished", workflow.sqlworkflowcontent.execute_result)
+
+    def test_agent_runnable_instances_require_active_websocket(self):
+        offline_instance = create_instance("offline")
+        online_instance = create_instance("online")
+        offline_agent = Agent.objects.create(
+            name="agent-offline", status=AgentStatus.ONLINE
+        )
+        online_agent = Agent.objects.create(
+            name="agent-online", status=AgentStatus.ONLINE
+        )
+        mark_agent_websocket(online_agent)
+        AgentInstanceAssignment.objects.create(
+            agent=offline_agent,
+            instance=offline_instance,
+            command_enabled=True,
+        )
+        AgentInstanceAssignment.objects.create(
+            agent=online_agent,
+            instance=online_instance,
+            command_enabled=True,
+        )
+
+        runnable_ids = set(
+            filter_agent_runnable_instances(Instance.objects.all()).values_list(
+                "id", flat=True
+            )
+        )
+
+        self.assertNotIn(offline_instance.id, runnable_ids)
+        self.assertIn(online_instance.id, runnable_ids)
+
+    def test_dispatch_sql_workflow_requires_active_websocket(self):
+        agent = Agent.objects.create(name="agent-a", status=AgentStatus.ONLINE)
+        instance = create_instance()
+        AgentInstanceAssignment.objects.create(
+            agent=agent,
+            instance=instance,
+            command_enabled=True,
+        )
+        workflow = create_sql_workflow(instance)
+
+        with self.assertRaises(AgentCommandDispatchError):
+            dispatch_sql_workflow_to_agent(workflow)
 
 
 @override_settings(
