@@ -35,6 +35,7 @@ from api_agents.models import (
     AgentCommandStatus,
     AgentCommandType,
     AgentInstanceAssignment,
+    AgentNodeAssignment,
     AgentStatus,
     AgentToolArtifact,
 )
@@ -272,7 +273,7 @@ def build_agent_config(agent):
     assignments = [
         serialize_assignment(assignment)
         for assignment in agent.assignments.filter(enabled=True).select_related(
-            "instance"
+            "instance", "instance__node", "local_node"
         )
     ]
     modules = build_module_configs(agent, assignments)
@@ -299,6 +300,8 @@ def serialize_assignment(assignment):
         "id": assignment.id,
         "instance_id": instance.id,
         "instance_name": instance.instance_name,
+        "node_id": instance.node_id,
+        "node_name": instance.node.name if instance.node_id else "",
         "db_type": instance.db_type,
         "host": instance.host,
         "port": instance.port,
@@ -330,6 +333,210 @@ def assignment_modules(assignment):
     if assignment.logs_enabled:
         modules.add("logs")
     return sorted(modules)
+
+
+def _assignment_defaults_from_node_assignment(node_assignment):
+    return {
+        "node_assignment": node_assignment,
+        "local_node": None,
+        "enabled": node_assignment.enabled,
+        "modules": node_assignment.modules,
+        "capabilities": node_assignment.capabilities,
+        "command_enabled": node_assignment.command_enabled,
+        "metrics_enabled": node_assignment.metrics_enabled,
+        "online_schema_enabled": node_assignment.online_schema_enabled,
+        "logs_enabled": node_assignment.logs_enabled,
+    }
+
+
+def _local_node_command_enabled(agent, service, assignment=None):
+    queryset = AgentInstanceAssignment.objects.filter(
+        instance=service,
+        enabled=True,
+        command_enabled=True,
+    ).exclude(agent=agent)
+    if assignment is not None and assignment.pk:
+        queryset = queryset.exclude(pk=assignment.pk)
+    return not queryset.exists()
+
+
+def _assignment_defaults_from_local_node(agent, service, assignment=None):
+    return {
+        "node_assignment": None,
+        "local_node": agent.local_node,
+        "enabled": agent.enabled and agent.status != AgentStatus.REVOKED,
+        "modules": [],
+        "capabilities": [],
+        "command_enabled": _local_node_command_enabled(agent, service, assignment),
+        "metrics_enabled": True,
+        "online_schema_enabled": True,
+        "logs_enabled": True,
+    }
+
+
+def _delete_inherited_instance_assignments(queryset, agent=None, summary=None):
+    assignments = list(queryset.select_related("agent"))
+    if not assignments:
+        return
+
+    agent_ids = {assignment.agent_id for assignment in assignments}
+    queryset.delete()
+
+    from api_agents.dispatch import notify_config_changed
+
+    if agent is not None:
+        agents = [agent]
+    else:
+        agents = list(Agent.objects.filter(id__in=agent_ids))
+    for affected_agent in agents:
+        affected_agent.bump_desired_config_revision(summary=summary)
+        transaction.on_commit(
+            lambda affected_agent=affected_agent: notify_config_changed(
+                affected_agent, reason="node_assignment.synced"
+            )
+        )
+
+
+def sync_node_assignment_to_services(node_assignment):
+    if not node_assignment.enabled:
+        clear_node_assignment_from_services(node_assignment)
+        return
+
+    defaults = _assignment_defaults_from_node_assignment(node_assignment)
+    services = node_assignment.node.services.order_by("id")
+    for service in services:
+        assignment = (
+            AgentInstanceAssignment.objects.select_for_update()
+            .filter(agent=node_assignment.agent, instance=service)
+            .first()
+        )
+        if assignment is None:
+            assignment = AgentInstanceAssignment(
+                agent=node_assignment.agent,
+                instance=service,
+            )
+        for field, value in defaults.items():
+            setattr(assignment, field, value)
+        assignment.save()
+
+
+def sync_node_assignments_for_instance(instance, previous_node_id=None):
+    if previous_node_id and previous_node_id != instance.node_id:
+        _delete_inherited_instance_assignments(
+            AgentInstanceAssignment.objects.filter(
+                instance=instance,
+                node_assignment__node_id=previous_node_id,
+            ),
+            summary={
+                "action": "node_assignment.service_removed",
+                "instance_id": instance.id,
+                "node_id": previous_node_id,
+            },
+        )
+        _delete_inherited_instance_assignments(
+            AgentInstanceAssignment.objects.filter(
+                instance=instance,
+                local_node_id=previous_node_id,
+            ),
+            summary={
+                "action": "local_node_assignment.service_removed",
+                "instance_id": instance.id,
+                "node_id": previous_node_id,
+            },
+        )
+
+    if not instance.node_id:
+        return
+
+    for node_assignment in AgentNodeAssignment.objects.filter(
+        node_id=instance.node_id,
+        enabled=True,
+    ).select_related("agent", "node"):
+        sync_node_assignment_to_service(node_assignment, instance)
+
+    for agent in Agent.objects.filter(local_node_id=instance.node_id).select_related(
+        "local_node"
+    ):
+        sync_local_node_assignment_to_service(agent, instance)
+
+
+def sync_local_node_assignments_for_agent(agent, previous_node_id=None):
+    if previous_node_id and previous_node_id != agent.local_node_id:
+        _delete_inherited_instance_assignments(
+            AgentInstanceAssignment.objects.filter(
+                agent=agent,
+                local_node_id=previous_node_id,
+            ),
+            agent=agent,
+            summary={
+                "action": "local_node_assignment.agent_moved",
+                "agent_id": agent.id,
+                "node_id": previous_node_id,
+            },
+        )
+
+    if not agent.local_node_id:
+        _delete_inherited_instance_assignments(
+            AgentInstanceAssignment.objects.filter(
+                agent=agent,
+                local_node__isnull=False,
+            ),
+            agent=agent,
+            summary={
+                "action": "local_node_assignment.cleared",
+                "agent_id": agent.id,
+            },
+        )
+        return
+
+    for service in agent.local_node.services.order_by("id"):
+        sync_local_node_assignment_to_service(agent, service)
+
+
+def sync_local_node_assignment_to_service(agent, service):
+    assignment = (
+        AgentInstanceAssignment.objects.select_for_update()
+        .filter(agent=agent, instance=service)
+        .first()
+    )
+    if assignment is not None and assignment.node_assignment_id:
+        return
+    if assignment is None:
+        assignment = AgentInstanceAssignment(agent=agent, instance=service)
+
+    defaults = _assignment_defaults_from_local_node(agent, service, assignment)
+    for field, value in defaults.items():
+        setattr(assignment, field, value)
+    assignment.save()
+
+
+def sync_node_assignment_to_service(node_assignment, service):
+    defaults = _assignment_defaults_from_node_assignment(node_assignment)
+    assignment = (
+        AgentInstanceAssignment.objects.select_for_update()
+        .filter(agent=node_assignment.agent, instance=service)
+        .first()
+    )
+    if assignment is None:
+        assignment = AgentInstanceAssignment(
+            agent=node_assignment.agent,
+            instance=service,
+        )
+    for field, value in defaults.items():
+        setattr(assignment, field, value)
+    assignment.save()
+
+
+def clear_node_assignment_from_services(node_assignment):
+    _delete_inherited_instance_assignments(
+        AgentInstanceAssignment.objects.filter(node_assignment=node_assignment),
+        agent=node_assignment.agent,
+        summary={
+            "action": "node_assignment.cleared",
+            "node_assignment_id": node_assignment.id,
+            "node_id": node_assignment.node_id,
+        },
+    )
 
 
 def build_module_configs(agent, assignments):
@@ -480,10 +687,12 @@ def create_agent_command_for_instance(
     payload,
     idempotency_key=None,
 ):
-    assignment = command_capable_assignment_for_instance(instance.id)
+    assignment = command_capable_assignment_for_instance(
+        instance.id, db_type=instance.db_type
+    )
     if assignment is None:
         raise AgentCommandDispatchError(
-            "No online command-capable agent is assigned to this MySQL service."
+            "No online command-capable agent is assigned to this service."
         )
     return AgentCommand.objects.create(
         agent=assignment.agent,

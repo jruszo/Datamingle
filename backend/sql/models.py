@@ -240,6 +240,97 @@ class InstanceTag(models.Model):
         verbose_name_plural = "Instance Tag"
 
 
+class InfrastructureNode(models.Model):
+    """Server or host that owns one or more database services."""
+
+    name = models.CharField("Node Name", max_length=128, unique=True)
+    address = models.CharField("Node Address", max_length=200, db_index=True)
+    description = models.TextField("Description", blank=True, default="")
+    metadata = models.JSONField("Metadata", default=dict, blank=True)
+    enabled = models.BooleanField("Enabled", default=True)
+    resource_group = models.ManyToManyField(
+        ResourceGroup, verbose_name="Resource Group", blank=True
+    )
+    create_time = models.DateTimeField("Created Time", auto_now_add=True)
+    update_time = models.DateTimeField("Updated Time", auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def node_name(self):
+        return self.name
+
+    @property
+    def hostname(self):
+        return self.address
+
+    class Meta:
+        managed = True
+        db_table = "infrastructure_node"
+        verbose_name = "Infrastructure Node"
+        verbose_name_plural = "Infrastructure Nodes"
+        ordering = ("name", "id")
+        permissions = (("menu_infrastructure", "Can access Infrastructure menu"),)
+
+
+class ServiceRecommendation(models.Model):
+    STATUS_RECOMMENDED = "recommended"
+    STATUS_ACCEPTED = "accepted"
+    STATUS_IGNORED = "ignored"
+    STATUS_CHOICES = (
+        (STATUS_RECOMMENDED, "Recommended"),
+        (STATUS_ACCEPTED, "Accepted"),
+        (STATUS_IGNORED, "Ignored"),
+    )
+    ENGINE_CHOICES = (
+        ("mysql", "MySQL"),
+        ("pgsql", "PostgreSQL"),
+    )
+
+    node = models.ForeignKey(
+        InfrastructureNode,
+        related_name="service_recommendations",
+        on_delete=models.CASCADE,
+    )
+    engine = models.CharField("Service Engine", max_length=20, choices=ENGINE_CHOICES)
+    host = models.CharField("Host", max_length=200, blank=True, default="")
+    port = models.IntegerField("Port", default=0)
+    service_name = models.CharField(
+        "Service Name", max_length=128, blank=True, default=""
+    )
+    source = models.CharField("Discovery Source", max_length=64, blank=True, default="")
+    confidence = models.PositiveSmallIntegerField("Confidence", default=50)
+    detected_version = models.CharField(
+        "Detected Version", max_length=200, blank=True, default=""
+    )
+    fingerprint = models.CharField("Fingerprint", max_length=128)
+    status = models.CharField(
+        "Status",
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_RECOMMENDED,
+        db_index=True,
+    )
+    metadata = models.JSONField("Metadata", default=dict, blank=True)
+    last_seen_at = models.DateTimeField("Last Seen At", null=True, blank=True)
+    create_time = models.DateTimeField("Created Time", auto_now_add=True)
+    update_time = models.DateTimeField("Updated Time", auto_now=True)
+
+    class Meta:
+        managed = True
+        db_table = "service_recommendation"
+        verbose_name = "Service Recommendation"
+        verbose_name_plural = "Service Recommendations"
+        unique_together = ("node", "fingerprint")
+        indexes = (
+            models.Index(fields=("node", "status"), name="svc_rec_node_status_idx"),
+            models.Index(
+                fields=("engine", "host", "port"), name="svc_rec_endpoint_idx"
+            ),
+        )
+
+
 DB_TYPE_CHOICES = (
     ("mysql", "MySQL"),
     ("mssql", "MsSQL"),
@@ -355,6 +446,15 @@ class Instance(models.Model, PasswordMixin):
         max_length=200,
         default="",
         blank=True,
+    )
+    node = models.ForeignKey(
+        InfrastructureNode,
+        verbose_name="Infrastructure Node",
+        related_name="services",
+        null=True,
+        blank=True,
+        default=None,
+        on_delete=models.SET_NULL,
     )
     create_time = models.DateTimeField("Created Time", auto_now_add=True)
     update_time = models.DateTimeField("Updated Time", auto_now=True)

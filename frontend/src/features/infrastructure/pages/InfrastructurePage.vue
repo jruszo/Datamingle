@@ -407,6 +407,7 @@ async function submitAgent() {
       {
         name: agentForm.name.trim(),
         display_name: agentForm.display_name.trim(),
+        local_node: selectedNode.value.id,
       },
       requireToken(),
     )

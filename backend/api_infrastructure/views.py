@@ -1,0 +1,409 @@
+from django.db import transaction
+from django.db.models import Count, Prefetch, Q
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from rest_framework import generics, permissions, serializers, status, views
+from rest_framework.exceptions import PermissionDenied
+
+from api_agents.dispatch import send_agent_message
+from api_agents.models import AgentNodeAssignment
+from api_agents.models import AgentStatus
+from api_agents.models import AgentCommandType
+from api_agents.services import (
+    AgentCommandDispatchError,
+    AgentCommandExecutionError,
+    has_active_agent_websocket,
+    run_agent_command_sync,
+)
+from api_core.pagination import CustomizedPagination
+from api_core.response import success_response
+from api_infrastructure.serializers import (
+    DatabaseServiceSerializer,
+    DatabaseServiceWriteSerializer,
+    InfrastructureNodeRemoteManagerRecordSerializer,
+    InfrastructureNodeRemoteManagerSerializer,
+    InfrastructureNodeSerializer,
+    InfrastructureNodeWriteSerializer,
+    RecommendationStatusSerializer,
+    ServiceRecommendationSerializer,
+)
+from sql.models import InfrastructureNode, Instance, ServiceRecommendation
+from sql.utils.resource_group import user_instances
+
+INFRASTRUCTURE_MENU_PERMISSIONS = (
+    "sql.menu_infrastructure",
+    "sql.menu_instance",
+    "sql.menu_instance_list",
+    "api_agents.menu_agent",
+)
+
+
+def _has_permission(user, permission):
+    return bool(user and user.is_authenticated and user.has_perm(permission))
+
+
+def _require_any_permission(request, *permissions_list):
+    if request.user.is_superuser:
+        return
+    if any(
+        _has_permission(request.user, permission) for permission in permissions_list
+    ):
+        return
+    raise PermissionDenied(
+        f"Missing required permission. Need one of: {', '.join(permissions_list)}"
+    )
+
+
+def request_can_manage_infrastructure(request):
+    return bool(
+        request.user.is_superuser
+        or _has_permission(request.user, "sql.menu_infrastructure")
+        or _has_permission(request.user, "sql.menu_instance")
+    )
+
+
+def _require_manage_infrastructure(request):
+    if request_can_manage_infrastructure(request):
+        return
+    raise PermissionDenied(
+        "Missing required permission. Need sql.menu_infrastructure or sql.menu_instance."
+    )
+
+
+def _active_node_agent(node):
+    local_agents = (
+        node.local_agents.filter(enabled=True, status=AgentStatus.ONLINE)
+        .exclude(status=AgentStatus.REVOKED)
+        .order_by("-last_seen_at", "name", "id")
+    )
+    for agent in local_agents:
+        if has_active_agent_websocket(agent):
+            return agent
+
+    assignments = (
+        node.agent_assignments.filter(
+            enabled=True,
+            command_enabled=True,
+            agent__enabled=True,
+            agent__status=AgentStatus.ONLINE,
+        )
+        .select_related("agent")
+        .order_by("-agent__last_seen_at", "agent_id")
+    )
+    for assignment in assignments:
+        if has_active_agent_websocket(assignment.agent):
+            return assignment.agent
+    return None
+
+
+class InfrastructureNodeListCreateView(generics.ListAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = CustomizedPagination
+    serializer_class = InfrastructureNodeSerializer
+
+    def get_visible_services(self):
+        return (
+            user_instances(self.request.user)
+            .select_related("node")
+            .prefetch_related("resource_group", "instance_tag")
+        )
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["visible_service_ids"] = list(
+            self.get_visible_services().values_list("id", flat=True)
+        )
+        return context
+
+    def get_queryset(self):
+        visible_services = self.get_visible_services()
+        visible_service_ids = visible_services.values("id")
+        queryset = (
+            InfrastructureNode.objects.annotate(
+                service_count=Count(
+                    "services",
+                    filter=Q(services__id__in=visible_service_ids),
+                    distinct=True,
+                ),
+                recommendation_count=Count(
+                    "service_recommendations",
+                    filter=Q(
+                        service_recommendations__status=(
+                            ServiceRecommendation.STATUS_RECOMMENDED
+                        )
+                    ),
+                    distinct=True,
+                ),
+            )
+            .prefetch_related(
+                "resource_group",
+                "local_agents",
+                "agent_assignments__agent",
+                "service_recommendations",
+                Prefetch(
+                    "services",
+                    queryset=visible_services.order_by("instance_name", "id"),
+                    to_attr="visible_services",
+                ),
+            )
+            .order_by("name", "id")
+        )
+        if not request_can_manage_infrastructure(self.request):
+            user_groups = self.request.user.resource_group.filter(is_deleted=0)
+            queryset = queryset.filter(
+                Q(resource_group__in=user_groups)
+                | Q(services__id__in=visible_service_ids)
+            ).distinct()
+        search = self.request.query_params.get("search", "").strip()
+        if search:
+            visible_service_search = Q(services__id__in=visible_service_ids) & (
+                Q(services__instance_name__icontains=search)
+                | Q(services__host__icontains=search)
+            )
+            queryset = queryset.filter(
+                Q(name__icontains=search)
+                | Q(address__icontains=search)
+                | Q(description__icontains=search)
+                | visible_service_search
+                | Q(local_agents__name__icontains=search)
+                | Q(local_agents__hostname__icontains=search)
+            ).distinct()
+        return queryset
+
+    def get(self, request):
+        _require_any_permission(request, *INFRASTRUCTURE_MENU_PERMISSIONS)
+        return super().get(request)
+
+    def post(self, request):
+        _require_manage_infrastructure(request)
+        serializer = InfrastructureNodeWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        node = serializer.save()
+        return success_response(
+            data=InfrastructureNodeSerializer(
+                node,
+                context={
+                    "visible_service_ids": list(
+                        self.get_visible_services().values_list("id", flat=True)
+                    )
+                },
+            ).data,
+            detail="Infrastructure node created.",
+            status_code=status.HTTP_201_CREATED,
+        )
+
+
+class InfrastructureNodeDetailView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self, node_id):
+        return get_object_or_404(InfrastructureNode, pk=node_id)
+
+    def get_visible_services(self, request):
+        return user_instances(request.user)
+
+    def get_visible_service_ids(self, request):
+        return list(self.get_visible_services(request).values_list("id", flat=True))
+
+    def ensure_node_visible(self, request, node):
+        if request_can_manage_infrastructure(request):
+            return
+        user_groups = request.user.resource_group.filter(is_deleted=0)
+        if node.resource_group.filter(
+            group_id__in=user_groups.values("group_id")
+        ).exists():
+            return
+        if self.get_visible_services(request).filter(node=node).exists():
+            return
+        raise PermissionDenied("You do not have access to this infrastructure node.")
+
+    def get(self, request, node_id):
+        _require_any_permission(request, *INFRASTRUCTURE_MENU_PERMISSIONS)
+        node = self.get_object(node_id)
+        self.ensure_node_visible(request, node)
+        return success_response(
+            data=InfrastructureNodeSerializer(
+                node,
+                context={"visible_service_ids": self.get_visible_service_ids(request)},
+            ).data
+        )
+
+    def patch(self, request, node_id):
+        _require_manage_infrastructure(request)
+        node = self.get_object(node_id)
+        serializer = InfrastructureNodeWriteSerializer(
+            node, data=request.data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        node = serializer.save()
+        return success_response(
+            data=InfrastructureNodeSerializer(
+                node,
+                context={"visible_service_ids": self.get_visible_service_ids(request)},
+            ).data
+        )
+
+
+class InfrastructureServiceCreateView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        _require_manage_infrastructure(request)
+        serializer = DatabaseServiceWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        service = serializer.save()
+        return success_response(
+            data=DatabaseServiceSerializer(service).data,
+            detail="Service created.",
+            status_code=status.HTTP_201_CREATED,
+        )
+
+
+class InfrastructureServiceDetailView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self, service_id):
+        return get_object_or_404(
+            Instance.objects.select_related("node").prefetch_related(
+                "resource_group", "instance_tag"
+            ),
+            pk=service_id,
+        )
+
+    def patch(self, request, service_id):
+        _require_manage_infrastructure(request)
+        service = self.get_object(service_id)
+        serializer = DatabaseServiceWriteSerializer(
+            service, data=request.data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        service = serializer.save()
+        return success_response(data=DatabaseServiceSerializer(service).data)
+
+
+class InfrastructureServiceConnectionTestView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, service_id):
+        _require_manage_infrastructure(request)
+        service = get_object_or_404(Instance, pk=service_id)
+        try:
+            command = run_agent_command_sync(
+                instance=service,
+                command_type=AgentCommandType.CONNECTION_TEST,
+                workflow_type="infrastructure",
+                workflow_id=f"service-test:{service.id}:{timezone.now().timestamp()}",
+                payload={"action": "connection_test", "instance_id": service.id},
+                timeout_seconds=30,
+            )
+        except (AgentCommandDispatchError, AgentCommandExecutionError) as exc:
+            raise serializers.ValidationError({"errors": str(exc)}) from exc
+
+        message = ""
+        if isinstance(command.result, dict):
+            message = command.result.get("message", "")
+        return success_response(
+            data={"message": message or "Connection successful."},
+            detail="Connection test completed.",
+        )
+
+
+class InfrastructureNodeDiscoverView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, node_id):
+        _require_manage_infrastructure(request)
+        node = get_object_or_404(InfrastructureNode, pk=node_id)
+        agent = _active_node_agent(node)
+        if agent is None:
+            raise serializers.ValidationError(
+                {
+                    "errors": "No online websocket-connected agent is assigned to this node."
+                }
+            )
+
+        delivered = send_agent_message(
+            agent.id,
+            {
+                "type": "infrastructure.discover",
+                "node_id": node.id,
+                "node": {
+                    "id": node.id,
+                    "name": node.name,
+                    "address": node.address,
+                    "metadata": node.metadata,
+                },
+            },
+            agent=agent,
+        )
+        if not delivered:
+            raise serializers.ValidationError(
+                {"errors": "Agent websocket is not connected."}
+            )
+        return success_response(
+            data={"agent_id": agent.id},
+            detail="Discovery requested.",
+            status_code=status.HTTP_202_ACCEPTED,
+        )
+
+
+class ServiceRecommendationDetailView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, recommendation_id):
+        _require_manage_infrastructure(request)
+        recommendation = get_object_or_404(ServiceRecommendation, pk=recommendation_id)
+        serializer = RecommendationStatusSerializer(
+            recommendation, data=request.data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        recommendation = serializer.save()
+        return success_response(
+            data=ServiceRecommendationSerializer(recommendation).data
+        )
+
+
+class InfrastructureNodeRemoteManagerView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self, node_id):
+        return get_object_or_404(InfrastructureNode, pk=node_id)
+
+    def put(self, request, node_id):
+        _require_any_permission(request, "api_agents.menu_agent")
+        node = self.get_object(node_id)
+        serializer = InfrastructureNodeRemoteManagerSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        agent = data.pop("agent")
+
+        with transaction.atomic():
+            for assignment in node.agent_assignments.select_for_update().exclude(
+                agent=agent
+            ):
+                assignment.delete()
+
+            assignment = (
+                AgentNodeAssignment.objects.select_for_update()
+                .filter(agent=agent, node=node)
+                .first()
+            )
+            if assignment is None:
+                assignment = AgentNodeAssignment(agent=agent, node=node)
+            assignment.enabled = True
+            for field, value in data.items():
+                setattr(assignment, field, value)
+            assignment.save()
+
+        return success_response(
+            data=InfrastructureNodeRemoteManagerRecordSerializer(assignment).data,
+            detail="Remote manager assigned.",
+        )
+
+    def delete(self, request, node_id):
+        _require_any_permission(request, "api_agents.menu_agent")
+        node = self.get_object(node_id)
+        with transaction.atomic():
+            for assignment in node.agent_assignments.select_for_update():
+                assignment.delete()
+        return success_response(detail="Remote manager cleared.")
