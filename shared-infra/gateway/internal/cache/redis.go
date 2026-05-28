@@ -32,7 +32,10 @@ func NewAPIKeyCache(redisURL string, ttl time.Duration) (*APIKeyCache, error) {
 
 	client := redis.NewClient(opts)
 
-	if err := client.Ping(context.Background()).Err(); err != nil {
+	pingCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := client.Ping(pingCtx).Err(); err != nil {
 		slog.Warn("redis unavailable, caching disabled", "error", err)
 		return &APIKeyCache{client: nil, ttl: ttl}, nil
 	}
