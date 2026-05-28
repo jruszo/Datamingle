@@ -206,7 +206,6 @@ export const systemSettingsSections: SystemSettingsSectionDefinition[] = [
     fields: [
       { key: 'index_path_url', label: 'Default landing path', input: 'text', placeholder: 'sqlworkflow' },
       { key: 'default_auth_group', label: 'Default auth groups', input: 'multiselect', optionSource: 'auth_groups' },
-      { key: 'default_resource_group', label: 'Default resource groups', input: 'multiselect', optionSource: 'resource_groups' },
       { key: 'api_user_whitelist', label: 'API user whitelist', input: 'multiselect', optionSource: 'users' },
       { key: 'watermark_enabled', label: 'Enable watermark', input: 'checkbox' },
     ],

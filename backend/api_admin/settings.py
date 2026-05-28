@@ -181,7 +181,6 @@ SYSTEM_SETTINGS_SCHEMA = (
     },
     {"name": "index_path_url", "kind": "string", "default": ""},
     {"name": "default_auth_group", "kind": "list_string", "default": []},
-    {"name": "default_resource_group", "kind": "list_string", "default": []},
     {"name": "api_user_whitelist", "kind": "list_int", "default": []},
     {"name": "lock_time_threshold", "kind": "int", "default": None},
     {"name": "lock_cnt_threshold", "kind": "int", "default": None},
@@ -364,15 +363,6 @@ class SystemSettingsSerializer(serializers.Serializer):
 
     def validate_default_auth_group(self, value):
         return self._validate_group_names(value)
-
-    def validate_default_resource_group(self, value):
-        valid_groups = set(ResourceGroup.objects.values_list("group_name", flat=True))
-        invalid_groups = [
-            group_name for group_name in value if group_name not in valid_groups
-        ]
-        if invalid_groups:
-            raise serializers.ValidationError("Unknown resource groups were provided.")
-        return value
 
     def validate_api_user_whitelist(self, value):
         valid_user_ids = set(User.objects.values_list("id", flat=True))
