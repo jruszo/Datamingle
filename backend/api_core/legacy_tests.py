@@ -4921,7 +4921,6 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
                 "sftp_host": "sftp.internal",
                 "sftp_port": 2222,
                 "default_auth_group": [self.group.name],
-                "default_resource_group": [self.resource_group.group_name],
                 "api_user_whitelist": [self.regular_user.id],
                 "openai_api_key": "sk-test",
                 "gh_ost": "/bin/echo",
@@ -4939,9 +4938,6 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
         self.assertEqual(payload["auto_review_tag"], [self.instance_tag.tag_code])
         self.assertEqual(payload["notify_phase_control"], ["Apply", "Execute"])
         self.assertEqual(payload["default_auth_group"], [self.group.name])
-        self.assertEqual(
-            payload["default_resource_group"], [self.resource_group.group_name]
-        )
         self.assertEqual(payload["api_user_whitelist"], [self.regular_user.id])
 
         config = SysConfig()
@@ -4951,9 +4947,6 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
         self.assertEqual(config.get("storage_type"), "sftp")
         self.assertEqual(config.get("sftp_port"), "2222")
         self.assertEqual(config.get("default_auth_group"), self.group.name)
-        self.assertEqual(
-            config.get("default_resource_group"), self.resource_group.group_name
-        )
         self.assertEqual(config.get("api_user_whitelist"), str(self.regular_user.id))
         self.assertEqual(config.get("openai_api_key"), "sk-test")
         self.assertEqual(config.get("gh_ost"), "/bin/echo")

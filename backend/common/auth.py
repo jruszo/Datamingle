@@ -1,8 +1,6 @@
 from django.contrib.auth.models import Group, Permission
 
 from common.config import SysConfig
-from sql.models import ResourceAccessRole, ResourceGroup, ResourceGroupMembership
-from sql.utils.resource_group import sync_user_legacy_resource_groups
 
 SUPERADMIN_GROUP_NAME = "superadmin"
 
@@ -15,11 +13,10 @@ def ensure_superadmin_group():
 
 def init_user(user):
     """
-    Attach the default resource groups and permission groups to a user.
+    Attach the default permission groups to a user.
     :param user:
     :return:
     """
-    # Add to default permission groups
     default_auth_group = SysConfig().get("default_auth_group", "")
     if default_auth_group:
         default_auth_group = default_auth_group.split(",")
@@ -27,17 +24,3 @@ def init_user(user):
             user.groups.add(group)
             for group in Group.objects.filter(name__in=default_auth_group)
         ]
-
-    # Add to default resource groups
-    default_resource_group = SysConfig().get("default_resource_group", "")
-    if default_resource_group:
-        default_resource_group = default_resource_group.split(",")
-        for group in ResourceGroup.objects.filter(
-            group_name__in=default_resource_group
-        ):
-            ResourceGroupMembership.objects.get_or_create(
-                user=user,
-                resource_group=group,
-                defaults={"access_role": ResourceAccessRole.QUERY},
-            )
-        sync_user_legacy_resource_groups(user)

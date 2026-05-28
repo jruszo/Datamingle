@@ -5,6 +5,7 @@ from unittest.mock import patch, ANY, Mock
 import datetime
 from dateutil.relativedelta import relativedelta
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.test import RequestFactory, TestCase, override_settings
 
 from common.config import SysConfig
@@ -21,7 +22,6 @@ from sql.models import (
     SqlWorkflow,
     SqlWorkflowContent,
     QueryLog,
-    ResourceGroup,
     TaskSchedule,
     TwoFactorAuthConfig,
 )
@@ -572,22 +572,21 @@ class AuthTest(TestCase):
         self.password = "some_str"
         self.u1 = User(username=self.username, password=self.password, display="user1")
         self.u1.save()
-        self.resource_group1 = ResourceGroup.objects.create(group_name="some_group")
-        sys_config = SysConfig()
-        sys_config.set("default_resource_group", self.resource_group1.group_name)
+        self.auth_group = Group.objects.create(name="Default")
 
     def tearDown(self):
         self.u1.delete()
-        self.resource_group1.delete()
+        self.auth_group.delete()
         SysConfig().purge()
 
     def test_init_user(self):
         """User initialization test."""
+        sys_config = SysConfig()
+        sys_config.set("default_auth_group", self.auth_group.name)
         init_user(self.u1)
-        self.assertEqual(self.u1, self.resource_group1.users_set.get(pk=self.u1.pk))
-        # init should be idempotent
+        self.assertIn(self.auth_group, self.u1.groups.all())
         init_user(self.u1)
-        self.assertEqual(self.u1, self.resource_group1.users_set.get(pk=self.u1.pk))
+        self.assertIn(self.auth_group, self.u1.groups.all())
 
 
 class TestTwoFactorAuth(TestCase):

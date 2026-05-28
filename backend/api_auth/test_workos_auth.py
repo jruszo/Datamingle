@@ -17,11 +17,15 @@ from common.authenticate.workos import WorkOSAuthClient
 from common.authenticate.workos_directory import process_directory_event
 from sql.models import (
     ResourceGroup,
+    ResourceAccessRole,
+    ResourceGroupMembership,
+    ResourceGroupMembershipSource,
     Users,
     WorkOSDirectoryGroup,
     WorkOSDirectoryGroupMembership,
     WorkOSDirectorySyncEvent,
 )
+from sql.utils.resource_group import sync_user_legacy_resource_groups
 
 
 def _jwt(payload):
@@ -205,7 +209,6 @@ class WorkOSAuthApiTests(APITestCase):
         self.resource_group = ResourceGroup.objects.create(group_name="Primary Team")
         self.sys_config = SysConfig()
         self.sys_config.set("default_auth_group", self.auth_group.name)
-        self.sys_config.set("default_resource_group", self.resource_group.group_name)
 
     def tearDown(self):
         self.sys_config.purge()
@@ -312,10 +315,6 @@ class WorkOSAuthApiTests(APITestCase):
         self.assertEqual(
             set(created_user.groups.values_list("name", flat=True)),
             {self.auth_group.name, SUPERADMIN_GROUP_NAME},
-        )
-        self.assertEqual(
-            list(created_user.resource_group.values_list("group_name", flat=True)),
-            [self.resource_group.group_name],
         )
 
         exchange_code = parse_qs(urlparse(callback_response.url).query)["code"][0]
@@ -541,7 +540,13 @@ class WorkOSAuthApiTests(APITestCase):
         )
         user = Users.objects.get(email="directory.user@datamingle.dev")
         direct_resource_group = ResourceGroup.objects.create(group_name="Direct Grant")
-        user.resource_group.add(direct_resource_group)
+        ResourceGroupMembership.objects.create(
+            user=user,
+            resource_group=direct_resource_group,
+            access_role=ResourceAccessRole.QUERY,
+            membership_source=ResourceGroupMembershipSource.DATAMINGLE,
+        )
+        sync_user_legacy_resource_groups(user)
 
         response = self._post_workos_directory_event(
             "dsync.group.user_removed",
