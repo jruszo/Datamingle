@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils import timezone
 
-from sql.models import Instance
+from sql.models import InfrastructureNode, Instance
 
 
 class AgentStatus(models.TextChoices):
@@ -47,6 +47,13 @@ class Agent(models.Model):
     desired_config_revision = models.PositiveIntegerField(default=1)
     enabled = models.BooleanField(default=True)
     metadata = models.JSONField(default=dict, blank=True)
+    local_node = models.ForeignKey(
+        InfrastructureNode,
+        related_name="local_agents",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
     create_time = models.DateTimeField(auto_now_add=True)
     update_time = models.DateTimeField(auto_now=True)
 
@@ -90,12 +97,90 @@ class Agent(models.Model):
         permissions = (("menu_agent", "Can access Agents menu"),)
 
 
+class AgentNodeAssignment(models.Model):
+    agent = models.ForeignKey(
+        Agent, related_name="node_assignments", on_delete=models.CASCADE
+    )
+    node = models.ForeignKey(
+        InfrastructureNode, related_name="agent_assignments", on_delete=models.CASCADE
+    )
+    enabled = models.BooleanField(default=True)
+    modules = models.JSONField(default=list, blank=True)
+    capabilities = models.JSONField(default=list, blank=True)
+    command_enabled = models.BooleanField(default=False)
+    active_command_node_id = models.PositiveIntegerField(
+        null=True, blank=True, unique=True, editable=False
+    )
+    metrics_enabled = models.BooleanField(default=True)
+    online_schema_enabled = models.BooleanField(default=False)
+    logs_enabled = models.BooleanField(default=False)
+    create_time = models.DateTimeField(auto_now_add=True)
+    update_time = models.DateTimeField(auto_now=True)
+
+    def clean(self):
+        super().clean()
+        self.active_command_node_id = (
+            self.node_id if self.enabled and self.command_enabled else None
+        )
+        if self.enabled and self.command_enabled:
+            duplicate = AgentNodeAssignment.objects.filter(
+                node=self.node,
+                enabled=True,
+                command_enabled=True,
+            )
+            if self.pk:
+                duplicate = duplicate.exclude(pk=self.pk)
+            if duplicate.exists():
+                raise ValidationError(
+                    {
+                        "command_enabled": (
+                            "This node already has an active command-capable "
+                            "remote manager assignment."
+                        )
+                    }
+                )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        from api_agents.services import sync_node_assignment_to_services
+
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            sync_node_assignment_to_services(self)
+
+    def delete(self, *args, **kwargs):
+        from api_agents.services import clear_node_assignment_from_services
+
+        with transaction.atomic():
+            clear_node_assignment_from_services(self)
+            return super().delete(*args, **kwargs)
+
+    class Meta:
+        db_table = "agent_node_assignment"
+        ordering = ("agent_id", "node_id")
+        unique_together = ("agent", "node")
+
+
 class AgentInstanceAssignment(models.Model):
     agent = models.ForeignKey(
         Agent, related_name="assignments", on_delete=models.CASCADE
     )
     instance = models.ForeignKey(
         Instance, related_name="agent_assignments", on_delete=models.CASCADE
+    )
+    node_assignment = models.ForeignKey(
+        AgentNodeAssignment,
+        related_name="instance_assignments",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+    )
+    local_node = models.ForeignKey(
+        InfrastructureNode,
+        related_name="local_agent_instance_assignments",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
     )
     enabled = models.BooleanField(default=True)
     modules = models.JSONField(default=list, blank=True)

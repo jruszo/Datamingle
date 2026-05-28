@@ -294,6 +294,8 @@ export type AgentRecord = {
   last_config_revision: number
   desired_config_revision: number
   enabled: boolean
+  local_node: number | null
+  local_node_name: string
   assignment_count: number
   create_time: string
   update_time: string
@@ -302,6 +304,10 @@ export type AgentRecord = {
 export type AgentAssignmentRecord = {
   id: number
   instance: number
+  node: number | null
+  node_assignment: number | null
+  local_node: number | null
+  inherited: boolean
   instance_name: string
   db_type: string
   host: string
@@ -359,6 +365,7 @@ export type AgentDetailRecord = AgentRecord & {
 export type AgentCreatePayload = {
   name: string
   display_name?: string
+  local_node?: number | null
 }
 
 export type AgentCreateResponse = AgentDetailRecord & {

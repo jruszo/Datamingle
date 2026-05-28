@@ -156,6 +156,7 @@ INSTALLED_APPS = (
     "api_access",
     "api_mailbox",
     "api_agents",
+    "api_infrastructure",
     "api_admin",
     "common",
     "rest_framework",
