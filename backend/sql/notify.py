@@ -10,7 +10,6 @@ from typing import Union, List
 
 import requests
 from django.conf import settings
-from django.contrib.auth.models import Group
 
 from common.config import SysConfig
 from common.utils.const import WorkflowStatus, WorkflowType
@@ -204,8 +203,7 @@ class LegacyRender(Notifier):
                 workflow_type_display, audit_id
             )
             # Send to users in auth groups for this resource group.
-            auth_group_names = Group.objects.get(id=self.audit.current_audit).name
-            msg_to = auth_group_users([auth_group_names], self.audit.group_id)
+            msg_to = auth_group_users([self.audit.current_audit], self.audit.group_id)
             # Message content
             msg_content = """Created At: {}
 Requester: {}
@@ -266,11 +264,9 @@ Workflow Preview: {}""".format(
                 workflow_type_display, audit_id
             )
             # Send to users in all auth groups for this resource group.
-            auth_group_names = [
-                Group.objects.get(id=auth_group_id).name
-                for auth_group_id in self.audit.audit_auth_groups.split(",")
-            ]
-            msg_to = auth_group_users(auth_group_names, self.audit.group_id)
+            msg_to = auth_group_users(
+                self.audit.audit_auth_groups.split(","), self.audit.group_id
+            )
             # Message content
             msg_content = """Created At: {}\nRequester: {}\nGroup: {}\nTarget Instance: {}\nDatabase: {}\nWorkflow Name: {}\nWorkflow URL: {}\nCancellation Reason: {}""".format(
                 workflow_detail.create_time.strftime("%Y-%m-%d %H:%M:%S"),

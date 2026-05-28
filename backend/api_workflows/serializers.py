@@ -10,6 +10,7 @@ from common.config import SysConfig
 from common.utils.const import WorkflowStatus, WorkflowType
 from sql.models import (
     Instance,
+    ResourceAccessRole,
     ResourceGroup,
     SqlWorkflow,
     SqlWorkflowContent,
@@ -18,9 +19,9 @@ from sql.models import (
     Users,
 )
 from sql.utils.resource_group import (
-    user_has_group_instance_access,
     user_has_instance_query_access,
     user_has_instance_workflow_access,
+    user_has_resource_role,
 )
 from sql.utils.sql_review import can_cancel, can_execute, can_timingtask
 from sql.utils.sql_utils import generate_sql, get_syntax_type
@@ -67,9 +68,7 @@ def _detected_workflow_syntax_types(sql_text, db_type="mysql"):
     return syntax_types
 
 
-def _authorize_workflow_check_dispatch(
-    actor, instance, sql_text, has_group_write_access
-):
+def _authorize_workflow_check_dispatch(actor, instance, sql_text):
     if actor.is_superuser:
         return
     syntax_types = _detected_workflow_syntax_types(sql_text, db_type=instance.db_type)
@@ -77,8 +76,6 @@ def _authorize_workflow_check_dispatch(
         user_has_instance_workflow_access(actor, instance, syntax_type)
         for syntax_type in syntax_types
     ):
-        return
-    if has_group_write_access and actor.has_perm("sql.sql_submit"):
         return
     raise serializers.ValidationError(
         {"errors": "You do not have permission to submit SQL for this instance."}
@@ -237,20 +234,26 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
         else:
             user = self.context["request"].user
 
-        has_group_write_access = user_has_group_instance_access(
-            actor, instance, tag_codes=["can_write"]
-        )
-        has_group_read_access = user_has_group_instance_access(
-            actor, instance, tag_codes=["can_read"]
+        has_group_request_access = user_has_resource_role(
+            actor, group, ResourceAccessRole.WORKFLOW_REQUESTER
         )
         has_temporary_read_access = user_has_instance_query_access(actor, instance)
 
         if is_offline_export:
-            if not (actor.is_superuser or actor.has_perm("sql.sqlexport_submit")):
+            if not (actor.is_superuser or has_group_request_access):
                 raise serializers.ValidationError(
                     {"errors": "You do not have permission to submit export workflows."}
                 )
-            if not (has_group_read_access or has_temporary_read_access):
+            if not (
+                actor.is_superuser
+                or (
+                    has_group_request_access
+                    and instance.instance_tag.filter(
+                        tag_code="can_read", active=True
+                    ).exists()
+                )
+                or has_temporary_read_access
+            ):
                 raise serializers.ValidationError(
                     {
                         "errors": (
@@ -259,7 +262,8 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                     }
                 )
         elif actor.is_superuser or (
-            has_group_write_access and actor.has_perm("sql.sql_submit")
+            has_group_request_access
+            and instance.instance_tag.filter(tag_code="can_write", active=True).exists()
         ):
             pass
         else:
@@ -267,7 +271,6 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                 actor,
                 instance,
                 sql_content,
-                has_group_write_access=has_group_write_access,
             )
 
         try:
@@ -331,7 +334,12 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
         )
         if not (
             actor.is_superuser
-            or (has_group_write_access and actor.has_perm("sql.sql_submit"))
+            or (
+                has_group_request_access
+                and instance.instance_tag.filter(
+                    tag_code="can_write", active=True
+                ).exists()
+            )
             or has_temporary_write_access
         ):
             raise serializers.ValidationError(

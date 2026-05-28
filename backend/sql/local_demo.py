@@ -6,6 +6,7 @@ from django.db import transaction
 from common.auth import ensure_superadmin_group
 from common.utils.const import WorkflowType
 from sql.models import Instance, InstanceTag, ResourceGroup, Users, WorkflowAuditSetting
+from sql.utils.resource_group import normalize_access_role_sequence
 
 DEMO_DB_PASSWORD = "demo123"
 
@@ -317,7 +318,7 @@ def _seed_workflow_settings(auth_groups, resource_groups, log):
     for key, config in DEMO_RESOURCE_GROUPS.items():
         resource_group = resource_groups[key]
         audit_auth_groups = ",".join(
-            str(auth_groups[group_name].id) for group_name in config["approval_groups"]
+            normalize_access_role_sequence(config["approval_groups"])
         )
         _, created = WorkflowAuditSetting.objects.update_or_create(
             group_id=resource_group.group_id,

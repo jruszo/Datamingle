@@ -63,11 +63,24 @@ function hasPermission(permission: string) {
   return authStore.currentUser?.permissions?.includes(permission) ?? false
 }
 
-const canAccessSettings = computed(() => hasPermission('sql.menu_system'))
-const canViewResourceGroups = computed(() => canAccessSettings.value && hasPermission('sql.view_resourcegroup'))
-const canCreateResourceGroups = computed(() => hasPermission('sql.menu_system') || hasPermission('sql.add_resourcegroup'))
-const canEditResourceGroups = computed(() => hasPermission('sql.menu_system') || hasPermission('sql.change_resourcegroup'))
-const canDeleteResourceGroups = computed(() => hasPermission('sql.menu_system') || hasPermission('sql.delete_resourcegroup'))
+const canViewResourceGroups = computed(
+  () =>
+    hasPermission('sql.menu_system')
+    || hasPermission('sql.view_resourcegroup')
+    || hasPermission('sql.resource_group_owner'),
+)
+const canCreateResourceGroups = computed(
+  () => hasPermission('sql.menu_system') || hasPermission('sql.add_resourcegroup'),
+)
+const canEditResourceGroups = computed(
+  () =>
+    hasPermission('sql.menu_system')
+    || hasPermission('sql.change_resourcegroup')
+    || hasPermission('sql.resource_group_owner'),
+)
+const canDeleteResourceGroups = computed(
+  () => hasPermission('sql.menu_system') || hasPermission('sql.delete_resourcegroup'),
+)
 
 function toUserFacingMessage(errorValue: unknown, fallback: string) {
   if (!(errorValue instanceof Error)) {
@@ -205,7 +218,7 @@ watch(searchQuery, () => {
       <CardHeader>
         <CardTitle>Groups</CardTitle>
         <CardDescription>
-          Search, sort, and maintain resource groups with the same filterable workflow used in Permission Groups.
+          Search, sort, and maintain scoped access groups for users and servers.
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-5">

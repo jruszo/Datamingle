@@ -62,6 +62,54 @@ class ResourceGroup(models.Model):
         verbose_name_plural = "Resource Group Management"
 
 
+class ResourceAccessRole(models.TextChoices):
+    QUERY = "query", "Query"
+    WORKFLOW_REQUESTER = "workflow_requester", "Workflow Requester"
+    WORKFLOW_APPROVER = "workflow_approver", "Workflow Approver"
+    RESOURCE_OWNER = "resource_owner", "Resource Owner"
+
+
+RESOURCE_ACCESS_ROLE_RANKS = {
+    ResourceAccessRole.QUERY: 10,
+    ResourceAccessRole.WORKFLOW_REQUESTER: 20,
+    ResourceAccessRole.WORKFLOW_APPROVER: 30,
+    ResourceAccessRole.RESOURCE_OWNER: 40,
+}
+
+
+RESOURCE_ACCESS_ROLE_CATALOG = (
+    {
+        "code": ResourceAccessRole.QUERY,
+        "label": "Query",
+        "description": "Query allowed instances in the resource group.",
+        "rank": RESOURCE_ACCESS_ROLE_RANKS[ResourceAccessRole.QUERY],
+    },
+    {
+        "code": ResourceAccessRole.WORKFLOW_REQUESTER,
+        "label": "Workflow Requester",
+        "description": "Query plus submit workflow, export, and archive requests.",
+        "rank": RESOURCE_ACCESS_ROLE_RANKS[ResourceAccessRole.WORKFLOW_REQUESTER],
+    },
+    {
+        "code": ResourceAccessRole.WORKFLOW_APPROVER,
+        "label": "Workflow Approver",
+        "description": "Requester capabilities plus review and approve workflows.",
+        "rank": RESOURCE_ACCESS_ROLE_RANKS[ResourceAccessRole.WORKFLOW_APPROVER],
+    },
+    {
+        "code": ResourceAccessRole.RESOURCE_OWNER,
+        "label": "Resource Owner",
+        "description": "Approver capabilities plus manage resource group users, roles, and instances.",
+        "rank": RESOURCE_ACCESS_ROLE_RANKS[ResourceAccessRole.RESOURCE_OWNER],
+    },
+)
+
+
+class ResourceGroupMembershipSource(models.TextChoices):
+    DATAMINGLE = "datamingle", "Datamingle"
+    WORKOS_DIRECTORY = "workos_directory", "WorkOS Directory"
+
+
 class Users(AbstractUser):
     """
     Extended user profile.
@@ -116,6 +164,58 @@ class Users(AbstractUser):
         db_table = "sql_users"
         verbose_name = "User Management"
         verbose_name_plural = "User Management"
+
+
+class ResourceGroupMembership(models.Model):
+    """Role-bearing membership of a user in a resource group."""
+
+    user = models.ForeignKey(
+        Users, related_name="resource_group_memberships", on_delete=models.CASCADE
+    )
+    resource_group = models.ForeignKey(
+        ResourceGroup, related_name="memberships", on_delete=models.CASCADE
+    )
+    access_role = models.CharField(
+        "Access Role",
+        max_length=32,
+        choices=ResourceAccessRole.choices,
+        default=ResourceAccessRole.QUERY,
+        db_index=True,
+    )
+    membership_source = models.CharField(
+        "Membership Source",
+        max_length=32,
+        choices=ResourceGroupMembershipSource.choices,
+        default=ResourceGroupMembershipSource.DATAMINGLE,
+        db_index=True,
+    )
+    create_time = models.DateTimeField(auto_now_add=True)
+    sys_time = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user_id}:{self.resource_group_id}:{self.access_role}"
+
+    class Meta:
+        managed = True
+        db_table = "resource_group_membership"
+        verbose_name = "Resource Group Membership"
+        verbose_name_plural = "Resource Group Memberships"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("user", "resource_group"),
+                name="resource_group_membership_user_group_uniq",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=("resource_group", "access_role"),
+                name="rg_membership_group_role_idx",
+            ),
+            models.Index(
+                fields=("user", "access_role"),
+                name="rg_membership_user_role_idx",
+            ),
+        ]
 
 
 class WorkOSDirectoryGroup(models.Model):

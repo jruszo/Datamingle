@@ -8,12 +8,18 @@ from enum import Enum
 from typing import Union, Optional, List
 import logging
 
-from django.contrib.auth.models import Group
+from django.db.models import Q
 from django.utils import timezone
 from django.conf import settings
 
 from sql.engines.models import ReviewResult
-from sql.utils.resource_group import user_groups, user_member_groups, auth_group_users
+from sql.utils.resource_group import (
+    access_role_label,
+    normalize_access_role,
+    normalize_access_role_sequence,
+    roles_at_or_below,
+    user_has_resource_role,
+)
 from common.utils.const import WorkflowStatus, WorkflowType, WorkflowAction
 from sql.models import (
     WorkflowAudit,
@@ -26,6 +32,7 @@ from sql.models import (
     PermissionRequest,
     Users,
     ArchiveConfig,
+    ResourceGroupMembership,
 )
 from common.config import SysConfig
 from sql.utils.sql_utils import remove_comments
@@ -38,21 +45,30 @@ class AuditException(Exception):
 
 
 class ReviewNodeType(Enum):
-    GROUP = "group"
+    ROLE = "role"
     AUTO_PASS = "auto_pass"
 
 
 @dataclass
+class ReviewRole:
+    code: str
+
+    @property
+    def name(self):
+        return access_role_label(self.code)
+
+
+@dataclass
 class ReviewNode:
-    group: Optional[Group] = None
-    node_type: ReviewNodeType = ReviewNodeType.GROUP
+    group: Optional[ReviewRole] = None
+    node_type: ReviewNodeType = ReviewNodeType.ROLE
     is_current_node: bool = False
     is_passed_node: bool = False
 
     def __post_init__(self):
-        if self.node_type == ReviewNodeType.GROUP and not self.group:
+        if self.node_type == ReviewNodeType.ROLE and not self.group:
             raise ValueError(
-                f"group not provided and node_type is set as {self.node_type}"
+                f"role not provided and node_type is set as {self.node_type}"
             )
 
     @property
@@ -95,7 +111,7 @@ class ReviewInfo:
 @dataclass
 class AuditSetting:
     """
-    `audit_auth_groups` are Django group IDs.
+    `audit_auth_groups` are resource access role codes.
     """
 
     audit_auth_groups: List = field(default_factory=list)
@@ -107,6 +123,27 @@ class AuditSetting:
         if self.auto_reject or self.auto_pass:
             return ""
         return ",".join(str(x) for x in self.audit_auth_groups)
+
+
+def reviewable_audit_ids(user, workflow_type=None):
+    queryset = WorkflowAudit.objects.filter(current_status=WorkflowStatus.WAITING)
+    if workflow_type is not None:
+        queryset = queryset.filter(workflow_type=workflow_type)
+    if user.is_superuser:
+        return list(queryset.values_list("audit_id", flat=True))
+
+    filters = Q()
+    for membership in ResourceGroupMembership.objects.filter(
+        user=user,
+        resource_group__is_deleted=0,
+    ):
+        filters |= Q(
+            group_id=membership.resource_group_id,
+            current_audit__in=roles_at_or_below(membership.access_role),
+        )
+    if not filters:
+        return []
+    return list(queryset.filter(filters).values_list("audit_id", flat=True))
 
 
 # List allowed operations for each workflow status during review.
@@ -176,24 +213,14 @@ class AuditV2:
         if self.audit.audit_auth_groups == "":
             audit_auth_group = "No approval required"
         else:
-            try:
-                audit_auth_group = "->".join(
-                    [
-                        Group.objects.get(id=auth_group_id).name
-                        for auth_group_id in self.audit.audit_auth_groups.split(",")
-                    ]
-                )
-            except Group.DoesNotExist:
-                audit_auth_group = self.audit.audit_auth_groups
+            audit_auth_group = "->".join(
+                access_role_label(role)
+                for role in normalize_access_role_sequence(self.audit.audit_auth_groups)
+            )
         if self.audit.current_audit == "-1":
             current_audit_auth_group = None
         else:
-            try:
-                current_audit_auth_group = Group.objects.get(
-                    id=self.audit.current_audit
-                ).name
-            except Group.DoesNotExist:
-                current_audit_auth_group = self.audit.current_audit
+            current_audit_auth_group = access_role_label(self.audit.current_audit)
         return audit_auth_group, current_audit_auth_group
 
     def get_workflow(self):
@@ -298,7 +325,9 @@ class AuditV2:
         return AuditSetting(
             auto_pass=self.is_auto_review(),
             auto_reject=self.is_auto_reject(),
-            audit_auth_groups=workflow_audit_setting.audit_auth_groups.split(","),
+            audit_auth_groups=normalize_access_role_sequence(
+                workflow_audit_setting.audit_auth_groups
+            ),
         )
 
     def create_audit(self) -> str:
@@ -428,15 +457,12 @@ class AuditV2:
                 f"{self.audit.current_status}, allowed actions are "
                 f"{','.join(x.label for x in allowed_actions)}"
             )
-        if self.workflow_type == WorkflowType.QUERY:
-            need_user_permission = "sql.query_review"
-        elif self.workflow_type == WorkflowType.ACCESS_REQUEST:
-            need_user_permission = "sql.query_review"
-        elif self.workflow_type == WorkflowType.SQL_REVIEW:
-            need_user_permission = "sql.sql_review"
-        elif self.workflow_type == WorkflowType.ARCHIVE:
-            need_user_permission = "sql.archive_review"
-        else:
+        if self.workflow_type not in [
+            WorkflowType.QUERY,
+            WorkflowType.ACCESS_REQUEST,
+            WorkflowType.SQL_REVIEW,
+            WorkflowType.ARCHIVE,
+        ]:
             raise AuditException(f"Unsupported workflow type: {self.workflow_type}")
 
         if action == WorkflowAction.ABORT:
@@ -455,27 +481,12 @@ class AuditV2:
                 raise AuditException(
                     "Current configuration forbids reviewing your own workflow"
                 )
-            # Check user permission.
-            if not actor.has_perm(need_user_permission):
+            current_role = normalize_access_role(self.audit.current_audit)
+            if not current_role:
+                raise AuditException("Current review role is not configured")
+            if not user_has_resource_role(actor, self.resource_group_id, current_role):
                 raise AuditException(
-                    "User has no related review permission, please configure permissions"
-                )
-
-            # Check whether user is in the current review group.
-            try:
-                audit_auth_group = Group.objects.get(id=self.audit.current_audit)
-            except Group.DoesNotExist:
-                raise AuditException(
-                    "Current review permission group does not exist, "
-                    "please ask admin to check and clean bad data"
-                )
-            if not auth_group_users([audit_auth_group.name], self.resource_group_id):
-                raise AuditException(
-                    "User is not in the resource group for this flow, no permission"
-                )
-            if not actor.groups.filter(id=self.audit.current_audit).exists():
-                raise AuditException(
-                    "User is not in the current node review group, no permission"
+                    "User is not in the current resource role review node"
                 )
             return True
         if action in [
@@ -553,10 +564,7 @@ class AuditV2:
         if self.audit.current_audit == "-1":
             operation_info = f"Approval remark: {remark}, no next approval"
         else:
-            try:
-                next_group_name = Group.objects.get(id=self.audit.current_audit).name
-            except Group.DoesNotExist:
-                next_group_name = self.audit.current_audit
+            next_group_name = access_role_label(self.audit.current_audit)
             operation_info = (
                 f"Approval remark: {remark}, next approval: {next_group_name}"
             )
@@ -633,9 +641,17 @@ class AuditV2:
         self.get_audit_info()
         review_nodes = []
         has_met_current_node = False
-        current_node_group_id = int(self.audit.current_audit)
-        for g in self.audit.audit_auth_groups.split(","):
-            if not g:
+        current_node_role = normalize_access_role(self.audit.current_audit)
+        roles = normalize_access_role_sequence(self.audit.audit_auth_groups)
+        if not roles:
+            review_nodes.append(
+                ReviewNode(
+                    node_type=ReviewNodeType.AUTO_PASS,
+                    is_passed_node=True,
+                )
+            )
+        for role in roles:
+            if not role:
                 # Empty value means auto-pass.
                 review_nodes.append(
                     ReviewNode(
@@ -644,33 +660,21 @@ class AuditV2:
                     )
                 )
                 continue
-            try:
-                g = int(g)
-            except ValueError:  # pragma: no cover
-                # Dirty data, treat as auto-pass.
-                # Compatibility: usually empty value means auto-pass.
-                review_nodes.append(
-                    ReviewNode(
-                        node_type=ReviewNodeType.AUTO_PASS,
-                        is_passed_node=True,
-                    )
-                )
-                continue
-            group_in_db = Group.objects.get(id=g)
+            review_role = ReviewRole(role)
             if self.audit.current_status != WorkflowStatus.WAITING:
                 # Overall status is not waiting, do not set detailed flags.
                 review_nodes.append(
                     ReviewNode(
-                        group=group_in_db,
+                        group=review_role,
                     )
                 )
                 continue
-            if current_node_group_id == g:
+            if current_node_role == role:
                 # Current node is always unpassed.
                 has_met_current_node = True
                 review_nodes.append(
                     ReviewNode(
-                        group=group_in_db,
+                        group=review_role,
                         is_current_node=True,
                         is_passed_node=False,
                     )
@@ -680,7 +684,7 @@ class AuditV2:
                 # Nodes after current are always unpassed.
                 review_nodes.append(
                     ReviewNode(
-                        group=group_in_db,
+                        group=review_role,
                         is_passed_node=False,
                     )
                 )
@@ -688,7 +692,7 @@ class AuditV2:
             # Otherwise, node is passed.
             review_nodes.append(
                 ReviewNode(
-                    group=group_in_db,
+                    group=review_role,
                     is_passed_node=True,
                 )
             )
@@ -701,19 +705,8 @@ class Audit(object):
     # Get pending workflow count for a user.
     @staticmethod
     def todo(user):
-        # Get resource groups for the user.
-        group_list = user_member_groups(user)
-        group_ids = [group.group_id for group in group_list]
-        # Get permission groups for the user.
-        if user.is_superuser:
-            auth_group_ids = [group.id for group in Group.objects.all()]
-        else:
-            auth_group_ids = [group.id for group in Group.objects.filter(user=user)]
-
         return WorkflowAudit.objects.filter(
-            current_status=WorkflowStatus.WAITING,
-            group_id__in=group_ids,
-            current_audit__in=auth_group_ids,
+            audit_id__in=reviewable_audit_ids(user),
         ).count()
 
     # Get audit info by audit_id.
@@ -738,15 +731,17 @@ class Audit(object):
     @staticmethod
     def settings(group_id, workflow_type):
         try:
-            return WorkflowAuditSetting.objects.get(
+            raw_roles = WorkflowAuditSetting.objects.get(
                 workflow_type=workflow_type, group_id=group_id
             ).audit_auth_groups
+            return ",".join(normalize_access_role_sequence(raw_roles))
         except Exception:
             return None
 
     # Update or create settings.
     @staticmethod
     def change_settings(group_id, workflow_type, audit_auth_groups):
+        audit_auth_groups = ",".join(normalize_access_role_sequence(audit_auth_groups))
         try:
             WorkflowAuditSetting.objects.get(
                 workflow_type=workflow_type, group_id=group_id
@@ -796,34 +791,12 @@ class Audit(object):
             return result
         # Only workflows in waiting status are reviewable.
         if audit_info.current_status == WorkflowStatus.WAITING:
-            try:
-                auth_group_id = Audit.detail_by_workflow_id(
-                    workflow_id, workflow_type
-                ).current_audit
-                audit_auth_group = Group.objects.get(id=auth_group_id).name
-            except Exception:
-                raise Exception(
-                    "Current review auth_group_id does not exist, "
-                    "please check and clean historical data"
-                )
-            if (
-                user.is_superuser
-                or auth_group_users([audit_auth_group], group_id)
-                .filter(id=user.id)
-                .exists()
+            if user.is_superuser or user_has_resource_role(
+                user,
+                group_id,
+                normalize_access_role(audit_info.current_audit),
             ):
-                if workflow_type == 1:
-                    if user.has_perm("sql.query_review"):
-                        result = True
-                elif workflow_type == WorkflowType.ACCESS_REQUEST:
-                    if user.has_perm("sql.query_review"):
-                        result = True
-                elif workflow_type == 2:
-                    if user.has_perm("sql.sql_review"):
-                        result = True
-                elif workflow_type == 3:
-                    if user.has_perm("sql.archive_review"):
-                        result = True
+                result = True
         return result
 
     # Add workflow log.

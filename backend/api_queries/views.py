@@ -28,6 +28,7 @@ from sql.models import (
     QueryLog,
     QueryPrivileges,
     QueryPrivilegesApply,
+    ResourceAccessRole,
     ResourceGroup,
 )
 from sql.notify import notify_for_audit
@@ -37,7 +38,12 @@ from sql.query_privileges import (
     _tb_priv,
     query_priv_check,
 )
-from sql.utils.resource_group import user_groups, user_instances, user_member_groups
+from sql.utils.resource_group import (
+    resource_groups_for_role,
+    user_groups,
+    user_instances,
+    user_member_groups,
+)
 from sql.utils.resource_group import (
     has_any_active_instance_grant,
     temp_instance_access_level,
@@ -93,6 +99,8 @@ def _require_any_permission(request, *perm_list):
 
 def _require_query_page_access(request):
     if has_any_active_instance_grant(request.user):
+        return
+    if resource_groups_for_role(request.user, ResourceAccessRole.QUERY).exists():
         return
     _require_any_permission(
         request, "sql.menu_query", "sql.menu_sqlquery", "sql.query_submit"
@@ -261,6 +269,9 @@ class QueryExecute(views.APIView):
         if not (
             user.is_superuser
             or user.has_perm("sql.query_submit")
+            or user_instances(user, tag_codes=["can_read"])
+            .filter(pk=instance.pk)
+            .exists()
             or temp_instance_access_level(user, instance) in READ_ACCESS_LEVELS
         ):
             raise PermissionDenied("You do not have permission to query this instance.")

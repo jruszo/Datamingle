@@ -1,15 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import {
-  ArrowLeft,
-  ChevronLeft,
-  ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
-  Save,
-  Trash2,
-} from 'lucide-vue-next'
+import { ArrowLeft, Save, Trash2 } from 'lucide-vue-next'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -24,28 +16,35 @@ import {
 import { Input } from '@/components/ui/input'
 import {
   deleteUser,
+  fetchAccessRoles,
   fetchResourceGroups,
   fetchUser,
   updateUser,
+  type AccessRoleRecord,
+  type ResourceAccessRoleCode,
+  type ResourceGroupMembershipSource,
   type ResourceGroupRecord,
   type UserManagementDetailRecord,
 } from '../api'
 import { useAuthStore } from '@/stores/auth'
 
+type GroupAccessState = {
+  access_role: ResourceAccessRoleCode | ''
+  membership_source?: ResourceGroupMembershipSource
+}
+
 const authStore = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 
+const accessRoles = ref<AccessRoleRecord[]>([])
 const resourceGroups = ref<ResourceGroupRecord[]>([])
 const loadedUser = ref<UserManagementDetailRecord | null>(null)
 const username = ref('')
 const displayName = ref('')
 const email = ref('')
-const selectedResourceGroupIds = ref<number[]>([])
-const availableFilter = ref('')
-const selectedFilter = ref('')
-const availableSelection = ref<number[]>([])
-const selectedSelection = ref<number[]>([])
+const groupAccessById = ref<Record<number, GroupAccessState>>({})
+const groupFilter = ref('')
 const isLoading = ref(false)
 const isSaving = ref(false)
 const isDeleting = ref(false)
@@ -60,9 +59,10 @@ const userId = computed(() => {
 })
 const canManageUsers = computed(() => authStore.currentUser?.is_superuser ?? false)
 const isDirectoryManaged = computed(() => loadedUser.value?.is_directory_managed ?? false)
-const selectedResourceGroupSet = computed(() => new Set(selectedResourceGroupIds.value))
-const normalizedAvailableFilter = computed(() => availableFilter.value.trim().toLowerCase())
-const normalizedSelectedFilter = computed(() => selectedFilter.value.trim().toLowerCase())
+const normalizedGroupFilter = computed(() => groupFilter.value.trim().toLowerCase())
+const assignedGroupCount = computed(
+  () => Object.values(groupAccessById.value).filter((row) => row.access_role).length,
+)
 
 function toUserFacingMessage(errorValue: unknown, fallback: string) {
   if (!(errorValue instanceof Error)) {
@@ -85,12 +85,25 @@ function requireToken() {
   return authStore.accessToken
 }
 
+function isAccessRoleCode(value: string): value is ResourceAccessRoleCode {
+  return accessRoles.value.some((role) => role.code === value)
+}
+
 function applyUser(user: UserManagementDetailRecord) {
   loadedUser.value = user
   username.value = user.username
   displayName.value = user.display
   email.value = user.email
-  selectedResourceGroupIds.value = [...user.resource_group_ids].sort((left, right) => left - right)
+
+  const nextAccess: Record<number, GroupAccessState> = {}
+  const rows = user.resource_access?.length ? user.resource_access : user.resource_groups
+  for (const row of rows) {
+    nextAccess[row.group_id] = {
+      access_role: row.access_role,
+      membership_source: row.membership_source ?? 'datamingle',
+    }
+  }
+  groupAccessById.value = nextAccess
 }
 
 function sortGroups(values: ResourceGroupRecord[]) {
@@ -111,79 +124,50 @@ function groupMatches(group: ResourceGroupRecord, filterValue: string) {
   return haystack.includes(filterValue)
 }
 
-const availableGroups = computed(() =>
+const filteredResourceGroups = computed(() =>
   sortGroups(
-    resourceGroups.value
-      .filter((group) => !selectedResourceGroupSet.value.has(group.group_id))
-      .filter((group) => groupMatches(group, normalizedAvailableFilter.value)),
+    resourceGroups.value.filter((group) => groupMatches(group, normalizedGroupFilter.value)),
   ),
 )
 
-const assignedGroups = computed(() =>
-  sortGroups(
-    resourceGroups.value
-      .filter((group) => selectedResourceGroupSet.value.has(group.group_id))
-      .filter((group) => groupMatches(group, normalizedSelectedFilter.value)),
-  ),
-)
+function roleForGroup(groupId: number) {
+  return groupAccessById.value[groupId]?.access_role ?? ''
+}
 
-function setSelectedGroups(groupIds: number[]) {
-  selectedResourceGroupIds.value = [...new Set(groupIds)].sort((left, right) => left - right)
+function sourceForGroup(groupId: number) {
+  return groupAccessById.value[groupId]?.membership_source
+}
+
+function updateGroupRole(groupId: number, event: Event) {
+  const value = (event.target as HTMLSelectElement).value
+  if (isDirectoryManaged.value || sourceForGroup(groupId) === 'workos_directory') {
+    return
+  }
+
+  const nextAccess = { ...groupAccessById.value }
+  if (!value) {
+    delete nextAccess[groupId]
+  } else if (isAccessRoleCode(value)) {
+    nextAccess[groupId] = {
+      access_role: value,
+      membership_source: nextAccess[groupId]?.membership_source ?? 'datamingle',
+    }
+  }
+  groupAccessById.value = nextAccess
   formSuccess.value = ''
 }
 
-function addGroups(groupIds: number[]) {
-  if (isDirectoryManaged.value) {
-    return
-  }
-  if (groupIds.length === 0) {
-    return
-  }
-  setSelectedGroups([...selectedResourceGroupIds.value, ...groupIds])
-}
-
-function removeGroups(groupIds: number[]) {
-  if (isDirectoryManaged.value) {
-    return
-  }
-  if (groupIds.length === 0) {
-    return
-  }
-  setSelectedGroups(selectedResourceGroupIds.value.filter((value) => !groupIds.includes(value)))
-}
-
-function moveSelectedToAssigned() {
-  addGroups(availableSelection.value)
-  availableSelection.value = []
-}
-
-function moveAllToAssigned() {
-  addGroups(availableGroups.value.map((group) => group.group_id))
-  availableSelection.value = []
-}
-
-function moveSelectedToAvailable() {
-  removeGroups(selectedSelection.value)
-  selectedSelection.value = []
-}
-
-function moveAllToAvailable() {
-  removeGroups(assignedGroups.value.map((group) => group.group_id))
-  selectedSelection.value = []
-}
-
-function updateSelection(event: Event, target: 'available' | 'selected') {
-  const element = event.target as HTMLSelectElement
-  const values = Array.from(element.selectedOptions)
-    .map((option) => Number(option.value))
-    .filter((value) => Number.isFinite(value))
-
-  if (target === 'available') {
-    availableSelection.value = values
-    return
-  }
-
-  selectedSelection.value = values
+function resourceAccessRows() {
+  return Object.entries(groupAccessById.value)
+    .map(([resourceGroupId, row]) => ({
+      resource_group_id: Number(resourceGroupId),
+      access_role: row.access_role,
+    }))
+    .filter(
+      (row): row is { resource_group_id: number; access_role: ResourceAccessRoleCode } =>
+        Number.isFinite(row.resource_group_id) && isAccessRoleCode(row.access_role),
+    )
+    .sort((left, right) => left.resource_group_id - right.resource_group_id)
 }
 
 async function loadAllGroups() {
@@ -219,9 +203,7 @@ async function loadPage() {
   username.value = ''
   displayName.value = ''
   email.value = ''
-  selectedResourceGroupIds.value = []
-  availableSelection.value = []
-  selectedSelection.value = []
+  groupAccessById.value = {}
 
   try {
     await authStore.loadCurrentUser()
@@ -231,14 +213,17 @@ async function loadPage() {
       return
     }
 
-    await loadAllGroups()
-
     if (!userId.value) {
       pageError.value = 'Invalid user identifier.'
       return
     }
 
-    const user = await fetchUser(userId.value, requireToken())
+    const [roles, user] = await Promise.all([
+      fetchAccessRoles(requireToken()),
+      fetchUser(userId.value, requireToken()),
+      loadAllGroups(),
+    ])
+    accessRoles.value = roles
     applyUser(user)
   } catch (errorValue) {
     pageError.value = toUserFacingMessage(errorValue, 'Failed to load the user editor.')
@@ -253,6 +238,11 @@ async function saveUser() {
     return
   }
 
+  if (isDirectoryManaged.value) {
+    formError.value = 'Resource group membership for this user is managed by WorkOS Directory Sync.'
+    return
+  }
+
   isSaving.value = true
   formError.value = ''
   formSuccess.value = ''
@@ -261,16 +251,11 @@ async function saveUser() {
     if (!userId.value) {
       throw new Error('Missing user identifier.')
     }
-    if (isDirectoryManaged.value) {
-      throw new Error(
-        'Resource group membership for this user is managed by WorkOS Directory Sync.',
-      )
-    }
 
     const updatedUser = await updateUser(
       userId.value,
       {
-        resource_group_ids: [...selectedResourceGroupIds.value].sort((left, right) => left - right),
+        resource_access: resourceAccessRows(),
         is_active: loadedUser.value?.is_active ?? true,
       },
       requireToken(),
@@ -305,16 +290,11 @@ async function toggleUserStatus() {
   formSuccess.value = ''
 
   try {
-    const payload: { resource_group_ids?: number[]; is_active: boolean } = {
-      is_active: nextIsActive,
-    }
-    if (!loadedUser.value.is_directory_managed) {
-      payload.resource_group_ids = [...loadedUser.value.resource_group_ids].sort(
-        (left, right) => left - right,
-      )
-    }
-
-    const updatedUser = await updateUser(userId.value, payload, requireToken())
+    const updatedUser = await updateUser(
+      userId.value,
+      { is_active: nextIsActive },
+      requireToken(),
+    )
     applyUser(updatedUser)
     formSuccess.value = nextIsActive
       ? 'User reactivated successfully.'
@@ -406,22 +386,14 @@ watch(
     <Card class="border-slate-200">
       <CardHeader>
         <CardTitle>Edit User</CardTitle>
-        <CardDescription>
-          Review resource groups and manage account lifecycle from the Datamingle SPA.
-        </CardDescription>
+        <CardDescription>Maintain the user account and resource access assignments.</CardDescription>
       </CardHeader>
       <CardContent class="space-y-6">
         <div
-          class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+          v-if="isDirectoryManaged"
+          class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
         >
-          <span v-if="isDirectoryManaged">
-            Resource group membership is managed by WorkOS Directory Sync. Active status remains
-            editable in Datamingle.
-          </span>
-          <span v-else>
-            This user uses Datamingle-managed fallback resource groups until WorkOS Directory Sync
-            manages their membership.
-          </span>
+          Resource group membership for this user is managed by WorkOS Directory Sync.
         </div>
 
         <div class="grid gap-4 md:grid-cols-2">
@@ -431,9 +403,7 @@ watch(
           </div>
 
           <div class="space-y-2">
-            <label for="user-display" class="text-sm font-medium text-slate-900"
-              >Display name</label
-            >
+            <label for="user-display" class="text-sm font-medium text-slate-900">Display name</label>
             <Input
               id="user-display"
               v-model="displayName"
@@ -455,105 +425,92 @@ watch(
 
         <p
           v-if="pageError"
-          class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+          class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
         >
           {{ pageError }}
         </p>
         <p
           v-else-if="formError"
-          class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+          class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
         >
           {{ formError }}
         </p>
         <p
           v-else-if="formSuccess"
-          class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"
+          class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"
         >
           {{ formSuccess }}
         </p>
 
-        <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
-          <div class="space-y-3">
-            <label for="available-groups-filter" class="text-sm font-medium text-slate-900"
-              >Available resource groups</label
-            >
-            <Input
-              id="available-groups-filter"
-              v-model="availableFilter"
-              :disabled="isLoading || isDirectoryManaged"
-              placeholder="Filter available resource groups"
-            />
-            <select
-              class="min-h-[22rem] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-              multiple
-              :disabled="isLoading || isDirectoryManaged"
-              @change="updateSelection($event, 'available')"
-            >
-              <option
-                v-for="group in availableGroups"
-                :key="group.group_id"
-                :value="group.group_id"
-              >
-                {{ group.group_name }}
-              </option>
-            </select>
+        <div class="space-y-4 rounded-lg border border-slate-200 p-5">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <h3 class="text-base font-semibold text-slate-900">Resource Access</h3>
+            <div class="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary" class="bg-slate-100 text-slate-700">
+                {{ assignedGroupCount }} assigned
+              </Badge>
+              <Badge variant="secondary" class="bg-slate-100 text-slate-700">
+                {{ resourceGroups.length }} groups
+              </Badge>
+            </div>
           </div>
 
-          <div class="flex flex-col items-center justify-center gap-2">
-            <Button
-              variant="outline"
-              size="icon"
-              :disabled="isLoading || isDirectoryManaged || availableSelection.length === 0"
-              @click="moveSelectedToAssigned"
-            >
-              <ChevronRight class="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              :disabled="isLoading || isDirectoryManaged || availableGroups.length === 0"
-              @click="moveAllToAssigned"
-            >
-              <ChevronsRight class="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              :disabled="isLoading || isDirectoryManaged || selectedSelection.length === 0"
-              @click="moveSelectedToAvailable"
-            >
-              <ChevronLeft class="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              :disabled="isLoading || isDirectoryManaged || assignedGroups.length === 0"
-              @click="moveAllToAvailable"
-            >
-              <ChevronsLeft class="h-4 w-4" />
-            </Button>
-          </div>
+          <Input
+            v-model="groupFilter"
+            :disabled="isLoading"
+            placeholder="Filter resource groups"
+            aria-label="Filter resource groups"
+          />
 
-          <div class="space-y-3">
-            <label for="selected-groups-filter" class="text-sm font-medium text-slate-900"
-              >Assigned resource groups</label
-            >
-            <Input
-              id="selected-groups-filter"
-              v-model="selectedFilter"
-              :disabled="isLoading || isDirectoryManaged"
-              placeholder="Filter assigned resource groups"
-            />
-            <select
-              class="min-h-[22rem] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-              multiple
-              :disabled="isLoading || isDirectoryManaged"
-              @change="updateSelection($event, 'selected')"
-            >
-              <option v-for="group in assignedGroups" :key="group.group_id" :value="group.group_id">
-                {{ group.group_name }}
-              </option>
-            </select>
+          <div class="overflow-x-auto rounded-md border border-slate-200">
+            <table class="min-w-full divide-y divide-slate-200 text-sm">
+              <thead class="bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
+                <tr>
+                  <th class="px-4 py-3">Resource group</th>
+                  <th class="px-4 py-3">Access role</th>
+                  <th class="px-4 py-3">Source</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-200 bg-white">
+                <tr v-for="group in filteredResourceGroups" :key="group.group_id">
+                  <td class="px-4 py-3">
+                    <div class="font-medium text-slate-900">{{ group.group_name }}</div>
+                    <div class="mt-1 text-xs text-slate-500">Group ID {{ group.group_id }}</div>
+                  </td>
+                  <td class="px-4 py-3">
+                    <select
+                      class="w-full min-w-52 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                      :value="roleForGroup(group.group_id)"
+                      :disabled="isDirectoryManaged || sourceForGroup(group.group_id) === 'workos_directory'"
+                      @change="updateGroupRole(group.group_id, $event)"
+                    >
+                      <option value="">No access</option>
+                      <option v-for="role in accessRoles" :key="role.code" :value="role.code">
+                        {{ role.label }}
+                      </option>
+                    </select>
+                  </td>
+                  <td class="px-4 py-3">
+                    <Badge
+                      v-if="sourceForGroup(group.group_id) === 'workos_directory'"
+                      variant="secondary"
+                      class="bg-violet-100 text-violet-800"
+                    >
+                      WorkOS Directory
+                    </Badge>
+                    <span v-else-if="roleForGroup(group.group_id)" class="text-xs text-slate-500">
+                      Datamingle
+                    </span>
+                    <span v-else class="text-xs text-slate-400">None</span>
+                  </td>
+                </tr>
+                <tr v-if="filteredResourceGroups.length === 0">
+                  <td colspan="3" class="px-4 py-8 text-center text-sm text-slate-500">
+                    No resource groups match the current filter.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </CardContent>

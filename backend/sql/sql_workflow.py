@@ -5,7 +5,6 @@ import traceback
 
 import simplejson as json
 from django.contrib.auth.decorators import permission_required
-from django.contrib.auth.models import Group
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Q

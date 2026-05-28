@@ -1,4 +1,4 @@
-from django.contrib.auth.models import Group, Permission
+from django.contrib.auth.models import Permission
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -15,7 +15,11 @@ from sql.models import (
     Users,
     WorkflowLog,
 )
-from sql.utils.resource_group import user_groups, user_member_groups
+from sql.utils.resource_group import (
+    normalize_access_role,
+    resource_role_users,
+    user_groups,
+)
 from sql.utils.sql_review import can_execute
 
 MAILBOX_BACKFILL_BATCH_SIZE = 1000
@@ -143,28 +147,20 @@ def _current_reviewers(source):
     ):
         return []
 
-    try:
-        current_group = Group.objects.get(id=int(audit.current_audit))
-    except (Group.DoesNotExist, ValueError):
+    current_role = normalize_access_role(audit.current_audit)
+    if not current_role:
         return []
 
-    required_permission = _approval_permission_codename(source)
     ban_self_audit = SysConfig().get("ban_self_audit")
     reviewers = []
     seen_usernames = set()
-    for user in current_group.user_set.filter(is_active=True):
-        member_group_ids = {group.group_id for group in user_member_groups(user)}
-        if isinstance(source, SqlWorkflow):
-            in_scope = source.group_id in member_group_ids
-        else:
-            in_scope = source.resource_group_id in member_group_ids
-        if not in_scope:
-            continue
+    group_id = (
+        source.group_id if isinstance(source, SqlWorkflow) else source.resource_group_id
+    )
+    for user in resource_role_users([current_role], group_id):
         if user.username in seen_usernames or _is_self_audit_blocked(
             user, source, ban_self_audit
         ):
-            continue
-        if not (user.is_superuser or user.has_perm(f"sql.{required_permission}")):
             continue
         seen_usernames.add(user.username)
         reviewers.append(user)

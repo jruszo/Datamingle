@@ -6,7 +6,6 @@ import ast
 import uuid
 from types import SimpleNamespace
 
-from django.contrib.auth.models import Group
 from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
@@ -34,6 +33,7 @@ from sql.models import (
     SqlWorkflowContent,
     WorkflowAudit,
     WorkflowLog,
+    ResourceAccessRole,
 )
 from sql.notify import notify_for_audit, notify_for_execute
 from sql.query_privileges import _query_apply_audit_call_back
@@ -42,12 +42,12 @@ from sql.utils.resource_group import (
     READ_ACCESS_LEVELS,
     WRITE_ACCESS_LEVELS,
     active_instance_grants,
+    access_role_label,
     user_groups,
     user_instances,
-    user_member_groups,
-    user_has_group_instance_access,
     user_has_instance_workflow_access,
-    temp_instance_access_level,
+    resource_groups_for_role,
+    resource_role_users,
 )
 from sql.utils.sql_utils import generate_sql, get_syntax_type
 from sql.utils.sql_review import (
@@ -58,7 +58,13 @@ from sql.utils.sql_review import (
     on_correct_time_period,
 )
 from sql.utils.tasks import add_sql_schedule, del_schedule, task_info
-from sql.utils.workflow_audit import Audit, AuditV2, get_auditor, AuditException
+from sql.utils.workflow_audit import (
+    Audit,
+    AuditV2,
+    get_auditor,
+    AuditException,
+    reviewable_audit_ids,
+)
 from api_workflows.filters import WorkflowAuditFilter
 from api_core.pagination import CustomizedPagination
 from api_core.response import success_response
@@ -129,9 +135,6 @@ def _detected_workflow_syntax_types(sql_text, db_type="mysql"):
 
 
 def _authorize_workflow_check_dispatch(user, instance, sql_text):
-    has_group_write_access = user_has_group_instance_access(
-        user, instance, tag_codes=["can_write"]
-    )
     if user.is_superuser:
         return
 
@@ -140,8 +143,6 @@ def _authorize_workflow_check_dispatch(user, instance, sql_text):
         user_has_instance_workflow_access(user, instance, syntax_type)
         for syntax_type in syntax_types
     ):
-        return
-    if has_group_write_access and user.has_perm("sql.sql_submit"):
         return
     raise serializers.ValidationError(
         {"errors": "You do not have permission to submit SQL for this instance."}
@@ -352,12 +353,8 @@ def _serialize_current_reviewers(workflow):
     for node in review_info.nodes:
         if not node.is_current_node or not node.group:
             continue
-        for user in node.group.user_set.filter(is_active=1):
-            group_names = [group.group_name for group in user_member_groups(user)]
-            if (
-                workflow.group_name not in group_names
-                or user.username in seen_usernames
-            ):
+        for user in resource_role_users([node.group.code], workflow.group_id):
+            if user.username in seen_usernames:
                 continue
             seen_usernames.add(user.username)
             reviewers.append(
@@ -525,33 +522,40 @@ def _can_access_workflow_module(user):
             user.has_perm("sql.sqlexport_submit"),
             user.has_perm("sql.offline_download"),
             user.has_perm("sql.audit_user"),
+            resource_groups_for_role(
+                user, ResourceAccessRole.WORKFLOW_REQUESTER
+            ).exists(),
             user_instances(user, tag_codes=["can_write"]).exists(),
         ]
     )
 
 
 def _can_submit_export_workflow(user):
-    return user.is_superuser or user.has_perm("sql.sqlexport_submit")
+    return (
+        user.is_superuser
+        or resource_groups_for_role(
+            user, ResourceAccessRole.WORKFLOW_REQUESTER
+        ).exists()
+    )
 
 
 def _pending_review_workflow_ids(user):
-    group_ids = [group.group_id for group in user_member_groups(user)]
-    if user.is_superuser:
-        auth_group_ids = [group.id for group in Group.objects.all()]
-    else:
-        auth_group_ids = [group.id for group in Group.objects.filter(user=user)]
     return list(
         WorkflowAudit.objects.filter(
-            current_status=WorkflowStatus.WAITING,
-            workflow_type=WorkflowType.SQL_REVIEW,
-            group_id__in=group_ids,
-            current_audit__in=auth_group_ids,
+            audit_id__in=reviewable_audit_ids(
+                user, workflow_type=WorkflowType.SQL_REVIEW
+            )
         ).values_list("workflow_id", flat=True)
     )
 
 
 def _workflow_metadata_resource_groups(user):
-    groups_by_id = {group.group_id: group for group in user_groups(user)}
+    groups_by_id = {
+        group.group_id: group
+        for group in resource_groups_for_role(
+            user, ResourceAccessRole.WORKFLOW_REQUESTER
+        )
+    }
     for grant in (
         active_instance_grants(user)
         .filter(
@@ -588,14 +592,25 @@ def _workflow_metadata_instance_groups(user):
 
 
 def _workflow_submission_scope(user):
-    can_submit_directly = user.is_superuser or user.has_perm("sql.sql_submit")
+    can_submit_directly = (
+        user.is_superuser
+        or resource_groups_for_role(
+            user, ResourceAccessRole.WORKFLOW_REQUESTER
+        ).exists()
+    )
     instances = (
         filter_agent_runnable_instances(user_instances(user))
         .prefetch_related("resource_group")
         .order_by("instance_name", "id")
     )
     direct_group_ids = (
-        {group.group_id for group in user_groups(user) if group.is_deleted == 0}
+        {
+            group.group_id
+            for group in resource_groups_for_role(
+                user, ResourceAccessRole.WORKFLOW_REQUESTER
+            )
+            if group.is_deleted == 0
+        }
         if can_submit_directly
         else set()
     )
@@ -624,8 +639,9 @@ def _workflow_submission_scope(user):
         allowed_groups = {}
         allowed_syntax_types = set()
 
-        if can_submit_directly and user_has_group_instance_access(
-            user, instance, tag_codes=["can_write"]
+        if (
+            can_submit_directly
+            and instance.instance_tag.filter(tag_code="can_write", active=True).exists()
         ):
             direct_groups = {
                 group_id: {"group_name": group_name, "syntax_types": {1, 2}}
@@ -689,7 +705,13 @@ def _export_submission_scope(user):
         .order_by("instance_name", "id")
     )
     direct_group_ids = (
-        {group.group_id for group in user_groups(user) if group.is_deleted == 0}
+        {
+            group.group_id
+            for group in resource_groups_for_role(
+                user, ResourceAccessRole.WORKFLOW_REQUESTER
+            )
+            if group.is_deleted == 0
+        }
         if _can_submit_export_workflow(user)
         else set()
     )
@@ -708,8 +730,9 @@ def _export_submission_scope(user):
     for instance in instances:
         allowed_groups = {}
 
-        if _can_submit_export_workflow(user) and user_has_group_instance_access(
-            user, instance, tag_codes=["can_read"]
+        if (
+            _can_submit_export_workflow(user)
+            and instance.instance_tag.filter(tag_code="can_read", active=True).exists()
         ):
             direct_groups = {
                 group_id: group_name
@@ -840,17 +863,10 @@ class ExecuteCheck(views.APIView):
                 "Workflow SQL check failed for instance_id=%s", instance.id
             )
             raise serializers.ValidationError({"errors": "Internal Server Error"})
-        has_group_write_access = user_has_group_instance_access(
-            request.user, instance, tag_codes=["can_write"]
-        )
         has_temporary_write_access = user_has_instance_workflow_access(
             request.user, instance, check_result.syntax_type
         )
-        if not (
-            request.user.is_superuser
-            or (has_group_write_access and request.user.has_perm("sql.sql_submit"))
-            or has_temporary_write_access
-        ):
+        if not (request.user.is_superuser or has_temporary_write_access):
             raise serializers.ValidationError(
                 {
                     "errors": "You do not have permission to submit SQL for this instance."
@@ -879,13 +895,10 @@ class WorkflowExportCheck(views.APIView):
         serializer = ExecuteCheckSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         instance = serializer.get_instance()
-        if (
-            not user_has_group_instance_access(
-                request.user, instance, tag_codes=["can_read"]
-            )
-            and temp_instance_access_level(request.user, instance)
-            not in READ_ACCESS_LEVELS
-        ):
+        scoped_instance_ids = {
+            item["id"] for item in _export_submission_scope(request.user)["instances"]
+        }
+        if instance.id not in scoped_instance_ids:
             raise PermissionDenied(
                 "You do not have permission to submit export workflows for this instance."
             )
@@ -1001,13 +1014,16 @@ class WorkflowList(generics.ListAPIView):
 
         if user.is_superuser or user.has_perm("sql.audit_user"):
             pass
-        elif (
-            user.has_perm("sql.sql_review")
-            or user.has_perm("sql.sql_execute_for_resource_group")
-            or user.has_perm("sql.menu_sqlexportworkflow")
-        ):
+        elif resource_groups_for_role(
+            user, ResourceAccessRole.WORKFLOW_APPROVER
+        ).exists() or user.has_perm("sql.sql_execute_for_resource_group"):
+            scoped_groups = resource_groups_for_role(
+                user, ResourceAccessRole.WORKFLOW_APPROVER
+            )
+            if user.has_perm("sql.sql_execute_for_resource_group"):
+                scoped_groups = user_groups(user)
             queryset = queryset.filter(
-                group_id__in=[group.group_id for group in user_groups(user)]
+                group_id__in=[group.group_id for group in scoped_groups]
             )
         else:
             queryset = queryset.filter(engineer=user.username)
@@ -1245,12 +1261,12 @@ class WorkflowApprovalPreview(views.APIView):
         else:
             readable_groups = []
             review_info = []
-            for auth_group_id in audit_auth_groups.split(","):
-                group = Group.objects.get(id=int(auth_group_id))
-                readable_groups.append(group.name)
+            for role in audit_auth_groups.split(","):
+                role_label = access_role_label(role)
+                readable_groups.append(role_label)
                 review_info.append(
                     {
-                        "group_name": group.name,
+                        "group_name": role_label,
                         "is_auto_pass": False,
                         "is_current_node": False,
                         "is_passed_node": False,
@@ -1491,18 +1507,9 @@ class WorkflowAuditList(generics.ListAPIView):
     )
     def get(self, request):
         user = request.user
-        group_list = user_member_groups(user)
-        group_ids = [group.group_id for group in group_list]
-
-        if user.is_superuser:
-            auth_group_ids = [group.id for group in Group.objects.all()]
-        else:
-            auth_group_ids = [group.id for group in Group.objects.filter(user=user)]
-
         queryset = self.queryset.filter(
             current_status=WorkflowStatus.WAITING,
-            group_id__in=group_ids,
-            current_audit__in=auth_group_ids,
+            audit_id__in=reviewable_audit_ids(user),
         )
         audit = self.filter_queryset(queryset)
         page_audit = self.paginate_queryset(queryset=audit)

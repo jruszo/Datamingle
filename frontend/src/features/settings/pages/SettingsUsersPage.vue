@@ -11,10 +11,13 @@ import { DataTable, type DataTableColumn } from '@/components/ui/data-table'
 import { Input } from '@/components/ui/input'
 import {
   deleteUser,
+  fetchAccessRoles,
   fetchResourceGroups,
   fetchUsers,
   inviteWorkosUser,
   updateUser,
+  type AccessRoleRecord,
+  type ResourceAccessRoleCode,
   type ResourceGroupRecord,
   type UserManagementRecord,
 } from '../api'
@@ -36,8 +39,9 @@ const latestRequestId = ref(0)
 const isInviteDialogOpen = ref(false)
 const inviteEmail = ref('')
 const inviteDisplay = ref('')
-const inviteResourceGroupIds = ref<number[]>([])
+const inviteResourceAccessById = ref<Record<number, ResourceAccessRoleCode | ''>>({})
 const inviteResourceGroups = ref<ResourceGroupRecord[]>([])
+const inviteAccessRoles = ref<AccessRoleRecord[]>([])
 const inviteResourceGroupsLoading = ref(false)
 const inviteSubmitting = ref(false)
 const inviteError = ref('')
@@ -105,7 +109,49 @@ function groupSummary(user: UserManagementRecord) {
     return 'No resource groups assigned'
   }
 
-  return user.resource_groups.map((group) => group.group_name).join(', ')
+  return user.resource_groups
+    .map((group) => `${group.group_name}: ${group.access_role_label ?? group.access_role}`)
+    .join(', ')
+}
+
+function isAccessRoleCode(value: string): value is ResourceAccessRoleCode {
+  return inviteAccessRoles.value.some((role) => role.code === value)
+}
+
+function resourceAccessRowsForUser(user: UserManagementRecord) {
+  const rows = user.resource_access?.length ? user.resource_access : user.resource_groups
+  return rows.map((group) => ({
+    resource_group_id: group.group_id,
+    access_role: group.access_role,
+  }))
+}
+
+function inviteRoleForGroup(groupId: number) {
+  return inviteResourceAccessById.value[groupId] ?? ''
+}
+
+function updateInviteRole(groupId: number, event: Event) {
+  const value = (event.target as HTMLSelectElement).value
+  const nextAccess = { ...inviteResourceAccessById.value }
+  if (!value) {
+    delete nextAccess[groupId]
+  } else if (isAccessRoleCode(value)) {
+    nextAccess[groupId] = value
+  }
+  inviteResourceAccessById.value = nextAccess
+}
+
+function inviteResourceAccessRows() {
+  return Object.entries(inviteResourceAccessById.value)
+    .map(([resourceGroupId, accessRole]) => ({
+      resource_group_id: Number(resourceGroupId),
+      access_role: accessRole,
+    }))
+    .filter(
+      (row): row is { resource_group_id: number; access_role: ResourceAccessRoleCode } =>
+        Number.isFinite(row.resource_group_id) && isAccessRoleCode(row.access_role),
+    )
+    .sort((left, right) => left.resource_group_id - right.resource_group_id)
 }
 
 async function loadUsers() {
@@ -169,11 +215,14 @@ async function toggleUserActiveState(user: UserManagementRecord) {
   }
 
   try {
-    const payload: { resource_group_ids?: number[]; is_active: boolean } = {
+    const payload: {
+      resource_access?: Array<{ resource_group_id: number; access_role: ResourceAccessRoleCode }>
+      is_active: boolean
+    } = {
       is_active: nextIsActive,
     }
     if (!user.is_directory_managed) {
-      payload.resource_group_ids = user.resource_groups.map((group) => group.group_id)
+      payload.resource_access = resourceAccessRowsForUser(user)
     }
 
     const updatedUser = await updateUser(user.id, payload, requireToken())
@@ -213,6 +262,7 @@ async function loadInviteResourceGroups() {
   inviteError.value = ''
 
   try {
+    inviteAccessRoles.value = await fetchAccessRoles(requireToken())
     const collectedGroups: ResourceGroupRecord[] = []
     let page = 1
     let hasMore = true
@@ -248,7 +298,7 @@ function openInviteDialog() {
 
   inviteEmail.value = ''
   inviteDisplay.value = ''
-  inviteResourceGroupIds.value = []
+  inviteResourceAccessById.value = {}
   inviteError.value = ''
   isInviteDialogOpen.value = true
   void loadInviteResourceGroups()
@@ -281,7 +331,7 @@ async function submitInvite() {
       {
         email,
         display: inviteDisplay.value.trim(),
-        resource_group_ids: inviteResourceGroupIds.value,
+        resource_access: inviteResourceAccessRows(),
       },
       requireToken(),
     )
@@ -414,7 +464,7 @@ watch(searchQuery, () => {
                   variant="secondary"
                   class="bg-slate-100 text-slate-700"
                 >
-                  {{ group.group_name }}
+                  {{ group.group_name }} · {{ group.access_role_label ?? group.access_role }}
                 </Badge>
                 <Badge
                   v-if="(row as UserManagementRecord).resource_groups.length > 2"
@@ -499,7 +549,7 @@ watch(searchQuery, () => {
       class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
       @click.self="closeInviteDialog"
     >
-      <div class="w-full max-w-xl rounded-lg bg-white shadow-xl">
+      <div class="w-full max-w-2xl rounded-lg bg-white shadow-xl">
         <div class="flex items-start justify-between border-b border-slate-200 px-6 py-4">
           <div>
             <h3 class="text-lg font-semibold text-slate-900">Invite WorkOS user</h3>
@@ -546,27 +596,40 @@ watch(searchQuery, () => {
           </div>
 
           <div class="grid gap-2">
-            <label for="invite-groups" class="text-sm font-medium text-slate-900"
-              >Initial resource groups</label
-            >
-            <select
-              id="invite-groups"
-              v-model="inviteResourceGroupIds"
-              multiple
-              class="min-h-36 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
-              :disabled="inviteSubmitting || inviteResourceGroupsLoading"
-            >
-              <option
-                v-for="group in inviteResourceGroups"
-                :key="group.group_id"
-                :value="group.group_id"
-              >
-                {{ group.group_name }}
-              </option>
-            </select>
-            <p class="text-xs text-slate-500">
-              These groups apply until WorkOS Directory Sync starts managing this user's membership.
-            </p>
+            <label class="text-sm font-medium text-slate-900">Initial resource access</label>
+            <div class="max-h-72 overflow-auto rounded-md border border-slate-200">
+              <table class="min-w-full divide-y divide-slate-200 text-sm">
+                <thead class="bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
+                  <tr>
+                    <th class="px-4 py-3">Resource group</th>
+                    <th class="px-4 py-3">Access role</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-200 bg-white">
+                  <tr v-for="group in inviteResourceGroups" :key="group.group_id">
+                    <td class="px-4 py-3 font-medium text-slate-900">{{ group.group_name }}</td>
+                    <td class="px-4 py-3">
+                      <select
+                        class="w-full min-w-48 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                        :value="inviteRoleForGroup(group.group_id)"
+                        :disabled="inviteSubmitting || inviteResourceGroupsLoading"
+                        @change="updateInviteRole(group.group_id, $event)"
+                      >
+                        <option value="">No access</option>
+                        <option v-for="role in inviteAccessRoles" :key="role.code" :value="role.code">
+                          {{ role.label }}
+                        </option>
+                      </select>
+                    </td>
+                  </tr>
+                  <tr v-if="inviteResourceGroups.length === 0">
+                    <td colspan="2" class="px-4 py-8 text-center text-sm text-slate-500">
+                      No resource groups are available.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <div class="flex justify-end gap-3 border-t border-slate-200 pt-4">
