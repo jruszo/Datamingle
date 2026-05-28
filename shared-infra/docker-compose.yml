@@ -14,6 +14,8 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
     volumes:
       - shared_minio_data:/data
+    networks:
+      - datamingle
 
   minio-init:
     image: quay.io/minio/mc:latest
@@ -27,7 +29,9 @@ services:
       mc mb --ignore-existing local/cortex-blocks &&
       mc mb --ignore-existing local/cortex-ruler &&
       mc mb --ignore-existing local/cortex-alertmanager &&
-      mc mb --ignore-existing local/quickwit-indexes"
+       mc mb --ignore-existing local/quickwit-indexes"
+    networks:
+      - datamingle
 
   quickwit-postgres:
     image: postgres:16-alpine
@@ -39,6 +43,8 @@ services:
       POSTGRES_PASSWORD: quickwit
     volumes:
       - shared_quickwit_postgres_data:/var/lib/postgresql/data
+    networks:
+      - datamingle
 
   cortex:
     image: cortexproject/cortex:v1.20.1
@@ -56,6 +62,8 @@ services:
       - "./config/cortex/runtime-config.yaml:/etc/cortex/runtime-config.yaml:ro"
       - "./config/cortex/rules:/rules"
       - shared_cortex_data:/data
+    networks:
+      - datamingle
 
   quickwit:
     image: quickwit/quickwit:0.8.2
@@ -79,6 +87,8 @@ services:
     volumes:
       - "./config/quickwit/quickwit-node-1.yaml:/etc/quickwit/quickwit.yaml:ro"
       - shared_quickwit_node_1_data:/quickwit/qwdata
+    networks:
+      - datamingle
 
   quickwit-worker:
     image: quickwit/quickwit:0.8.2
@@ -95,6 +105,8 @@ services:
     volumes:
       - "./config/quickwit/quickwit-node-2.yaml:/etc/quickwit/quickwit.yaml:ro"
       - shared_quickwit_node_2_data:/quickwit/qwdata
+    networks:
+      - datamingle
 
   jaeger-query:
     image: jaegertracing/jaeger-query:1.60
@@ -110,6 +122,8 @@ services:
       SPAN_STORAGE_TYPE: grpc
       GRPC_STORAGE_SERVER: quickwit:7281
       GRPC_STORAGE_TLS: "false"
+    networks:
+      - datamingle
 
   prometheus:
     image: prom/prometheus:v2.54.1
@@ -129,6 +143,8 @@ services:
     volumes:
       - "./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro"
       - shared_prometheus_data:/prometheus
+    networks:
+      - datamingle
 
   grafana:
     image: grafana/grafana-oss:11.5.2
@@ -151,6 +167,12 @@ services:
     volumes:
       - "./config/grafana/provisioning:/etc/grafana/provisioning:ro"
       - shared_grafana_data:/var/lib/grafana
+    networks:
+      - datamingle
+
+networks:
+  datamingle:
+    external: true
 
 volumes:
   shared_cortex_data:
