@@ -1,6 +1,4 @@
 import type { FeatureModule } from '@/app/feature-contract'
-import SettingsGroupDetailPage from '@/features/settings/pages/SettingsGroupDetailPage.vue'
-import SettingsGroupsPage from '@/features/settings/pages/SettingsGroupsPage.vue'
 import SettingsInstanceTagDetailPage from '@/features/settings/pages/SettingsInstanceTagDetailPage.vue'
 import SettingsInstanceTagsPage from '@/features/settings/pages/SettingsInstanceTagsPage.vue'
 import SettingsLandingPage from '@/features/settings/pages/SettingsLandingPage.vue'
@@ -20,15 +18,12 @@ const settingsModule: FeatureModule = {
     { path: '/settings/instance-tags/:tagId', name: 'settings-instance-tags-detail', component: SettingsInstanceTagDetailPage, meta: { title: 'Instance Tags', access: { anyPermissions: ['sql.menu_instance'] } } },
     { path: '/settings/users', name: 'settings-users', component: SettingsUsersPage, meta: { title: 'User Management', access: { requiresSuperuser: true } } },
     { path: '/settings/users/:userId', name: 'settings-users-detail', component: SettingsUserDetailPage, meta: { title: 'User Management', access: { requiresSuperuser: true } } },
-    { path: '/settings/groups', name: 'settings-groups', component: SettingsGroupsPage, meta: { title: 'Permission Groups', access: { requiredPermissions: ['sql.menu_system', 'auth.view_group'] } } },
-    { path: '/settings/groups/new', name: 'settings-groups-new', component: SettingsGroupDetailPage, meta: { title: 'Permission Groups', access: { requiredPermissions: ['sql.menu_system', 'auth.view_group'] } } },
-    { path: '/settings/groups/:groupId', name: 'settings-groups-detail', component: SettingsGroupDetailPage, meta: { title: 'Permission Groups', access: { requiredPermissions: ['sql.menu_system', 'auth.view_group'] } } },
-    { path: '/settings/resource-groups', name: 'settings-resource-groups', component: SettingsResourceGroupsPage, meta: { title: 'Resource Groups', access: { requiredPermissions: ['sql.menu_system', 'sql.view_resourcegroup'] } } },
-    { path: '/settings/resource-groups/new', name: 'settings-resource-groups-new', component: SettingsResourceGroupDetailPage, meta: { title: 'Resource Groups', access: { requiredPermissions: ['sql.menu_system', 'sql.view_resourcegroup'] } } },
-    { path: '/settings/resource-groups/:groupId', name: 'settings-resource-groups-detail', component: SettingsResourceGroupDetailPage, meta: { title: 'Resource Groups', access: { requiredPermissions: ['sql.menu_system', 'sql.view_resourcegroup'] } } },
-    { path: '/groups/management', redirect: { name: 'settings-groups' } },
-    { path: '/groups/management/new', redirect: { name: 'settings-groups-new' } },
-    { path: '/groups/management/:groupId', redirect: (to) => ({ name: 'settings-groups-detail', params: { groupId: to.params.groupId } }) },
+    { path: '/settings/resource-groups', name: 'settings-resource-groups', component: SettingsResourceGroupsPage, meta: { title: 'Resource Groups', access: { anyPermissions: ['sql.menu_system', 'sql.view_resourcegroup', 'sql.resource_group_owner'] } } },
+    { path: '/settings/resource-groups/new', name: 'settings-resource-groups-new', component: SettingsResourceGroupDetailPage, meta: { title: 'Resource Groups', access: { anyPermissions: ['sql.menu_system', 'sql.add_resourcegroup'] } } },
+    { path: '/settings/resource-groups/:groupId', name: 'settings-resource-groups-detail', component: SettingsResourceGroupDetailPage, meta: { title: 'Resource Groups', access: { anyPermissions: ['sql.menu_system', 'sql.view_resourcegroup', 'sql.resource_group_owner'] } } },
+    { path: '/groups/management', redirect: { name: 'settings-resource-groups' } },
+    { path: '/groups/management/new', redirect: { name: 'settings-resource-groups-new' } },
+    { path: '/groups/management/:groupId', redirect: (to) => ({ name: 'settings-resource-groups-detail', params: { groupId: to.params.groupId } }) },
   ],
   navigation: [
     {
@@ -53,18 +48,11 @@ const settingsModule: FeatureModule = {
       access: { requiresSuperuser: true },
     },
     {
-      to: '/settings/groups',
-      label: 'Permission Groups',
-      section: 'settings',
-      order: 40,
-      access: { requiredPermissions: ['sql.menu_system', 'auth.view_group'] },
-    },
-    {
       to: '/settings/resource-groups',
       label: 'Resource Groups',
       section: 'settings',
       order: 50,
-      access: { requiredPermissions: ['sql.menu_system', 'sql.view_resourcegroup'] },
+      access: { anyPermissions: ['sql.menu_system', 'sql.view_resourcegroup', 'sql.resource_group_owner'] },
     },
   ],
 }

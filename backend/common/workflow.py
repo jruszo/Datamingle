@@ -1,11 +1,10 @@
 import simplejson as json
-from django.contrib.auth.models import Group
 from django.http import HttpResponse
 
 from common.utils.const import WorkflowStatus
 from common.utils.extend_json_encoder import ExtendJSONEncoder, ExtendJSONEncoderFTime
 from sql.models import WorkflowAudit, WorkflowLog
-from sql.utils.resource_group import user_groups
+from sql.utils.workflow_audit import reviewable_audit_ids
 
 
 # Get pending review list
@@ -19,21 +18,11 @@ def lists(request):
     limit = offset + limit
     search = request.POST.get("search", "")
 
-    # First, fetch resource groups for the user
-    group_list = user_groups(user)
-    group_ids = [group.group_id for group in group_list]
-    # Then, fetch auth groups for the user
-    if user.is_superuser:
-        auth_group_ids = [group.id for group in Group.objects.all()]
-    else:
-        auth_group_ids = [group.id for group in Group.objects.filter(user=user)]
-
     # Return only records in the user's resource groups waiting for this reviewer
     workflow_audit = WorkflowAudit.objects.filter(
+        audit_id__in=reviewable_audit_ids(user, workflow_type=workflow_type or None),
         workflow_title__icontains=search,
         current_status=WorkflowStatus.WAITING,
-        group_id__in=group_ids,
-        current_audit__in=auth_group_ids,
     )
     # Filter by workflow type
     if workflow_type != 0:

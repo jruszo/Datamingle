@@ -4,9 +4,9 @@ import re
 from django.db import transaction
 
 from sql.engines.models import ReviewResult
-from sql.models import SqlWorkflow
+from sql.models import ResourceAccessRole, SqlWorkflow
 from common.config import SysConfig
-from sql.utils.resource_group import user_groups
+from sql.utils.resource_group import resource_groups_for_role, user_groups
 from sql.utils.sql_utils import remove_comments
 
 
@@ -130,11 +130,15 @@ def can_view(user, workflow_id):
         result = True
     # Non-admin users with review permission or resource-group-level execution
     # permission can view all workflows in their groups.
-    elif user.has_perm("sql.sql_review") or user.has_perm(
-        "sql.sql_execute_for_resource_group"
-    ):
+    elif resource_groups_for_role(
+        user, ResourceAccessRole.WORKFLOW_APPROVER
+    ).exists() or user.has_perm("sql.sql_execute_for_resource_group"):
         # Get user's resource groups first.
-        group_list = user_groups(user)
+        group_list = resource_groups_for_role(
+            user, ResourceAccessRole.WORKFLOW_APPROVER
+        )
+        if user.has_perm("sql.sql_execute_for_resource_group"):
+            group_list = user_groups(user)
         group_ids = [group.group_id for group in group_list]
         if workflow_detail.group_id in group_ids:
             result = True

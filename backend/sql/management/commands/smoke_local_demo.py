@@ -1,6 +1,4 @@
 from django.core.management.base import BaseCommand, CommandError
-from django.contrib.auth.models import Group
-
 from sql.engines import get_engine
 from sql.local_demo import (
     DEMO_INSTANCES,
@@ -12,6 +10,7 @@ from sql.local_demo import (
 from common.utils.const import WorkflowType
 from sql.utils.sql_utils import filter_db_list
 from sql.models import Instance, ResourceGroup, Users, WorkflowAuditSetting
+from sql.utils.resource_group import access_role_label, normalize_access_role_sequence
 
 
 class Command(BaseCommand):
@@ -59,24 +58,24 @@ class Command(BaseCommand):
 
         for resource_group_config in DEMO_RESOURCE_GROUPS.values():
             resource_group = resource_groups[resource_group_config["group_name"]]
-            expected_display = " -> ".join(resource_group_config["approval_groups"])
+            expected_display = " -> ".join(
+                access_role_label(role)
+                for role in normalize_access_role_sequence(
+                    resource_group_config["approval_groups"]
+                )
+            )
             audit_setting = WorkflowAuditSetting.objects.filter(
                 group_id=resource_group.group_id,
                 workflow_type=WorkflowType.SQL_REVIEW,
             ).first()
             actual_display = ""
             if audit_setting:
-                group_ids = [
-                    value
-                    for value in audit_setting.audit_auth_groups.split(",")
-                    if value
-                ]
-                groups_by_id = {
-                    str(group.id): group.name
-                    for group in Group.objects.filter(id__in=group_ids)
-                }
-                group_names = [groups_by_id.get(group_id, "") for group_id in group_ids]
-                actual_display = " -> ".join(group_names)
+                actual_display = " -> ".join(
+                    access_role_label(role)
+                    for role in normalize_access_role_sequence(
+                        audit_setting.audit_auth_groups
+                    )
+                )
             if actual_display != expected_display:
                 raise CommandError(
                     "Unexpected approval preview for {}: expected '{}', got '{}'".format(

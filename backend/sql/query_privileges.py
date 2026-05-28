@@ -55,14 +55,13 @@ def query_priv_check(user, instance, db_name, sql_content, limit_num):
             min(priv_limit, limit_num) if limit_num else priv_limit
         )
         return result
-    # If user has query_resource_group_instance, treat as group admin.
-    if user.has_perm("sql.query_resource_group_instance"):
-        if user_instances(user, tag_codes=["can_read"]).filter(pk=instance.pk).exists():
-            priv_limit = int(SysConfig().get("admin_query_limit", 5000))
-            result["data"]["limit_num"] = (
-                min(priv_limit, limit_num) if limit_num else priv_limit
-            )
-            return result
+    # Resource-group query role grants instance-level query access.
+    if user_instances(user, tag_codes=["can_read"]).filter(pk=instance.pk).exists():
+        priv_limit = int(SysConfig().get("admin_query_limit", 5000))
+        result["data"]["limit_num"] = (
+            min(priv_limit, limit_num) if limit_num else priv_limit
+        )
+        return result
 
     # Only MySQL performs table-level permission checks.
     if instance.db_type == "mysql":

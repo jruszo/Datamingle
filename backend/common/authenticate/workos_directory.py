@@ -12,11 +12,15 @@ from common.auth import init_user
 from common.authenticate.workos import WorkOSAuthClient
 from sql.models import (
     ResourceGroup,
+    ResourceAccessRole,
+    ResourceGroupMembership,
+    ResourceGroupMembershipSource,
     Users,
     WorkOSDirectoryGroup,
     WorkOSDirectoryGroupMembership,
     WorkOSDirectorySyncEvent,
 )
+from sql.utils.resource_group import sync_user_legacy_resource_groups
 
 logger = logging.getLogger(__name__)
 
@@ -199,23 +203,41 @@ def _directory_resource_group_ids(directory_id):
 
 
 def apply_directory_memberships(user):
-    resource_groups = [
-        membership.directory_group.resource_group
-        for membership in WorkOSDirectoryGroupMembership.objects.select_related(
+    memberships = list(
+        WorkOSDirectoryGroupMembership.objects.select_related(
             "directory_group__resource_group"
         ).filter(
             user=user,
             directory_group__is_deleted=False,
             directory_group__resource_group__is_deleted=0,
         )
-    ]
+    )
     directory_resource_group_ids = _directory_resource_group_ids(
         user.workos_directory_id
     )
-    preserved_resource_groups = list(
-        user.resource_group.exclude(group_id__in=directory_resource_group_ids)
-    )
-    user.resource_group.set([*preserved_resource_groups, *resource_groups])
+    ResourceGroupMembership.objects.filter(
+        user=user,
+        membership_source=ResourceGroupMembershipSource.WORKOS_DIRECTORY,
+        resource_group_id__in=directory_resource_group_ids,
+    ).delete()
+    for membership in memberships:
+        ResourceGroupMembership.objects.get_or_create(
+            user=user,
+            resource_group=membership.directory_group.resource_group,
+            defaults={
+                "access_role": ResourceAccessRole.QUERY,
+                "membership_source": ResourceGroupMembershipSource.WORKOS_DIRECTORY,
+            },
+        )
+    ResourceGroupMembership.objects.filter(
+        user=user,
+        membership_source=ResourceGroupMembershipSource.WORKOS_DIRECTORY,
+    ).exclude(
+        resource_group_id__in=[
+            membership.directory_group.resource_group_id for membership in memberships
+        ]
+    ).delete()
+    sync_user_legacy_resource_groups(user)
 
 
 def replace_directory_memberships(user, directory_groups):

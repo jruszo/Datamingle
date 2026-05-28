@@ -3,14 +3,17 @@ import logging
 from itertools import chain
 
 import simplejson as json
-from django.contrib.auth.models import Group
 from django.db.models import F, Value, IntegerField
 from django.http import HttpResponse
 from common.utils.extend_json_encoder import ExtendJSONEncoder
 from common.utils.permission import superuser_required
 from common.utils.convert import Convert
 from sql.models import ResourceGroup, Users, Instance
-from sql.utils.resource_group import user_instances
+from sql.utils.resource_group import (
+    access_role_label,
+    normalize_access_role_sequence,
+    user_instances,
+)
 from sql.utils.workflow_audit import Audit
 
 logger = logging.getLogger("default")
@@ -210,24 +213,10 @@ def auditors(request):
         result["msg"] = "Invalid parameters"
         return HttpResponse(json.dumps(result), content_type="application/json")
 
-    # Get permission group names.
     if audit_auth_groups:
-        # Validate configuration.
-        for auth_group_id in audit_auth_groups.split(","):
-            try:
-                Group.objects.get(id=auth_group_id)
-            except Exception:
-                result["status"] = 1
-                result["msg"] = (
-                    "Approval flow permission group does not exist. "
-                    "Please reconfigure it."
-                )
-                return HttpResponse(json.dumps(result), content_type="application/json")
         audit_auth_groups_name = "->".join(
-            [
-                Group.objects.get(id=auth_group_id).name
-                for auth_group_id in audit_auth_groups.split(",")
-            ]
+            access_role_label(role)
+            for role in normalize_access_role_sequence(audit_auth_groups)
         )
         result["data"]["auditors"] = audit_auth_groups
         result["data"]["auditors_display"] = audit_auth_groups_name
@@ -245,10 +234,7 @@ def changeauditors(request):
 
     # Update workflow approval settings.
     group_id = ResourceGroup.objects.get(group_name=group_name).group_id
-    audit_auth_groups = [
-        str(Group.objects.get(name=auth_group).id)
-        for auth_group in auth_groups.split(",")
-    ]
+    audit_auth_groups = normalize_access_role_sequence(auth_groups)
     try:
         Audit.change_settings(group_id, workflow_type, ",".join(audit_auth_groups))
     except Exception as msg:

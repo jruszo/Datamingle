@@ -3,7 +3,6 @@
 import datetime
 import logging
 
-from django.contrib.auth.models import Group
 from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
@@ -35,15 +34,24 @@ from sql.mailbox import (
     sync_approval_notifications,
     sync_execution_needed_notifications,
 )
-from sql.models import ArchiveConfig, ArchiveLog, Instance, ResourceGroup, WorkflowLog
+from sql.models import (
+    ArchiveConfig,
+    ArchiveLog,
+    Instance,
+    ResourceAccessRole,
+    ResourceGroup,
+    WorkflowLog,
+)
 from sql.notify import notify_for_audit
 from sql.utils.resource_group import (
     WRITE_ACCESS_LEVELS,
+    access_role_label,
     active_instance_grants,
+    normalize_access_role,
+    resource_groups_for_role,
+    resource_role_users,
     user_groups,
-    user_has_group_instance_access,
     user_instances,
-    user_member_groups,
 )
 from sql.utils.workflow_audit import Audit, AuditException, AuditV2, get_auditor
 
@@ -100,14 +108,25 @@ def _resolve_archive_mailbox_items_safe(workflow):
 
 
 def _require_archive_module_access(user):
-    if user.is_superuser or user.has_perm("sql.menu_archive"):
+    if (
+        user.is_superuser
+        or user.has_perm("sql.menu_archive")
+        or resource_groups_for_role(
+            user, ResourceAccessRole.WORKFLOW_REQUESTER
+        ).exists()
+    ):
         return
     raise PermissionDenied("You do not have permission to access archive workflows.")
 
 
 def _require_archive_apply_access(user):
     _require_archive_module_access(user)
-    if user.is_superuser or user.has_perm("sql.archive_apply"):
+    if (
+        user.is_superuser
+        or resource_groups_for_role(
+            user, ResourceAccessRole.WORKFLOW_REQUESTER
+        ).exists()
+    ):
         return
     raise PermissionDenied("You do not have permission to submit archive workflows.")
 
@@ -116,8 +135,17 @@ def _archive_can_view(user, archive_config):
     if user.is_superuser or archive_config.user_name == user.username:
         return True
 
-    if user.has_perm("sql.archive_review") or user.has_perm("sql.archive_mgt"):
-        group_ids = [group.group_id for group in user_groups(user)]
+    if resource_groups_for_role(
+        user, ResourceAccessRole.WORKFLOW_APPROVER
+    ).exists() or user.has_perm("sql.archive_mgt"):
+        group_ids = [
+            group.group_id
+            for group in resource_groups_for_role(
+                user, ResourceAccessRole.WORKFLOW_APPROVER
+            )
+        ]
+        if user.has_perm("sql.archive_mgt"):
+            group_ids = [group.group_id for group in user_groups(user)]
         return archive_config.resource_group_id in group_ids
     return False
 
@@ -125,9 +153,12 @@ def _archive_can_view(user, archive_config):
 def _archive_can_manage(user, archive_config):
     if user.is_superuser:
         return True
-    if not user.has_perm("sql.archive_mgt"):
+    if not resource_groups_for_role(user, ResourceAccessRole.RESOURCE_OWNER).exists():
         return False
-    group_ids = [group.group_id for group in user_groups(user)]
+    group_ids = [
+        group.group_id
+        for group in resource_groups_for_role(user, ResourceAccessRole.RESOURCE_OWNER)
+    ]
     return archive_config.resource_group_id in group_ids
 
 
@@ -138,8 +169,15 @@ def _archive_queryset_for_user(user):
     ).all()
     if user.is_superuser:
         return queryset
-    if user.has_perm("sql.archive_review") or user.has_perm("sql.archive_mgt"):
-        group_ids = [group.group_id for group in user_groups(user)]
+    if resource_groups_for_role(
+        user, ResourceAccessRole.WORKFLOW_APPROVER
+    ).exists() or user.has_perm("sql.archive_mgt"):
+        scoped_groups = resource_groups_for_role(
+            user, ResourceAccessRole.WORKFLOW_APPROVER
+        )
+        if user.has_perm("sql.archive_mgt"):
+            scoped_groups = user_groups(user)
+        group_ids = [group.group_id for group in scoped_groups]
         return queryset.filter(resource_group_id__in=group_ids)
     return queryset.filter(user_name=user.username)
 
@@ -154,10 +192,21 @@ def _archive_capable_instances(user):
 
 
 def _archive_submission_scope(user):
-    can_submit_directly = user.is_superuser or user.has_perm("sql.archive_apply")
+    can_submit_directly = (
+        user.is_superuser
+        or resource_groups_for_role(
+            user, ResourceAccessRole.WORKFLOW_REQUESTER
+        ).exists()
+    )
     instances = _archive_capable_instances(user)
     direct_group_ids = (
-        {group.group_id for group in user_groups(user) if group.is_deleted == 0}
+        {
+            group.group_id
+            for group in resource_groups_for_role(
+                user, ResourceAccessRole.WORKFLOW_REQUESTER
+            )
+            if group.is_deleted == 0
+        }
         if can_submit_directly
         else set()
     )
@@ -179,8 +228,9 @@ def _archive_submission_scope(user):
     for instance in instances:
         allowed_groups = {}
 
-        if can_submit_directly and user_has_group_instance_access(
-            user, instance, tag_codes=["can_write"]
+        if (
+            can_submit_directly
+            and instance.instance_tag.filter(tag_code="can_write", active=True).exists()
         ):
             direct_groups = {
                 group_id: group_name
@@ -245,18 +295,18 @@ def _serialize_archive_review_info(archive_config):
         audit.audit_auth_groups if audit else archive_config.audit_auth_groups or ""
     )
     current_status = audit.current_status if audit else archive_config.status
-    current_group_id = None
+    current_role = None
     if (
         audit
         and current_status == WorkflowStatus.WAITING
         and str(audit.current_audit).strip()
     ):
-        current_group_id = int(audit.current_audit)
+        current_role = normalize_access_role(audit.current_audit)
 
     review_info = []
     has_met_current_node = False
-    for auth_group_id in str(audit_auth_groups).split(","):
-        token = str(auth_group_id).strip()
+    for role in str(audit_auth_groups).split(","):
+        token = str(role).strip()
         if not token:
             review_info.append(
                 {
@@ -267,12 +317,13 @@ def _serialize_archive_review_info(archive_config):
             )
             continue
 
-        group = Group.objects.get(id=int(token))
+        role = normalize_access_role(token)
+        role_label = access_role_label(role)
         is_current_node = (
-            current_status == WorkflowStatus.WAITING and current_group_id == group.id
+            current_status == WorkflowStatus.WAITING and current_role == role
         )
         if current_status == WorkflowStatus.WAITING:
-            is_passed_node = not has_met_current_node and current_group_id != group.id
+            is_passed_node = not has_met_current_node and current_role != role
             if is_current_node:
                 has_met_current_node = True
                 is_passed_node = False
@@ -283,7 +334,7 @@ def _serialize_archive_review_info(archive_config):
 
         review_info.append(
             {
-                "group_name": group.name,
+                "group_name": role_label,
                 "is_current_node": is_current_node,
                 "is_passed_node": is_passed_node,
             }
@@ -300,16 +351,12 @@ def _serialize_archive_current_reviewers(archive_config):
     ):
         return []
 
-    current_group_id = int(audit.current_audit)
+    current_role = normalize_access_role(audit.current_audit)
     reviewers = []
     seen_usernames = set()
 
-    for user in Group.objects.get(id=current_group_id).user_set.filter(is_active=1):
-        group_names = [group.group_name for group in user_member_groups(user)]
-        if (
-            archive_config.resource_group.group_name not in group_names
-            or user.username in seen_usernames
-        ):
+    for user in resource_role_users([current_role], archive_config.resource_group_id):
+        if user.username in seen_usernames:
             continue
         seen_usernames.add(user.username)
         reviewers.append(
@@ -680,12 +727,12 @@ class ArchiveApprovalPreview(views.APIView):
         else:
             readable_groups = []
             review_info = []
-            for auth_group_id in audit_auth_groups.split(","):
-                group = Group.objects.get(id=int(auth_group_id))
-                readable_groups.append(group.name)
+            for role in audit_auth_groups.split(","):
+                role_label = access_role_label(role)
+                readable_groups.append(role_label)
                 review_info.append(
                     {
-                        "group_name": group.name,
+                        "group_name": role_label,
                         "is_auto_pass": False,
                         "is_current_node": False,
                         "is_passed_node": False,

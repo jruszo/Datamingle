@@ -96,22 +96,47 @@ export type SystemSettingsPayload = {
   options: SystemSettingsOptions
 }
 
-export type GroupRecord = {
-  id: number
-  name: string
-  permissions: number[]
+export type ResourceAccessRoleCode =
+  | 'query'
+  | 'workflow_requester'
+  | 'workflow_approver'
+  | 'resource_owner'
+
+export type ResourceGroupMembershipSource = 'datamingle' | 'workos_directory'
+
+export type AccessRoleRecord = {
+  code: ResourceAccessRoleCode
+  label: string
+  description: string
+  rank: number
+}
+
+export type ResourceAccessAssignmentRecord = {
+  resource_group_id: number
+  access_role: ResourceAccessRoleCode
+}
+
+export type ResourceGroupUserAccessRecord = {
+  user_id: number
+  username?: string
+  display?: string
+  access_role: ResourceAccessRoleCode
+  access_role_label?: string
+  membership_source?: ResourceGroupMembershipSource
 }
 
 export type UserManagementGroupRecord = {
   id: number
   name: string
-  membership_source?: 'datamingle' | 'workos_directory'
+  membership_source?: ResourceGroupMembershipSource
 }
 
 export type UserManagementResourceGroupRecord = {
   group_id: number
   group_name: string
-  membership_source?: 'datamingle' | 'workos_directory'
+  access_role: ResourceAccessRoleCode
+  access_role_label?: string
+  membership_source?: ResourceGroupMembershipSource
 }
 
 export type UserManagementRecord = {
@@ -126,6 +151,7 @@ export type UserManagementRecord = {
   is_staff: boolean
   groups: UserManagementGroupRecord[]
   resource_groups: UserManagementResourceGroupRecord[]
+  resource_access: UserManagementResourceGroupRecord[]
 }
 
 export type UserManagementDetailRecord = UserManagementRecord & {
@@ -143,6 +169,7 @@ export type UserManagementListOptions = {
 export type UpdateUserPayload = {
   group_ids?: number[]
   resource_group_ids?: number[]
+  resource_access?: ResourceAccessAssignmentRecord[]
   is_active?: boolean
 }
 
@@ -151,6 +178,7 @@ export type InviteWorkosUserPayload = {
   display?: string
   group_ids?: number[]
   resource_group_ids?: number[]
+  resource_access?: ResourceAccessAssignmentRecord[]
 }
 
 export type WorkosInvitationRecord = {
@@ -201,6 +229,7 @@ export type ResourceGroupRecord = {
 
 export type ResourceGroupDetailRecord = ResourceGroupRecord & {
   user_ids: number[]
+  user_access: ResourceGroupUserAccessRecord[]
   instance_ids: number[]
 }
 
@@ -426,12 +455,14 @@ export type InstanceEditorRecord = InstanceCreatePayload & {
   id: number
 }
 
-export type PermissionRecord = {
-  id: number
-  name: string
-  codename: string
-  app_label: string
-  model: string
+export type ResourceGroupUpsertPayload = {
+  group_name: string
+  user_ids?: number[]
+  user_access?: Array<{
+    user_id: number
+    access_role: ResourceAccessRoleCode
+  }>
+  instance_ids: number[]
 }
 
 type DashboardNamedSeries = {
@@ -663,66 +694,9 @@ export function updateInstanceTag(tagId: number, payload: UpdateInstanceTagPaylo
   )
 }
 
-export function fetchGroups(
-  token: string,
-  options: {
-    page?: number
-    size?: number
-    search?: string
-    ordering?: string
-  } = {},
-) {
-  const params = new URLSearchParams()
-  if (options.page) {
-    params.set('page', `${options.page}`)
-  }
-  if (options.size) {
-    params.set('size', `${options.size}`)
-  }
-  if (options.search?.trim()) {
-    params.set('search', options.search.trim())
-  }
-  if (options.ordering?.trim()) {
-    params.set('ordering', options.ordering.trim())
-  }
-  const queryString = params.toString()
-  const path = queryString ? `/v1/user/group/?${queryString}` : '/v1/user/group/'
-  return apiGet<unknown>(path, { token }).then((payload) =>
-    extractData<PaginatedResponse<GroupRecord>>(payload),
-  )
-}
-
-export function fetchGroup(groupId: number, token: string) {
-  return apiGet<unknown>(`/v1/user/group/${groupId}/`, { token }).then((payload) =>
-    extractData<GroupRecord>(payload),
-  )
-}
-
-export function createGroup(payload: { name: string; permissions: number[] }, token: string) {
-  return apiPost<unknown>('/v1/user/group/', payload, { token }).then((responsePayload) =>
-    extractData<GroupRecord>(responsePayload),
-  )
-}
-
-export function updateGroup(
-  groupId: number,
-  payload: { name: string; permissions: number[] },
-  token: string,
-) {
-  return apiPut<unknown>(`/v1/user/group/${groupId}/`, payload, { token }).then((responsePayload) =>
-    extractData<GroupRecord>(responsePayload),
-  )
-}
-
-export function deleteGroup(groupId: number, token: string) {
-  return apiDelete<unknown>(`/v1/user/group/${groupId}/`, { token }).then((payload) =>
-    extractDetail(payload, 'Group deleted successfully.'),
-  )
-}
-
-export function fetchPermissions(token: string) {
-  return apiGet<unknown>('/v1/user/permission/', { token }).then((payload) =>
-    extractData<PermissionRecord[]>(payload),
+export function fetchAccessRoles(token: string) {
+  return apiGet<unknown>('/v1/user/access-roles/', { token }).then((payload) =>
+    extractData<AccessRoleRecord[]>(payload),
   )
 }
 
@@ -762,7 +736,7 @@ export function fetchResourceGroup(resourceGroupId: number, token: string) {
 }
 
 export function createResourceGroup(
-  payload: { group_name: string; user_ids: number[]; instance_ids: number[] },
+  payload: ResourceGroupUpsertPayload,
   token: string,
 ) {
   return apiPost<unknown>('/v1/user/resourcegroup/', payload, { token }).then((responsePayload) =>
@@ -772,7 +746,7 @@ export function createResourceGroup(
 
 export function updateResourceGroup(
   resourceGroupId: number,
-  payload: { group_name: string; user_ids: number[]; instance_ids: number[] },
+  payload: ResourceGroupUpsertPayload,
   token: string,
 ) {
   return apiPut<unknown>(`/v1/user/resourcegroup/${resourceGroupId}/`, payload, { token }).then(

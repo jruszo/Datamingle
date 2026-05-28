@@ -1,41 +1,64 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Save, Trash2 } from 'lucide-vue-next'
+import {
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Save,
+  Trash2,
+} from 'lucide-vue-next'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import {
   createResourceGroup,
   deleteResourceGroup,
+  fetchAccessRoles,
   fetchResourceGroup,
   fetchResourceGroupInstances,
   fetchResourceGroupUsers,
   updateResourceGroup,
+  type AccessRoleRecord,
+  type ResourceAccessRoleCode,
   type ResourceGroupInstanceLookupRecord,
+  type ResourceGroupMembershipSource,
+  type ResourceGroupUpsertPayload,
   type ResourceGroupUserLookupRecord,
 } from '../api'
 import { useAuthStore } from '@/stores/auth'
+
+type UserAccessState = {
+  access_role: ResourceAccessRoleCode | ''
+  membership_source?: ResourceGroupMembershipSource
+}
 
 const authStore = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 
+const accessRoles = ref<AccessRoleRecord[]>([])
 const users = ref<ResourceGroupUserLookupRecord[]>([])
 const instances = ref<ResourceGroupInstanceLookupRecord[]>([])
-const selectedUserIds = ref<number[]>([])
+const userAccessById = ref<Record<number, UserAccessState>>({})
 const selectedInstanceIds = ref<number[]>([])
 const groupName = ref('')
 
-const availableUserFilter = ref('')
-const selectedUserFilter = ref('')
+const userFilter = ref('')
 const availableInstanceFilter = ref('')
 const selectedInstanceFilter = ref('')
 
-const availableUserSelection = ref<number[]>([])
-const selectedUserSelection = ref<number[]>([])
 const availableInstanceSelection = ref<number[]>([])
 const selectedInstanceSelection = ref<number[]>([])
 
@@ -63,19 +86,33 @@ function hasPermission(permission: string) {
   return authStore.currentUser?.permissions?.includes(permission) ?? false
 }
 
-const canAccessSettings = computed(() => hasPermission('sql.menu_system'))
-const canViewResourceGroups = computed(() => canAccessSettings.value && hasPermission('sql.view_resourcegroup'))
-const canCreateResourceGroups = computed(() => hasPermission('sql.menu_system') || hasPermission('sql.add_resourcegroup'))
-const canEditResourceGroups = computed(() => hasPermission('sql.menu_system') || hasPermission('sql.change_resourcegroup'))
-const canDeleteResourceGroups = computed(() => hasPermission('sql.menu_system') || hasPermission('sql.delete_resourcegroup'))
+const canViewResourceGroups = computed(
+  () =>
+    hasPermission('sql.menu_system')
+    || hasPermission('sql.view_resourcegroup')
+    || hasPermission('sql.resource_group_owner'),
+)
+const canCreateResourceGroups = computed(
+  () => hasPermission('sql.menu_system') || hasPermission('sql.add_resourcegroup'),
+)
+const canEditResourceGroups = computed(
+  () =>
+    hasPermission('sql.menu_system')
+    || hasPermission('sql.change_resourcegroup')
+    || hasPermission('sql.resource_group_owner'),
+)
+const canDeleteResourceGroups = computed(
+  () => hasPermission('sql.menu_system') || hasPermission('sql.delete_resourcegroup'),
+)
 const canSave = computed(() => (isCreateMode.value ? canCreateResourceGroups.value : canEditResourceGroups.value))
 
-const selectedUserSet = computed(() => new Set(selectedUserIds.value))
 const selectedInstanceSet = computed(() => new Set(selectedInstanceIds.value))
-const normalizedAvailableUserFilter = computed(() => availableUserFilter.value.trim().toLowerCase())
-const normalizedSelectedUserFilter = computed(() => selectedUserFilter.value.trim().toLowerCase())
+const normalizedUserFilter = computed(() => userFilter.value.trim().toLowerCase())
 const normalizedAvailableInstanceFilter = computed(() => availableInstanceFilter.value.trim().toLowerCase())
 const normalizedSelectedInstanceFilter = computed(() => selectedInstanceFilter.value.trim().toLowerCase())
+const assignedUserCount = computed(
+  () => Object.values(userAccessById.value).filter((row) => row.access_role).length,
+)
 
 function toUserFacingMessage(errorValue: unknown, fallback: string) {
   if (!(errorValue instanceof Error)) {
@@ -138,31 +175,14 @@ function instanceMatches(instance: ResourceGroupInstanceLookupRecord, filterValu
     return true
   }
 
-  const haystack = [
-    instance.instance_name,
-    instance.db_type,
-    instance.host,
-    instance.label,
-  ]
+  const haystack = [instance.instance_name, instance.db_type, instance.host, instance.label]
     .join(' ')
     .toLowerCase()
   return haystack.includes(filterValue)
 }
 
-const availableUsers = computed(() =>
-  sortUsers(
-    users.value
-      .filter((user) => !selectedUserSet.value.has(user.id))
-      .filter((user) => userMatches(user, normalizedAvailableUserFilter.value)),
-  ),
-)
-
-const assignedUsers = computed(() =>
-  sortUsers(
-    users.value
-      .filter((user) => selectedUserSet.value.has(user.id))
-      .filter((user) => userMatches(user, normalizedSelectedUserFilter.value)),
-  ),
+const filteredUsers = computed(() =>
+  sortUsers(users.value.filter((user) => userMatches(user, normalizedUserFilter.value))),
 )
 
 const availableInstances = computed(() =>
@@ -185,23 +205,48 @@ function sortNumeric(values: number[]) {
   return [...new Set(values)].sort((left, right) => left - right)
 }
 
-function setSelectedUsers(userIds: number[]) {
-  selectedUserIds.value = sortNumeric(userIds)
+function isAccessRoleCode(value: string): value is ResourceAccessRoleCode {
+  return accessRoles.value.some((role) => role.code === value)
+}
+
+function roleForUser(userId: number) {
+  return userAccessById.value[userId]?.access_role ?? ''
+}
+
+function sourceForUser(userId: number) {
+  return userAccessById.value[userId]?.membership_source
+}
+
+function updateUserRole(userId: number, event: Event) {
+  const value = (event.target as HTMLSelectElement).value
+  if (sourceForUser(userId) === 'workos_directory') {
+    return
+  }
+
+  const nextAccess = { ...userAccessById.value }
+  if (!value) {
+    delete nextAccess[userId]
+  } else if (isAccessRoleCode(value)) {
+    nextAccess[userId] = {
+      access_role: value,
+      membership_source: nextAccess[userId]?.membership_source ?? 'datamingle',
+    }
+  }
+  userAccessById.value = nextAccess
   formSuccess.value = ''
 }
 
-function addUsers(userIds: number[]) {
-  if (userIds.length === 0) {
-    return
-  }
-  setSelectedUsers([...selectedUserIds.value, ...userIds])
-}
-
-function removeUsers(userIds: number[]) {
-  if (userIds.length === 0) {
-    return
-  }
-  setSelectedUsers(selectedUserIds.value.filter((value) => !userIds.includes(value)))
+function userAccessRows() {
+  return Object.entries(userAccessById.value)
+    .map(([userId, row]) => ({
+      user_id: Number(userId),
+      access_role: row.access_role,
+    }))
+    .filter(
+      (row): row is { user_id: number; access_role: ResourceAccessRoleCode } =>
+        Number.isFinite(row.user_id) && isAccessRoleCode(row.access_role),
+    )
+    .sort((left, right) => left.user_id - right.user_id)
 }
 
 function setSelectedInstances(instanceIds: number[]) {
@@ -221,26 +266,6 @@ function removeInstances(instanceIds: number[]) {
     return
   }
   setSelectedInstances(selectedInstanceIds.value.filter((value) => !instanceIds.includes(value)))
-}
-
-function moveSelectedUsersToAssigned() {
-  addUsers(availableUserSelection.value)
-  availableUserSelection.value = []
-}
-
-function moveAllUsersToAssigned() {
-  addUsers(availableUsers.value.map((user) => user.id))
-  availableUserSelection.value = []
-}
-
-function moveSelectedUsersToAvailable() {
-  removeUsers(selectedUserSelection.value)
-  selectedUserSelection.value = []
-}
-
-function moveAllUsersToAvailable() {
-  removeUsers(assignedUsers.value.map((user) => user.id))
-  selectedUserSelection.value = []
 }
 
 function moveSelectedInstancesToAssigned() {
@@ -263,24 +288,11 @@ function moveAllInstancesToAvailable() {
   selectedInstanceSelection.value = []
 }
 
-function updateSelection(
-  event: Event,
-  target: 'available-users' | 'selected-users' | 'available-instances' | 'selected-instances',
-) {
+function updateInstanceSelection(event: Event, target: 'available-instances' | 'selected-instances') {
   const element = event.target as HTMLSelectElement
   const values = Array.from(element.selectedOptions)
     .map((option) => Number(option.value))
     .filter((value) => Number.isFinite(value))
-
-  if (target === 'available-users') {
-    availableUserSelection.value = values
-    return
-  }
-
-  if (target === 'selected-users') {
-    selectedUserSelection.value = values
-    return
-  }
 
   if (target === 'available-instances') {
     availableInstanceSelection.value = values
@@ -297,10 +309,8 @@ async function loadPage() {
   formError.value = ''
   formSuccess.value = ''
   groupName.value = ''
-  selectedUserIds.value = []
+  userAccessById.value = {}
   selectedInstanceIds.value = []
-  availableUserSelection.value = []
-  selectedUserSelection.value = []
   availableInstanceSelection.value = []
   selectedInstanceSelection.value = []
 
@@ -308,7 +318,7 @@ async function loadPage() {
     await authStore.loadCurrentUser()
 
     if (isCreateMode.value && route.query.reason === 'inventory-requires-resource-group') {
-      pageNotice.value = 'A resource group is required before you can add an instance. Create one here first.'
+      pageNotice.value = 'A resource group is required before you can add an instance.'
     }
 
     if (!canViewResourceGroups.value && !canCreateResourceGroups.value && !canEditResourceGroups.value) {
@@ -316,11 +326,13 @@ async function loadPage() {
       return
     }
 
-    const [userLookup, instanceLookup] = await Promise.all([
+    const [roles, userLookup, instanceLookup] = await Promise.all([
+      fetchAccessRoles(requireToken()),
       fetchResourceGroupUsers(requireToken()),
       fetchResourceGroupInstances(requireToken()),
     ])
 
+    accessRoles.value = roles
     users.value = userLookup
     instances.value = instanceLookup
 
@@ -335,8 +347,15 @@ async function loadPage() {
 
     const resourceGroup = await fetchResourceGroup(groupId.value, requireToken())
     groupName.value = resourceGroup.group_name
-    selectedUserIds.value = sortNumeric(resourceGroup.user_ids)
     selectedInstanceIds.value = sortNumeric(resourceGroup.instance_ids)
+    const nextAccess: Record<number, UserAccessState> = {}
+    for (const row of resourceGroup.user_access ?? []) {
+      nextAccess[row.user_id] = {
+        access_role: row.access_role,
+        membership_source: row.membership_source ?? 'datamingle',
+      }
+    }
+    userAccessById.value = nextAccess
   } catch (errorValue) {
     pageError.value = toUserFacingMessage(errorValue, 'Failed to load the resource group editor.')
   } finally {
@@ -361,9 +380,9 @@ async function saveResourceGroup() {
   formSuccess.value = ''
 
   try {
-    const payload = {
+    const payload: ResourceGroupUpsertPayload = {
       group_name: trimmedName,
-      user_ids: sortNumeric(selectedUserIds.value),
+      user_access: userAccessRows(),
       instance_ids: sortNumeric(selectedInstanceIds.value),
     }
 
@@ -371,9 +390,6 @@ async function saveResourceGroup() {
       const createdGroup = await createResourceGroup(payload, requireToken())
       formSuccess.value = 'Resource group created successfully.'
       await router.replace(`/settings/resource-groups/${createdGroup.group_id}`)
-      groupName.value = createdGroup.group_name
-      selectedUserIds.value = sortNumeric(createdGroup.user_ids)
-      selectedInstanceIds.value = sortNumeric(createdGroup.instance_ids)
       return
     }
 
@@ -383,8 +399,15 @@ async function saveResourceGroup() {
 
     const updatedGroup = await updateResourceGroup(groupId.value, payload, requireToken())
     groupName.value = updatedGroup.group_name
-    selectedUserIds.value = sortNumeric(updatedGroup.user_ids)
     selectedInstanceIds.value = sortNumeric(updatedGroup.instance_ids)
+    const nextAccess: Record<number, UserAccessState> = {}
+    for (const row of updatedGroup.user_access ?? []) {
+      nextAccess[row.user_id] = {
+        access_role: row.access_role,
+        membership_source: row.membership_source ?? 'datamingle',
+      }
+    }
+    userAccessById.value = nextAccess
     formSuccess.value = 'Resource group updated successfully.'
   } catch (errorValue) {
     formError.value = toUserFacingMessage(errorValue, 'Failed to save the resource group.')
@@ -449,9 +472,7 @@ watch(
     <Card class="border-slate-200">
       <CardHeader>
         <CardTitle>{{ isCreateMode ? 'Create Resource Group' : 'Edit Resource Group' }}</CardTitle>
-        <CardDescription>
-          Assign users and servers with filterable dual-list selectors modeled after Permission Groups.
-        </CardDescription>
+        <CardDescription>Manage scoped resource access and server membership.</CardDescription>
       </CardHeader>
       <CardContent class="space-y-6">
         <div class="space-y-2">
@@ -464,102 +485,103 @@ watch(
           />
         </div>
 
-        <p v-if="pageError" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p v-if="pageError" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {{ pageError }}
         </p>
         <p
           v-else-if="pageNotice"
-          class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+          class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
         >
           {{ pageNotice }}
         </p>
-        <p v-else-if="formError" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p v-else-if="formError" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {{ formError }}
         </p>
         <p
           v-else-if="formSuccess"
-          class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"
+          class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"
         >
           {{ formSuccess }}
         </p>
 
-        <div class="space-y-4 rounded-2xl border border-slate-200 p-5">
+        <div class="space-y-4 rounded-lg border border-slate-200 p-5">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h3 class="text-lg font-semibold text-slate-900">Users</h3>
-              <p class="text-sm text-slate-600">Choose which Datamingle users belong to this resource group.</p>
+              <h3 class="text-base font-semibold text-slate-900">User Access</h3>
             </div>
             <div class="flex flex-wrap items-center gap-2">
               <Badge variant="secondary" class="bg-slate-100 text-slate-700">
-                {{ availableUsers.length }} available
+                {{ assignedUserCount }} assigned
               </Badge>
               <Badge variant="secondary" class="bg-slate-100 text-slate-700">
-                {{ assignedUsers.length }} assigned
+                {{ users.length }} users
               </Badge>
             </div>
           </div>
 
-          <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
-            <div class="space-y-3">
-              <label for="available-users-filter" class="text-sm font-medium text-slate-900">Available users</label>
-              <Input
-                id="available-users-filter"
-                v-model="availableUserFilter"
-                :disabled="isLoading"
-                placeholder="Filter available users"
-              />
-              <select
-                class="min-h-[18rem] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                multiple
-                @change="updateSelection($event, 'available-users')"
-              >
-                <option v-for="user in availableUsers" :key="user.id" :value="user.id">
-                  {{ userLabel(user) }}
-                </option>
-              </select>
-            </div>
+          <Input
+            v-model="userFilter"
+            :disabled="isLoading"
+            placeholder="Filter users"
+            aria-label="Filter users"
+          />
 
-            <div class="flex flex-col items-center justify-center gap-2">
-              <Button variant="outline" size="icon" :disabled="!canSave || availableUserSelection.length === 0" @click="moveSelectedUsersToAssigned">
-                <ChevronRight class="h-4 w-4" />
-              </Button>
-              <Button variant="outline" size="icon" :disabled="!canSave || availableUsers.length === 0" @click="moveAllUsersToAssigned">
-                <ChevronsRight class="h-4 w-4" />
-              </Button>
-              <Button variant="outline" size="icon" :disabled="!canSave || selectedUserSelection.length === 0" @click="moveSelectedUsersToAvailable">
-                <ChevronLeft class="h-4 w-4" />
-              </Button>
-              <Button variant="outline" size="icon" :disabled="!canSave || assignedUsers.length === 0" @click="moveAllUsersToAvailable">
-                <ChevronsLeft class="h-4 w-4" />
-              </Button>
-            </div>
-
-            <div class="space-y-3">
-              <label for="assigned-users-filter" class="text-sm font-medium text-slate-900">Assigned users</label>
-              <Input
-                id="assigned-users-filter"
-                v-model="selectedUserFilter"
-                :disabled="isLoading"
-                placeholder="Filter assigned users"
-              />
-              <select
-                class="min-h-[18rem] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                multiple
-                @change="updateSelection($event, 'selected-users')"
-              >
-                <option v-for="user in assignedUsers" :key="user.id" :value="user.id">
-                  {{ userLabel(user) }}
-                </option>
-              </select>
-            </div>
+          <div class="overflow-x-auto rounded-md border border-slate-200">
+            <table class="min-w-full divide-y divide-slate-200 text-sm">
+              <thead class="bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
+                <tr>
+                  <th class="px-4 py-3">User</th>
+                  <th class="px-4 py-3">Access role</th>
+                  <th class="px-4 py-3">Source</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-200 bg-white">
+                <tr v-for="user in filteredUsers" :key="user.id">
+                  <td class="px-4 py-3">
+                    <div class="font-medium text-slate-900">{{ userLabel(user) }}</div>
+                    <div class="mt-1 text-xs text-slate-500">{{ user.username }}</div>
+                  </td>
+                  <td class="px-4 py-3">
+                    <select
+                      class="w-full min-w-52 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                      :value="roleForUser(user.id)"
+                      :disabled="!canSave || sourceForUser(user.id) === 'workos_directory'"
+                      @change="updateUserRole(user.id, $event)"
+                    >
+                      <option value="">No access</option>
+                      <option v-for="role in accessRoles" :key="role.code" :value="role.code">
+                        {{ role.label }}
+                      </option>
+                    </select>
+                  </td>
+                  <td class="px-4 py-3">
+                    <Badge
+                      v-if="sourceForUser(user.id) === 'workos_directory'"
+                      variant="secondary"
+                      class="bg-violet-100 text-violet-800"
+                    >
+                      WorkOS Directory
+                    </Badge>
+                    <span v-else-if="roleForUser(user.id)" class="text-xs text-slate-500">
+                      Datamingle
+                    </span>
+                    <span v-else class="text-xs text-slate-400">None</span>
+                  </td>
+                </tr>
+                <tr v-if="filteredUsers.length === 0">
+                  <td colspan="3" class="px-4 py-8 text-center text-sm text-slate-500">
+                    No users match the current filter.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
-        <div class="space-y-4 rounded-2xl border border-slate-200 p-5">
+        <div class="space-y-4 rounded-lg border border-slate-200 p-5">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h3 class="text-lg font-semibold text-slate-900">Servers</h3>
-              <p class="text-sm text-slate-600">Choose which database servers belong to this resource group.</p>
+              <h3 class="text-base font-semibold text-slate-900">Servers</h3>
             </div>
             <div class="flex flex-wrap items-center gap-2">
               <Badge variant="secondary" class="bg-slate-100 text-slate-700">
@@ -583,7 +605,7 @@ watch(
               <select
                 class="min-h-[18rem] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
                 multiple
-                @change="updateSelection($event, 'available-instances')"
+                @change="updateInstanceSelection($event, 'available-instances')"
               >
                 <option v-for="instance in availableInstances" :key="instance.id" :value="instance.id">
                   {{ serverLabel(instance) }}
@@ -592,16 +614,36 @@ watch(
             </div>
 
             <div class="flex flex-col items-center justify-center gap-2">
-              <Button variant="outline" size="icon" :disabled="!canSave || availableInstanceSelection.length === 0" @click="moveSelectedInstancesToAssigned">
+              <Button
+                variant="outline"
+                size="icon"
+                :disabled="!canSave || availableInstanceSelection.length === 0"
+                @click="moveSelectedInstancesToAssigned"
+              >
                 <ChevronRight class="h-4 w-4" />
               </Button>
-              <Button variant="outline" size="icon" :disabled="!canSave || availableInstances.length === 0" @click="moveAllInstancesToAssigned">
+              <Button
+                variant="outline"
+                size="icon"
+                :disabled="!canSave || availableInstances.length === 0"
+                @click="moveAllInstancesToAssigned"
+              >
                 <ChevronsRight class="h-4 w-4" />
               </Button>
-              <Button variant="outline" size="icon" :disabled="!canSave || selectedInstanceSelection.length === 0" @click="moveSelectedInstancesToAvailable">
+              <Button
+                variant="outline"
+                size="icon"
+                :disabled="!canSave || selectedInstanceSelection.length === 0"
+                @click="moveSelectedInstancesToAvailable"
+              >
                 <ChevronLeft class="h-4 w-4" />
               </Button>
-              <Button variant="outline" size="icon" :disabled="!canSave || assignedInstances.length === 0" @click="moveAllInstancesToAvailable">
+              <Button
+                variant="outline"
+                size="icon"
+                :disabled="!canSave || assignedInstances.length === 0"
+                @click="moveAllInstancesToAvailable"
+              >
                 <ChevronsLeft class="h-4 w-4" />
               </Button>
             </div>
@@ -617,7 +659,7 @@ watch(
               <select
                 class="min-h-[18rem] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
                 multiple
-                @change="updateSelection($event, 'selected-instances')"
+                @change="updateInstanceSelection($event, 'selected-instances')"
               >
                 <option v-for="instance in assignedInstances" :key="instance.id" :value="instance.id">
                   {{ serverLabel(instance) }}
@@ -628,21 +670,25 @@ watch(
         </div>
       </CardContent>
       <CardFooter class="justify-between border-t border-slate-200 pt-6">
-        <div>
-          <Button
-            v-if="!isCreateMode && canDeleteResourceGroups"
-            variant="destructive"
-            :disabled="isDeleting"
-            @click="removeResourceGroup"
-          >
-            <Trash2 class="h-4 w-4" />
-            Delete
+        <Button
+          v-if="!isCreateMode"
+          variant="destructive"
+          :disabled="isDeleting || !canDeleteResourceGroups"
+          @click="removeResourceGroup"
+        >
+          <Trash2 class="h-4 w-4" />
+          Delete
+        </Button>
+        <span v-else />
+        <div class="flex flex-wrap justify-end gap-3">
+          <Button as-child variant="outline">
+            <RouterLink to="/settings/resource-groups">Cancel</RouterLink>
+          </Button>
+          <Button :disabled="isLoading || isSaving || !canSave" @click="saveResourceGroup">
+            <Save class="h-4 w-4" />
+            Save
           </Button>
         </div>
-        <Button :disabled="!canSave || isLoading || isSaving" @click="saveResourceGroup">
-          <Save class="h-4 w-4" />
-          {{ isSaving ? 'Saving…' : 'Save resource group' }}
-        </Button>
       </CardFooter>
     </Card>
   </section>
