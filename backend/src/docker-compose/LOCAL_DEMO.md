@@ -14,6 +14,12 @@ The local dev compose environment can seed a manual-testing setup for workflow U
 
 The local compose file sets `RUN_LOCAL_DEMO_SEED=1` on the `datamingle-app` container.
 
+The demo databases run in a separate compose stack. Start them first:
+
+```bash
+docker-compose -f backend/src/docker-compose/docker-compose.demo-dbs.yml up -d
+```
+
 On rebuild or recreate, startup runs:
 
 ```bash
@@ -90,15 +96,17 @@ This command verifies:
 
 ## Resetting the demo databases
 
-The local ARM compose services are intentionally ephemeral:
+The local compose services are intentionally ephemeral:
 
 - the app MySQL database is not bind-mounted
 - the demo MySQL/PostgreSQL services do not use named volumes
 
-If you want to recreate the initial SQL content from scratch, tear down the local stack and bring it back up again:
+If you want to recreate the initial SQL content from scratch, tear down all local stacks and bring them back up again:
 
 ```bash
 docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml down -v
+docker-compose -f backend/src/docker-compose/docker-compose.demo-dbs.yml down -v
+docker-compose -f backend/src/docker-compose/docker-compose.demo-dbs.yml up -d
 docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend
 ```
 

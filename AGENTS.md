@@ -10,9 +10,15 @@
 
 - Prefer running Django and other Python app commands inside the app container, not on the host.
 - The local development app container is `datamingle-app`.
-- The local compose file in use is `backend/src/docker-compose/docker-compose.local-dev.yml`.
+- The local compose file is `backend/src/docker-compose/docker-compose.local-dev.yml`.
+- Demo databases run in a separate stack at `backend/src/docker-compose/docker-compose.demo-dbs.yml`.
+- Shared infrastructure (observability) runs from `shared-infra/docker-compose.yml`.
+- All local stacks join the shared `datamingle` Docker network.
+  - Create it once with: `docker network create datamingle`
 - Rebuild the app and frontend containers with:
   - `docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend`
+- Start demo databases with:
+  - `docker-compose -f backend/src/docker-compose/docker-compose.demo-dbs.yml up -d`
 - Run Django commands with:
   - `docker exec -w /opt/datamingle/backend datamingle-app python manage.py <command>`
 - If container code is not bind-mounted for a file you changed, copy the file into the container with `docker cp` before running containerized commands.
