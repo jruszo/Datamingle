@@ -1,7 +1,6 @@
 import datetime
 import logging
 
-from django.contrib.auth.models import Group
 from django.db import DatabaseError, IntegrityError, transaction
 from django.db.models import Q
 from common.task_queue import async_task
@@ -19,6 +18,8 @@ from sql.models import (
     PermissionRequestSubject,
     PermissionRequestTarget,
     ResourceGroup,
+    ResourceAccessRole,
+    ResourceGroupMembership,
     TemporaryInstanceGrant,
     TemporaryResourceGroupGrant,
     Users,
@@ -27,13 +28,14 @@ from sql.models import (
 )
 from sql.notify import notify_for_audit
 from sql.utils.resource_group import (
+    resource_groups_for_role,
     user_groups,
     user_member_groups,
-    user_has_group_instance_access,
     user_has_instance_query_access,
     user_has_instance_workflow_access,
+    sync_user_legacy_resource_groups,
 )
-from sql.utils.workflow_audit import AuditException, get_auditor
+from sql.utils.workflow_audit import AuditException, get_auditor, reviewable_audit_ids
 
 from api_core.pagination import CustomizedPagination
 from api_core.response import success_response
@@ -61,27 +63,16 @@ def _sync_permission_request_approval_notifications(permission_request):
     sync_approval_notifications(permission_request)
 
 
-def _user_auth_group_ids(user):
-    if user.is_superuser:
-        return list(Group.objects.values_list("id", flat=True))
-    return list(user.groups.values_list("id", flat=True))
-
-
 def _reviewable_request_ids(user):
     if user.is_superuser:
         return list(
             PermissionRequest.objects.values_list("request_id", flat=True).order_by()
         )
-    if not user.has_perm("sql.query_review"):
-        return []
-    group_ids = [group.group_id for group in user_member_groups(user)]
-    auth_group_ids = _user_auth_group_ids(user)
     return list(
         WorkflowAudit.objects.filter(
-            workflow_type=WorkflowType.ACCESS_REQUEST,
-            group_id__in=group_ids,
-            current_status=WorkflowStatus.WAITING,
-            current_audit__in=auth_group_ids,
+            audit_id__in=reviewable_audit_ids(
+                user, workflow_type=WorkflowType.ACCESS_REQUEST
+            )
         ).values_list("workflow_id", flat=True)
     )
 
@@ -183,7 +174,12 @@ def _permission_request_audit_callback(request_id, workflow_status):
 
     if permission_request.access_duration == PermissionRequestDuration.PERMANENT:
         if permission_request.target_type == PermissionRequestTarget.RESOURCE_GROUP:
-            user.resource_group.add(permission_request.resource_group)
+            ResourceGroupMembership.objects.get_or_create(
+                user=user,
+                resource_group=permission_request.resource_group,
+                defaults={"access_role": ResourceAccessRole.QUERY},
+            )
+            sync_user_legacy_resource_groups(user)
             PermanentResourceGroupGrant.objects.get_or_create(
                 source_request=permission_request,
                 defaults={
@@ -722,7 +718,14 @@ class PermissionRequestReviewCreate(views.APIView):
 
     @extend_schema(request=PermissionRequestReviewSerializer)
     def post(self, request, request_id):
-        _require_permission(request, "sql.query_review")
+        if not (
+            request.user.is_superuser
+            or resource_groups_for_role(
+                request.user, ResourceAccessRole.WORKFLOW_APPROVER
+            ).exists()
+            or request.user.has_perm("sql.query_review")
+        ):
+            raise PermissionDenied("You do not have permission to review requests.")
         serializer = PermissionRequestReviewSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
