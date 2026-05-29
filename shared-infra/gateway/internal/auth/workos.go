@@ -15,14 +15,20 @@ type contextKey string
 
 const OrgIDKey contextKey = "org_id"
 
+const RequiredIngestPermission = "datamingle-agent:ingest-metrics"
+
 type Authenticator struct {
 	workosClient *workos.Client
 	apiKeyCache  *cache.APIKeyCache
 }
 
 func NewAuthenticator(apiKey string, apiKeyCache *cache.APIKeyCache) *Authenticator {
+	return newAuthenticatorWithClient(workos.NewClient(apiKey), apiKeyCache)
+}
+
+func newAuthenticatorWithClient(workosClient *workos.Client, apiKeyCache *cache.APIKeyCache) *Authenticator {
 	return &Authenticator{
-		workosClient: workos.NewClient(apiKey),
+		workosClient: workosClient,
 		apiKeyCache:  apiKeyCache,
 	}
 }
@@ -49,8 +55,10 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 }
 
 func (a *Authenticator) validate(ctx context.Context, token string) (string, error) {
-	if cachedOrgID, ok := a.apiKeyCache.GetOrgID(ctx, token); ok {
-		return cachedOrgID, nil
+	if a.apiKeyCache != nil {
+		if cachedOrgID, ok := a.apiKeyCache.GetOrgID(ctx, token); ok {
+			return cachedOrgID, nil
+		}
 	}
 
 	resp, err := a.workosClient.APIKeys().CreateValidation(
@@ -67,6 +75,10 @@ func (a *Authenticator) validate(ctx context.Context, token string) (string, err
 		return "", errors.New("api key must belong to an organization")
 	}
 
+	if !hasPermission(resp.APIKey.Permissions, RequiredIngestPermission) {
+		return "", errors.New("api key missing required ingest permission")
+	}
+
 	orgID := resp.APIKey.Owner.ID
 
 	slog.Info("api key validated",
@@ -74,9 +86,20 @@ func (a *Authenticator) validate(ctx context.Context, token string) (string, err
 		"org_id", orgID,
 	)
 
-	a.apiKeyCache.SetOrgID(ctx, token, orgID)
+	if a.apiKeyCache != nil {
+		a.apiKeyCache.SetOrgID(ctx, token, orgID)
+	}
 
 	return orgID, nil
+}
+
+func hasPermission(permissions []string, required string) bool {
+	for _, permission := range permissions {
+		if permission == required {
+			return true
+		}
+	}
+	return false
 }
 
 func OrgIDFromContext(ctx context.Context) (string, bool) {

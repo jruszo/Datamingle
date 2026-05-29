@@ -11,10 +11,19 @@ import (
 	"github.com/jruszo/datamingle/gateway/internal/proxy"
 )
 
+const (
+	defaultCortexEndpoint = "http://cortex:9009"
+	defaultRedisURL       = "redis://redis:6379"
+	defaultGatewayPort    = "4430"
+
+	prometheusRemoteWritePath = "/api/v1/push"
+	otlpMetricsPath           = "/api/v1/otlp/v1/metrics"
+)
+
 func main() {
 	cortexEndpoint := os.Getenv("CORTEX_ENDPOINT")
 	if cortexEndpoint == "" {
-		cortexEndpoint = "http://cortex:9009"
+		cortexEndpoint = defaultCortexEndpoint
 	}
 
 	workosAPIKey := os.Getenv("WORKOS_API_KEY")
@@ -25,12 +34,12 @@ func main() {
 
 	redisURL := os.Getenv("REDIS_URL")
 	if redisURL == "" {
-		redisURL = "redis://redis:6379"
+		redisURL = defaultRedisURL
 	}
 
 	port := os.Getenv("GATEWAY_PORT")
 	if port == "" {
-		port = "4430"
+		port = defaultGatewayPort
 	}
 
 	apiKeyCache, err := cache.NewAPIKeyCache(redisURL, 5*time.Minute)
@@ -41,8 +50,8 @@ func main() {
 
 	authenticator := auth.NewAuthenticator(workosAPIKey, apiKeyCache)
 
-	promWriteProxy := proxy.CortexHandler(cortexEndpoint + "/api/v1/push")
-	otlpMetricsProxy := proxy.CortexHandler(cortexEndpoint + "/otlp/v1/metrics")
+	promWriteProxy := proxy.CortexHandler(cortexEndpoint + prometheusRemoteWritePath)
+	otlpMetricsProxy := proxy.CortexHandler(cortexEndpoint + otlpMetricsPath)
 
 	mux := http.NewServeMux()
 	mux.Handle("POST /api/v1/prometheus/write", authenticator.Middleware(promWriteProxy))
@@ -58,7 +67,16 @@ func main() {
 		"cortex_endpoint", cortexEndpoint,
 	)
 
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
+	server := &http.Server{
+		Addr:              ":" + port,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      2 * time.Minute,
+		IdleTimeout:       60 * time.Second,
+	}
+
+	if err := server.ListenAndServe(); err != nil {
 		slog.Error("server error", "error", err)
 		os.Exit(1)
 	}
