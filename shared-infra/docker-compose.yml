@@ -33,6 +33,16 @@ services:
     networks:
       - datamingle
 
+  redis:
+    image: redis:7-alpine
+    container_name: datamingle-shared-redis
+    restart: always
+    command: redis-server --save "" --appendonly no
+    ports:
+      - "6379:6379"
+    networks:
+      - datamingle
+
   quickwit-postgres:
     image: postgres:16-alpine
     container_name: datamingle-shared-quickwit-postgres
@@ -62,6 +72,25 @@ services:
       - "./config/cortex/runtime-config.yaml:/etc/cortex/runtime-config.yaml:ro"
       - "./config/cortex/rules:/rules"
       - shared_cortex_data:/data
+    networks:
+      - datamingle
+
+  gateway:
+    build: ./gateway
+    container_name: datamingle-shared-gateway
+    restart: always
+    depends_on:
+      cortex:
+        condition: service_started
+      redis:
+        condition: service_started
+    ports:
+      - "4430:4430"
+    env_file:
+      - .env
+    environment:
+      CORTEX_ENDPOINT: http://cortex:9009
+      REDIS_URL: redis://redis:6379
     networks:
       - datamingle
 
