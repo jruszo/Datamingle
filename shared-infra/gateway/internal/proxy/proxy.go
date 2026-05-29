@@ -18,6 +18,9 @@ func CortexHandler(targetURL string) http.Handler {
 	reverseProxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
+			pr.Out.URL.Path = target.Path
+			pr.Out.URL.RawPath = target.RawPath
+			pr.Out.URL.RawQuery = target.RawQuery
 
 			orgID, ok := auth.OrgIDFromContext(pr.In.Context())
 			if !ok {

@@ -29,6 +29,7 @@ from api_agents.models import (
 )
 from api_agents.services import (
     REQUIRED_AGENT_KEY_PERMISSIONS,
+    WORKOS_AGENT_API_KEY_PERMISSIONS,
     AgentCommandDispatchError,
     AgentAPIKeyRejected,
     authenticate_agent_api_key,
@@ -404,7 +405,7 @@ class WorkOSAgentAPIKeyTests(APITestCase):
                 "name": "Datamingle Agent: agent-a",
                 "value": "sk_agent_created_once",
                 "obfuscated_value": "sk_...once",
-                "permissions": list(REQUIRED_AGENT_KEY_PERMISSIONS),
+                "permissions": list(WORKOS_AGENT_API_KEY_PERMISSIONS),
             }
         }
         mock_post.return_value.raise_for_status.return_value = None
@@ -421,7 +422,7 @@ class WorkOSAgentAPIKeyTests(APITestCase):
         mock_post.assert_called_once()
         self.assertEqual(
             mock_post.call_args.kwargs["json"]["permissions"],
-            list(REQUIRED_AGENT_KEY_PERMISSIONS),
+            list(WORKOS_AGENT_API_KEY_PERMISSIONS),
         )
 
     @patch("api_agents.services.validate_workos_api_key")

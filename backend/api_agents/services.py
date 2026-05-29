@@ -56,6 +56,10 @@ REQUIRED_AGENT_KEY_PERMISSIONS = (
     "datamingle-agent:read-config",
     "datamingle-agent:execute-command",
 )
+AGENT_INGEST_METRICS_PERMISSION = "datamingle-agent:ingest-metrics"
+WORKOS_AGENT_API_KEY_PERMISSIONS = REQUIRED_AGENT_KEY_PERMISSIONS + (
+    AGENT_INGEST_METRICS_PERMISSION,
+)
 
 
 class AgentAPIKeyRejected(Exception):
@@ -149,7 +153,7 @@ class WorkOSAgentAPIKeyProvider:
             )
         api_key = create_workos_organization_api_key(
             name=f"Datamingle Agent: {agent.display_name or agent.name}",
-            permissions=list(REQUIRED_AGENT_KEY_PERMISSIONS),
+            permissions=list(WORKOS_AGENT_API_KEY_PERMISSIONS),
         )
         owner = api_key.get("owner") or {}
         if (

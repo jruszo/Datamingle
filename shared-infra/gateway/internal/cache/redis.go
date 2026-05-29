@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	defaultTTL          = 5 * time.Minute
-	apiKeyCacheKeyPrefix = "apikey:"
+	defaultTTL           = 5 * time.Minute
+	apiKeyCacheKeyPrefix = "apikey:ingest-metrics:"
 )
 
 type APIKeyCache struct {
