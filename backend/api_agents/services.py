@@ -18,6 +18,7 @@ from django.core.exceptions import (
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 import requests
+from rest_framework.exceptions import APIException
 
 from common.config import SysConfig
 from common.authenticate.workos import _dynamic_import_workos
@@ -61,6 +62,12 @@ WORKOS_AGENT_API_KEY_PERMISSIONS = REQUIRED_AGENT_KEY_PERMISSIONS + (
 
 class AgentAPIKeyRejected(Exception):
     pass
+
+
+class WorkOSAPIKeyIssueError(APIException):
+    status_code = 502
+    default_detail = "WorkOS could not create an agent API key."
+    default_code = "workos_api_key_issue_failed"
 
 
 class AgentCommandDispatchError(Exception):
@@ -210,18 +217,30 @@ def create_workos_organization_api_key(name, permissions):
         settings.WORKOS_BASE_URL.rstrip("/") + "/",
         f"organizations/{settings.WORKOS_ORGANIZATION_ID}/api_keys",
     )
+    payload = {"name": name}
+    if permissions:
+        payload["permissions"] = permissions
     response = requests.post(
         url,
-        json={"name": name, "permissions": permissions},
+        json=payload,
         headers={
             "Authorization": f"Bearer {settings.WORKOS_API_KEY}",
             "Content-Type": "application/json",
         },
         timeout=10,
     )
-    response.raise_for_status()
-    payload = response.json()
-    api_key = payload.get("api_key") or payload
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        detail = (
+            "WorkOS could not create an agent API key. Confirm these WorkOS API key "
+            f"permissions exist: {', '.join(permissions)}."
+        )
+        if response.text:
+            detail = f"{detail} WorkOS response: {response.text[:500]}"
+        raise WorkOSAPIKeyIssueError(detail=detail) from exc
+    response_payload = response.json()
+    api_key = response_payload.get("api_key") or response_payload
     if not api_key.get("id") or not api_key.get("value"):
         raise PermissionDenied("WorkOS did not return a usable API key.")
     return api_key

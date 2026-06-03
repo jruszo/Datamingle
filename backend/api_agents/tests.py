@@ -2,6 +2,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import requests
 from asgiref.sync import async_to_sync, sync_to_async
 from channels.testing import WebsocketCommunicator
 from django.core.exceptions import ImproperlyConfigured, ValidationError
@@ -321,6 +322,30 @@ class AgentApiTests(APITestCase):
         list_response = self.client.get("/api/v1/agents/")
         self.assertEqual(list_response.status_code, status.HTTP_200_OK)
         self.assertEqual(list_response.json()["data"]["count"], 1)
+
+    @patch("api_agents.services.requests.post")
+    def test_create_agent_returns_json_error_when_workos_rejects_permissions(
+        self, mock_post
+    ):
+        mock_post.return_value.status_code = 422
+        mock_post.return_value.text = '{"error":"Unknown permission"}'
+        mock_post.return_value.raise_for_status.side_effect = requests.HTTPError(
+            "422 Client Error"
+        )
+
+        response = self.client.post(
+            "/api/v1/agents/",
+            {"node_name": "prod-db-node-01"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+        self.assertIn("datamingle-agent:connect", response.json()["detail"])
+        self.assertIn("Unknown permission", response.json()["detail"])
+        self.assertFalse(Agent.objects.filter(name="prod-db-node-01").exists())
+        self.assertFalse(
+            InfrastructureNode.objects.filter(name="prod-db-node-01").exists()
+        )
 
     @patch("api_agents.services.requests.post")
     @patch("api_agents.services.workos_client")
