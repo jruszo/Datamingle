@@ -13,6 +13,7 @@ import (
 
 func TestClientSendsHelloAndHandlesMessages(t *testing.T) {
 	helloCh := make(chan Hello, 1)
+	pongCh := make(chan Message, 1)
 	upgrader := websocket.Upgrader{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/ws/agent/" {
@@ -40,6 +41,16 @@ func TestClientSendsHelloAndHandlesMessages(t *testing.T) {
 			t.Errorf("hello ack write failed: %v", err)
 			return
 		}
+		if err := conn.WriteJSON(Message{Type: "ping", SentAt: "2026-06-03T20:00:00Z"}); err != nil {
+			t.Errorf("ping write failed: %v", err)
+			return
+		}
+		var pong Message
+		if err := conn.ReadJSON(&pong); err != nil {
+			t.Errorf("pong read failed: %v", err)
+			return
+		}
+		pongCh <- pong
 		if err := conn.WriteJSON(Message{Type: "config.changed", Revision: 5, Reason: "assignment.updated"}); err != nil {
 			t.Errorf("config changed write failed: %v", err)
 			return
@@ -76,6 +87,10 @@ func TestClientSendsHelloAndHandlesMessages(t *testing.T) {
 	hello := <-helloCh
 	if hello.Type != "hello" || hello.AgentVersion != "test" || hello.ConfigRevision != 4 {
 		t.Fatalf("unexpected hello: %+v", hello)
+	}
+	pong := <-pongCh
+	if pong.Type != "pong" || pong.SentAt != "2026-06-03T20:00:00Z" {
+		t.Fatalf("unexpected pong: %+v", pong)
 	}
 	if len(messages) != 2 {
 		t.Fatalf("expected two messages, got %d", len(messages))

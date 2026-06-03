@@ -68,6 +68,7 @@ services:
       RUN_MIGRATIONS_ON_START: "1"
       RUN_LOCAL_DEMO_SEED: "1"
       GUNICORN_RELOAD: "1"
+      DATAMINGLE_SERVE_ASGI: "1"
     entrypoint: "bash /opt/datamingle/backend/src/docker/startup.sh"
     env_file:
       - .env.local-dev

@@ -43,6 +43,7 @@ class Agent(models.Model):
     last_seen_at = models.DateTimeField(null=True, blank=True)
     last_connected_at = models.DateTimeField(null=True, blank=True)
     last_disconnected_at = models.DateTimeField(null=True, blank=True)
+    last_websocket_pong_at = models.DateTimeField(null=True, blank=True)
     last_config_revision = models.PositiveIntegerField(default=0)
     desired_config_revision = models.PositiveIntegerField(default=1)
     enabled = models.BooleanField(default=True)

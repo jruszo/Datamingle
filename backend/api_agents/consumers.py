@@ -1,3 +1,6 @@
+import asyncio
+import contextlib
+
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
@@ -10,6 +13,8 @@ from api_agents.models import AgentCommand
 from api_agents.models import AgentStatus
 from api_agents.services import AgentAPIKeyRejected, authenticate_agent_api_key
 from api_agents.time import agent_datetime_to_utc_iso, agent_utc_now
+
+WEBSOCKET_HEARTBEAT_INTERVAL_SECONDS = 30
 
 
 class AgentConsumer(AsyncJsonWebsocketConsumer):
@@ -38,10 +43,17 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
                 "type": "hello.ack",
                 "agent_id": self.agent.id,
                 "desired_config_revision": self.agent.desired_config_revision,
+                "heartbeat_interval": WEBSOCKET_HEARTBEAT_INTERVAL_SECONDS,
             }
         )
+        self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
     async def disconnect(self, code):
+        heartbeat_task = getattr(self, "heartbeat_task", None)
+        if heartbeat_task is not None:
+            heartbeat_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await heartbeat_task
         if hasattr(self, "agent"):
             await self._mark_disconnected()
 
@@ -53,10 +65,11 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
                     "type": "hello.ack",
                     "agent_id": self.agent.id,
                     "desired_config_revision": self.agent.desired_config_revision,
+                    "heartbeat_interval": WEBSOCKET_HEARTBEAT_INTERVAL_SECONDS,
                 }
             )
         elif message_type == "pong":
-            await self._store_metadata("last_pong", content)
+            await self._mark_websocket_pong(content)
         elif message_type == "config.applied":
             await self._mark_config_applied(
                 content.get("revision", 0), content.get("config_hash", "")
@@ -102,6 +115,17 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         if len(parts) == 2 and parts[0].lower() == "bearer":
             return parts[1]
         return ""
+
+    async def _heartbeat_loop(self):
+        while True:
+            await asyncio.sleep(WEBSOCKET_HEARTBEAT_INTERVAL_SECONDS)
+            now = agent_utc_now()
+            await self.send_json(
+                {
+                    "type": "ping",
+                    "sent_at": agent_datetime_to_utc_iso(now),
+                }
+            )
 
     @database_sync_to_async
     def _mark_connected(self):
@@ -179,6 +203,32 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         agent.save(update_fields=["metadata", "last_seen_at", "update_time"])
         self.agent.metadata = metadata
         self.agent.last_seen_at = now
+
+    @database_sync_to_async
+    def _mark_websocket_pong(self, content):
+        agent = Agent.objects.only(
+            "metadata", "last_seen_at", "last_websocket_pong_at"
+        ).get(pk=self.agent.pk)
+        metadata = dict(agent.metadata or {})
+        now = agent_utc_now()
+        metadata["last_pong"] = {
+            **content,
+            "received_at": agent_datetime_to_utc_iso(now),
+        }
+        agent.metadata = metadata
+        agent.last_seen_at = now
+        agent.last_websocket_pong_at = now
+        agent.save(
+            update_fields=[
+                "metadata",
+                "last_seen_at",
+                "last_websocket_pong_at",
+                "update_time",
+            ]
+        )
+        self.agent.metadata = metadata
+        self.agent.last_seen_at = now
+        self.agent.last_websocket_pong_at = now
 
     @database_sync_to_async
     def _store_module_status(self, content):

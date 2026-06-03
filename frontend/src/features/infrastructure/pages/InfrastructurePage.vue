@@ -845,6 +845,17 @@ watch([currentPage, pageSize], () => {
                     </div>
                   </div>
                   <div class="grid gap-1">
+                    <span class="text-xs font-semibold uppercase text-slate-500">WS Heartbeat</span>
+                    <div class="grid gap-0.5">
+                      <span class="text-sm text-slate-900">
+                        {{ formatRelativeTime(selectedNode.agent.last_websocket_pong_at) }}
+                      </span>
+                      <span class="text-xs text-slate-500">
+                        {{ formatDateTime(selectedNode.agent.last_websocket_pong_at) }}
+                      </span>
+                    </div>
+                  </div>
+                  <div class="grid gap-1">
                     <span class="text-xs font-semibold uppercase text-slate-500">Config</span>
                     <span class="text-sm text-slate-900">
                       {{ selectedNode.agent.last_config_revision }} /

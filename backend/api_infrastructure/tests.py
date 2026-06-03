@@ -86,6 +86,7 @@ class InfrastructureNodeApiTests(APITestCase):
             architecture="amd64",
             agent_version="0.1.0",
             last_seen_at=datetime(2026, 6, 3, 20, 7, 0),
+            last_websocket_pong_at=datetime(2026, 6, 3, 20, 8, 0),
             last_connected_at=datetime(2026, 6, 3, 20, 6, 0),
             last_config_revision=2,
             desired_config_revision=3,
@@ -118,6 +119,9 @@ class InfrastructureNodeApiTests(APITestCase):
         self.assertEqual(payload["agent"]["architecture"], "amd64")
         self.assertEqual(payload["agent"]["agent_version"], "0.1.0")
         self.assertEqual(payload["agent"]["last_seen_at"], "2026-06-03T20:07:00Z")
+        self.assertEqual(
+            payload["agent"]["last_websocket_pong_at"], "2026-06-03T20:08:00Z"
+        )
         self.assertEqual(payload["agent"]["last_connected_at"], "2026-06-03T20:06:00Z")
         self.assertEqual(payload["agent"]["last_config_revision"], 2)
         agent.refresh_from_db()

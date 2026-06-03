@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone as datetime_timezone
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -40,6 +41,7 @@ from api_agents.services import (
     issue_agent_api_key,
     validate_workos_api_key,
 )
+from api_agents.time import agent_utc_now
 from common.utils.const import WorkflowStatus, WorkflowType
 from sql.models import SqlWorkflow, SqlWorkflowContent, WorkflowAudit
 from sql.models import InfrastructureNode, Instance, Users
@@ -562,6 +564,10 @@ class AgentFacingApiTests(APITestCase):
         self.validate_workos_key = patch(
             "api_agents.services.validate_workos_api_key"
         ).start()
+        self.workos_api_keys = {}
+        self.validate_workos_key.side_effect = lambda api_key: self.workos_api_keys.get(
+            api_key
+        )
         self.addCleanup(patch.stopall)
 
     def authenticate_agent(self, agent):
@@ -569,7 +575,7 @@ class AgentFacingApiTests(APITestCase):
         agent.workos_api_key_id = key_id
         agent.save(update_fields=["workos_api_key_id", "update_time"])
         api_key = f"sk_agent_value_{agent.id}"
-        self.validate_workos_key.return_value = SimpleNamespace(
+        self.workos_api_keys[api_key] = SimpleNamespace(
             id=key_id,
             owner=SimpleNamespace(type="organization", id="org_test_123"),
             permissions=list(REQUIRED_AGENT_KEY_PERMISSIONS),
@@ -955,18 +961,23 @@ class AgentWebsocketTests(TransactionTestCase):
         self.validate_workos_key = patch(
             "api_agents.services.validate_workos_api_key"
         ).start()
+        self.workos_api_keys = {}
+        self.validate_workos_key.side_effect = lambda api_key: self.workos_api_keys.get(
+            api_key
+        )
         self.addCleanup(patch.stopall)
 
     def authenticate_agent(self, agent):
         key_id = f"api_key_agent_{agent.id}"
         agent.workos_api_key_id = key_id
         agent.save(update_fields=["workos_api_key_id", "update_time"])
-        self.validate_workos_key.return_value = SimpleNamespace(
+        api_key = f"sk_agent_value_{agent.id}"
+        self.workos_api_keys[api_key] = SimpleNamespace(
             id=key_id,
             owner=SimpleNamespace(type="organization", id="org_test_123"),
             permissions=list(REQUIRED_AGENT_KEY_PERMISSIONS),
         )
-        return f"sk_agent_value_{agent.id}"
+        return api_key
 
     def test_websocket_receives_config_changed_notification(self):
         agent = Agent.objects.create(name="agent-a", desired_config_revision=4)
@@ -1001,6 +1012,47 @@ class AgentWebsocketTests(TransactionTestCase):
         await sync_to_async(agent.refresh_from_db)()
         self.assertEqual(agent.status, AgentStatus.OFFLINE)
         self.assertNotIn(ACTIVE_WEBSOCKET_METADATA_KEY, agent.metadata)
+
+    def test_websocket_pong_updates_heartbeat_time(self):
+        agent = Agent.objects.create(name="agent-a")
+        api_key = self.authenticate_agent(agent)
+        async_to_sync(self._websocket_pong_updates_heartbeat_time)(agent, api_key)
+
+    async def _websocket_pong_updates_heartbeat_time(self, agent, api_key):
+        from archery.asgi import application
+
+        communicator = WebsocketCommunicator(
+            application,
+            "/api/ws/agent/",
+            headers=[(b"authorization", f"Bearer {api_key}".encode("utf-8"))],
+        )
+
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+        hello = await communicator.receive_json_from()
+        self.assertEqual(hello["type"], "hello.ack")
+        self.assertEqual(hello["heartbeat_interval"], 30)
+
+        before = agent_utc_now()
+        await communicator.send_json_to(
+            {"type": "pong", "sent_at": "2026-06-03T20:00:00Z"}
+        )
+        after = agent_utc_now()
+
+        for _ in range(20):
+            await sync_to_async(agent.refresh_from_db)()
+            if agent.last_websocket_pong_at is not None:
+                break
+            await asyncio.sleep(0.05)
+        self.assertGreaterEqual(
+            agent.last_websocket_pong_at, before - timedelta(seconds=1)
+        )
+        self.assertLessEqual(agent.last_websocket_pong_at, after + timedelta(seconds=1))
+        self.assertEqual(agent.metadata["last_pong"]["sent_at"], "2026-06-03T20:00:00Z")
+        self.assertTrue(agent.metadata["last_pong"]["received_at"].endswith("Z"))
+        self.assertEqual(agent.last_seen_at, agent.last_websocket_pong_at)
+
+        await communicator.disconnect()
 
     def test_websocket_receives_command_available_notification(self):
         agent = Agent.objects.create(name="agent-a")

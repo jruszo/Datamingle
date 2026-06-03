@@ -41,6 +41,7 @@ export type InfrastructureNodeAgentRecord = {
   architecture: string
   agent_version: string
   last_seen_at: string | null
+  last_websocket_pong_at: string | null
   last_connected_at: string | null
   last_disconnected_at: string | null
   last_config_revision: number

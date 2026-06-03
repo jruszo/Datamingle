@@ -131,6 +131,9 @@ class InfrastructureNodeSerializer(serializers.ModelSerializer):
             "architecture": agent.architecture,
             "agent_version": agent.agent_version,
             "last_seen_at": agent_datetime_to_utc_iso(agent.last_seen_at),
+            "last_websocket_pong_at": agent_datetime_to_utc_iso(
+                agent.last_websocket_pong_at
+            ),
             "last_connected_at": agent_datetime_to_utc_iso(agent.last_connected_at),
             "last_disconnected_at": agent_datetime_to_utc_iso(
                 agent.last_disconnected_at
