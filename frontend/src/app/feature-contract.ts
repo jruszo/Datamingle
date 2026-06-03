@@ -5,11 +5,19 @@ import type { AccessRequirement } from '@/shared/auth/access'
 
 export type NavigationSection = 'primary' | 'settings'
 
+export type FeatureNavigationGroup = {
+  id: string
+  label: string
+  icon?: Component
+  order?: number
+}
+
 export type FeatureNavigationItem = {
   to: string
   label: string
   section: NavigationSection
   icon?: Component
+  group?: FeatureNavigationGroup
   order?: number
   access?: AccessRequirement
   matchPrefix?: string

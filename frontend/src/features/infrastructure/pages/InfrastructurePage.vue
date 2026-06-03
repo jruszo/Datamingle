@@ -4,7 +4,6 @@ import { Check, Database, Plus, RefreshCw, Search, ServerCog, Wand2, X } from 'l
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -44,6 +43,7 @@ const error = ref('')
 const feedback = ref('')
 const testingServiceId = ref<number | null>(null)
 const discoveringNodeId = ref<number | null>(null)
+const isDetailDialogOpen = ref(false)
 
 const isNodeDialogOpen = ref(false)
 const editingNodeId = ref<number | null>(null)
@@ -101,13 +101,16 @@ const canAccessInfrastructure = computed(() => {
     return true
   }
   const permissions = authStore.currentUser?.permissions ?? []
-  return permissions.includes('sql.menu_infrastructure') || permissions.includes('sql.menu_instance')
+  return (
+    permissions.includes('sql.menu_infrastructure') || permissions.includes('sql.menu_instance')
+  )
 })
 
-const recommendedServices = computed(() =>
-  selectedNode.value?.recommendations.filter(
-    (recommendation: ServiceRecommendationRecord) => recommendation.status === 'recommended',
-  ) ?? [],
+const recommendedServices = computed(
+  () =>
+    selectedNode.value?.recommendations.filter(
+      (recommendation: ServiceRecommendationRecord) => recommendation.status === 'recommended',
+    ) ?? [],
 )
 
 function requireToken() {
@@ -123,7 +126,9 @@ function toUserFacingMessage(errorValue: unknown, fallback: string) {
   }
   const separator = '): '
   const separatorIndex = errorValue.message.indexOf(separator)
-  return separatorIndex === -1 ? errorValue.message : errorValue.message.slice(separatorIndex + separator.length)
+  return separatorIndex === -1
+    ? errorValue.message
+    : errorValue.message.slice(separatorIndex + separator.length)
 }
 
 function statusBadgeClass(status: string | null) {
@@ -206,9 +211,7 @@ async function loadNodes() {
     })
     nodes.value = response.results
     totalCount.value = response.count
-    if (!selectedNode.value && response.results[0]) {
-      await selectNode(response.results[0].id)
-    } else if (selectedNode.value) {
+    if (isDetailDialogOpen.value && selectedNode.value) {
       await loadSelectedNode()
     }
   } catch (errorValue) {
@@ -218,16 +221,35 @@ async function loadNodes() {
   }
 }
 
+function searchNodes() {
+  if (currentPage.value !== 1) {
+    currentPage.value = 1
+    return
+  }
+  void loadNodes()
+}
+
 async function selectNode(nodeId: number) {
   detailLoading.value = true
   error.value = ''
   try {
     selectedNode.value = await fetchInfrastructureNode(nodeId, requireToken())
   } catch (errorValue) {
+    selectedNode.value = null
     error.value = toUserFacingMessage(errorValue, 'Failed to load node detail.')
   } finally {
     detailLoading.value = false
   }
+}
+
+async function openNodeDetail(nodeId: number) {
+  isDetailDialogOpen.value = true
+  await selectNode(nodeId)
+}
+
+function closeNodeDetail() {
+  isDetailDialogOpen.value = false
+  selectedNode.value = null
 }
 
 async function loadSelectedNode() {
@@ -284,6 +306,7 @@ async function submitNode() {
       ? await updateInfrastructureNode(editingNodeId.value, payload, requireToken())
       : await createInfrastructureNode(payload, requireToken())
     selectedNode.value = detail
+    isDetailDialogOpen.value = true
     feedback.value = editingNodeId.value ? 'Node updated.' : 'Node created.'
     closeNodeDialog()
     await loadNodes()
@@ -310,13 +333,18 @@ function resetServiceForm() {
   serviceForm.show_db_name_regex = ''
   serviceForm.denied_db_name_regex = ''
   serviceForm.charset = ''
-  serviceForm.resource_group_ids = selectedNode.value?.resource_group_ids ? [...selectedNode.value.resource_group_ids] : []
+  serviceForm.resource_group_ids = selectedNode.value?.resource_group_ids
+    ? [...selectedNode.value.resource_group_ids]
+    : []
   serviceForm.service_tag_ids = []
   delete serviceForm.recommendation_id
   serviceFormError.value = ''
 }
 
-function openServiceDialog(service?: DatabaseServiceRecord, recommendation?: ServiceRecommendationRecord) {
+function openServiceDialog(
+  service?: DatabaseServiceRecord,
+  recommendation?: ServiceRecommendationRecord,
+) {
   resetServiceForm()
   if (service) {
     editingServiceId.value = service.id
@@ -342,7 +370,8 @@ function openServiceDialog(service?: DatabaseServiceRecord, recommendation?: Ser
     serviceForm.host = recommendation.host
     serviceForm.port = recommendation.port
     serviceForm.service_name =
-      recommendation.service_name || `${selectedNode.value?.name || 'node'}-${recommendation.engine}-${recommendation.port}`
+      recommendation.service_name ||
+      `${selectedNode.value?.name || 'node'}-${recommendation.engine}-${recommendation.port}`
   }
   isServiceDialogOpen.value = true
 }
@@ -364,7 +393,11 @@ async function submitService() {
   serviceSaving.value = true
   serviceFormError.value = ''
   try {
-    const payload = { ...serviceForm, service_name: serviceForm.service_name.trim(), host: serviceForm.host.trim() }
+    const payload = {
+      ...serviceForm,
+      service_name: serviceForm.service_name.trim(),
+      host: serviceForm.host.trim(),
+    }
     if (editingServiceId.value) {
       await updateDatabaseService(editingServiceId.value, payload, requireToken())
       feedback.value = 'Service updated.'
@@ -507,91 +540,179 @@ watch([currentPage, pageSize], () => {
       </div>
     </div>
 
-    <p v-if="error" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+    <p
+      v-if="error"
+      class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+    >
       {{ error }}
     </p>
-    <p v-if="feedback" class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+    <p
+      v-if="feedback"
+      class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"
+    >
       {{ feedback }}
     </p>
 
-    <div class="grid gap-6 xl:grid-cols-[minmax(22rem,0.8fr)_minmax(0,1.5fr)]">
-      <Card class="border-slate-200">
-        <CardHeader>
-          <CardTitle>Nodes</CardTitle>
-        </CardHeader>
-        <CardContent class="space-y-4">
-          <div class="relative">
-            <Search class="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-            <Input v-model="searchQuery" class="pl-9" placeholder="Search nodes" @keyup.enter="void loadNodes()" />
-          </div>
+    <div class="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div class="flex flex-col gap-3 border-b border-slate-200 p-4 lg:flex-row lg:items-center">
+        <div class="relative flex-1">
+          <Search class="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+          <Input
+            v-model="searchQuery"
+            class="h-10 pl-9 font-mono text-sm"
+            placeholder="name:prod-db service:mysql status:online"
+            @keyup.enter="searchNodes"
+          />
+        </div>
+        <Button variant="outline" type="button" :disabled="isLoading" @click="searchNodes">
+          Search
+        </Button>
+      </div>
 
-          <div class="overflow-hidden rounded-lg border border-slate-200">
-            <button
+      <div
+        class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 text-sm"
+      >
+        <div class="flex items-center gap-3 text-slate-500">
+          <span class="font-medium text-slate-900">{{ totalCount }} nodes</span>
+          <span>{{ isLoading ? 'Loading...' : 'Updated' }}</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            :disabled="currentPage === 1 || isLoading"
+            @click="currentPage -= 1"
+          >
+            Previous
+          </Button>
+          <span class="px-2 text-sm text-slate-500">Page {{ currentPage }}</span>
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            :disabled="nodes.length < pageSize || isLoading"
+            @click="currentPage += 1"
+          >
+            Next
+          </Button>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-slate-200 text-sm">
+          <thead class="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
+            <tr>
+              <th class="px-4 py-3">Node</th>
+              <th class="px-4 py-3">Agent</th>
+              <th class="px-4 py-3">Services</th>
+              <th class="px-4 py-3">Recommendations</th>
+              <th class="px-4 py-3">Resource Groups</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 bg-white">
+            <tr
               v-for="node in nodes"
               :key="node.id"
-              type="button"
-              class="grid w-full gap-2 border-b border-slate-100 px-4 py-3 text-left last:border-b-0 hover:bg-slate-50"
-              :class="selectedNode?.id === node.id ? 'bg-slate-50' : 'bg-white'"
-              @click="void selectNode(node.id)"
+              tabindex="0"
+              class="cursor-pointer transition hover:bg-slate-50 focus:bg-slate-50 focus:outline-none"
+              @click="void openNodeDetail(node.id)"
+              @keyup.enter="void openNodeDetail(node.id)"
             >
-              <span class="flex items-center justify-between gap-3">
-                <span class="font-medium text-slate-900">{{ node.name }}</span>
+              <td class="px-4 py-3">
+                <div class="grid gap-1">
+                  <span class="font-medium text-slate-900">{{ node.name }}</span>
+                  <span class="font-mono text-xs text-slate-500">{{ node.address }}</span>
+                </div>
+              </td>
+              <td class="px-4 py-3">
                 <Badge variant="secondary" :class="statusBadgeClass(node.agent_status)">
                   {{ node.agent_status || 'No agent' }}
                 </Badge>
-              </span>
-              <span class="text-sm text-slate-500">{{ node.address }}</span>
-              <span class="flex flex-wrap gap-2 text-xs text-slate-500">
-                <span>{{ node.service_count }} services</span>
-                <span>{{ node.recommendation_count }} recommendations</span>
-              </span>
-            </button>
-            <div v-if="!isLoading && nodes.length === 0" class="px-4 py-8 text-center text-sm text-slate-500">
-              No nodes found.
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+              </td>
+              <td class="px-4 py-3 text-slate-700">{{ node.service_count }}</td>
+              <td class="px-4 py-3 text-slate-700">{{ node.recommendation_count }}</td>
+              <td class="px-4 py-3 text-slate-600">
+                {{ resourceGroupNames(node.resource_group_ids) || 'No groups' }}
+              </td>
+            </tr>
+            <tr v-if="!isLoading && nodes.length === 0">
+              <td colspan="5" class="px-4 py-10 text-center text-sm text-slate-500">
+                No nodes found.
+              </td>
+            </tr>
+            <tr v-if="isLoading">
+              <td colspan="5" class="px-4 py-10 text-center text-sm text-slate-500">
+                Loading nodes...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
 
-      <Card class="border-slate-200">
-        <CardHeader>
+    <div
+      v-if="isDetailDialogOpen"
+      class="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/45 px-4 py-6"
+      @click.self="closeNodeDetail"
+    >
+      <div class="max-h-[92vh] w-full max-w-6xl overflow-y-auto rounded-lg bg-white shadow-xl">
+        <div class="sticky top-0 z-10 border-b border-slate-200 bg-white px-6 py-4">
           <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <CardTitle>{{ selectedNode?.name || 'Node detail' }}</CardTitle>
+              <h3 class="text-lg font-semibold text-slate-900">
+                {{ selectedNode?.name || 'Node detail' }}
+              </h3>
               <p v-if="selectedNode" class="mt-1 text-sm text-slate-500">
-                {{ selectedNode.address }} · {{ resourceGroupNames(selectedNode.resource_group_ids) || 'No groups' }}
+                {{ selectedNode.address }} ·
+                {{ resourceGroupNames(selectedNode.resource_group_ids) || 'No groups' }}
               </p>
             </div>
-            <div v-if="selectedNode" class="flex flex-wrap gap-2">
-              <Button variant="outline" type="button" @click="openNodeDialog(selectedNode)">
-                Edit Node
-              </Button>
-              <Button v-if="!selectedNode.agent_id" variant="outline" type="button" @click="openAgentDialog">
-                <ServerCog class="h-4 w-4" />
-                Add Agent
-              </Button>
-              <Button
-                variant="outline"
-                type="button"
-                :disabled="!selectedNode.agent_id || discoveringNodeId === selectedNode.id"
-                @click="void discoverServices()"
-              >
-                <Wand2 class="h-4 w-4" />
-                Discover
-              </Button>
-              <Button type="button" @click="openServiceDialog()">
-                <Plus class="h-4 w-4" />
-                Add Service
+            <div class="flex flex-wrap items-center gap-2">
+              <template v-if="selectedNode">
+                <Button variant="outline" type="button" @click="openNodeDialog(selectedNode)"
+                  >Edit Node</Button
+                >
+                <Button
+                  v-if="!selectedNode.agent_id"
+                  variant="outline"
+                  type="button"
+                  @click="openAgentDialog"
+                >
+                  <ServerCog class="h-4 w-4" />
+                  Add Agent
+                </Button>
+                <Button
+                  variant="outline"
+                  type="button"
+                  :disabled="!selectedNode.agent_id || discoveringNodeId === selectedNode.id"
+                  @click="void discoverServices()"
+                >
+                  <Wand2 class="h-4 w-4" />
+                  Discover
+                </Button>
+                <Button type="button" @click="openServiceDialog()">
+                  <Plus class="h-4 w-4" />
+                  Add Service
+                </Button>
+              </template>
+              <Button variant="ghost" size="icon" type="button" @click="closeNodeDetail">
+                <X class="h-4 w-4" />
               </Button>
             </div>
           </div>
-        </CardHeader>
-        <CardContent>
-          <div v-if="detailLoading" class="py-12 text-center text-sm text-slate-500">Loading node...</div>
-          <div v-else-if="!selectedNode" class="py-12 text-center text-sm text-slate-500">Select a node.</div>
+        </div>
+
+        <div class="px-6 py-5">
+          <div v-if="detailLoading" class="py-12 text-center text-sm text-slate-500">
+            Loading node...
+          </div>
+          <div v-else-if="!selectedNode" class="py-12 text-center text-sm text-slate-500">
+            Node detail unavailable.
+          </div>
           <div v-else class="grid gap-8">
             <section class="grid gap-3">
-              <h3 class="text-sm font-semibold uppercase text-slate-500">Services</h3>
+              <h4 class="text-sm font-semibold uppercase text-slate-500">Services</h4>
               <div class="overflow-x-auto rounded-lg border border-slate-200">
                 <table class="min-w-full divide-y divide-slate-200 text-sm">
                   <thead class="bg-slate-50 text-left text-xs uppercase text-slate-500">
@@ -605,17 +726,29 @@ watch([currentPage, pageSize], () => {
                   </thead>
                   <tbody class="divide-y divide-slate-100 bg-white">
                     <tr v-for="service in selectedNode.services" :key="service.id">
-                      <td class="px-4 py-3 font-medium text-slate-900">{{ service.service_name }}</td>
+                      <td class="px-4 py-3 font-medium text-slate-900">
+                        {{ service.service_name }}
+                      </td>
                       <td class="px-4 py-3 text-slate-600">{{ service.engine.toUpperCase() }}</td>
-                      <td class="px-4 py-3 text-slate-600">{{ service.host }}:{{ service.port }}</td>
+                      <td class="px-4 py-3 text-slate-600">
+                        {{ service.host }}:{{ service.port }}
+                      </td>
                       <td class="px-4 py-3">
-                        <Badge variant="secondary" :class="serviceStatusClass(service.inventory_status)">
+                        <Badge
+                          variant="secondary"
+                          :class="serviceStatusClass(service.inventory_status)"
+                        >
                           {{ service.inventory_status }}
                         </Badge>
                       </td>
                       <td class="px-4 py-3">
                         <div class="flex justify-end gap-2">
-                          <Button variant="outline" size="sm" type="button" @click="openServiceDialog(service)">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            type="button"
+                            @click="openServiceDialog(service)"
+                          >
                             Edit
                           </Button>
                           <Button
@@ -631,7 +764,9 @@ watch([currentPage, pageSize], () => {
                       </td>
                     </tr>
                     <tr v-if="selectedNode.services.length === 0">
-                      <td colspan="5" class="px-4 py-8 text-center text-slate-500">No services added.</td>
+                      <td colspan="5" class="px-4 py-8 text-center text-slate-500">
+                        No services added.
+                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -639,7 +774,7 @@ watch([currentPage, pageSize], () => {
             </section>
 
             <section class="grid gap-3">
-              <h3 class="text-sm font-semibold uppercase text-slate-500">Recommendations</h3>
+              <h4 class="text-sm font-semibold uppercase text-slate-500">Recommendations</h4>
               <div class="overflow-x-auto rounded-lg border border-slate-200">
                 <table class="min-w-full divide-y divide-slate-200 text-sm">
                   <thead class="bg-slate-50 text-left text-xs uppercase text-slate-500">
@@ -653,32 +788,51 @@ watch([currentPage, pageSize], () => {
                   </thead>
                   <tbody class="divide-y divide-slate-100 bg-white">
                     <tr v-for="recommendation in recommendedServices" :key="recommendation.id">
-                      <td class="px-4 py-3 font-medium text-slate-900">{{ recommendation.engine.toUpperCase() }}</td>
-                      <td class="px-4 py-3 text-slate-600">{{ recommendation.host }}:{{ recommendation.port }}</td>
-                      <td class="px-4 py-3 text-slate-600">{{ recommendation.source }} · {{ recommendation.confidence }}%</td>
-                      <td class="px-4 py-3 text-slate-600">{{ formatDateTime(recommendation.last_seen_at) }}</td>
+                      <td class="px-4 py-3 font-medium text-slate-900">
+                        {{ recommendation.engine.toUpperCase() }}
+                      </td>
+                      <td class="px-4 py-3 text-slate-600">
+                        {{ recommendation.host }}:{{ recommendation.port }}
+                      </td>
+                      <td class="px-4 py-3 text-slate-600">
+                        {{ recommendation.source }} · {{ recommendation.confidence }}%
+                      </td>
+                      <td class="px-4 py-3 text-slate-600">
+                        {{ formatDateTime(recommendation.last_seen_at) }}
+                      </td>
                       <td class="px-4 py-3">
                         <div class="flex justify-end gap-2">
-                          <Button size="sm" type="button" @click="openServiceDialog(undefined, recommendation)">
+                          <Button
+                            size="sm"
+                            type="button"
+                            @click="openServiceDialog(undefined, recommendation)"
+                          >
                             <Check class="h-4 w-4" />
                             Add
                           </Button>
-                          <Button variant="outline" size="sm" type="button" @click="void ignoreRecommendation(recommendation)">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            type="button"
+                            @click="void ignoreRecommendation(recommendation)"
+                          >
                             Ignore
                           </Button>
                         </div>
                       </td>
                     </tr>
                     <tr v-if="recommendedServices.length === 0">
-                      <td colspan="5" class="px-4 py-8 text-center text-slate-500">No recommendations.</td>
+                      <td colspan="5" class="px-4 py-8 text-center text-slate-500">
+                        No recommendations.
+                      </td>
                     </tr>
                   </tbody>
                 </table>
               </div>
             </section>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
 
     <div
@@ -686,15 +840,23 @@ watch([currentPage, pageSize], () => {
       class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 py-6"
       @click.self="closeNodeDialog"
     >
-      <form class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white shadow-xl" @submit.prevent="void submitNode()">
+      <form
+        class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white shadow-xl"
+        @submit.prevent="void submitNode()"
+      >
         <div class="flex items-start justify-between border-b border-slate-200 px-6 py-4">
-          <h3 class="text-lg font-semibold text-slate-900">{{ editingNodeId ? 'Edit Node' : 'Add Node' }}</h3>
+          <h3 class="text-lg font-semibold text-slate-900">
+            {{ editingNodeId ? 'Edit Node' : 'Add Node' }}
+          </h3>
           <Button variant="ghost" size="icon" type="button" @click="closeNodeDialog">
             <X class="h-4 w-4" />
           </Button>
         </div>
         <div class="grid gap-5 px-6 py-5">
-          <p v-if="nodeFormError" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <p
+            v-if="nodeFormError"
+            class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+          >
             {{ nodeFormError }}
           </p>
           <label class="grid gap-2">
@@ -711,8 +873,17 @@ watch([currentPage, pageSize], () => {
           </label>
           <label class="grid gap-2">
             <span class="text-sm font-medium text-slate-700">Resource Groups</span>
-            <select :class="multiSelectClass" multiple :value="nodeForm.resource_group_ids.map(String)" @change="updateNumericSelections($event, 'node')">
-              <option v-for="group in metadata?.resource_groups ?? []" :key="group.group_id" :value="group.group_id">
+            <select
+              :class="multiSelectClass"
+              multiple
+              :value="nodeForm.resource_group_ids.map(String)"
+              @change="updateNumericSelections($event, 'node')"
+            >
+              <option
+                v-for="group in metadata?.resource_groups ?? []"
+                :key="group.group_id"
+                :value="group.group_id"
+              >
                 {{ group.group_name }}
               </option>
             </select>
@@ -730,15 +901,23 @@ watch([currentPage, pageSize], () => {
       class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 py-6"
       @click.self="closeServiceDialog"
     >
-      <form class="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-lg bg-white shadow-xl" @submit.prevent="void submitService()">
+      <form
+        class="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-lg bg-white shadow-xl"
+        @submit.prevent="void submitService()"
+      >
         <div class="flex items-start justify-between border-b border-slate-200 px-6 py-4">
-          <h3 class="text-lg font-semibold text-slate-900">{{ editingServiceId ? 'Edit Service' : 'Add Service' }}</h3>
+          <h3 class="text-lg font-semibold text-slate-900">
+            {{ editingServiceId ? 'Edit Service' : 'Add Service' }}
+          </h3>
           <Button variant="ghost" size="icon" type="button" @click="closeServiceDialog">
             <X class="h-4 w-4" />
           </Button>
         </div>
         <div class="grid gap-5 px-6 py-5 md:grid-cols-2">
-          <p v-if="serviceFormError" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 md:col-span-2">
+          <p
+            v-if="serviceFormError"
+            class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 md:col-span-2"
+          >
             {{ serviceFormError }}
           </p>
           <label class="grid gap-2">
@@ -747,7 +926,11 @@ watch([currentPage, pageSize], () => {
           </label>
           <label class="grid gap-2">
             <span class="text-sm font-medium text-slate-700">Engine</span>
-            <select v-model="serviceForm.engine" :class="selectClass" @change="applyEngineDefaultPort">
+            <select
+              v-model="serviceForm.engine"
+              :class="selectClass"
+              @change="applyEngineDefaultPort"
+            >
               <option value="mysql">MySQL</option>
               <option value="pgsql">PostgreSQL</option>
             </select>
@@ -777,24 +960,46 @@ watch([currentPage, pageSize], () => {
             <Input v-model="serviceForm.charset" placeholder="utf8mb4" />
           </label>
           <label class="flex items-center gap-2 text-sm text-slate-700">
-            <input v-model="serviceForm.is_ssl" type="checkbox" class="h-4 w-4 rounded border-slate-300" />
+            <input
+              v-model="serviceForm.is_ssl"
+              type="checkbox"
+              class="h-4 w-4 rounded border-slate-300"
+            />
             SSL
           </label>
           <label class="flex items-center gap-2 text-sm text-slate-700">
-            <input v-model="serviceForm.verify_ssl" type="checkbox" class="h-4 w-4 rounded border-slate-300" />
+            <input
+              v-model="serviceForm.verify_ssl"
+              type="checkbox"
+              class="h-4 w-4 rounded border-slate-300"
+            />
             Verify SSL
           </label>
           <label class="grid gap-2 md:col-span-2">
             <span class="text-sm font-medium text-slate-700">Resource Groups</span>
-            <select :class="multiSelectClass" multiple :value="serviceForm.resource_group_ids.map(String)" @change="updateNumericSelections($event, 'service_groups')">
-              <option v-for="group in metadata?.resource_groups ?? []" :key="group.group_id" :value="group.group_id">
+            <select
+              :class="multiSelectClass"
+              multiple
+              :value="serviceForm.resource_group_ids.map(String)"
+              @change="updateNumericSelections($event, 'service_groups')"
+            >
+              <option
+                v-for="group in metadata?.resource_groups ?? []"
+                :key="group.group_id"
+                :value="group.group_id"
+              >
                 {{ group.group_name }}
               </option>
             </select>
           </label>
           <label class="grid gap-2 md:col-span-2">
             <span class="text-sm font-medium text-slate-700">Tags</span>
-            <select :class="multiSelectClass" multiple :value="serviceForm.service_tag_ids.map(String)" @change="updateNumericSelections($event, 'service_tags')">
+            <select
+              :class="multiSelectClass"
+              multiple
+              :value="serviceForm.service_tag_ids.map(String)"
+              @change="updateNumericSelections($event, 'service_tags')"
+            >
               <option v-for="tag in metadata?.tags ?? []" :key="tag.id" :value="tag.id">
                 {{ tag.tag_name }}
               </option>
@@ -823,8 +1028,15 @@ watch([currentPage, pageSize], () => {
             <X class="h-4 w-4" />
           </Button>
         </div>
-        <form v-if="!createdAgent" class="grid gap-5 px-6 py-5" @submit.prevent="void submitAgent()">
-          <p v-if="agentFormError" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <form
+          v-if="!createdAgent"
+          class="grid gap-5 px-6 py-5"
+          @submit.prevent="void submitAgent()"
+        >
+          <p
+            v-if="agentFormError"
+            class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+          >
             {{ agentFormError }}
           </p>
           <label class="grid gap-2">
@@ -841,20 +1053,34 @@ watch([currentPage, pageSize], () => {
           </div>
         </form>
         <div v-else class="grid gap-5 px-6 py-5">
-          <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <div
+            class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+          >
             The API key is shown once.
           </div>
           <div class="grid gap-2">
             <div class="flex items-center justify-between">
               <span class="text-sm font-medium text-slate-700">API Key</span>
-              <Button variant="outline" size="sm" type="button" @click="void copyText(createdAgent.api_key)">Copy</Button>
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                @click="void copyText(createdAgent.api_key)"
+                >Copy</Button
+              >
             </div>
             <textarea :class="fieldClass" rows="3" readonly :value="createdAgent.api_key" />
           </div>
           <div class="grid gap-2">
             <div class="flex items-center justify-between">
               <span class="text-sm font-medium text-slate-700">Install Command</span>
-              <Button variant="outline" size="sm" type="button" @click="void copyText(createdAgent.install_command)">Copy</Button>
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                @click="void copyText(createdAgent.install_command)"
+                >Copy</Button
+              >
             </div>
             <textarea :class="fieldClass" rows="5" readonly :value="createdAgent.install_command" />
           </div>

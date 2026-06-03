@@ -14,7 +14,8 @@ const queriesModule: FeatureModule = {
       label: 'Queries',
       section: 'primary',
       icon: Database,
-      order: 50,
+      group: { id: 'database', label: 'Database', icon: Database, order: 25 },
+      order: 70,
     },
   ],
 }

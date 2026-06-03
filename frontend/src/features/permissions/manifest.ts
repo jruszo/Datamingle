@@ -1,4 +1,4 @@
-import { ShieldCheck } from 'lucide-vue-next'
+import { Database, ShieldCheck } from 'lucide-vue-next'
 
 import type { FeatureModule } from '@/app/feature-contract'
 import PermissionManagementPage from '@/features/permissions/pages/PermissionManagementPage.vue'
@@ -6,15 +6,24 @@ import PermissionManagementPage from '@/features/permissions/pages/PermissionMan
 const permissionsModule: FeatureModule = {
   id: 'permissions',
   routes: [
-    { path: '/permission-management', name: 'permission-management', component: PermissionManagementPage, meta: { title: 'Permission Management', access: { anyPermissions: ['sql.menu_queryapplylist'] } } },
+    {
+      path: '/permission-management',
+      name: 'permission-management',
+      component: PermissionManagementPage,
+      meta: {
+        title: 'Permission Management',
+        access: { anyPermissions: ['sql.menu_queryapplylist'] },
+      },
+    },
   ],
   navigation: [
     {
       to: '/permission-management',
-      label: 'Permission Management',
+      label: 'Permissions',
       section: 'primary',
       icon: ShieldCheck,
-      order: 60,
+      group: { id: 'database', label: 'Database', icon: Database, order: 25 },
+      order: 100,
       access: { anyPermissions: ['sql.menu_queryapplylist'] },
     },
   ],

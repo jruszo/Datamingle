@@ -5,10 +5,18 @@ from django.test import TestCase
 from common.utils.const import WorkflowType
 from sql.local_demo import (
     managed_demo_instance_names,
+    managed_demo_node_names,
     managed_demo_resource_group_names,
     managed_demo_usernames,
 )
-from sql.models import Instance, InstanceTag, ResourceGroup, Users, WorkflowAuditSetting
+from sql.models import (
+    InfrastructureNode,
+    Instance,
+    InstanceTag,
+    ResourceGroup,
+    Users,
+    WorkflowAuditSetting,
+)
 
 
 class TestLocalDemoSeed(TestCase):
@@ -27,6 +35,12 @@ class TestLocalDemoSeed(TestCase):
                 instance_name__in=managed_demo_instance_names()
             ).count(),
             len(managed_demo_instance_names()),
+        )
+        self.assertEqual(
+            InfrastructureNode.objects.filter(
+                name__in=managed_demo_node_names(), enabled=True
+            ).count(),
+            len(managed_demo_node_names()),
         )
         self.assertEqual(
             ResourceGroup.objects.filter(
@@ -59,9 +73,11 @@ class TestLocalDemoSeed(TestCase):
         self.assertEqual(mysql_instance.port, 3306)
         self.assertEqual(mysql_instance.user, "demo_datamingle")
         self.assertEqual(mysql_instance.db_type, "mysql")
+        self.assertEqual(mysql_instance.node.name, "demo-mysql-node")
 
         pg_instance = Instance.objects.get(instance_name="demo-pgsql-workflow")
         self.assertEqual(pg_instance.host, "postgres_demo")
         self.assertEqual(pg_instance.port, 5432)
         self.assertEqual(pg_instance.user, "demo_datamingle")
         self.assertEqual(pg_instance.db_type, "pgsql")
+        self.assertEqual(pg_instance.node.name, "demo-postgres-node")
