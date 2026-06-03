@@ -48,7 +48,13 @@ def create_instance(name="primary", node=None):
     )
 
 
-@override_settings(DATAMINGLE_AGENT_API_KEY_BACKEND="local")
+@override_settings(
+    DATAMINGLE_AGENT_API_KEY_BACKEND="workos",
+    WORKOS_API_KEY="sk_test_123",
+    WORKOS_CLIENT_ID="client_test_123",
+    WORKOS_ORGANIZATION_ID="org_test_123",
+    WORKOS_BASE_URL="https://api.workos.test/",
+)
 class InfrastructureNodeApiTests(APITestCase):
     def setUp(self):
         self.user = Users.objects.create_user(
@@ -92,7 +98,18 @@ class InfrastructureNodeApiTests(APITestCase):
             payload["recommendations"][0]["service_name"], "orders-replica"
         )
 
-    def test_create_service_under_node_syncs_local_agent_assignment(self):
+    @patch("api_agents.services.requests.post")
+    def test_create_service_under_node_syncs_local_agent_assignment(self, mock_post):
+        mock_post.return_value.json.return_value = {
+            "object": "api_key",
+            "id": "api_key_123",
+            "owner": {"type": "organization", "id": "org_test_123"},
+            "name": "Datamingle Agent",
+            "value": "sk_agent_created_once",
+            "obfuscated_value": "sk_...once",
+            "permissions": ["datamingle-agent:connect"],
+        }
+        mock_post.return_value.raise_for_status.return_value = None
         node = create_node()
 
         create_agent_response = self.client.post(

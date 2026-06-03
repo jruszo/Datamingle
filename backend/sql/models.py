@@ -344,7 +344,9 @@ class InfrastructureNode(models.Model):
     """Server or host that owns one or more database services."""
 
     name = models.CharField("Node Name", max_length=128, unique=True)
-    address = models.CharField("Node Address", max_length=200, db_index=True)
+    address = models.CharField(
+        "Node Address", max_length=200, blank=True, default="", db_index=True
+    )
     description = models.TextField("Description", blank=True, default="")
     metadata = models.JSONField("Metadata", default=dict, blank=True)
     enabled = models.BooleanField("Enabled", default=True)

@@ -183,8 +183,6 @@ class InfrastructureNodeWriteSerializer(serializers.ModelSerializer):
 
     def validate_address(self, value):
         address = value.strip()
-        if not address:
-            raise serializers.ValidationError("Node address cannot be blank.")
         return address
 
     def validate_description(self, value):

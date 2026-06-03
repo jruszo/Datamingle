@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	stdlibRuntime "runtime"
@@ -102,6 +103,7 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 	registration, err := r.client.Register(ctx, client.RegisterRequest{
 		InstallID:    installID,
 		Name:         r.cfg.AgentName,
+		Address:      detectPrimaryAddress(),
 		Hostname:     hostname,
 		Platform:     stdlibRuntime.GOOS,
 		Architecture: stdlibRuntime.GOARCH,
@@ -130,6 +132,36 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 		ModuleHealth:   toClientHealth(r.modules.Health(ctx)),
 	})
 	return err
+}
+
+func detectPrimaryAddress() string {
+	var fallback string
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, networkInterface := range interfaces {
+		if networkInterface.Flags&net.FlagUp == 0 || networkInterface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addresses, err := networkInterface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, address := range addresses {
+			ipNet, ok := address.(*net.IPNet)
+			if !ok || ipNet.IP.IsLoopback() {
+				continue
+			}
+			if ipv4 := ipNet.IP.To4(); ipv4 != nil {
+				return ipv4.String()
+			}
+			if fallback == "" {
+				fallback = ipNet.IP.String()
+			}
+		}
+	}
+	return fallback
 }
 
 func (r *Runner) CheckConnectivity(ctx context.Context) error {

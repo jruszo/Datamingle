@@ -1,8 +1,6 @@
 import hashlib
-import hmac
 import json
 import logging
-import secrets
 import os
 import tempfile
 import time
@@ -41,7 +39,6 @@ from api_agents.models import (
 )
 
 logger = logging.getLogger("default")
-AGENT_API_KEY_PREFIX = "dma_"
 AGENT_KEY_VISIBLE_PREFIX_LENGTH = 16
 ACTIVE_WEBSOCKET_METADATA_KEY = "active_websocket"
 WEBSOCKET_CHANNEL_METADATA_KEY = "channel_name"
@@ -86,27 +83,7 @@ class IssuedAgentAPIKey:
     key_id: str = ""
     prefix: str = ""
     obfuscated_value: str = ""
-    backend: str = "local"
-
-
-def generate_agent_api_key():
-    return f"{AGENT_API_KEY_PREFIX}{secrets.token_urlsafe(32)}"
-
-
-def hash_agent_api_key(api_key):
-    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
-
-
-def create_agent_api_key(agent):
-    api_key = generate_agent_api_key()
-    agent.api_key_hash = hash_agent_api_key(api_key)
-    agent.api_key_prefix = api_key[:AGENT_KEY_VISIBLE_PREFIX_LENGTH]
-    agent.save(update_fields=["api_key_hash", "api_key_prefix", "update_time"])
-    return IssuedAgentAPIKey(
-        value=api_key,
-        prefix=api_key[:AGENT_KEY_VISIBLE_PREFIX_LENGTH],
-        backend="local",
-    )
+    backend: str = "workos"
 
 
 def authenticate_agent_api_key(api_key):
@@ -123,26 +100,15 @@ def revoke_agent_api_key(agent):
 
 def get_agent_api_key_provider():
     backend = settings.DATAMINGLE_AGENT_API_KEY_BACKEND.strip().lower()
-    if backend == "local":
-        return LocalAgentAPIKeyProvider()
     if backend == "workos":
         return WorkOSAgentAPIKeyProvider()
+    if backend == "local":
+        raise ImproperlyConfigured(
+            "Local agent API keys are disabled. Configure WorkOS organization API keys."
+        )
     raise ImproperlyConfigured(
         f"Unsupported DATAMINGLE_AGENT_API_KEY_BACKEND: {backend}"
     )
-
-
-class LocalAgentAPIKeyProvider:
-    def issue(self, agent):
-        return create_agent_api_key(agent)
-
-    def authenticate(self, api_key):
-        return authenticate_local_agent_api_key(api_key)
-
-    def revoke(self, agent):
-        agent.api_key_hash = None
-        agent.api_key_prefix = ""
-        agent.save(update_fields=["api_key_hash", "api_key_prefix", "update_time"])
 
 
 class WorkOSAgentAPIKeyProvider:
@@ -151,6 +117,7 @@ class WorkOSAgentAPIKeyProvider:
             raise ImproperlyConfigured(
                 "WORKOS_API_KEY and WORKOS_ORGANIZATION_ID are required to issue agent API keys."
             )
+        previous_key_id = agent.workos_api_key_id
         api_key = create_workos_organization_api_key(
             name=f"Datamingle Agent: {agent.display_name or agent.name}",
             permissions=list(WORKOS_AGENT_API_KEY_PERMISSIONS),
@@ -178,6 +145,8 @@ class WorkOSAgentAPIKeyProvider:
                 "update_time",
             ]
         )
+        if previous_key_id and previous_key_id != agent.workos_api_key_id:
+            workos_client().api_keys.delete_api_key(previous_key_id)
         return IssuedAgentAPIKey(
             value=value,
             key_id=api_key["id"],
@@ -218,16 +187,6 @@ class WorkOSAgentAPIKeyProvider:
         agent.save(update_fields=["workos_api_key_id", "api_key_prefix", "update_time"])
 
 
-def authenticate_local_agent_api_key(api_key):
-    candidate_hash = hash_agent_api_key(api_key)
-    for agent in Agent.objects.filter(api_key_hash=candidate_hash):
-        if hmac.compare_digest(agent.api_key_hash, candidate_hash):
-            if not agent.can_connect:
-                raise AgentAPIKeyRejected("Agent is disabled or revoked.")
-            return agent
-    return None
-
-
 def workos_client():
     workos_client_class = _dynamic_import_workos()
     return workos_client_class(
@@ -238,7 +197,12 @@ def workos_client():
 
 
 def validate_workos_api_key(api_key):
-    return workos_client().api_keys.validate_api_key(value=api_key)
+    result = workos_client().api_keys.validate_api_key(value=api_key)
+    if result is None:
+        return None
+    if isinstance(result, dict):
+        return result.get("api_key")
+    return getattr(result, "api_key", result)
 
 
 def create_workos_organization_api_key(name, permissions):
@@ -257,7 +221,7 @@ def create_workos_organization_api_key(name, permissions):
     )
     response.raise_for_status()
     payload = response.json()
-    api_key = payload.get("api_key") or {}
+    api_key = payload.get("api_key") or payload
     if not api_key.get("id") or not api_key.get("value"):
         raise PermissionDenied("WorkOS did not return a usable API key.")
     return api_key

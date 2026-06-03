@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework import serializers
 
 from sql.utils.resource_group import user_instances
@@ -55,6 +56,13 @@ class AgentListSerializer(serializers.ModelSerializer):
 
 
 class AgentCreateSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(max_length=128, required=False, allow_blank=True)
+    display_name = serializers.CharField(
+        max_length=200, required=False, allow_blank=True
+    )
+    node_name = serializers.CharField(
+        max_length=128, required=False, allow_blank=True, write_only=True
+    )
     local_node = serializers.PrimaryKeyRelatedField(
         queryset=InfrastructureNode.objects.filter(enabled=True),
         required=False,
@@ -63,14 +71,75 @@ class AgentCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Agent
-        fields = ("id", "name", "display_name", "metadata", "local_node")
+        fields = ("id", "name", "display_name", "metadata", "local_node", "node_name")
         read_only_fields = ("id",)
 
     def validate_name(self, value):
         value = value.strip()
         if not value:
-            raise serializers.ValidationError("Agent name cannot be blank.")
+            return ""
         return value
+
+    def validate_node_name(self, value):
+        value = value.strip()
+        if not value:
+            return ""
+        if InfrastructureNode.objects.filter(name=value).exists():
+            raise serializers.ValidationError("A node with this name already exists.")
+        return value
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        local_node = attrs.get("local_node")
+        node_name = attrs.get("node_name", "").strip()
+        agent_name = attrs.get("name", "").strip()
+
+        if local_node is None and not node_name and not agent_name:
+            raise serializers.ValidationError({"node_name": "Node name is required."})
+
+        if local_node is None and not node_name:
+            attrs["node_name"] = agent_name
+            node_name = agent_name
+        if (
+            local_node is None
+            and InfrastructureNode.objects.filter(name=node_name).exists()
+        ):
+            raise serializers.ValidationError(
+                {"node_name": "A node with this name already exists."}
+            )
+        if agent_name and Agent.objects.filter(name=agent_name).exists():
+            raise serializers.ValidationError(
+                {"name": "An agent with this name already exists."}
+            )
+        return attrs
+
+    def create(self, validated_data):
+        local_node = validated_data.pop("local_node", None)
+        node_name = validated_data.pop("node_name", "").strip()
+        metadata = validated_data.pop("metadata", {})
+        agent_name = validated_data.pop("name", "").strip()
+        display_name = validated_data.pop("display_name", "").strip()
+
+        with transaction.atomic():
+            if local_node is None:
+                local_node = InfrastructureNode.objects.create(
+                    name=node_name,
+                    address="",
+                    metadata={"provisioning_status": "pending_agent_install"},
+                )
+
+            if not agent_name:
+                agent_name = local_node.name
+            if not display_name:
+                display_name = f"{local_node.name} Agent"
+
+            return Agent.objects.create(
+                **validated_data,
+                name=agent_name,
+                display_name=display_name,
+                metadata=metadata,
+                local_node=local_node,
+            )
 
 
 class AgentUpdateSerializer(serializers.ModelSerializer):

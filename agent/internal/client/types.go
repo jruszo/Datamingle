@@ -9,6 +9,7 @@ import (
 type RegisterRequest struct {
 	InstallID      string `json:"install_id"`
 	Name           string `json:"name"`
+	Address        string `json:"address,omitempty"`
 	Hostname       string `json:"hostname"`
 	Platform       string `json:"platform"`
 	Architecture   string `json:"architecture"`

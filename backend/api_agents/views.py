@@ -51,8 +51,21 @@ class AgentMenuPermission(permissions.BasePermission):
             and (
                 request.user.is_superuser
                 or request.user.has_perm("api_agents.menu_agent")
+                or request.user.has_perm("sql.menu_infrastructure")
+                or request.user.has_perm("sql.menu_instance")
             )
         )
+
+
+def _agent_install_payload(request, agent):
+    issued_key = issue_agent_api_key(agent)
+    data = AgentDetailSerializer(agent).data
+    data["api_key"] = issued_key.value
+    data["api_key_backend"] = issued_key.backend
+    data["api_key_prefix"] = issued_key.prefix
+    data["api_key_id"] = issued_key.key_id
+    data["install_command"] = build_agent_install_command(request, issued_key.value)
+    return data
 
 
 class AgentListCreateView(generics.ListAPIView):
@@ -83,15 +96,12 @@ class AgentListCreateView(generics.ListAPIView):
             getattr(request.user, "organization_id", "")
             or settings.WORKOS_ORGANIZATION_ID
         )
-        agent = serializer.save(organization_id=organization_id)
-        issued_key = issue_agent_api_key(agent)
-        data = AgentDetailSerializer(agent).data
-        data["api_key"] = issued_key.value
-        data["api_key_backend"] = issued_key.backend
-        data["install_command"] = build_agent_install_command(request, issued_key.value)
+        with transaction.atomic():
+            agent = serializer.save(organization_id=organization_id)
+            data = _agent_install_payload(request, agent)
         return success_response(
             data=data,
-            detail="Agent created.",
+            detail="Node created. Install the agent to activate it.",
             status_code=status.HTTP_201_CREATED,
         )
 
@@ -127,6 +137,22 @@ class AgentDetailView(views.APIView):
         agent.save(update_fields=["enabled", "status", "update_time"])
         return success_response(
             data=AgentDetailSerializer(agent).data, detail="Agent revoked."
+        )
+
+
+class AgentInstallKeyView(views.APIView):
+    permission_classes = [AgentMenuPermission]
+
+    def post(self, request, agent_id):
+        agent = get_object_or_404(
+            Agent.objects.select_related("local_node").annotate(
+                assignment_count=Count("assignments")
+            ),
+            pk=agent_id,
+        )
+        return success_response(
+            data=_agent_install_payload(request, agent),
+            detail="Agent install key issued.",
         )
 
 

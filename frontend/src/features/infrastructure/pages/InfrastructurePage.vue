@@ -9,11 +9,11 @@ import { useAuthStore } from '@/stores/auth'
 import {
   createAgent,
   createDatabaseService,
-  createInfrastructureNode,
   discoverInfrastructureNodeServices,
   fetchInfrastructureNode,
   fetchInfrastructureNodes,
   fetchInstanceInventoryMetadata,
+  issueAgentInstallKey,
   testDatabaseServiceConnection,
   updateDatabaseService,
   updateInfrastructureNode,
@@ -54,7 +54,6 @@ const nodeForm = reactive<InfrastructureNodePayload>({
   address: '',
   description: '',
   metadata: {},
-  resource_group_ids: [],
 })
 
 const isServiceDialogOpen = ref(false)
@@ -82,12 +81,13 @@ const serviceForm = reactive<DatabaseServicePayload>({
 
 const isAgentDialogOpen = ref(false)
 const agentSaving = ref(false)
+const agentInstallIssuing = ref(false)
 const agentFormError = ref('')
 const createdAgent = ref<AgentCreateResponse | null>(null)
 const agentForm = reactive({
-  name: '',
-  display_name: '',
+  node_name: '',
 })
+const agentTargetNodeId = ref<number | null>(null)
 
 const fieldClass =
   'w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-400'
@@ -167,22 +167,16 @@ function formatDateTime(value: string | null) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
 }
 
-function resourceGroupNames(ids: number[]) {
-  const groups = metadata.value?.resource_groups ?? []
-  return ids
-    .map((id) => groups.find((group) => group.group_id === id)?.group_name)
-    .filter(Boolean)
-    .join(', ')
+function displayNodeAddress(address: string) {
+  return address.trim() || 'Pending agent registration'
 }
 
-function updateNumericSelections(event: Event, target: 'node' | 'service_groups' | 'service_tags') {
+function updateNumericSelections(event: Event, target: 'service_groups' | 'service_tags') {
   const element = event.target as HTMLSelectElement
   const values = Array.from(element.selectedOptions)
     .map((option) => Number(option.value))
     .filter((value) => Number.isFinite(value))
-  if (target === 'node') {
-    nodeForm.resource_group_ids = values
-  } else if (target === 'service_groups') {
+  if (target === 'service_groups') {
     serviceForm.resource_group_ids = values
   } else {
     serviceForm.service_tag_ids = values
@@ -265,7 +259,6 @@ function resetNodeForm() {
   nodeForm.address = ''
   nodeForm.description = ''
   nodeForm.metadata = {}
-  nodeForm.resource_group_ids = []
   nodeFormError.value = ''
 }
 
@@ -277,7 +270,6 @@ function openNodeDialog(node?: InfrastructureNodeRecord) {
     nodeForm.address = node.address
     nodeForm.description = node.description
     nodeForm.metadata = node.metadata
-    nodeForm.resource_group_ids = [...node.resource_group_ids]
   }
   isNodeDialogOpen.value = true
 }
@@ -288,8 +280,12 @@ function closeNodeDialog() {
 }
 
 async function submitNode() {
-  if (!nodeForm.name.trim() || !nodeForm.address.trim()) {
-    nodeFormError.value = 'Node name and address are required.'
+  if (!editingNodeId.value) {
+    nodeFormError.value = 'Use Add New Node to create nodes with an installable agent.'
+    return
+  }
+  if (!nodeForm.name.trim()) {
+    nodeFormError.value = 'Node name is required.'
     return
   }
   nodeSaving.value = true
@@ -300,14 +296,11 @@ async function submitNode() {
       address: nodeForm.address.trim(),
       description: nodeForm.description.trim(),
       metadata: nodeForm.metadata,
-      resource_group_ids: [...nodeForm.resource_group_ids],
     }
-    const detail = editingNodeId.value
-      ? await updateInfrastructureNode(editingNodeId.value, payload, requireToken())
-      : await createInfrastructureNode(payload, requireToken())
+    const detail = await updateInfrastructureNode(editingNodeId.value, payload, requireToken())
     selectedNode.value = detail
     isDetailDialogOpen.value = true
-    feedback.value = editingNodeId.value ? 'Node updated.' : 'Node created.'
+    feedback.value = 'Node updated.'
     closeNodeDialog()
     await loadNodes()
   } catch (errorValue) {
@@ -333,9 +326,7 @@ function resetServiceForm() {
   serviceForm.show_db_name_regex = ''
   serviceForm.denied_db_name_regex = ''
   serviceForm.charset = ''
-  serviceForm.resource_group_ids = selectedNode.value?.resource_group_ids
-    ? [...selectedNode.value.resource_group_ids]
-    : []
+  serviceForm.resource_group_ids = []
   serviceForm.service_tag_ids = []
   delete serviceForm.recommendation_id
   serviceFormError.value = ''
@@ -415,9 +406,17 @@ async function submitService() {
   }
 }
 
+function openNewNodeDialog() {
+  agentTargetNodeId.value = null
+  agentForm.node_name = ''
+  agentFormError.value = ''
+  createdAgent.value = null
+  isAgentDialogOpen.value = true
+}
+
 function openAgentDialog() {
-  agentForm.name = selectedNode.value ? `${selectedNode.value.name}-agent` : ''
-  agentForm.display_name = selectedNode.value?.name ? `${selectedNode.value.name} Agent` : ''
+  agentTargetNodeId.value = selectedNode.value?.id ?? null
+  agentForm.node_name = selectedNode.value?.name ?? ''
   agentFormError.value = ''
   createdAgent.value = null
   isAgentDialogOpen.value = true
@@ -426,22 +425,21 @@ function openAgentDialog() {
 function closeAgentDialog() {
   isAgentDialogOpen.value = false
   createdAgent.value = null
+  agentTargetNodeId.value = null
 }
 
 async function submitAgent() {
-  if (!selectedNode.value || !agentForm.name.trim()) {
-    agentFormError.value = 'Agent name is required.'
+  if (!agentTargetNodeId.value && !agentForm.node_name.trim()) {
+    agentFormError.value = 'Node name is required.'
     return
   }
   agentSaving.value = true
   agentFormError.value = ''
   try {
     createdAgent.value = await createAgent(
-      {
-        name: agentForm.name.trim(),
-        display_name: agentForm.display_name.trim(),
-        local_node: selectedNode.value.id,
-      },
+      agentTargetNodeId.value
+        ? { local_node: agentTargetNodeId.value }
+        : { node_name: agentForm.node_name.trim() },
       requireToken(),
     )
     await loadSelectedNode()
@@ -450,6 +448,26 @@ async function submitAgent() {
     agentFormError.value = toUserFacingMessage(errorValue, 'Failed to create agent.')
   } finally {
     agentSaving.value = false
+  }
+}
+
+async function issueExistingAgentInstallKey() {
+  if (!selectedNode.value?.agent_id) {
+    return
+  }
+  agentInstallIssuing.value = true
+  error.value = ''
+  feedback.value = ''
+  try {
+    createdAgent.value = await issueAgentInstallKey(selectedNode.value.agent_id, requireToken())
+    isAgentDialogOpen.value = true
+    feedback.value = 'WorkOS organization API key created for agent install.'
+    await loadSelectedNode()
+    await loadNodes()
+  } catch (errorValue) {
+    error.value = toUserFacingMessage(errorValue, 'Failed to create WorkOS agent API key.')
+  } finally {
+    agentInstallIssuing.value = false
   }
 }
 
@@ -533,9 +551,9 @@ watch([currentPage, pageSize], () => {
           <RefreshCw class="h-4 w-4" />
           Refresh
         </Button>
-        <Button type="button" @click="openNodeDialog()">
+        <Button type="button" @click="openNewNodeDialog">
           <Plus class="h-4 w-4" />
-          Add Node
+          Add New Node
         </Button>
       </div>
     </div>
@@ -607,7 +625,6 @@ watch([currentPage, pageSize], () => {
               <th class="px-4 py-3">Agent</th>
               <th class="px-4 py-3">Services</th>
               <th class="px-4 py-3">Recommendations</th>
-              <th class="px-4 py-3">Resource Groups</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100 bg-white">
@@ -622,7 +639,9 @@ watch([currentPage, pageSize], () => {
               <td class="px-4 py-3">
                 <div class="grid gap-1">
                   <span class="font-medium text-slate-900">{{ node.name }}</span>
-                  <span class="font-mono text-xs text-slate-500">{{ node.address }}</span>
+                  <span class="font-mono text-xs text-slate-500">
+                    {{ displayNodeAddress(node.address) }}
+                  </span>
                 </div>
               </td>
               <td class="px-4 py-3">
@@ -632,17 +651,14 @@ watch([currentPage, pageSize], () => {
               </td>
               <td class="px-4 py-3 text-slate-700">{{ node.service_count }}</td>
               <td class="px-4 py-3 text-slate-700">{{ node.recommendation_count }}</td>
-              <td class="px-4 py-3 text-slate-600">
-                {{ resourceGroupNames(node.resource_group_ids) || 'No groups' }}
-              </td>
             </tr>
             <tr v-if="!isLoading && nodes.length === 0">
-              <td colspan="5" class="px-4 py-10 text-center text-sm text-slate-500">
+              <td colspan="4" class="px-4 py-10 text-center text-sm text-slate-500">
                 No nodes found.
               </td>
             </tr>
             <tr v-if="isLoading">
-              <td colspan="5" class="px-4 py-10 text-center text-sm text-slate-500">
+              <td colspan="4" class="px-4 py-10 text-center text-sm text-slate-500">
                 Loading nodes...
               </td>
             </tr>
@@ -664,8 +680,7 @@ watch([currentPage, pageSize], () => {
                 {{ selectedNode?.name || 'Node detail' }}
               </h3>
               <p v-if="selectedNode" class="mt-1 text-sm text-slate-500">
-                {{ selectedNode.address }} ·
-                {{ resourceGroupNames(selectedNode.resource_group_ids) || 'No groups' }}
+                {{ displayNodeAddress(selectedNode.address) }}
               </p>
             </div>
             <div class="flex flex-wrap items-center gap-2">
@@ -680,7 +695,17 @@ watch([currentPage, pageSize], () => {
                   @click="openAgentDialog"
                 >
                   <ServerCog class="h-4 w-4" />
-                  Add Agent
+                  Install Agent
+                </Button>
+                <Button
+                  v-else
+                  variant="outline"
+                  type="button"
+                  :disabled="agentInstallIssuing"
+                  @click="void issueExistingAgentInstallKey()"
+                >
+                  <ServerCog class="h-4 w-4" />
+                  Install Agent
                 </Button>
                 <Button
                   variant="outline"
@@ -845,9 +870,7 @@ watch([currentPage, pageSize], () => {
         @submit.prevent="void submitNode()"
       >
         <div class="flex items-start justify-between border-b border-slate-200 px-6 py-4">
-          <h3 class="text-lg font-semibold text-slate-900">
-            {{ editingNodeId ? 'Edit Node' : 'Add Node' }}
-          </h3>
+          <h3 class="text-lg font-semibold text-slate-900">Edit Node</h3>
           <Button variant="ghost" size="icon" type="button" @click="closeNodeDialog">
             <X class="h-4 w-4" />
           </Button>
@@ -865,28 +888,11 @@ watch([currentPage, pageSize], () => {
           </label>
           <label class="grid gap-2">
             <span class="text-sm font-medium text-slate-700">Address</span>
-            <Input v-model="nodeForm.address" required placeholder="10.0.0.12" />
+            <Input v-model="nodeForm.address" placeholder="Pending agent registration" />
           </label>
           <label class="grid gap-2">
             <span class="text-sm font-medium text-slate-700">Description</span>
             <textarea v-model="nodeForm.description" :class="fieldClass" rows="3" />
-          </label>
-          <label class="grid gap-2">
-            <span class="text-sm font-medium text-slate-700">Resource Groups</span>
-            <select
-              :class="multiSelectClass"
-              multiple
-              :value="nodeForm.resource_group_ids.map(String)"
-              @change="updateNumericSelections($event, 'node')"
-            >
-              <option
-                v-for="group in metadata?.resource_groups ?? []"
-                :key="group.group_id"
-                :value="group.group_id"
-              >
-                {{ group.group_name }}
-              </option>
-            </select>
           </label>
         </div>
         <div class="flex justify-end gap-2 border-t border-slate-200 px-6 py-4">
@@ -1023,7 +1029,11 @@ watch([currentPage, pageSize], () => {
     >
       <div class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white shadow-xl">
         <div class="flex items-start justify-between border-b border-slate-200 px-6 py-4">
-          <h3 class="text-lg font-semibold text-slate-900">Add Agent</h3>
+          <h3 class="text-lg font-semibold text-slate-900">
+            {{
+              createdAgent ? 'Install Agent' : agentTargetNodeId ? 'Install Agent' : 'Add New Node'
+            }}
+          </h3>
           <Button variant="ghost" size="icon" type="button" @click="closeAgentDialog">
             <X class="h-4 w-4" />
           </Button>
@@ -1040,27 +1050,38 @@ watch([currentPage, pageSize], () => {
             {{ agentFormError }}
           </p>
           <label class="grid gap-2">
-            <span class="text-sm font-medium text-slate-700">Name</span>
-            <Input v-model="agentForm.name" required />
-          </label>
-          <label class="grid gap-2">
-            <span class="text-sm font-medium text-slate-700">Display Name</span>
-            <Input v-model="agentForm.display_name" />
+            <span class="text-sm font-medium text-slate-700">Node Name</span>
+            <Input
+              v-model="agentForm.node_name"
+              required
+              :readonly="Boolean(agentTargetNodeId)"
+              placeholder="prod-db-node-01"
+            />
           </label>
           <div class="flex justify-end gap-2 border-t border-slate-200 pt-4">
             <Button variant="outline" type="button" @click="closeAgentDialog">Cancel</Button>
-            <Button type="submit" :disabled="agentSaving">Create</Button>
+            <Button type="submit" :disabled="agentSaving">
+              {{ agentTargetNodeId ? 'Create WorkOS Key' : 'Create Node and Key' }}
+            </Button>
           </div>
         </form>
         <div v-else class="grid gap-5 px-6 py-5">
           <div
             class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
           >
-            The API key is shown once.
+            A WorkOS organization API key was created for this agent. The full key is shown once.
+          </div>
+          <p class="text-sm text-slate-600">
+            Run the install command on the node. Creating new install instructions rotates the agent
+            key and invalidates the previous key.
+          </p>
+          <div class="grid gap-1 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+            <span class="font-medium text-slate-700">Key backend</span>
+            <span class="text-slate-600">{{ createdAgent.api_key_backend }}</span>
           </div>
           <div class="grid gap-2">
             <div class="flex items-center justify-between">
-              <span class="text-sm font-medium text-slate-700">API Key</span>
+              <span class="text-sm font-medium text-slate-700">WorkOS API Key</span>
               <Button
                 variant="outline"
                 size="sm"
