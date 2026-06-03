@@ -615,39 +615,6 @@ class WorkOSAuthApiTests(APITestCase):
         directory_user.refresh_from_db()
         self.assertFalse(directory_user.is_active)
 
-    @override_settings(WORKOS_WEBHOOK_SECRET="webhook_secret_123")
-    @patch("api_auth.views.WorkOSAuthClient")
-    def test_workos_webhook_uses_signature_verification_when_secret_configured(
-        self, mock_client_class
-    ):
-        signature = f"t={int(datetime.now(datetime_timezone.utc).timestamp())},v1=abc"
-        mock_client_class.return_value.verify_webhook_event.return_value = (
-            SimpleNamespace(
-                id="event_verified",
-                event="dsync.group.created",
-                data=self._directory_group_payload(),
-            )
-        )
-
-        with patch(
-            "api_auth.views.process_workos_webhook_task.delay",
-            side_effect=process_directory_event,
-        ):
-            response = self.client.post(
-                "/api/auth/workos/webhook/",
-                b'{"id":"event_verified"}',
-                content_type="application/json",
-                HTTP_WORKOS_SIGNATURE=signature,
-            )
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        mock_client_class.return_value.verify_webhook_event.assert_called_once_with(
-            event_body=b'{"id":"event_verified"}',
-            event_signature=signature,
-            secret="webhook_secret_123",
-        )
-        self.assertTrue(ResourceGroup.objects.filter(group_name="Developers").exists())
-
     def test_workos_webhook_rejects_stale_event_timestamps(self):
         stale_timestamp = (
             datetime.now(datetime_timezone.utc) - timedelta(seconds=301)

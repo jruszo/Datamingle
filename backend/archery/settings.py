@@ -30,7 +30,6 @@ env = environ.Env(
     WORKOS_CLIENT_ID=(str, ""),
     WORKOS_ORGANIZATION_ID=(str, ""),
     WORKOS_BASE_URL=(str, "https://api.workos.com/"),
-    WORKOS_WEBHOOK_SECRET=(str, ""),
     WORKOS_STAFF_EMAILS=(list, []),
     WORKOS_SUPERUSER_EMAILS=(list, []),
     WORKOS_SUPERADMIN_ROLE_SLUGS=(list, ["admin"]),
@@ -367,7 +366,6 @@ WORKOS_API_KEY = env("WORKOS_API_KEY", default="")
 WORKOS_CLIENT_ID = env("WORKOS_CLIENT_ID", default="")
 WORKOS_ORGANIZATION_ID = env("WORKOS_ORGANIZATION_ID", default="")
 WORKOS_BASE_URL = env("WORKOS_BASE_URL", default="https://api.workos.com/")
-WORKOS_WEBHOOK_SECRET = env("WORKOS_WEBHOOK_SECRET", default="")
 DATAMINGLE_AGENT_API_KEY_BACKEND = env(
     "DATAMINGLE_AGENT_API_KEY_BACKEND", default="workos"
 )

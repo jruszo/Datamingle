@@ -111,7 +111,6 @@ Datamingle uses WorkOS as the only sign-in method for every deployment. Each run
 WORKOS_API_KEY=sk_test_or_live_xxx
 WORKOS_CLIENT_ID=client_xxx
 WORKOS_ORGANIZATION_ID=org_xxx
-WORKOS_WEBHOOK_SECRET=whsec_xxx
 WORKOS_STAFF_EMAILS=ops@datamingle.dev,admin@datamingle.dev
 WORKOS_SUPERUSER_EMAILS=admin@datamingle.dev
 WORKOS_SUPERADMIN_ROLE_SLUGS=admin
@@ -150,9 +149,7 @@ WorkOS setup assumptions in this repo:
 4. Set the required `WORKOS_*` values in `.env`.
 5. Configure the WorkOS webhook endpoint:
    `https://<tenant-host>/api/auth/workos/webhook/`
-   Include Directory Sync events. After creating the endpoint, copy its signing
-   secret from the WorkOS Dashboard and set it in `.env` as
-   `WORKOS_WEBHOOK_SECRET` before continuing.
+   Include Directory Sync events.
 6. Optionally backfill an existing directory after setup:
 
 ```bash
