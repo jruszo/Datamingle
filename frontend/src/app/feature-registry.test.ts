@@ -35,6 +35,7 @@ describe('feature registry', () => {
       'auth',
       'dashboard',
       'reports',
+      'infrastructure',
       'inventory',
       'agents',
       'instance-operations',
@@ -53,17 +54,17 @@ describe('feature registry', () => {
 
     expect(labels).toEqual([
       'Dashboard',
-      'Inventory',
+      'Nodes',
+      'Instances',
       'Data Dictionary',
-      'Agents',
-      'Instance Databases',
-      'Instance Accounts',
+      'Databases',
+      'Accounts',
       'Parameters',
       'Diagnostics',
-      'Workflows',
-      'Archives',
       'Queries',
-      'Permission Management',
+      'Archives',
+      'Workflows',
+      'Permissions',
       'Reports',
       'Audit',
       'Profile',
@@ -76,27 +77,24 @@ describe('feature registry', () => {
       buildUser({ permissions: ['sql.menu_instance', 'sql.menu_archive'] }),
     ).map((item) => item.label)
 
-    expect(labels).toContain('Inventory')
+    expect(labels).toContain('Nodes')
+    expect(labels).toContain('Instances')
     expect(labels).toContain('Archives')
-    expect(labels).not.toContain('Permission Management')
+    expect(labels).not.toContain('Permissions')
   })
 
   it('resolves the first settings route from visible settings entries', () => {
-    expect(
-      getFirstVisibleSettingsItem(buildUser({ is_staff: true }))?.to,
-    ).toBe('/settings/system')
+    expect(getFirstVisibleSettingsItem(buildUser({ is_staff: true }))?.to).toBe('/settings/system')
 
     expect(
       getFirstVisibleSettingsItem(
         buildUser({ permissions: ['sql.menu_system', 'auth.view_group'] }),
       )?.to,
-    ).toBe('/settings/groups')
+    ).toBe('/settings/resource-groups')
 
-    expect(
-      getFirstVisibleSettingsItem(
-        buildUser({ permissions: ['sql.menu_instance'] }),
-      )?.to,
-    ).toBe('/settings/instance-tags')
+    expect(getFirstVisibleSettingsItem(buildUser({ permissions: ['sql.menu_instance'] }))?.to).toBe(
+      '/settings/instance-tags',
+    )
 
     expect(getFirstVisibleSettingsItem(buildUser())).toBeNull()
   })

@@ -2,10 +2,19 @@ from collections import OrderedDict
 
 from django.contrib.auth.models import Group, Permission
 from django.db import transaction
+from django.utils import timezone
 
+from api_agents.models import Agent, AgentStatus
 from common.auth import ensure_superadmin_group
 from common.utils.const import WorkflowType
-from sql.models import Instance, InstanceTag, ResourceGroup, Users, WorkflowAuditSetting
+from sql.models import (
+    InfrastructureNode,
+    Instance,
+    InstanceTag,
+    ResourceGroup,
+    Users,
+    WorkflowAuditSetting,
+)
 from sql.utils.resource_group import normalize_access_role_sequence
 
 DEMO_DB_PASSWORD = "demo123"
@@ -172,6 +181,37 @@ DEMO_INSTANCES = OrderedDict(
     }
 )
 
+DEMO_INFRASTRUCTURE_NODES = OrderedDict(
+    {
+        "mysql_node": {
+            "name": "demo-mysql-node",
+            "address": "mysql_demo",
+            "description": "Local demo MySQL database host.",
+            "metadata": {"environment": "demo", "provider": "docker-compose"},
+            "resource_groups": ["single_stage", "multi_stage"],
+            "services": ["mysql"],
+            "agent": {
+                "name": "demo-mysql-node-agent",
+                "display_name": "Demo MySQL Node Agent",
+                "status": AgentStatus.OFFLINE,
+                "hostname": "mysql_demo",
+                "platform": "linux",
+                "architecture": "amd64",
+                "agent_version": "demo",
+            },
+        },
+        "postgres_node": {
+            "name": "demo-postgres-node",
+            "address": "postgres_demo",
+            "description": "Local demo PostgreSQL database host.",
+            "metadata": {"environment": "demo", "provider": "docker-compose"},
+            "resource_groups": ["single_stage", "multi_stage"],
+            "services": ["pgsql"],
+            "agent": None,
+        },
+    }
+)
+
 
 def managed_demo_usernames():
     return list(LEGACY_DEMO_USERNAMES)
@@ -179,6 +219,10 @@ def managed_demo_usernames():
 
 def managed_demo_instance_names():
     return [item["instance_name"] for item in DEMO_INSTANCES.values()]
+
+
+def managed_demo_node_names():
+    return [item["name"] for item in DEMO_INFRASTRUCTURE_NODES.values()]
 
 
 def managed_demo_resource_group_names():
@@ -196,6 +240,7 @@ def seed_local_demo(write_line=None):
         tags = _seed_instance_tags(log)
         _remove_legacy_seeded_users(log)
         instances = _seed_instances(resource_groups, tags, log)
+        nodes = _seed_infrastructure_nodes(resource_groups, instances, log)
         _seed_workflow_settings(auth_groups, resource_groups, log)
 
     return {
@@ -204,6 +249,7 @@ def seed_local_demo(write_line=None):
         "users": [],
         "removed_users": managed_demo_usernames(),
         "instances": [instance.instance_name for instance in instances.values()],
+        "nodes": [node.name for node in nodes.values()],
     }
 
 
@@ -312,6 +358,56 @@ def _seed_instances(resource_groups, tags, log):
             )
         )
     return instances
+
+
+def _seed_infrastructure_nodes(resource_groups, instances, log):
+    nodes = {}
+    for key, config in DEMO_INFRASTRUCTURE_NODES.items():
+        node, created = InfrastructureNode.objects.update_or_create(
+            name=config["name"],
+            defaults={
+                "address": config["address"],
+                "description": config["description"],
+                "metadata": config["metadata"],
+                "enabled": True,
+            },
+        )
+        node.resource_group.set(
+            [resource_groups[name] for name in config["resource_groups"]]
+        )
+        for service_key in config["services"]:
+            instance = instances[service_key]
+            if instance.node_id != node.id:
+                instance.node = node
+                instance.save(update_fields=["node", "update_time"])
+
+        agent_config = config["agent"]
+        if agent_config:
+            Agent.objects.update_or_create(
+                name=agent_config["name"],
+                defaults={
+                    "display_name": agent_config["display_name"],
+                    "status": agent_config["status"],
+                    "hostname": agent_config["hostname"],
+                    "platform": agent_config["platform"],
+                    "architecture": agent_config["architecture"],
+                    "agent_version": agent_config["agent_version"],
+                    "last_seen_at": timezone.now(),
+                    "local_node": node,
+                    "enabled": True,
+                    "metadata": {"seeded": True},
+                },
+            )
+
+        nodes[key] = node
+        log(
+            "Infrastructure node {}: {} ({} services)".format(
+                "created" if created else "updated",
+                node.name,
+                len(config["services"]),
+            )
+        )
+    return nodes
 
 
 def _seed_workflow_settings(auth_groups, resource_groups, log):

@@ -1,4 +1,4 @@
-import { Network } from 'lucide-vue-next'
+import { Network, Server } from 'lucide-vue-next'
 
 import type { FeatureModule } from '@/app/feature-contract'
 import InfrastructurePage from '@/features/infrastructure/pages/InfrastructurePage.vue'
@@ -19,10 +19,11 @@ const infrastructureModule: FeatureModule = {
   navigation: [
     {
       to: '/infrastructure',
-      label: 'Infrastructure',
+      label: 'Nodes',
       section: 'primary',
-      icon: Network,
-      order: 20,
+      icon: Server,
+      group: { id: 'infrastructure', label: 'Infrastructure', icon: Network, order: 20 },
+      order: 10,
       access: { anyPermissions: ['sql.menu_infrastructure', 'sql.menu_instance'] },
     },
   ],

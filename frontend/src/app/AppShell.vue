@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import type { Component } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import {
@@ -17,8 +18,26 @@ import {
 import { Button } from '@/components/ui/button'
 import { publicApiUrl } from '@/shared/api/http'
 import { getVisibleNavigationItems, matchesNavigationItem } from '@/app/feature-registry'
+import type { FeatureNavigationItem } from '@/app/feature-contract'
 import { useAuthStore } from '@/stores/auth'
 import { useMailboxStore } from '@/stores/mailbox'
+
+type PrimaryNavigationEntry =
+  | {
+      type: 'item'
+      key: string
+      order: number
+      item: FeatureNavigationItem
+    }
+  | {
+      type: 'group'
+      key: string
+      id: string
+      label: string
+      icon?: Component
+      order: number
+      items: FeatureNavigationItem[]
+    }
 
 const authStore = useAuthStore()
 const mailboxStore = useMailboxStore()
@@ -27,6 +46,10 @@ const route = useRoute()
 
 const showAppShell = computed(() => authStore.isAuthenticated)
 const isSidebarCollapsed = ref(false)
+const openNavigationGroups = ref<Record<string, boolean>>({
+  database: true,
+  infrastructure: true,
+})
 const isSettingsMenuOpen = ref(route.path.startsWith('/settings'))
 const settingsSubmenuId = 'settings-submenu'
 const isMailboxMenuOpen = ref(false)
@@ -35,6 +58,9 @@ const mailboxMenuRef = ref<HTMLElement | null>(null)
 const visiblePrimaryNavigation = computed(() =>
   getVisibleNavigationItems('primary', authStore.currentUser),
 )
+const primaryNavigationEntries = computed(() =>
+  buildPrimaryNavigationEntries(visiblePrimaryNavigation.value),
+)
 const visibleSettingsNavigation = computed(() =>
   getVisibleNavigationItems('settings', authStore.currentUser),
 )
@@ -42,16 +68,104 @@ const hasSettingsNavigation = computed(() => visibleSettingsNavigation.value.len
 const isSettingsRouteActive = computed(() => route.path.startsWith('/settings'))
 
 function navigationItemClass(isActive: boolean) {
-  const baseClass = 'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition'
+  const baseClass =
+    'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium transition'
   if (isActive) {
-    return `${baseClass} bg-slate-100 text-slate-900`
+    return `${baseClass} bg-slate-100 text-slate-950`
   }
 
-  return `${baseClass} text-slate-600 hover:bg-slate-100 hover:text-slate-900`
+  return `${baseClass} text-slate-600 hover:bg-slate-100 hover:text-slate-950`
+}
+
+function navigationSubItemClass(isActive: boolean) {
+  const baseClass = 'flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm transition'
+  if (isActive) {
+    return `${baseClass} bg-slate-100 font-medium text-slate-950`
+  }
+
+  return `${baseClass} text-slate-600 hover:bg-slate-100 hover:text-slate-950`
+}
+
+function navigationGroupClass(isActive: boolean) {
+  const baseClass =
+    'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium transition'
+  if (isActive) {
+    return `${baseClass} bg-slate-100 text-slate-950`
+  }
+
+  return `${baseClass} text-slate-600 hover:bg-slate-100 hover:text-slate-950`
+}
+
+function buildPrimaryNavigationEntries(items: FeatureNavigationItem[]) {
+  const entries: PrimaryNavigationEntry[] = []
+  const groupedEntries = new Map<string, Extract<PrimaryNavigationEntry, { type: 'group' }>>()
+
+  items.forEach((item) => {
+    if (!item.group) {
+      entries.push({
+        type: 'item',
+        key: item.to,
+        order: item.order ?? 0,
+        item,
+      })
+      return
+    }
+
+    const existingGroup = groupedEntries.get(item.group.id)
+    if (existingGroup) {
+      existingGroup.items.push(item)
+      existingGroup.order = Math.min(existingGroup.order, item.group.order ?? item.order ?? 0)
+      return
+    }
+
+    const groupEntry: Extract<PrimaryNavigationEntry, { type: 'group' }> = {
+      type: 'group',
+      key: `group-${item.group.id}`,
+      id: item.group.id,
+      label: item.group.label,
+      icon: item.group.icon,
+      order: item.group.order ?? item.order ?? 0,
+      items: [item],
+    }
+    groupedEntries.set(item.group.id, groupEntry)
+    entries.push(groupEntry)
+  })
+
+  entries.forEach((entry) => {
+    if (entry.type === 'group') {
+      entry.items.sort((left, right) => (left.order ?? 0) - (right.order ?? 0))
+    }
+  })
+
+  return entries.sort((left, right) => left.order - right.order)
 }
 
 function isNavigationItemActive(to: string, matchPrefix?: string) {
   return matchesNavigationItem({ to, matchPrefix, label: '', section: 'primary' }, route.path)
+}
+
+function isNavigationGroupActive(items: FeatureNavigationItem[]) {
+  return items.some((item) => matchesNavigationItem(item, route.path))
+}
+
+function isNavigationGroupOpen(entry: Extract<PrimaryNavigationEntry, { type: 'group' }>) {
+  return openNavigationGroups.value[entry.id] || isNavigationGroupActive(entry.items)
+}
+
+function toggleNavigationGroup(entry: Extract<PrimaryNavigationEntry, { type: 'group' }>) {
+  if (isSidebarCollapsed.value) {
+    isSidebarCollapsed.value = false
+    openNavigationGroups.value = {
+      ...openNavigationGroups.value,
+      [entry.id]: true,
+    }
+    return
+  }
+
+  openNavigationGroups.value = {
+    ...openNavigationGroups.value,
+    [entry.id]: !isNavigationGroupOpen(entry),
+  }
 }
 
 const pageTitle = computed(() => {
@@ -151,11 +265,7 @@ async function toggleMailboxMenu() {
   }
 }
 
-async function openMailboxItem(
-  actionPath: string,
-  itemId: number,
-  isUnread: boolean,
-) {
+async function openMailboxItem(actionPath: string, itemId: number, isUnread: boolean) {
   isMailboxMenuOpen.value = false
   if (isUnread) {
     void mailboxStore.markRead(itemId).catch((error) => {
@@ -213,9 +323,9 @@ watch(
     }
     isMailboxMenuOpen.value = false
     if (
-      previousPath?.startsWith('/workflows/')
-      || previousPath?.startsWith('/archives/')
-      || previousPath?.startsWith('/permission-management')
+      previousPath?.startsWith('/workflows/') ||
+      previousPath?.startsWith('/archives/') ||
+      previousPath?.startsWith('/permission-management')
     ) {
       void mailboxStore.refreshSummary()
     }
@@ -242,17 +352,57 @@ watch(
           </div>
         </div>
 
-        <nav class="flex-1 space-y-1 p-3">
-          <RouterLink
-            v-for="item in visiblePrimaryNavigation"
-            :key="item.to"
-            :to="item.to"
-            :title="isSidebarCollapsed ? item.label : undefined"
-            :class="navigationItemClass(isNavigationItemActive(item.to, item.matchPrefix))"
-          >
-            <component :is="item.icon" class="h-4 w-4 shrink-0" />
-            <span v-if="!isSidebarCollapsed">{{ item.label }}</span>
-          </RouterLink>
+        <nav class="flex-1 space-y-0.5 p-3">
+          <template v-for="entry in primaryNavigationEntries" :key="entry.key">
+            <RouterLink
+              v-if="entry.type === 'item'"
+              :to="entry.item.to"
+              :title="isSidebarCollapsed ? entry.item.label : undefined"
+              :class="
+                navigationItemClass(isNavigationItemActive(entry.item.to, entry.item.matchPrefix))
+              "
+            >
+              <component :is="entry.item.icon" v-if="entry.item.icon" class="h-4 w-4 shrink-0" />
+              <span v-if="!isSidebarCollapsed">{{ entry.item.label }}</span>
+            </RouterLink>
+
+            <div v-else class="space-y-0.5">
+              <button
+                :aria-controls="`primary-navigation-group-${entry.id}`"
+                :aria-expanded="isNavigationGroupOpen(entry)"
+                :class="navigationGroupClass(isNavigationGroupActive(entry.items))"
+                :title="isSidebarCollapsed ? entry.label : undefined"
+                class="group"
+                type="button"
+                @click="toggleNavigationGroup(entry)"
+              >
+                <component :is="entry.icon" v-if="entry.icon" class="h-4 w-4 shrink-0" />
+                <template v-if="!isSidebarCollapsed">
+                  <span class="flex-1 text-left">{{ entry.label }}</span>
+                  <ChevronDown v-if="isNavigationGroupOpen(entry)" class="h-4 w-4 text-slate-400" />
+                  <ChevronRight v-else class="h-4 w-4 text-slate-400" />
+                </template>
+              </button>
+
+              <div
+                v-if="!isSidebarCollapsed && isNavigationGroupOpen(entry)"
+                :id="`primary-navigation-group-${entry.id}`"
+                :aria-label="`${entry.label} submenu`"
+                class="space-y-0.5 pl-6"
+                role="region"
+              >
+                <RouterLink
+                  v-for="item in entry.items"
+                  :key="item.to"
+                  :to="item.to"
+                  :class="navigationSubItemClass(isNavigationItemActive(item.to, item.matchPrefix))"
+                >
+                  <component :is="item.icon" v-if="item.icon" class="h-3.5 w-3.5 shrink-0" />
+                  <span>{{ item.label }}</span>
+                </RouterLink>
+              </div>
+            </div>
+          </template>
 
           <div v-if="hasSettingsNavigation" class="space-y-1">
             <button
@@ -260,11 +410,11 @@ watch(
               :aria-expanded="isSettingsMenuOpen"
               :class="
                 isSettingsRouteActive
-                  ? 'bg-slate-100 text-slate-900'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                  ? 'bg-slate-100 text-slate-950'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'
               "
               :title="isSidebarCollapsed ? 'Settings' : undefined"
-              class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition"
+              class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium transition"
               type="button"
               @click="toggleSettingsMenu"
             >
@@ -280,15 +430,15 @@ watch(
               v-if="!isSidebarCollapsed && isSettingsMenuOpen"
               :id="settingsSubmenuId"
               aria-label="Settings submenu"
-              class="space-y-1 pl-10"
+              class="space-y-0.5 pl-6"
               role="region"
             >
               <RouterLink
                 v-for="item in visibleSettingsNavigation"
                 :key="item.to"
                 :to="item.to"
-                class="flex rounded-md px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
-                active-class="bg-slate-100 font-medium text-slate-900"
+                class="flex rounded-md px-2.5 py-1.5 text-sm text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
+                active-class="bg-slate-100 font-medium text-slate-950"
               >
                 {{ item.label }}
               </RouterLink>
@@ -298,7 +448,9 @@ watch(
       </aside>
 
       <div class="flex min-h-screen flex-1 flex-col">
-        <header class="flex h-16 items-center justify-between border-b border-slate-200 bg-white px-4 lg:px-6">
+        <header
+          class="flex h-16 items-center justify-between border-b border-slate-200 bg-white px-4 lg:px-6"
+        >
           <div class="flex items-center gap-3">
             <Button variant="ghost" size="icon" @click="toggleSidebar">
               <PanelLeftOpen v-if="isSidebarCollapsed" class="h-4 w-4" />
@@ -335,7 +487,9 @@ watch(
                 data-testid="app-mailbox-menu"
                 class="absolute right-0 top-12 z-30 w-[24rem] rounded-2xl border border-slate-200 bg-white p-3 shadow-xl"
               >
-                <div class="flex items-center justify-between gap-3 border-b border-slate-100 px-1 pb-3">
+                <div
+                  class="flex items-center justify-between gap-3 border-b border-slate-100 px-1 pb-3"
+                >
                   <div>
                     <p class="text-sm font-semibold text-slate-900">Mailbox</p>
                     <p class="text-xs text-slate-500">
@@ -361,7 +515,10 @@ watch(
                   </Button>
                 </div>
 
-                <div v-if="mailboxPreviewItems.length === 0" class="px-1 py-6 text-center text-sm text-slate-500">
+                <div
+                  v-if="mailboxPreviewItems.length === 0"
+                  class="px-1 py-6 text-center text-sm text-slate-500"
+                >
                   No notifications right now.
                 </div>
 
@@ -413,7 +570,10 @@ watch(
                 </div>
               </div>
             </div>
-            <RouterLink to="/profile" class="flex items-center gap-3 rounded-full transition hover:opacity-90">
+            <RouterLink
+              to="/profile"
+              class="flex items-center gap-3 rounded-full transition hover:opacity-90"
+            >
               <div class="hidden text-right sm:block">
                 <p class="text-sm font-semibold">{{ currentUserName }}</p>
                 <p class="text-xs text-slate-500">{{ currentUserSubtitle }}</p>
