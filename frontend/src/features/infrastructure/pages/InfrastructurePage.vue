@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { Check, Database, Plus, RefreshCw, Search, ServerCog, Wand2, X } from 'lucide-vue-next'
 
 import { Badge } from '@/components/ui/badge'
@@ -41,9 +41,12 @@ const pageSize = ref(20)
 const searchQuery = ref('')
 const error = ref('')
 const feedback = ref('')
+const nowMs = ref(Date.now())
 const testingServiceId = ref<number | null>(null)
 const discoveringNodeId = ref<number | null>(null)
 const isDetailDialogOpen = ref(false)
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+let clockTimer: ReturnType<typeof setInterval> | null = null
 
 const isNodeDialogOpen = ref(false)
 const editingNodeId = ref<number | null>(null)
@@ -165,6 +168,29 @@ function formatDateTime(value: string | null) {
   }
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
+function formatRelativeTime(value: string | null) {
+  if (!value) {
+    return 'Never'
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  const seconds = Math.max(0, Math.floor((nowMs.value - date.getTime()) / 1000))
+  if (seconds < 60) {
+    return `${seconds}s ago`
+  }
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) {
+    return `${minutes}m ago`
+  }
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) {
+    return `${hours}h ago`
+  }
+  return `${Math.floor(hours / 24)}d ago`
 }
 
 function displayNodeAddress(address: string) {
@@ -537,12 +563,34 @@ async function testService(service: DatabaseServiceRecord) {
 }
 
 onMounted(async () => {
+  clockTimer = setInterval(() => {
+    nowMs.value = Date.now()
+  }, 1000)
   await authStore.loadCurrentUser()
   if (!canAccessInfrastructure.value) {
     error.value = 'You do not have permission to access infrastructure.'
     return
   }
   await Promise.all([loadMetadata(), loadNodes()])
+  refreshTimer = setInterval(() => {
+    if (
+      !isLoading.value &&
+      !detailLoading.value &&
+      !isServiceDialogOpen.value &&
+      !isNodeDialogOpen.value
+    ) {
+      void loadNodes()
+    }
+  }, 30_000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+  }
+  if (clockTimer) {
+    clearInterval(clockTimer)
+  }
 })
 
 watch([currentPage, pageSize], () => {
@@ -787,9 +835,14 @@ watch([currentPage, pageSize], () => {
                   </div>
                   <div class="grid gap-1">
                     <span class="text-xs font-semibold uppercase text-slate-500">Last Seen</span>
-                    <span class="text-sm text-slate-900">
-                      {{ formatDateTime(selectedNode.agent.last_seen_at) }}
-                    </span>
+                    <div class="grid gap-0.5">
+                      <span class="text-sm text-slate-900">
+                        {{ formatRelativeTime(selectedNode.agent.last_seen_at) }}
+                      </span>
+                      <span class="text-xs text-slate-500">
+                        {{ formatDateTime(selectedNode.agent.last_seen_at) }}
+                      </span>
+                    </div>
                   </div>
                   <div class="grid gap-1">
                     <span class="text-xs font-semibold uppercase text-slate-500">Config</span>
