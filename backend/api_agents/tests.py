@@ -340,6 +340,7 @@ class AgentApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+        self.assertIn("Organization API key permissions", response.json()["detail"])
         self.assertIn("datamingle-agent:connect", response.json()["detail"])
         self.assertIn("Unknown permission", response.json()["detail"])
         self.assertFalse(Agent.objects.filter(name="prod-db-node-01").exists())

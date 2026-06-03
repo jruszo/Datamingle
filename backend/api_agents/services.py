@@ -233,8 +233,9 @@ def create_workos_organization_api_key(name, permissions):
         response.raise_for_status()
     except requests.HTTPError as exc:
         detail = (
-            "WorkOS could not create an agent API key. Confirm these WorkOS API key "
-            f"permissions exist: {', '.join(permissions)}."
+            "WorkOS could not create an agent API key. Confirm these permission slugs "
+            "are enabled in WorkOS under Authorization > Configuration > "
+            f"Organization API key permissions: {', '.join(permissions)}."
         )
         if response.text:
             detail = f"{detail} WorkOS response: {response.text[:500]}"
