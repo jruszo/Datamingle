@@ -303,13 +303,6 @@ class WorkOSAuthClient:
             role_slug=role_slug or None,
         )
 
-    def verify_webhook_event(self, event_body, event_signature, secret):
-        return self.client.webhooks.verify_event(
-            event_body=event_body,
-            event_signature=event_signature,
-            secret=secret,
-        )
-
     def _paginate_directory_list(self, list_method, **params):
         items = []
         after = ""

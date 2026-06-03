@@ -566,15 +566,7 @@ class WorkOSWebhookView(views.APIView):
         event_signature = request.headers.get("WorkOS-Signature", "")
 
         try:
-            if settings.WORKOS_WEBHOOK_SECRET:
-                event = WorkOSAuthClient().verify_webhook_event(
-                    event_body=request.body,
-                    event_signature=event_signature,
-                    secret=settings.WORKOS_WEBHOOK_SECRET,
-                )
-            else:
-                event = json.loads(request.body.decode("utf-8"))
-
+            event = json.loads(request.body.decode("utf-8"))
             event_payload = _json_safe_workos_value(event)
             _validate_workos_webhook_freshness(event_payload, event_signature)
             task_result = process_workos_webhook_task.delay(event_payload)
