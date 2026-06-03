@@ -68,8 +68,10 @@ class Agent(models.Model):
         }
 
     def mark_seen(self, status=AgentStatus.ONLINE, config_revision=None):
+        from api_agents.time import agent_utc_now
+
         self.status = status
-        self.last_seen_at = timezone.now()
+        self.last_seen_at = agent_utc_now()
         update_fields = ["status", "last_seen_at", "update_time"]
         if config_revision is not None:
             self.last_config_revision = config_revision

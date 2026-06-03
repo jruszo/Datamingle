@@ -2,6 +2,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from api_agents.models import Agent, AgentNodeAssignment
+from api_agents.time import agent_datetime_to_utc_iso
 from sql.models import (
     InfrastructureNode,
     Instance,
@@ -129,9 +130,11 @@ class InfrastructureNodeSerializer(serializers.ModelSerializer):
             "platform": agent.platform,
             "architecture": agent.architecture,
             "agent_version": agent.agent_version,
-            "last_seen_at": agent.last_seen_at,
-            "last_connected_at": agent.last_connected_at,
-            "last_disconnected_at": agent.last_disconnected_at,
+            "last_seen_at": agent_datetime_to_utc_iso(agent.last_seen_at),
+            "last_connected_at": agent_datetime_to_utc_iso(agent.last_connected_at),
+            "last_disconnected_at": agent_datetime_to_utc_iso(
+                agent.last_disconnected_at
+            ),
             "last_config_revision": agent.last_config_revision,
             "desired_config_revision": agent.desired_config_revision,
             "enabled": agent.enabled,

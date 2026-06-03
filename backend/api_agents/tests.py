@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as datetime_timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -581,6 +581,7 @@ class AgentFacingApiTests(APITestCase):
         node = InfrastructureNode.objects.create(name="db-node-01", address="")
         agent = Agent.objects.create(name="agent-a", local_node=node)
         self.authenticate_agent(agent)
+        before = datetime.now(datetime_timezone.utc).replace(tzinfo=None)
 
         response = self.client.post(
             "/api/v1/agent/register/",
@@ -598,15 +599,19 @@ class AgentFacingApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        after = datetime.now(datetime_timezone.utc).replace(tzinfo=None)
         self.assertEqual(response.json()["agent_id"], agent.id)
         agent.refresh_from_db()
         self.assertEqual(agent.install_id, "ins_test_123")
         self.assertEqual(agent.status, AgentStatus.ONLINE)
         self.assertEqual(agent.hostname, "db-host-01")
+        self.assertGreaterEqual(agent.last_seen_at, before - timedelta(seconds=1))
+        self.assertLessEqual(agent.last_seen_at, after + timedelta(seconds=1))
         node.refresh_from_db()
         self.assertEqual(node.address, "10.0.0.12")
         self.assertEqual(node.metadata["provisioning_status"], "agent_registered")
         self.assertEqual(node.metadata["agent_host"]["hostname"], "db-host-01")
+        self.assertTrue(node.metadata["agent_host"]["last_registered_at"].endswith("Z"))
 
     def test_register_does_not_clear_existing_optional_metadata(self):
         agent = Agent.objects.create(

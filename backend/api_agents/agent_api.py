@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from api_agents.authentication import AgentAPIKeyAuthentication
 from api_agents.models import AgentCommand, AgentCommandStatus, AgentStatus
 from api_agents.services import build_agent_config, complete_agent_workflow_command
+from api_agents.time import agent_datetime_to_utc_iso, agent_utc_now
 
 TERMINAL_COMMAND_STATUSES = {
     AgentCommandStatus.SUCCEEDED,
@@ -90,7 +91,7 @@ class AgentRegisterView(views.APIView):
         if agent.install_id and agent.install_id != install_id:
             raise PermissionDenied("Agent install ID is already bound.")
 
-        now = timezone.now()
+        now = agent_utc_now()
         address = data.get("address", "").strip()
         with transaction.atomic():
             agent.install_id = install_id
@@ -130,7 +131,7 @@ class AgentRegisterView(views.APIView):
                     "platform": agent.platform,
                     "architecture": agent.architecture,
                     "agent_version": agent.agent_version,
-                    "last_registered_at": now.isoformat(),
+                    "last_registered_at": agent_datetime_to_utc_iso(now),
                 }
                 metadata["provisioning_status"] = "agent_registered"
                 node.metadata = metadata
@@ -171,13 +172,13 @@ class AgentHeartbeatView(views.APIView):
         if agent.install_id and agent.install_id != data["install_id"]:
             raise PermissionDenied("Agent install ID does not match.")
 
-        now = timezone.now()
+        now = agent_utc_now()
         metadata = dict(agent.metadata or {})
         metadata["module_health"] = data["module_health"]
         metadata["heartbeat"] = {
             "status": data["status"],
             "config_revision": data["config_revision"],
-            "received_at": now.isoformat(),
+            "received_at": agent_datetime_to_utc_iso(now),
         }
         agent.metadata = metadata
         agent.status = data["status"]

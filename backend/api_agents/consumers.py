@@ -1,6 +1,5 @@
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
-from django.utils import timezone
 
 from api_agents.dispatch import (
     ACTIVE_WEBSOCKET_METADATA_KEY,
@@ -10,6 +9,7 @@ from api_agents.models import Agent
 from api_agents.models import AgentCommand
 from api_agents.models import AgentStatus
 from api_agents.services import AgentAPIKeyRejected, authenticate_agent_api_key
+from api_agents.time import agent_datetime_to_utc_iso, agent_utc_now
 
 
 class AgentConsumer(AsyncJsonWebsocketConsumer):
@@ -105,14 +105,14 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def _mark_connected(self):
-        now = timezone.now()
+        now = agent_utc_now()
         self.agent.status = "online"
         self.agent.last_connected_at = now
         self.agent.last_seen_at = now
         metadata = dict(self.agent.metadata or {})
         metadata[ACTIVE_WEBSOCKET_METADATA_KEY] = {
             WEBSOCKET_CHANNEL_METADATA_KEY: self.channel_name,
-            "connected_at": now.isoformat(),
+            "connected_at": agent_datetime_to_utc_iso(now),
         }
         self.agent.metadata = metadata
         self.agent.save(
@@ -136,7 +136,7 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
             metadata.pop(ACTIVE_WEBSOCKET_METADATA_KEY, None)
             agent.status = AgentStatus.OFFLINE
         agent.metadata = metadata
-        agent.last_disconnected_at = timezone.now()
+        agent.last_disconnected_at = agent_utc_now()
         agent.save(
             update_fields=["metadata", "last_disconnected_at", "status", "update_time"]
         )
@@ -152,7 +152,7 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         ).get(pk=self.agent.pk)
         metadata = dict(agent.metadata or {})
         metadata["last_config_hash"] = config_hash
-        now = timezone.now()
+        now = agent_utc_now()
         agent.last_config_revision = revision
         agent.metadata = metadata
         agent.last_seen_at = now
@@ -173,7 +173,7 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         agent = Agent.objects.only("metadata", "last_seen_at").get(pk=self.agent.pk)
         metadata = dict(agent.metadata or {})
         metadata[key] = value
-        now = timezone.now()
+        now = agent_utc_now()
         agent.metadata = metadata
         agent.last_seen_at = now
         agent.save(update_fields=["metadata", "last_seen_at", "update_time"])
@@ -186,12 +186,12 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         metadata = dict(agent.metadata or {})
         statuses = dict(metadata.get("module_status") or {})
         module_name = content.get("module")
-        now = timezone.now()
+        now = agent_utc_now()
         if module_name:
             statuses[module_name] = {
                 "status": content.get("status", ""),
                 "message": content.get("message", ""),
-                "updated_at": now.isoformat(),
+                "updated_at": agent_datetime_to_utc_iso(now),
             }
         metadata["module_status"] = statuses
         agent.metadata = metadata
