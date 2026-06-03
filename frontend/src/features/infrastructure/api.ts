@@ -33,8 +33,24 @@ export type InfrastructureNodePayload = {
   resource_group_ids?: number[]
 }
 
+export type InfrastructureNodeAgentRecord = {
+  id: number
+  status: AgentStatus
+  hostname: string
+  platform: string
+  architecture: string
+  agent_version: string
+  last_seen_at: string | null
+  last_connected_at: string | null
+  last_disconnected_at: string | null
+  last_config_revision: number
+  desired_config_revision: number
+  enabled: boolean
+}
+
 export type InfrastructureNodeRecord = InfrastructureNodePayload & {
   id: number
+  agent: InfrastructureNodeAgentRecord | null
   agent_id: number | null
   agent_status: AgentStatus | null
   service_count: number

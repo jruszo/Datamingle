@@ -6,7 +6,12 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from api_agents.models import Agent, AgentCommandStatus, AgentInstanceAssignment
+from api_agents.models import (
+    Agent,
+    AgentCommandStatus,
+    AgentInstanceAssignment,
+    AgentStatus,
+)
 from api_agents.services import build_agent_config
 from sql.models import (
     InfrastructureNode,
@@ -70,6 +75,18 @@ class InfrastructureNodeApiTests(APITestCase):
         group = create_resource_group("primary services")
         node = create_node()
         node.resource_group.set([group])
+        agent = Agent.objects.create(
+            name="db-node-agent",
+            display_name="DB Node Agent",
+            local_node=node,
+            status=AgentStatus.ONLINE,
+            hostname="db-host-01",
+            platform="linux",
+            architecture="amd64",
+            agent_version="0.1.0",
+            last_config_revision=2,
+            desired_config_revision=3,
+        )
         service = create_instance("orders-primary", node=node)
         service.resource_group.set([group])
         ServiceRecommendation.objects.create(
@@ -91,6 +108,18 @@ class InfrastructureNodeApiTests(APITestCase):
         self.assertEqual(payload["name"], node.name)
         self.assertEqual(payload["address"], node.address)
         self.assertEqual(payload["resource_group_ids"], [group.group_id])
+        self.assertEqual(payload["agent_id"], agent.id)
+        self.assertEqual(payload["agent_status"], AgentStatus.ONLINE)
+        self.assertEqual(payload["agent"]["hostname"], "db-host-01")
+        self.assertEqual(payload["agent"]["platform"], "linux")
+        self.assertEqual(payload["agent"]["architecture"], "amd64")
+        self.assertEqual(payload["agent"]["agent_version"], "0.1.0")
+        self.assertEqual(payload["agent"]["last_config_revision"], 2)
+        agent.refresh_from_db()
+        self.assertEqual(
+            payload["agent"]["desired_config_revision"],
+            agent.desired_config_revision,
+        )
         self.assertEqual(payload["service_count"], 1)
         self.assertEqual(payload["recommendation_count"], 1)
         self.assertEqual(payload["services"][0]["service_name"], service.instance_name)

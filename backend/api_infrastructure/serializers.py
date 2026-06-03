@@ -97,6 +97,7 @@ class ServiceRecommendationSerializer(serializers.ModelSerializer):
 
 class InfrastructureNodeSerializer(serializers.ModelSerializer):
     resource_group_ids = serializers.SerializerMethodField()
+    agent = serializers.SerializerMethodField()
     agent_id = serializers.SerializerMethodField()
     agent_status = serializers.SerializerMethodField()
     service_count = serializers.SerializerMethodField()
@@ -116,6 +117,25 @@ class InfrastructureNodeSerializer(serializers.ModelSerializer):
     def get_agent_status(self, obj):
         agent = primary_node_agent(obj)
         return agent.status if agent is not None else None
+
+    def get_agent(self, obj):
+        agent = primary_node_agent(obj)
+        if agent is None:
+            return None
+        return {
+            "id": agent.id,
+            "status": agent.status,
+            "hostname": agent.hostname,
+            "platform": agent.platform,
+            "architecture": agent.architecture,
+            "agent_version": agent.agent_version,
+            "last_seen_at": agent.last_seen_at,
+            "last_connected_at": agent.last_connected_at,
+            "last_disconnected_at": agent.last_disconnected_at,
+            "last_config_revision": agent.last_config_revision,
+            "desired_config_revision": agent.desired_config_revision,
+            "enabled": agent.enabled,
+        }
 
     def get_service_count(self, obj):
         if hasattr(obj, "service_count"):
@@ -156,6 +176,7 @@ class InfrastructureNodeSerializer(serializers.ModelSerializer):
             "description",
             "metadata",
             "resource_group_ids",
+            "agent",
             "agent_id",
             "agent_status",
             "service_count",

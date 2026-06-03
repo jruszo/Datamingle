@@ -171,6 +171,16 @@ function displayNodeAddress(address: string) {
   return address.trim() || 'Pending agent registration'
 }
 
+function displayAgentVersion(version: string) {
+  return version.trim() || 'Version pending'
+}
+
+function displayAgentHost(hostname: string, platform: string, architecture: string) {
+  const host = hostname.trim() || 'Host pending'
+  const runtime = [platform, architecture].filter(Boolean).join('/')
+  return runtime ? `${host} · ${runtime}` : host
+}
+
 function updateNumericSelections(event: Event, target: 'service_groups' | 'service_tags') {
   const element = event.target as HTMLSelectElement
   const values = Array.from(element.selectedOptions)
@@ -645,9 +655,16 @@ watch([currentPage, pageSize], () => {
                 </div>
               </td>
               <td class="px-4 py-3">
-                <Badge variant="secondary" :class="statusBadgeClass(node.agent_status)">
-                  {{ node.agent_status || 'No agent' }}
-                </Badge>
+                <div class="grid gap-1">
+                  <div class="flex items-center gap-2">
+                    <Badge variant="secondary" :class="statusBadgeClass(node.agent_status)">
+                      {{ node.agent_status || 'No agent' }}
+                    </Badge>
+                  </div>
+                  <span v-if="node.agent" class="text-xs text-slate-500">
+                    {{ displayAgentVersion(node.agent.agent_version) }}
+                  </span>
+                </div>
               </td>
               <td class="px-4 py-3 text-slate-700">{{ node.service_count }}</td>
               <td class="px-4 py-3 text-slate-700">{{ node.recommendation_count }}</td>
@@ -736,6 +753,68 @@ watch([currentPage, pageSize], () => {
             Node detail unavailable.
           </div>
           <div v-else class="grid gap-8">
+            <section class="grid gap-3">
+              <h4 class="text-sm font-semibold uppercase text-slate-500">Agent</h4>
+              <div class="rounded-lg border border-slate-200 bg-white p-4">
+                <div v-if="selectedNode.agent" class="grid gap-4 md:grid-cols-4">
+                  <div class="grid gap-1">
+                    <span class="text-xs font-semibold uppercase text-slate-500">Status</span>
+                    <Badge
+                      variant="secondary"
+                      class="w-fit"
+                      :class="statusBadgeClass(selectedNode.agent.status)"
+                    >
+                      {{ selectedNode.agent.status }}
+                    </Badge>
+                  </div>
+                  <div class="grid gap-1">
+                    <span class="text-xs font-semibold uppercase text-slate-500">Version</span>
+                    <span class="text-sm text-slate-900">
+                      {{ displayAgentVersion(selectedNode.agent.agent_version) }}
+                    </span>
+                  </div>
+                  <div class="grid gap-1">
+                    <span class="text-xs font-semibold uppercase text-slate-500">Host</span>
+                    <span class="text-sm text-slate-900">
+                      {{
+                        displayAgentHost(
+                          selectedNode.agent.hostname,
+                          selectedNode.agent.platform,
+                          selectedNode.agent.architecture,
+                        )
+                      }}
+                    </span>
+                  </div>
+                  <div class="grid gap-1">
+                    <span class="text-xs font-semibold uppercase text-slate-500">Last Seen</span>
+                    <span class="text-sm text-slate-900">
+                      {{ formatDateTime(selectedNode.agent.last_seen_at) }}
+                    </span>
+                  </div>
+                  <div class="grid gap-1">
+                    <span class="text-xs font-semibold uppercase text-slate-500">Config</span>
+                    <span class="text-sm text-slate-900">
+                      {{ selectedNode.agent.last_config_revision }} /
+                      {{ selectedNode.agent.desired_config_revision }}
+                    </span>
+                  </div>
+                  <div class="grid gap-1">
+                    <span class="text-xs font-semibold uppercase text-slate-500">Connected</span>
+                    <span class="text-sm text-slate-900">
+                      {{ formatDateTime(selectedNode.agent.last_connected_at) }}
+                    </span>
+                  </div>
+                  <div class="grid gap-1">
+                    <span class="text-xs font-semibold uppercase text-slate-500">Enabled</span>
+                    <span class="text-sm text-slate-900">
+                      {{ selectedNode.agent.enabled ? 'Yes' : 'No' }}
+                    </span>
+                  </div>
+                </div>
+                <div v-else class="text-sm text-slate-500">No agent is attached to this node.</div>
+              </div>
+            </section>
+
             <section class="grid gap-3">
               <h4 class="text-sm font-semibold uppercase text-slate-500">Services</h4>
               <div class="overflow-x-auto rounded-lg border border-slate-200">
