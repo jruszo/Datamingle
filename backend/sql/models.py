@@ -349,6 +349,7 @@ class InfrastructureNode(models.Model):
     )
     description = models.TextField("Description", blank=True, default="")
     metadata = models.JSONField("Metadata", default=dict, blank=True)
+    monitoring_enabled = models.BooleanField("Monitoring Enabled", default=True)
     enabled = models.BooleanField("Enabled", default=True)
     resource_group = models.ManyToManyField(
         ResourceGroup, verbose_name="Resource Group", blank=True

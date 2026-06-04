@@ -298,6 +298,7 @@ class AgentApiTests(APITestCase):
             {
                 "node_name": "prod-db-node-01",
                 "organization_id": "org_evil",
+                "monitoring_enabled": False,
             },
             format="json",
         )
@@ -316,6 +317,7 @@ class AgentApiTests(APITestCase):
         self.assertIsNone(agent.api_key_hash)
         self.assertEqual(agent.local_node.name, "prod-db-node-01")
         self.assertEqual(agent.local_node.address, "")
+        self.assertFalse(agent.local_node.monitoring_enabled)
         self.assertEqual(
             agent.local_node.metadata["provisioning_status"],
             "pending_agent_install",
@@ -654,16 +656,21 @@ class AgentFacingApiTests(APITestCase):
     def test_config_includes_only_authenticated_agent_assignments_with_credentials(
         self,
     ):
-        agent = Agent.objects.create(name="agent-a")
+        node = InfrastructureNode.objects.create(
+            name="node-a",
+            address="10.0.0.10",
+            monitoring_enabled=False,
+        )
+        agent = Agent.objects.create(name="agent-a", local_node=node)
         other_agent = Agent.objects.create(name="agent-b")
         instance = create_instance("primary")
+        instance.node = node
+        instance.save(update_fields=["node", "update_time"])
         other_instance = create_instance("secondary")
-        AgentInstanceAssignment.objects.create(
-            agent=agent,
-            instance=instance,
-            command_enabled=True,
-            metrics_enabled=True,
-        )
+        assignment = AgentInstanceAssignment.objects.get(agent=agent, instance=instance)
+        assignment.command_enabled = True
+        assignment.metrics_enabled = True
+        assignment.save(update_fields=["command_enabled", "metrics_enabled"])
         AgentInstanceAssignment.objects.create(
             agent=other_agent,
             instance=other_instance,
@@ -677,9 +684,15 @@ class AgentFacingApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         payload = response.json()
         self.assertEqual(payload["agent_id"], agent.id)
+        self.assertEqual(payload["node"]["id"], node.id)
+        self.assertFalse(payload["node"]["monitoring_enabled"])
+        self.assertEqual(payload["nodes"][0]["id"], node.id)
+        self.assertFalse(payload["nodes"][0]["monitoring_enabled"])
         self.assertEqual(len(payload["assignments"]), 1)
         assignment = payload["assignments"][0]
         self.assertEqual(assignment["instance_id"], instance.id)
+        self.assertEqual(assignment["node_id"], node.id)
+        self.assertFalse(assignment["node_monitoring_enabled"])
         self.assertEqual(assignment["username"], "root")
         self.assertEqual(assignment["password"], "secret")
         self.assertNotIn(other_instance.instance_name, str(payload))

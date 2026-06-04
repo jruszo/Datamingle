@@ -16,6 +16,7 @@ from django.core.exceptions import (
     PermissionDenied,
 )
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 import requests
 from rest_framework.exceptions import APIException
@@ -258,12 +259,15 @@ def build_agent_install_command(request, api_key):
 
 
 def build_agent_config(agent):
-    assignments = [
-        serialize_assignment(assignment)
-        for assignment in agent.assignments.filter(enabled=True).select_related(
+    assignment_records = list(
+        agent.assignments.filter(enabled=True).select_related(
             "instance", "instance__node", "local_node"
         )
+    )
+    assignments = [
+        serialize_assignment(assignment) for assignment in assignment_records
     ]
+    nodes = build_agent_node_configs(agent, assignment_records)
     modules = build_module_configs(agent, assignments)
     tool_artifacts = [
         serialize_tool_artifact(artifact)
@@ -273,6 +277,8 @@ def build_agent_config(agent):
         "agent_id": agent.id,
         "revision": agent.desired_config_revision,
         "organization_id": agent.organization_id or settings.WORKOS_ORGANIZATION_ID,
+        "node": serialize_node(agent.local_node) if agent.local_node_id else None,
+        "nodes": nodes,
         "assignments": assignments,
         "modules": modules,
         "tool_artifacts": tool_artifacts,
@@ -290,6 +296,9 @@ def serialize_assignment(assignment):
         "instance_name": instance.instance_name,
         "node_id": instance.node_id,
         "node_name": instance.node.name if instance.node_id else "",
+        "node_monitoring_enabled": (
+            instance.node.monitoring_enabled if instance.node_id else False
+        ),
         "db_type": instance.db_type,
         "host": instance.host,
         "port": instance.port,
@@ -308,6 +317,31 @@ def serialize_assignment(assignment):
         "online_schema_enabled": assignment.online_schema_enabled,
         "logs_enabled": assignment.logs_enabled,
     }
+
+
+def serialize_node(node):
+    return {
+        "id": node.id,
+        "name": node.name,
+        "address": node.address,
+        "monitoring_enabled": node.monitoring_enabled,
+    }
+
+
+def build_agent_node_configs(agent, assignments):
+    nodes = {}
+    if agent.local_node_id:
+        nodes[agent.local_node_id] = agent.local_node
+    for assignment in assignments:
+        if assignment.local_node_id:
+            nodes[assignment.local_node_id] = assignment.local_node
+        if assignment.instance.node_id:
+            nodes[assignment.instance.node_id] = assignment.instance.node
+    for node_assignment in AgentNodeAssignment.objects.filter(
+        agent=agent, enabled=True
+    ).select_related("node"):
+        nodes[node_assignment.node_id] = node_assignment.node
+    return [serialize_node(node) for node in nodes.values()]
 
 
 def assignment_modules(assignment):
@@ -1065,5 +1099,30 @@ def notify_tool_artifact_changed(artifact, action="tool_artifact.changed", user=
         transaction.on_commit(
             lambda current_agent=agent: notify_config_changed(
                 current_agent, reason=action
+            )
+        )
+
+
+def notify_node_config_changed(node, summary=None, reason="node.changed", user=None):
+    from api_agents.dispatch import notify_config_changed
+
+    agents = (
+        Agent.objects.filter(
+            Q(local_node=node)
+            | Q(node_assignments__node=node, node_assignments__enabled=True)
+        )
+        .filter(enabled=True)
+        .exclude(status=AgentStatus.REVOKED)
+        .distinct()
+        .order_by("id")
+    )
+    for agent in agents:
+        agent.bump_desired_config_revision(
+            summary=summary or {"action": reason, "node_id": node.id},
+            created_by=user if getattr(user, "is_authenticated", False) else None,
+        )
+        transaction.on_commit(
+            lambda current_agent=agent: notify_config_changed(
+                current_agent, reason=reason
             )
         )

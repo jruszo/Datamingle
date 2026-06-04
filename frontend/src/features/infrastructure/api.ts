@@ -30,6 +30,7 @@ export type InfrastructureNodePayload = {
   address: string
   description: string
   metadata: Record<string, unknown>
+  monitoring_enabled: boolean
   resource_group_ids?: number[]
 }
 

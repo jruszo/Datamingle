@@ -2,6 +2,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from api_agents.models import Agent, AgentNodeAssignment
+from api_agents.services import notify_node_config_changed
 from api_agents.time import agent_datetime_to_utc_iso
 from sql.models import (
     InfrastructureNode,
@@ -181,6 +182,7 @@ class InfrastructureNodeSerializer(serializers.ModelSerializer):
             "address",
             "description",
             "metadata",
+            "monitoring_enabled",
             "resource_group_ids",
             "agent",
             "agent_id",
@@ -224,17 +226,38 @@ class InfrastructureNodeWriteSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         resource_groups = validated_data.pop("resource_group", None)
+        previous_monitoring_enabled = instance.monitoring_enabled
         with transaction.atomic():
             for field, value in validated_data.items():
                 setattr(instance, field, value)
             instance.save()
             if resource_groups is not None:
                 instance.resource_group.set(resource_groups)
+            if (
+                "monitoring_enabled" in validated_data
+                and previous_monitoring_enabled != instance.monitoring_enabled
+            ):
+                notify_node_config_changed(
+                    instance,
+                    summary={
+                        "action": "node.monitoring_changed",
+                        "node_id": instance.id,
+                        "monitoring_enabled": instance.monitoring_enabled,
+                    },
+                    reason="node.monitoring_changed",
+                )
         return instance
 
     class Meta:
         model = InfrastructureNode
-        fields = ("name", "address", "description", "metadata", "resource_group_ids")
+        fields = (
+            "name",
+            "address",
+            "description",
+            "metadata",
+            "monitoring_enabled",
+            "resource_group_ids",
+        )
 
 
 class DatabaseServiceWriteSerializer(serializers.ModelSerializer):

@@ -26,11 +26,20 @@ type AgentConfig struct {
 	AgentID       int64          `json:"agent_id"`
 	Revision      int64          `json:"revision"`
 	Hash          string         `json:"config_hash"`
+	Node          *NodeConfig    `json:"node,omitempty"`
+	Nodes         []NodeConfig   `json:"nodes,omitempty"`
 	Assignments   []Assignment   `json:"assignments,omitempty"`
 	Modules       []ModuleConfig `json:"modules"`
 	ToolArtifacts []ToolArtifact `json:"tool_artifacts,omitempty"`
 	Raw           map[string]any `json:"raw,omitempty"`
 	Fetched       time.Time      `json:"-"`
+}
+
+type NodeConfig struct {
+	ID                int64  `json:"id"`
+	Name              string `json:"name"`
+	Address           string `json:"address"`
+	MonitoringEnabled bool   `json:"monitoring_enabled"`
 }
 
 type ModuleConfig struct {
@@ -45,6 +54,8 @@ type Assignment struct {
 	ID         int64  `json:"id"`
 	InstanceID int64  `json:"instance_id"`
 	Name       string `json:"instance_name,omitempty"`
+	NodeID     int64  `json:"node_id,omitempty"`
+	NodeName   string `json:"node_name,omitempty"`
 	DBType     string `json:"db_type,omitempty"`
 	Host       string `json:"host,omitempty"`
 	Port       int    `json:"port,omitempty"`
@@ -57,6 +68,7 @@ type Assignment struct {
 	Modules        []string       `json:"modules,omitempty"`
 	Capabilities   []string       `json:"capabilities,omitempty"`
 	CommandEnabled bool           `json:"command_enabled"`
+	NodeMonitoring bool           `json:"node_monitoring_enabled"`
 	Raw            map[string]any `json:"raw,omitempty"`
 }
 

@@ -57,6 +57,7 @@ const nodeForm = reactive<InfrastructureNodePayload>({
   address: '',
   description: '',
   metadata: {},
+  monitoring_enabled: true,
 })
 
 const isServiceDialogOpen = ref(false)
@@ -89,6 +90,7 @@ const agentFormError = ref('')
 const createdAgent = ref<AgentCreateResponse | null>(null)
 const agentForm = reactive({
   node_name: '',
+  monitoring_enabled: true,
 })
 const agentTargetNodeId = ref<number | null>(null)
 
@@ -295,6 +297,7 @@ function resetNodeForm() {
   nodeForm.address = ''
   nodeForm.description = ''
   nodeForm.metadata = {}
+  nodeForm.monitoring_enabled = true
   nodeFormError.value = ''
 }
 
@@ -306,6 +309,7 @@ function openNodeDialog(node?: InfrastructureNodeRecord) {
     nodeForm.address = node.address
     nodeForm.description = node.description
     nodeForm.metadata = node.metadata
+    nodeForm.monitoring_enabled = node.monitoring_enabled
   }
   isNodeDialogOpen.value = true
 }
@@ -332,6 +336,7 @@ async function submitNode() {
       address: nodeForm.address.trim(),
       description: nodeForm.description.trim(),
       metadata: nodeForm.metadata,
+      monitoring_enabled: nodeForm.monitoring_enabled,
     }
     const detail = await updateInfrastructureNode(editingNodeId.value, payload, requireToken())
     selectedNode.value = detail
@@ -445,6 +450,7 @@ async function submitService() {
 function openNewNodeDialog() {
   agentTargetNodeId.value = null
   agentForm.node_name = ''
+  agentForm.monitoring_enabled = true
   agentFormError.value = ''
   createdAgent.value = null
   isAgentDialogOpen.value = true
@@ -453,6 +459,7 @@ function openNewNodeDialog() {
 function openAgentDialog() {
   agentTargetNodeId.value = selectedNode.value?.id ?? null
   agentForm.node_name = selectedNode.value?.name ?? ''
+  agentForm.monitoring_enabled = selectedNode.value?.monitoring_enabled ?? true
   agentFormError.value = ''
   createdAgent.value = null
   isAgentDialogOpen.value = true
@@ -474,8 +481,14 @@ async function submitAgent() {
   try {
     createdAgent.value = await createAgent(
       agentTargetNodeId.value
-        ? { local_node: agentTargetNodeId.value }
-        : { node_name: agentForm.node_name.trim() },
+        ? {
+            local_node: agentTargetNodeId.value,
+            monitoring_enabled: agentForm.monitoring_enabled,
+          }
+        : {
+            node_name: agentForm.node_name.trim(),
+            monitoring_enabled: agentForm.monitoring_enabled,
+          },
       requireToken(),
     )
     await loadSelectedNode()
@@ -681,6 +694,7 @@ watch([currentPage, pageSize], () => {
             <tr>
               <th class="px-4 py-3">Node</th>
               <th class="px-4 py-3">Agent</th>
+              <th class="px-4 py-3">Monitoring</th>
               <th class="px-4 py-3">Services</th>
               <th class="px-4 py-3">Recommendations</th>
             </tr>
@@ -714,16 +728,28 @@ watch([currentPage, pageSize], () => {
                   </span>
                 </div>
               </td>
+              <td class="px-4 py-3">
+                <Badge
+                  variant="secondary"
+                  :class="
+                    node.monitoring_enabled
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : 'bg-slate-100 text-slate-700'
+                  "
+                >
+                  {{ node.monitoring_enabled ? 'Enabled' : 'Disabled' }}
+                </Badge>
+              </td>
               <td class="px-4 py-3 text-slate-700">{{ node.service_count }}</td>
               <td class="px-4 py-3 text-slate-700">{{ node.recommendation_count }}</td>
             </tr>
             <tr v-if="!isLoading && nodes.length === 0">
-              <td colspan="4" class="px-4 py-10 text-center text-sm text-slate-500">
+              <td colspan="5" class="px-4 py-10 text-center text-sm text-slate-500">
                 No nodes found.
               </td>
             </tr>
             <tr v-if="isLoading">
-              <td colspan="4" class="px-4 py-10 text-center text-sm text-slate-500">
+              <td colspan="5" class="px-4 py-10 text-center text-sm text-slate-500">
                 Loading nodes...
               </td>
             </tr>
@@ -1037,6 +1063,14 @@ watch([currentPage, pageSize], () => {
             <span class="text-sm font-medium text-slate-700">Description</span>
             <textarea v-model="nodeForm.description" :class="fieldClass" rows="3" />
           </label>
+          <label class="flex items-center gap-2 text-sm font-medium text-slate-700">
+            <input
+              v-model="nodeForm.monitoring_enabled"
+              type="checkbox"
+              class="h-4 w-4 rounded border-slate-300"
+            />
+            Enable monitoring
+          </label>
         </div>
         <div class="flex justify-end gap-2 border-t border-slate-200 px-6 py-4">
           <Button variant="outline" type="button" @click="closeNodeDialog">Cancel</Button>
@@ -1200,6 +1234,14 @@ watch([currentPage, pageSize], () => {
               :readonly="Boolean(agentTargetNodeId)"
               placeholder="prod-db-node-01"
             />
+          </label>
+          <label class="flex items-center gap-2 text-sm font-medium text-slate-700">
+            <input
+              v-model="agentForm.monitoring_enabled"
+              type="checkbox"
+              class="h-4 w-4 rounded border-slate-300"
+            />
+            Enable monitoring
           </label>
           <div class="flex justify-end gap-2 border-t border-slate-200 pt-4">
             <Button variant="outline" type="button" @click="closeAgentDialog">Cancel</Button>

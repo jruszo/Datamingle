@@ -396,6 +396,7 @@ export type AgentCreatePayload = {
   display_name?: string
   node_name?: string
   local_node?: number | null
+  monitoring_enabled?: boolean
 }
 
 export type AgentCreateResponse = AgentDetailRecord & {

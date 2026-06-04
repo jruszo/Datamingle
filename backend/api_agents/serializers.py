@@ -2,6 +2,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from sql.utils.resource_group import user_instances
+from api_agents.services import notify_node_config_changed
 from api_agents.models import (
     Agent,
     AgentCommand,
@@ -68,10 +69,19 @@ class AgentCreateSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    monitoring_enabled = serializers.BooleanField(default=True, write_only=True)
 
     class Meta:
         model = Agent
-        fields = ("id", "name", "display_name", "metadata", "local_node", "node_name")
+        fields = (
+            "id",
+            "name",
+            "display_name",
+            "metadata",
+            "local_node",
+            "node_name",
+            "monitoring_enabled",
+        )
         read_only_fields = ("id",)
 
     def validate_name(self, value):
@@ -119,13 +129,27 @@ class AgentCreateSerializer(serializers.ModelSerializer):
         metadata = validated_data.pop("metadata", {})
         agent_name = validated_data.pop("name", "").strip()
         display_name = validated_data.pop("display_name", "").strip()
+        monitoring_enabled = validated_data.pop("monitoring_enabled", True)
 
         with transaction.atomic():
             if local_node is None:
                 local_node = InfrastructureNode.objects.create(
                     name=node_name,
                     address="",
+                    monitoring_enabled=monitoring_enabled,
                     metadata={"provisioning_status": "pending_agent_install"},
+                )
+            elif local_node.monitoring_enabled != monitoring_enabled:
+                local_node.monitoring_enabled = monitoring_enabled
+                local_node.save(update_fields=["monitoring_enabled", "update_time"])
+                notify_node_config_changed(
+                    local_node,
+                    summary={
+                        "action": "node.monitoring_changed",
+                        "node_id": local_node.id,
+                        "monitoring_enabled": monitoring_enabled,
+                    },
+                    reason="node.monitoring_changed",
                 )
 
             if not agent_name:

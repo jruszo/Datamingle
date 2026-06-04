@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -222,6 +223,7 @@ func (r *Runner) apiClient() (*client.Client, error) {
 }
 
 func (r *Runner) applyConfig(ctx context.Context, payload client.AgentConfig) error {
+	logMonitoringExpectation(payload)
 	if err := r.reconcileToolArtifacts(ctx, payload); err != nil {
 		return err
 	}
@@ -235,6 +237,30 @@ func (r *Runner) applyConfig(ctx context.Context, payload client.AgentConfig) er
 		})
 	}
 	return r.modules.Apply(ctx, configs)
+}
+
+func logMonitoringExpectation(payload client.AgentConfig) {
+	if payload.Node != nil {
+		log.Printf(
+			"node monitoring expected for %s (%d): %t",
+			payload.Node.Name,
+			payload.Node.ID,
+			payload.Node.MonitoringEnabled,
+		)
+		return
+	}
+	if len(payload.Nodes) == 0 {
+		log.Printf("node monitoring expected: false (no node assigned)")
+		return
+	}
+	for _, node := range payload.Nodes {
+		log.Printf(
+			"node monitoring expected for %s (%d): %t",
+			node.Name,
+			node.ID,
+			node.MonitoringEnabled,
+		)
+	}
 }
 
 func (r *Runner) reconcileToolArtifacts(ctx context.Context, payload client.AgentConfig) error {

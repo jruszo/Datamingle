@@ -33,11 +33,12 @@ def create_resource_group(name):
     )
 
 
-def create_node(name="db-node-01", address="10.0.0.10"):
+def create_node(name="db-node-01", address="10.0.0.10", monitoring_enabled=True):
     return InfrastructureNode.objects.create(
         name=name,
         address=address,
         description="Database host",
+        monitoring_enabled=monitoring_enabled,
     )
 
 
@@ -74,7 +75,7 @@ class InfrastructureNodeApiTests(APITestCase):
 
     def test_node_list_includes_services_and_recommendations(self):
         group = create_resource_group("primary services")
-        node = create_node()
+        node = create_node(monitoring_enabled=False)
         node.resource_group.set([group])
         agent = Agent.objects.create(
             name="db-node-agent",
@@ -111,6 +112,7 @@ class InfrastructureNodeApiTests(APITestCase):
         payload = response.json()["data"]["results"][0]
         self.assertEqual(payload["name"], node.name)
         self.assertEqual(payload["address"], node.address)
+        self.assertFalse(payload["monitoring_enabled"])
         self.assertEqual(payload["resource_group_ids"], [group.group_id])
         self.assertEqual(payload["agent_id"], agent.id)
         self.assertEqual(payload["agent_status"], AgentStatus.ONLINE)
@@ -156,6 +158,7 @@ class InfrastructureNodeApiTests(APITestCase):
                 "name": "local-agent-01",
                 "display_name": "Local Agent",
                 "local_node": node.id,
+                "monitoring_enabled": False,
             },
             format="json",
         )
@@ -190,9 +193,37 @@ class InfrastructureNodeApiTests(APITestCase):
         assignment = AgentInstanceAssignment.objects.get(agent=agent, instance=service)
         self.assertEqual(assignment.local_node_id, node.id)
         self.assertTrue(assignment.command_enabled)
+        agent.local_node.refresh_from_db()
+        self.assertFalse(agent.local_node.monitoring_enabled)
         config = build_agent_config(agent)
+        self.assertFalse(config["node"]["monitoring_enabled"])
         self.assertEqual(config["assignments"][0]["instance_id"], service.id)
         self.assertEqual(config["assignments"][0]["node_id"], node.id)
+
+    def test_update_node_monitoring_bumps_agent_config_revision(self):
+        node = create_node()
+        agent = Agent.objects.create(name="agent-a", local_node=node)
+
+        response = self.client.patch(
+            f"/api/v1/infrastructure/nodes/{node.id}/",
+            {
+                "name": node.name,
+                "address": node.address,
+                "description": node.description,
+                "metadata": node.metadata,
+                "monitoring_enabled": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response.json()["data"]
+        self.assertFalse(payload["monitoring_enabled"])
+        node.refresh_from_db()
+        agent.refresh_from_db()
+        self.assertFalse(node.monitoring_enabled)
+        self.assertEqual(agent.desired_config_revision, 2)
+        self.assertFalse(build_agent_config(agent)["node"]["monitoring_enabled"])
 
     def test_create_service_accepts_recommendation(self):
         node = create_node()
