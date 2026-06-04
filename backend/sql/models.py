@@ -550,6 +550,7 @@ class Instance(models.Model, PasswordMixin):
     password = EncryptedCharField(
         verbose_name="Password", max_length=300, default="", blank=True
     )
+    monitoring_enabled = models.BooleanField("Monitoring Enabled", default=True)
     is_ssl = models.BooleanField("Enable SSL", default=False)
     verify_ssl = models.BooleanField("Verify Server SSL Certificate", default=True)
     db_name = models.CharField("Database", max_length=64, default="", blank=True)

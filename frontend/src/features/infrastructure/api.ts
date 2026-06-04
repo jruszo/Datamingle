@@ -71,6 +71,7 @@ export type DatabaseServicePayload = {
   port: number
   user: string
   password?: string
+  monitoring_enabled: boolean
   is_ssl: boolean
   verify_ssl: boolean
   db_name: string

@@ -693,6 +693,15 @@ class AgentFacingApiTests(APITestCase):
             sha256="d459a6c4b0867e9f665a7db35f4387d11fa7fa79a00a85c2c172ba0fa4295c14",
             enabled=True,
         )
+        AgentToolArtifact.objects.create(
+            tool_name=AgentToolArtifact.TOOL_MYSQLD_EXPORTER,
+            version="0.19.0",
+            platform="linux",
+            architecture="amd64",
+            download_url="https://example.com/mysqld_exporter",
+            sha256="d459a6c4b0867e9f665a7db35f4387d11fa7fa79a00a85c2c172ba0fa4295c14",
+            enabled=True,
+        )
         self.authenticate_agent(agent)
 
         response = self.client.get("/api/v1/agent/me/config/")
@@ -717,6 +726,7 @@ class AgentFacingApiTests(APITestCase):
         self.assertEqual(assignment["instance_id"], instance.id)
         self.assertEqual(assignment["node_id"], node.id)
         self.assertFalse(assignment["node_monitoring_enabled"])
+        self.assertTrue(assignment["service_monitoring_enabled"])
         self.assertEqual(
             assignment["node_monitoring_collectors"],
             list(DEFAULT_NODE_EXPORTER_COLLECTORS),
@@ -728,6 +738,7 @@ class AgentFacingApiTests(APITestCase):
         self.assertTrue(module_names["mysql"]["enabled"])
         self.assertTrue(module_names["metrics"]["enabled"])
         self.assertFalse(module_names["node_monitoring"]["enabled"])
+        self.assertTrue(module_names["service_monitoring"]["enabled"])
         self.assertEqual(
             module_names["node_monitoring"]["raw"]["remote_write_url"],
             "http://localhost:4430/api/v1/prometheus/write",
@@ -741,6 +752,16 @@ class AgentFacingApiTests(APITestCase):
         self.assertEqual(
             module_names["node_monitoring"]["raw"]["node_exporter"]["collectors"],
             list(DEFAULT_NODE_EXPORTER_COLLECTORS),
+        )
+        services = module_names["service_monitoring"]["raw"]["services"]
+        self.assertEqual(len(services), 1)
+        self.assertEqual(services[0]["db_type"], "mysql")
+        self.assertEqual(services[0]["username"], "root")
+        self.assertEqual(services[0]["password"], "secret")
+        self.assertEqual(services[0]["exporter"]["listen_address"], "127.0.0.1:9200")
+        self.assertEqual(
+            services[0]["exporter"]["artifact"]["tool_name"],
+            AgentToolArtifact.TOOL_MYSQLD_EXPORTER,
         )
 
     def test_heartbeat_updates_last_seen_revision_and_module_health(self):

@@ -130,6 +130,7 @@ const serviceForm = reactive<DatabaseServicePayload>({
   port: 3306,
   user: '',
   password: '',
+  monitoring_enabled: true,
   is_ssl: false,
   verify_ssl: true,
   db_name: '',
@@ -468,6 +469,7 @@ function resetServiceForm() {
   serviceForm.port = 3306
   serviceForm.user = ''
   serviceForm.password = ''
+  serviceForm.monitoring_enabled = true
   serviceForm.is_ssl = false
   serviceForm.verify_ssl = true
   serviceForm.db_name = ''
@@ -494,6 +496,7 @@ function openServiceDialog(
     serviceForm.host = service.host
     serviceForm.port = service.port
     serviceForm.user = service.user
+    serviceForm.monitoring_enabled = service.monitoring_enabled
     serviceForm.is_ssl = service.is_ssl
     serviceForm.verify_ssl = service.verify_ssl
     serviceForm.db_name = service.db_name
@@ -1034,6 +1037,7 @@ watch([currentPage, pageSize], () => {
                       <th class="px-4 py-3">Service</th>
                       <th class="px-4 py-3">Engine</th>
                       <th class="px-4 py-3">Endpoint</th>
+                      <th class="px-4 py-3">Monitoring</th>
                       <th class="px-4 py-3">Status</th>
                       <th class="px-4 py-3 text-right">Actions</th>
                     </tr>
@@ -1046,6 +1050,18 @@ watch([currentPage, pageSize], () => {
                       <td class="px-4 py-3 text-slate-600">{{ service.engine.toUpperCase() }}</td>
                       <td class="px-4 py-3 text-slate-600">
                         {{ service.host }}:{{ service.port }}
+                      </td>
+                      <td class="px-4 py-3">
+                        <Badge
+                          variant="secondary"
+                          :class="
+                            service.monitoring_enabled
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-slate-100 text-slate-600'
+                          "
+                        >
+                          {{ service.monitoring_enabled ? 'Enabled' : 'Disabled' }}
+                        </Badge>
                       </td>
                       <td class="px-4 py-3">
                         <Badge
@@ -1078,7 +1094,7 @@ watch([currentPage, pageSize], () => {
                       </td>
                     </tr>
                     <tr v-if="selectedNode.services.length === 0">
-                      <td colspan="5" class="px-4 py-8 text-center text-slate-500">
+                      <td colspan="6" class="px-4 py-8 text-center text-slate-500">
                         No services added.
                       </td>
                     </tr>
@@ -1302,6 +1318,14 @@ watch([currentPage, pageSize], () => {
           <label class="grid gap-2">
             <span class="text-sm font-medium text-slate-700">Password</span>
             <Input v-model="serviceForm.password" type="password" autocomplete="new-password" />
+          </label>
+          <label class="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              v-model="serviceForm.monitoring_enabled"
+              type="checkbox"
+              class="h-4 w-4 rounded border-slate-300"
+            />
+            Enable monitoring
           </label>
           <label class="grid gap-2">
             <span class="text-sm font-medium text-slate-700">Default Database</span>

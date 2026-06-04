@@ -304,6 +304,9 @@ def serialize_assignment(assignment):
             if instance.node_id
             else list(DEFAULT_NODE_EXPORTER_COLLECTORS)
         ),
+        "service_monitoring_enabled": (
+            instance.monitoring_enabled and instance.db_type in ("mysql", "pgsql")
+        ),
         "db_type": instance.db_type,
         "host": instance.host,
         "port": instance.port,
@@ -572,7 +575,14 @@ def build_module_configs(agent, assignments):
     node_monitoring_enabled = any(
         node.get("monitoring_enabled") for node in build_agent_node_configs(agent, [])
     ) or any(assignment.get("node_monitoring_enabled") for assignment in assignments)
-    for module_name in ("mysql", "metrics", "online_schema", "logs", "node_monitoring"):
+    for module_name in (
+        "mysql",
+        "metrics",
+        "online_schema",
+        "logs",
+        "node_monitoring",
+        "service_monitoring",
+    ):
         module_assignments = [
             {
                 "id": assignment["id"],
@@ -587,6 +597,16 @@ def build_module_configs(agent, assignments):
         if module_name == "node_monitoring":
             enabled = node_monitoring_enabled
             raw = build_node_monitoring_module_config(agent)
+        if module_name == "service_monitoring":
+            monitored_assignments = [
+                assignment
+                for assignment in assignments
+                if assignment.get("service_monitoring_enabled")
+                and assignment.get("metrics_enabled")
+                and assignment.get("db_type") in ("mysql", "pgsql")
+            ]
+            enabled = bool(monitored_assignments)
+            raw = build_service_monitoring_module_config(agent, monitored_assignments)
         configs.append(
             {
                 "name": module_name,
@@ -629,6 +649,64 @@ def build_node_monitoring_module_config(agent):
             "agent_name": agent.name,
             "node_id": str(agent.local_node_id or ""),
             "node_name": agent.local_node.name if agent.local_node_id else "",
+        },
+    }
+
+
+def build_service_monitoring_module_config(agent, assignments):
+    mysql_artifact = (
+        AgentToolArtifact.objects.filter(
+            tool_name=AgentToolArtifact.TOOL_MYSQLD_EXPORTER,
+            enabled=True,
+        )
+        .order_by("-version", "id")
+        .first()
+    )
+    postgres_artifact = (
+        AgentToolArtifact.objects.filter(
+            tool_name=AgentToolArtifact.TOOL_POSTGRES_EXPORTER,
+            enabled=True,
+        )
+        .order_by("-version", "id")
+        .first()
+    )
+    remote_write_url = (
+        settings.DATAMINGLE_INGEST_GATEWAY_URL.rstrip("/") + "/api/v1/prometheus/write"
+    )
+    services = []
+    for index, assignment in enumerate(assignments):
+        port = 9200 + index
+        artifact = (
+            mysql_artifact if assignment["db_type"] == "mysql" else postgres_artifact
+        )
+        services.append(
+            {
+                "assignment_id": assignment["id"],
+                "instance_id": assignment["instance_id"],
+                "instance_name": assignment["instance_name"],
+                "node_id": assignment["node_id"],
+                "node_name": assignment["node_name"],
+                "db_type": assignment["db_type"],
+                "host": assignment["host"],
+                "port": assignment["port"],
+                "username": assignment["username"],
+                "password": assignment["password"],
+                "database": assignment["database"],
+                "ssl": assignment["ssl"],
+                "exporter": {
+                    "listen_address": f"127.0.0.1:{port}",
+                    "metrics_url": f"http://127.0.0.1:{port}/metrics",
+                    "artifact": serialize_tool_artifact(artifact) if artifact else None,
+                },
+            }
+        )
+    return {
+        "remote_write_url": remote_write_url,
+        "scrape_interval_seconds": 30,
+        "services": services,
+        "labels": {
+            "agent_id": str(agent.id),
+            "agent_name": agent.name,
         },
     }
 
@@ -1128,9 +1206,18 @@ def notify_tool_artifact_changed(artifact, action="tool_artifact.changed", user=
 
     agents = (
         Agent.objects.filter(
-            enabled=True,
-            assignments__enabled=True,
-            assignments__online_schema_enabled=True,
+            Q(
+                enabled=True,
+                assignments__enabled=True,
+                assignments__online_schema_enabled=True,
+            )
+            | Q(
+                enabled=True,
+                assignments__enabled=True,
+                assignments__metrics_enabled=True,
+                assignments__instance__monitoring_enabled=True,
+                assignments__instance__db_type__in=("mysql", "pgsql"),
+            )
         )
         .distinct()
         .order_by("id")

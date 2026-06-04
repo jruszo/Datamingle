@@ -48,6 +48,7 @@ func NewRunner(cfg config.Config) *Runner {
 			placeholder.New("metrics", []string{"metrics.export"}),
 			placeholder.New("online_schema", []string{"schema.change"}),
 			monitoring.New(cfg.DataDir, cfg.APIKeyEnv),
+			monitoring.NewService(cfg.DataDir, cfg.APIKeyEnv),
 			logs.New(),
 		),
 	}
@@ -242,6 +243,14 @@ func (r *Runner) applyConfig(ctx context.Context, payload client.AgentConfig) er
 }
 
 func logMonitoringExpectation(payload client.AgentConfig) {
+	for _, module := range payload.Modules {
+		if module.Name != "service_monitoring" {
+			continue
+		}
+		services, _ := module.Raw["services"].([]any)
+		log.Printf("service monitoring exporters expected: %d", len(services))
+		break
+	}
 	if payload.Node != nil {
 		log.Printf(
 			"node monitoring expected for %s (%d): %t",

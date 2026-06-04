@@ -148,6 +148,7 @@ class InfrastructureNodeApiTests(APITestCase):
         self.assertEqual(payload["service_count"], 1)
         self.assertEqual(payload["recommendation_count"], 1)
         self.assertEqual(payload["services"][0]["service_name"], service.instance_name)
+        self.assertTrue(payload["services"][0]["monitoring_enabled"])
         self.assertEqual(
             payload["recommendations"][0]["service_name"], "orders-replica"
         )
@@ -189,6 +190,7 @@ class InfrastructureNodeApiTests(APITestCase):
                 "port": 3306,
                 "user": "root",
                 "password": "secret",
+                "monitoring_enabled": True,
                 "is_ssl": False,
                 "verify_ssl": True,
                 "db_name": "",
@@ -207,12 +209,22 @@ class InfrastructureNodeApiTests(APITestCase):
         assignment = AgentInstanceAssignment.objects.get(agent=agent, instance=service)
         self.assertEqual(assignment.local_node_id, node.id)
         self.assertTrue(assignment.command_enabled)
+        self.assertTrue(service.monitoring_enabled)
         agent.local_node.refresh_from_db()
         self.assertFalse(agent.local_node.monitoring_enabled)
         config = build_agent_config(agent)
         self.assertFalse(config["node"]["monitoring_enabled"])
         self.assertEqual(config["assignments"][0]["instance_id"], service.id)
         self.assertEqual(config["assignments"][0]["node_id"], node.id)
+        self.assertTrue(config["assignments"][0]["service_monitoring_enabled"])
+        service_monitoring = {module["name"]: module for module in config["modules"]}[
+            "service_monitoring"
+        ]
+        self.assertTrue(service_monitoring["enabled"])
+        self.assertEqual(
+            service_monitoring["raw"]["services"][0]["username"],
+            "root",
+        )
 
     def test_update_node_monitoring_bumps_agent_config_revision(self):
         node = create_node()

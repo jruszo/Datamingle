@@ -379,10 +379,14 @@ class AgentToolArtifact(models.Model):
     TOOL_GHOST = "gh-ost"
     TOOL_PT_OSC = "pt-online-schema-change"
     TOOL_NODE_EXPORTER = "node_exporter"
+    TOOL_MYSQLD_EXPORTER = "mysqld_exporter"
+    TOOL_POSTGRES_EXPORTER = "postgres_exporter"
     TOOL_CHOICES = (
         (TOOL_GHOST, "gh-ost"),
         (TOOL_PT_OSC, "pt-online-schema-change"),
         (TOOL_NODE_EXPORTER, "node_exporter"),
+        (TOOL_MYSQLD_EXPORTER, "mysqld_exporter"),
+        (TOOL_POSTGRES_EXPORTER, "postgres_exporter"),
     )
 
     tool_name = models.CharField(max_length=64, choices=TOOL_CHOICES)
