@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"log"
+	"net"
 	"os"
 	"path/filepath"
 	stdlibRuntime "runtime"
@@ -15,6 +17,7 @@ import (
 	"github.com/jruszo/datamingle/agent/internal/config"
 	"github.com/jruszo/datamingle/agent/internal/modules"
 	"github.com/jruszo/datamingle/agent/internal/modules/logs"
+	"github.com/jruszo/datamingle/agent/internal/modules/monitoring"
 	"github.com/jruszo/datamingle/agent/internal/modules/placeholder"
 	"github.com/jruszo/datamingle/agent/internal/secrets"
 	"github.com/jruszo/datamingle/agent/internal/tools"
@@ -44,6 +47,8 @@ func NewRunner(cfg config.Config) *Runner {
 			placeholder.New("mysql", []string{"connection.test", "query.execute"}),
 			placeholder.New("metrics", []string{"metrics.export"}),
 			placeholder.New("online_schema", []string{"schema.change"}),
+			monitoring.New(cfg.DataDir, cfg.APIKeyEnv),
+			monitoring.NewService(cfg.DataDir, cfg.APIKeyEnv),
 			logs.New(),
 		),
 	}
@@ -102,6 +107,7 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 	registration, err := r.client.Register(ctx, client.RegisterRequest{
 		InstallID:    installID,
 		Name:         r.cfg.AgentName,
+		Address:      detectPrimaryAddress(),
 		Hostname:     hostname,
 		Platform:     stdlibRuntime.GOOS,
 		Architecture: stdlibRuntime.GOARCH,
@@ -130,6 +136,36 @@ func (r *Runner) RunOnce(ctx context.Context) error {
 		ModuleHealth:   toClientHealth(r.modules.Health(ctx)),
 	})
 	return err
+}
+
+func detectPrimaryAddress() string {
+	var fallback string
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, networkInterface := range interfaces {
+		if networkInterface.Flags&net.FlagUp == 0 || networkInterface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addresses, err := networkInterface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, address := range addresses {
+			ipNet, ok := address.(*net.IPNet)
+			if !ok || ipNet.IP.IsLoopback() {
+				continue
+			}
+			if ipv4 := ipNet.IP.To4(); ipv4 != nil {
+				return ipv4.String()
+			}
+			if fallback == "" {
+				fallback = ipNet.IP.String()
+			}
+		}
+	}
+	return fallback
 }
 
 func (r *Runner) CheckConnectivity(ctx context.Context) error {
@@ -190,6 +226,7 @@ func (r *Runner) apiClient() (*client.Client, error) {
 }
 
 func (r *Runner) applyConfig(ctx context.Context, payload client.AgentConfig) error {
+	logMonitoringExpectation(payload)
 	if err := r.reconcileToolArtifacts(ctx, payload); err != nil {
 		return err
 	}
@@ -203,6 +240,38 @@ func (r *Runner) applyConfig(ctx context.Context, payload client.AgentConfig) er
 		})
 	}
 	return r.modules.Apply(ctx, configs)
+}
+
+func logMonitoringExpectation(payload client.AgentConfig) {
+	for _, module := range payload.Modules {
+		if module.Name != "service_monitoring" {
+			continue
+		}
+		services, _ := module.Raw["services"].([]any)
+		log.Printf("service monitoring exporters expected: %d", len(services))
+		break
+	}
+	if payload.Node != nil {
+		log.Printf(
+			"node monitoring expected for %s (%d): %t",
+			payload.Node.Name,
+			payload.Node.ID,
+			payload.Node.MonitoringEnabled,
+		)
+		return
+	}
+	if len(payload.Nodes) == 0 {
+		log.Printf("node monitoring expected: false (no node assigned)")
+		return
+	}
+	for _, node := range payload.Nodes {
+		log.Printf(
+			"node monitoring expected for %s (%d): %t",
+			node.Name,
+			node.ID,
+			node.MonitoringEnabled,
+		)
+	}
 }
 
 func (r *Runner) reconcileToolArtifacts(ctx context.Context, payload client.AgentConfig) error {

@@ -1,8 +1,6 @@
 import hashlib
-import hmac
 import json
 import logging
-import secrets
 import os
 import tempfile
 import time
@@ -18,8 +16,10 @@ from django.core.exceptions import (
     PermissionDenied,
 )
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 import requests
+from rest_framework.exceptions import APIException
 
 from common.config import SysConfig
 from common.authenticate.workos import _dynamic_import_workos
@@ -27,7 +27,8 @@ from common.utils.const import WorkflowType
 from sql.engines import ResultSet
 from sql.engines.models import ReviewResult, ReviewSet
 from sql.mailbox import emit_execution_finished_notifications, resolve_mailbox_items
-from sql.models import SqlWorkflow
+from sql.models import DEFAULT_NODE_EXPORTER_COLLECTORS, SqlWorkflow
+from sql.models import normalize_service_monitoring_collectors
 from sql.utils.workflow_audit import Audit
 from api_agents.models import (
     Agent,
@@ -41,7 +42,6 @@ from api_agents.models import (
 )
 
 logger = logging.getLogger("default")
-AGENT_API_KEY_PREFIX = "dma_"
 AGENT_KEY_VISIBLE_PREFIX_LENGTH = 16
 ACTIVE_WEBSOCKET_METADATA_KEY = "active_websocket"
 WEBSOCKET_CHANNEL_METADATA_KEY = "channel_name"
@@ -66,6 +66,12 @@ class AgentAPIKeyRejected(Exception):
     pass
 
 
+class WorkOSAPIKeyIssueError(APIException):
+    status_code = 502
+    default_detail = "WorkOS could not create an agent API key."
+    default_code = "workos_api_key_issue_failed"
+
+
 class AgentCommandDispatchError(Exception):
     pass
 
@@ -86,27 +92,7 @@ class IssuedAgentAPIKey:
     key_id: str = ""
     prefix: str = ""
     obfuscated_value: str = ""
-    backend: str = "local"
-
-
-def generate_agent_api_key():
-    return f"{AGENT_API_KEY_PREFIX}{secrets.token_urlsafe(32)}"
-
-
-def hash_agent_api_key(api_key):
-    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
-
-
-def create_agent_api_key(agent):
-    api_key = generate_agent_api_key()
-    agent.api_key_hash = hash_agent_api_key(api_key)
-    agent.api_key_prefix = api_key[:AGENT_KEY_VISIBLE_PREFIX_LENGTH]
-    agent.save(update_fields=["api_key_hash", "api_key_prefix", "update_time"])
-    return IssuedAgentAPIKey(
-        value=api_key,
-        prefix=api_key[:AGENT_KEY_VISIBLE_PREFIX_LENGTH],
-        backend="local",
-    )
+    backend: str = "workos"
 
 
 def authenticate_agent_api_key(api_key):
@@ -123,26 +109,15 @@ def revoke_agent_api_key(agent):
 
 def get_agent_api_key_provider():
     backend = settings.DATAMINGLE_AGENT_API_KEY_BACKEND.strip().lower()
-    if backend == "local":
-        return LocalAgentAPIKeyProvider()
     if backend == "workos":
         return WorkOSAgentAPIKeyProvider()
+    if backend == "local":
+        raise ImproperlyConfigured(
+            "Local agent API keys are disabled. Configure WorkOS organization API keys."
+        )
     raise ImproperlyConfigured(
         f"Unsupported DATAMINGLE_AGENT_API_KEY_BACKEND: {backend}"
     )
-
-
-class LocalAgentAPIKeyProvider:
-    def issue(self, agent):
-        return create_agent_api_key(agent)
-
-    def authenticate(self, api_key):
-        return authenticate_local_agent_api_key(api_key)
-
-    def revoke(self, agent):
-        agent.api_key_hash = None
-        agent.api_key_prefix = ""
-        agent.save(update_fields=["api_key_hash", "api_key_prefix", "update_time"])
 
 
 class WorkOSAgentAPIKeyProvider:
@@ -151,6 +126,7 @@ class WorkOSAgentAPIKeyProvider:
             raise ImproperlyConfigured(
                 "WORKOS_API_KEY and WORKOS_ORGANIZATION_ID are required to issue agent API keys."
             )
+        previous_key_id = agent.workos_api_key_id
         api_key = create_workos_organization_api_key(
             name=f"Datamingle Agent: {agent.display_name or agent.name}",
             permissions=list(WORKOS_AGENT_API_KEY_PERMISSIONS),
@@ -178,6 +154,8 @@ class WorkOSAgentAPIKeyProvider:
                 "update_time",
             ]
         )
+        if previous_key_id and previous_key_id != agent.workos_api_key_id:
+            workos_client().api_keys.delete_api_key(previous_key_id)
         return IssuedAgentAPIKey(
             value=value,
             key_id=api_key["id"],
@@ -218,16 +196,6 @@ class WorkOSAgentAPIKeyProvider:
         agent.save(update_fields=["workos_api_key_id", "api_key_prefix", "update_time"])
 
 
-def authenticate_local_agent_api_key(api_key):
-    candidate_hash = hash_agent_api_key(api_key)
-    for agent in Agent.objects.filter(api_key_hash=candidate_hash):
-        if hmac.compare_digest(agent.api_key_hash, candidate_hash):
-            if not agent.can_connect:
-                raise AgentAPIKeyRejected("Agent is disabled or revoked.")
-            return agent
-    return None
-
-
 def workos_client():
     workos_client_class = _dynamic_import_workos()
     return workos_client_class(
@@ -238,7 +206,12 @@ def workos_client():
 
 
 def validate_workos_api_key(api_key):
-    return workos_client().api_keys.validate_api_key(value=api_key)
+    result = workos_client().api_keys.validate_api_key(value=api_key)
+    if result is None:
+        return None
+    if isinstance(result, dict):
+        return result.get("api_key")
+    return getattr(result, "api_key", result)
 
 
 def create_workos_organization_api_key(name, permissions):
@@ -246,18 +219,31 @@ def create_workos_organization_api_key(name, permissions):
         settings.WORKOS_BASE_URL.rstrip("/") + "/",
         f"organizations/{settings.WORKOS_ORGANIZATION_ID}/api_keys",
     )
+    payload = {"name": name}
+    if permissions:
+        payload["permissions"] = permissions
     response = requests.post(
         url,
-        json={"name": name, "permissions": permissions},
+        json=payload,
         headers={
             "Authorization": f"Bearer {settings.WORKOS_API_KEY}",
             "Content-Type": "application/json",
         },
         timeout=10,
     )
-    response.raise_for_status()
-    payload = response.json()
-    api_key = payload.get("api_key") or {}
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        detail = (
+            "WorkOS could not create an agent API key. Confirm these permission slugs "
+            "are enabled in WorkOS under Authorization > Configuration > "
+            f"Organization API key permissions: {', '.join(permissions)}."
+        )
+        if response.text:
+            detail = f"{detail} WorkOS response: {response.text[:500]}"
+        raise WorkOSAPIKeyIssueError(detail=detail) from exc
+    response_payload = response.json()
+    api_key = response_payload.get("api_key") or response_payload
     if not api_key.get("id") or not api_key.get("value"):
         raise PermissionDenied("WorkOS did not return a usable API key.")
     return api_key
@@ -274,12 +260,15 @@ def build_agent_install_command(request, api_key):
 
 
 def build_agent_config(agent):
-    assignments = [
-        serialize_assignment(assignment)
-        for assignment in agent.assignments.filter(enabled=True).select_related(
+    assignment_records = list(
+        agent.assignments.filter(enabled=True).select_related(
             "instance", "instance__node", "local_node"
         )
+    )
+    assignments = [
+        serialize_assignment(assignment) for assignment in assignment_records
     ]
+    nodes = build_agent_node_configs(agent, assignment_records)
     modules = build_module_configs(agent, assignments)
     tool_artifacts = [
         serialize_tool_artifact(artifact)
@@ -289,6 +278,8 @@ def build_agent_config(agent):
         "agent_id": agent.id,
         "revision": agent.desired_config_revision,
         "organization_id": agent.organization_id or settings.WORKOS_ORGANIZATION_ID,
+        "node": serialize_node(agent.local_node) if agent.local_node_id else None,
+        "nodes": nodes,
         "assignments": assignments,
         "modules": modules,
         "tool_artifacts": tool_artifacts,
@@ -306,6 +297,20 @@ def serialize_assignment(assignment):
         "instance_name": instance.instance_name,
         "node_id": instance.node_id,
         "node_name": instance.node.name if instance.node_id else "",
+        "node_monitoring_enabled": (
+            instance.node.monitoring_enabled if instance.node_id else False
+        ),
+        "node_monitoring_collectors": (
+            list(instance.node.monitoring_collectors or [])
+            if instance.node_id
+            else list(DEFAULT_NODE_EXPORTER_COLLECTORS)
+        ),
+        "service_monitoring_enabled": (
+            instance.monitoring_enabled and instance.db_type in ("mysql", "pgsql")
+        ),
+        "service_monitoring_collectors": normalize_service_monitoring_collectors(
+            instance.db_type, instance.monitoring_collectors
+        ),
         "db_type": instance.db_type,
         "host": instance.host,
         "port": instance.port,
@@ -324,6 +329,32 @@ def serialize_assignment(assignment):
         "online_schema_enabled": assignment.online_schema_enabled,
         "logs_enabled": assignment.logs_enabled,
     }
+
+
+def serialize_node(node):
+    return {
+        "id": node.id,
+        "name": node.name,
+        "address": node.address,
+        "monitoring_enabled": node.monitoring_enabled,
+        "monitoring_collectors": list(node.monitoring_collectors or []),
+    }
+
+
+def build_agent_node_configs(agent, assignments):
+    nodes = {}
+    if agent.local_node_id:
+        nodes[agent.local_node_id] = agent.local_node
+    for assignment in assignments:
+        if assignment.local_node_id:
+            nodes[assignment.local_node_id] = assignment.local_node
+        if assignment.instance.node_id:
+            nodes[assignment.instance.node_id] = assignment.instance.node
+    for node_assignment in AgentNodeAssignment.objects.filter(
+        agent=agent, enabled=True
+    ).select_related("node"):
+        nodes[node_assignment.node_id] = node_assignment.node
+    return [serialize_node(node) for node in nodes.values()]
 
 
 def assignment_modules(assignment):
@@ -545,7 +576,17 @@ def clear_node_assignment_from_services(node_assignment):
 
 def build_module_configs(agent, assignments):
     configs = []
-    for module_name in ("mysql", "metrics", "online_schema", "logs"):
+    node_monitoring_enabled = any(
+        node.get("monitoring_enabled") for node in build_agent_node_configs(agent, [])
+    ) or any(assignment.get("node_monitoring_enabled") for assignment in assignments)
+    for module_name in (
+        "mysql",
+        "metrics",
+        "online_schema",
+        "logs",
+        "node_monitoring",
+        "service_monitoring",
+    ):
         module_assignments = [
             {
                 "id": assignment["id"],
@@ -555,15 +596,124 @@ def build_module_configs(agent, assignments):
             for assignment in assignments
             if module_name in assignment["modules"]
         ]
+        raw = {}
+        enabled = bool(module_assignments)
+        if module_name == "node_monitoring":
+            enabled = node_monitoring_enabled
+            raw = build_node_monitoring_module_config(agent)
+        if module_name == "service_monitoring":
+            monitored_assignments = [
+                assignment
+                for assignment in assignments
+                if assignment.get("service_monitoring_enabled")
+                and assignment.get("metrics_enabled")
+                and assignment.get("db_type") in ("mysql", "pgsql")
+            ]
+            enabled = bool(monitored_assignments)
+            raw = build_service_monitoring_module_config(agent, monitored_assignments)
         configs.append(
             {
                 "name": module_name,
-                "enabled": bool(module_assignments),
+                "enabled": enabled,
                 "revision": agent.desired_config_revision,
                 "assignments": module_assignments,
+                "raw": raw,
             }
         )
     return configs
+
+
+def build_node_monitoring_module_config(agent):
+    artifact = (
+        AgentToolArtifact.objects.filter(
+            tool_name=AgentToolArtifact.TOOL_NODE_EXPORTER,
+            enabled=True,
+        )
+        .order_by("-version", "id")
+        .first()
+    )
+    remote_write_url = (
+        settings.DATAMINGLE_INGEST_GATEWAY_URL.rstrip("/") + "/api/v1/prometheus/write"
+    )
+    return {
+        "remote_write_url": remote_write_url,
+        "scrape_interval_seconds": 30,
+        "node_exporter": {
+            "listen_address": "127.0.0.1:9100",
+            "metrics_url": "http://127.0.0.1:9100/metrics",
+            "collectors": (
+                list(agent.local_node.monitoring_collectors or [])
+                if agent.local_node_id
+                else list(DEFAULT_NODE_EXPORTER_COLLECTORS)
+            ),
+            "artifact": serialize_tool_artifact(artifact) if artifact else None,
+        },
+        "labels": {
+            "agent_id": str(agent.id),
+            "agent_name": agent.name,
+            "node_id": str(agent.local_node_id or ""),
+            "node_name": agent.local_node.name if agent.local_node_id else "",
+        },
+    }
+
+
+def build_service_monitoring_module_config(agent, assignments):
+    mysql_artifact = (
+        AgentToolArtifact.objects.filter(
+            tool_name=AgentToolArtifact.TOOL_MYSQLD_EXPORTER,
+            enabled=True,
+        )
+        .order_by("-version", "id")
+        .first()
+    )
+    postgres_artifact = (
+        AgentToolArtifact.objects.filter(
+            tool_name=AgentToolArtifact.TOOL_POSTGRES_EXPORTER,
+            enabled=True,
+        )
+        .order_by("-version", "id")
+        .first()
+    )
+    remote_write_url = (
+        settings.DATAMINGLE_INGEST_GATEWAY_URL.rstrip("/") + "/api/v1/prometheus/write"
+    )
+    services = []
+    for index, assignment in enumerate(assignments):
+        port = 9200 + index
+        artifact = (
+            mysql_artifact if assignment["db_type"] == "mysql" else postgres_artifact
+        )
+        services.append(
+            {
+                "assignment_id": assignment["id"],
+                "instance_id": assignment["instance_id"],
+                "instance_name": assignment["instance_name"],
+                "node_id": assignment["node_id"],
+                "node_name": assignment["node_name"],
+                "db_type": assignment["db_type"],
+                "host": assignment["host"],
+                "port": assignment["port"],
+                "username": assignment["username"],
+                "password": assignment["password"],
+                "database": assignment["database"],
+                "collectors": assignment["service_monitoring_collectors"],
+                "ssl": assignment["ssl"],
+                "exporter": {
+                    "listen_address": f"127.0.0.1:{port}",
+                    "metrics_url": f"http://127.0.0.1:{port}/metrics",
+                    "artifact": serialize_tool_artifact(artifact) if artifact else None,
+                },
+            }
+        )
+    return {
+        "remote_write_url": remote_write_url,
+        "scrape_interval_seconds": 30,
+        "services": services,
+        "labels": {
+            "agent_id": str(agent.id),
+            "agent_name": agent.name,
+        },
+    }
 
 
 def serialize_tool_artifact(artifact):
@@ -1061,9 +1211,18 @@ def notify_tool_artifact_changed(artifact, action="tool_artifact.changed", user=
 
     agents = (
         Agent.objects.filter(
-            enabled=True,
-            assignments__enabled=True,
-            assignments__online_schema_enabled=True,
+            Q(
+                enabled=True,
+                assignments__enabled=True,
+                assignments__online_schema_enabled=True,
+            )
+            | Q(
+                enabled=True,
+                assignments__enabled=True,
+                assignments__metrics_enabled=True,
+                assignments__instance__monitoring_enabled=True,
+                assignments__instance__db_type__in=("mysql", "pgsql"),
+            )
         )
         .distinct()
         .order_by("id")
@@ -1081,5 +1240,30 @@ def notify_tool_artifact_changed(artifact, action="tool_artifact.changed", user=
         transaction.on_commit(
             lambda current_agent=agent: notify_config_changed(
                 current_agent, reason=action
+            )
+        )
+
+
+def notify_node_config_changed(node, summary=None, reason="node.changed", user=None):
+    from api_agents.dispatch import notify_config_changed
+
+    agents = (
+        Agent.objects.filter(
+            Q(local_node=node)
+            | Q(node_assignments__node=node, node_assignments__enabled=True)
+        )
+        .filter(enabled=True)
+        .exclude(status=AgentStatus.REVOKED)
+        .distinct()
+        .order_by("id")
+    )
+    for agent in agents:
+        agent.bump_desired_config_revision(
+            summary=summary or {"action": reason, "node_id": node.id},
+            created_by=user if getattr(user, "is_authenticated", False) else None,
+        )
+        transaction.on_commit(
+            lambda current_agent=agent: notify_config_changed(
+                current_agent, reason=reason
             )
         )

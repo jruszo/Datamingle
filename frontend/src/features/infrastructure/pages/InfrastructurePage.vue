@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { Check, Database, Plus, RefreshCw, Search, ServerCog, Wand2, X } from 'lucide-vue-next'
 
 import { Badge } from '@/components/ui/badge'
@@ -9,11 +9,11 @@ import { useAuthStore } from '@/stores/auth'
 import {
   createAgent,
   createDatabaseService,
-  createInfrastructureNode,
   discoverInfrastructureNodeServices,
   fetchInfrastructureNode,
   fetchInfrastructureNodes,
   fetchInstanceInventoryMetadata,
+  issueAgentInstallKey,
   testDatabaseServiceConnection,
   updateDatabaseService,
   updateInfrastructureNode,
@@ -21,6 +21,7 @@ import {
   type AgentCreateResponse,
   type DatabaseServicePayload,
   type DatabaseServiceRecord,
+  type InfrastructureNodeAgentRecord,
   type InfrastructureNodeDetailRecord,
   type InfrastructureNodePayload,
   type InfrastructureNodeRecord,
@@ -29,6 +30,146 @@ import {
 } from '../api'
 
 const authStore = useAuthStore()
+
+const DEFAULT_NODE_EXPORTER_COLLECTORS = [
+  'arp',
+  'bcache',
+  'bcachefs',
+  'bonding',
+  'btrfs',
+  'conntrack',
+  'cpu',
+  'cpufreq',
+  'diskstats',
+  'dmi',
+  'edac',
+  'entropy',
+  'fibrechannel',
+  'filefd',
+  'filesystem',
+  'hwmon',
+  'infiniband',
+  'ipvs',
+  'kernel_hung',
+  'loadavg',
+  'mdadm',
+  'meminfo',
+  'netclass',
+  'netdev',
+  'netstat',
+  'nfs',
+  'nfsd',
+  'nvme',
+  'os',
+  'powersupplyclass',
+  'pressure',
+  'rapl',
+  'schedstat',
+  'selinux',
+  'sockstat',
+  'softnet',
+  'stat',
+  'tapestats',
+  'textfile',
+  'thermal_zone',
+  'time',
+  'timex',
+  'udp_queues',
+  'uname',
+  'vmstat',
+  'watchdog',
+  'xfs',
+  'zfs',
+]
+
+const MYSQLD_EXPORTER_COLLECTORS = [
+  'heartbeat.utc',
+  'info_schema.processlist.processes_by_user',
+  'info_schema.processlist.processes_by_host',
+  'mysql.user.privileges',
+  'perf_schema.indexiowaits',
+  'perf_schema.tablelocks',
+  'perf_schema.eventsstatements',
+  'perf_schema.eventsstatementssum',
+  'perf_schema.eventswaits',
+  'heartbeat',
+  'slave_hosts',
+  'info_schema.replica_host',
+  'info_schema.rocksdb_perf_context',
+  'perf_schema.file_events',
+  'perf_schema.file_instances',
+  'perf_schema.memory_events',
+  'perf_schema.replication_group_members',
+  'perf_schema.replication_group_member_stats',
+  'perf_schema.replication_applier_status_by_worker',
+  'sys.user_summary',
+  'info_schema.userstats',
+  'info_schema.clientstats',
+  'info_schema.tablestats',
+  'info_schema.schemastats',
+  'info_schema.innodb_cmp',
+  'info_schema.innodb_cmpmem',
+  'info_schema.query_response_time',
+  'engine_tokudb_status',
+  'engine_innodb_status',
+  'global_status',
+  'global_variables',
+  'slave_status',
+  'info_schema.processlist',
+  'mysql.user',
+  'info_schema.tables',
+  'info_schema.innodb_tablespaces',
+  'info_schema.innodb_metrics',
+  'auto_increment.columns',
+  'binlog_size',
+  'perf_schema.tableiowaits',
+]
+
+const DEFAULT_MYSQLD_EXPORTER_COLLECTORS = ['global_status', 'global_variables', 'slave_status']
+
+const POSTGRES_EXPORTER_COLLECTORS = [
+  'buffercache_summary',
+  'database',
+  'database_wraparound',
+  'locks',
+  'long_running_transactions',
+  'postmaster',
+  'process_idle',
+  'replication',
+  'replication_slot',
+  'roles',
+  'stat_activity_autovacuum',
+  'stat_bgwriter',
+  'stat_checkpointer',
+  'stat_database',
+  'stat_progress_vacuum',
+  'stat_statements',
+  'stat_statements.include_query',
+  'stat_user_tables',
+  'stat_wal_receiver',
+  'statio_user_indexes',
+  'statio_user_tables',
+  'wal',
+  'xlog_location',
+]
+
+const DEFAULT_POSTGRES_EXPORTER_COLLECTORS = [
+  'database',
+  'locks',
+  'replication',
+  'replication_slot',
+  'roles',
+  'stat_bgwriter',
+  'stat_database',
+  'stat_progress_vacuum',
+  'stat_user_tables',
+  'statio_user_tables',
+  'wal',
+]
+
+type MonitoringCollectorForm = {
+  monitoring_collectors: string[]
+}
 
 const nodes = ref<InfrastructureNodeRecord[]>([])
 const selectedNode = ref<InfrastructureNodeDetailRecord | null>(null)
@@ -41,9 +182,12 @@ const pageSize = ref(20)
 const searchQuery = ref('')
 const error = ref('')
 const feedback = ref('')
+const nowMs = ref(Date.now())
 const testingServiceId = ref<number | null>(null)
 const discoveringNodeId = ref<number | null>(null)
 const isDetailDialogOpen = ref(false)
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+let clockTimer: ReturnType<typeof setInterval> | null = null
 
 const isNodeDialogOpen = ref(false)
 const editingNodeId = ref<number | null>(null)
@@ -54,7 +198,8 @@ const nodeForm = reactive<InfrastructureNodePayload>({
   address: '',
   description: '',
   metadata: {},
-  resource_group_ids: [],
+  monitoring_enabled: true,
+  monitoring_collectors: [...DEFAULT_NODE_EXPORTER_COLLECTORS],
 })
 
 const isServiceDialogOpen = ref(false)
@@ -70,6 +215,8 @@ const serviceForm = reactive<DatabaseServicePayload>({
   port: 3306,
   user: '',
   password: '',
+  monitoring_enabled: true,
+  monitoring_collectors: [...DEFAULT_MYSQLD_EXPORTER_COLLECTORS],
   is_ssl: false,
   verify_ssl: true,
   db_name: '',
@@ -82,12 +229,15 @@ const serviceForm = reactive<DatabaseServicePayload>({
 
 const isAgentDialogOpen = ref(false)
 const agentSaving = ref(false)
+const agentInstallIssuing = ref(false)
 const agentFormError = ref('')
 const createdAgent = ref<AgentCreateResponse | null>(null)
 const agentForm = reactive({
-  name: '',
-  display_name: '',
+  node_name: '',
+  monitoring_enabled: true,
+  monitoring_collectors: [...DEFAULT_NODE_EXPORTER_COLLECTORS],
 })
+const agentTargetNodeId = ref<number | null>(null)
 
 const fieldClass =
   'w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-400'
@@ -131,6 +281,87 @@ function toUserFacingMessage(errorValue: unknown, fallback: string) {
     : errorValue.message.slice(separatorIndex + separator.length)
 }
 
+function orderedCollectors(collectors?: string[]) {
+  const selected = new Set((collectors ?? DEFAULT_NODE_EXPORTER_COLLECTORS).filter(Boolean))
+  return DEFAULT_NODE_EXPORTER_COLLECTORS.filter((collector) => selected.has(collector))
+}
+
+function setMonitoringCollectors(target: MonitoringCollectorForm, collectors?: string[]) {
+  target.monitoring_collectors.splice(
+    0,
+    target.monitoring_collectors.length,
+    ...orderedCollectors(collectors),
+  )
+}
+
+function isMonitoringCollectorSelected(target: MonitoringCollectorForm, collector: string) {
+  return target.monitoring_collectors.includes(collector)
+}
+
+function toggleMonitoringCollector(
+  target: MonitoringCollectorForm,
+  collector: string,
+  event: Event,
+) {
+  const checked = (event.target as HTMLInputElement).checked
+  if (checked && !target.monitoring_collectors.includes(collector)) {
+    setMonitoringCollectors(target, [...target.monitoring_collectors, collector])
+  }
+  if (!checked) {
+    setMonitoringCollectors(
+      target,
+      target.monitoring_collectors.filter((selected) => selected !== collector),
+    )
+  }
+}
+
+function selectAllMonitoringCollectors(target: MonitoringCollectorForm) {
+  setMonitoringCollectors(target, DEFAULT_NODE_EXPORTER_COLLECTORS)
+}
+
+function resetDefaultMonitoringCollectors(target: MonitoringCollectorForm) {
+  setMonitoringCollectors(target, DEFAULT_NODE_EXPORTER_COLLECTORS)
+}
+
+function serviceCollectorOptions(engine: DatabaseServicePayload['engine']) {
+  return engine === 'pgsql' ? POSTGRES_EXPORTER_COLLECTORS : MYSQLD_EXPORTER_COLLECTORS
+}
+
+function defaultServiceCollectors(engine: DatabaseServicePayload['engine']) {
+  return engine === 'pgsql'
+    ? DEFAULT_POSTGRES_EXPORTER_COLLECTORS
+    : DEFAULT_MYSQLD_EXPORTER_COLLECTORS
+}
+
+function orderedServiceCollectors(engine: DatabaseServicePayload['engine'], collectors?: string[]) {
+  const fallback = defaultServiceCollectors(engine)
+  const selected = new Set((collectors === undefined ? fallback : collectors).filter(Boolean))
+  return serviceCollectorOptions(engine).filter((collector) => selected.has(collector))
+}
+
+function setServiceMonitoringCollectors(
+  target: MonitoringCollectorForm & { engine: DatabaseServicePayload['engine'] },
+  collectors?: string[],
+) {
+  target.monitoring_collectors.splice(
+    0,
+    target.monitoring_collectors.length,
+    ...orderedServiceCollectors(target.engine, collectors),
+  )
+}
+
+function selectAllServiceMonitoringCollectors(
+  target: MonitoringCollectorForm & { engine: DatabaseServicePayload['engine'] },
+) {
+  setServiceMonitoringCollectors(target, serviceCollectorOptions(target.engine))
+}
+
+function resetDefaultServiceMonitoringCollectors(
+  target: MonitoringCollectorForm & { engine: DatabaseServicePayload['engine'] },
+) {
+  setServiceMonitoringCollectors(target, defaultServiceCollectors(target.engine))
+}
+
 function statusBadgeClass(status: string | null) {
   switch (status) {
     case 'online':
@@ -167,22 +398,53 @@ function formatDateTime(value: string | null) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
 }
 
-function resourceGroupNames(ids: number[]) {
-  const groups = metadata.value?.resource_groups ?? []
-  return ids
-    .map((id) => groups.find((group) => group.group_id === id)?.group_name)
-    .filter(Boolean)
-    .join(', ')
+function formatRelativeTime(value: string | null) {
+  if (!value) {
+    return 'Never'
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  const seconds = Math.max(0, Math.floor((nowMs.value - date.getTime()) / 1000))
+  if (seconds < 60) {
+    return `${seconds}s ago`
+  }
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) {
+    return `${minutes}m ago`
+  }
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) {
+    return `${hours}h ago`
+  }
+  return `${Math.floor(hours / 24)}d ago`
 }
 
-function updateNumericSelections(event: Event, target: 'node' | 'service_groups' | 'service_tags') {
+function displayNodeAddress(address: string) {
+  return address.trim() || 'Pending agent registration'
+}
+
+function displayAgentVersion(version: string) {
+  return version.trim() || 'Version pending'
+}
+
+function displayAgentHost(hostname: string, platform: string, architecture: string) {
+  const host = hostname.trim() || 'Host pending'
+  const runtime = [platform, architecture].filter(Boolean).join('/')
+  return runtime ? `${host} · ${runtime}` : host
+}
+
+function agentConfigInSync(agent: InfrastructureNodeAgentRecord) {
+  return agent.last_config_revision >= agent.desired_config_revision
+}
+
+function updateNumericSelections(event: Event, target: 'service_groups' | 'service_tags') {
   const element = event.target as HTMLSelectElement
   const values = Array.from(element.selectedOptions)
     .map((option) => Number(option.value))
     .filter((value) => Number.isFinite(value))
-  if (target === 'node') {
-    nodeForm.resource_group_ids = values
-  } else if (target === 'service_groups') {
+  if (target === 'service_groups') {
     serviceForm.resource_group_ids = values
   } else {
     serviceForm.service_tag_ids = values
@@ -265,7 +527,8 @@ function resetNodeForm() {
   nodeForm.address = ''
   nodeForm.description = ''
   nodeForm.metadata = {}
-  nodeForm.resource_group_ids = []
+  nodeForm.monitoring_enabled = true
+  setMonitoringCollectors(nodeForm)
   nodeFormError.value = ''
 }
 
@@ -277,7 +540,8 @@ function openNodeDialog(node?: InfrastructureNodeRecord) {
     nodeForm.address = node.address
     nodeForm.description = node.description
     nodeForm.metadata = node.metadata
-    nodeForm.resource_group_ids = [...node.resource_group_ids]
+    nodeForm.monitoring_enabled = node.monitoring_enabled
+    setMonitoringCollectors(nodeForm, node.monitoring_collectors)
   }
   isNodeDialogOpen.value = true
 }
@@ -288,8 +552,12 @@ function closeNodeDialog() {
 }
 
 async function submitNode() {
-  if (!nodeForm.name.trim() || !nodeForm.address.trim()) {
-    nodeFormError.value = 'Node name and address are required.'
+  if (!editingNodeId.value) {
+    nodeFormError.value = 'Use Add New Node to create nodes with an installable agent.'
+    return
+  }
+  if (!nodeForm.name.trim()) {
+    nodeFormError.value = 'Node name is required.'
     return
   }
   nodeSaving.value = true
@@ -300,14 +568,13 @@ async function submitNode() {
       address: nodeForm.address.trim(),
       description: nodeForm.description.trim(),
       metadata: nodeForm.metadata,
-      resource_group_ids: [...nodeForm.resource_group_ids],
+      monitoring_enabled: nodeForm.monitoring_enabled,
+      monitoring_collectors: [...nodeForm.monitoring_collectors],
     }
-    const detail = editingNodeId.value
-      ? await updateInfrastructureNode(editingNodeId.value, payload, requireToken())
-      : await createInfrastructureNode(payload, requireToken())
+    const detail = await updateInfrastructureNode(editingNodeId.value, payload, requireToken())
     selectedNode.value = detail
     isDetailDialogOpen.value = true
-    feedback.value = editingNodeId.value ? 'Node updated.' : 'Node created.'
+    feedback.value = 'Node updated.'
     closeNodeDialog()
     await loadNodes()
   } catch (errorValue) {
@@ -327,15 +594,15 @@ function resetServiceForm() {
   serviceForm.port = 3306
   serviceForm.user = ''
   serviceForm.password = ''
+  serviceForm.monitoring_enabled = true
+  setServiceMonitoringCollectors(serviceForm)
   serviceForm.is_ssl = false
   serviceForm.verify_ssl = true
   serviceForm.db_name = ''
   serviceForm.show_db_name_regex = ''
   serviceForm.denied_db_name_regex = ''
   serviceForm.charset = ''
-  serviceForm.resource_group_ids = selectedNode.value?.resource_group_ids
-    ? [...selectedNode.value.resource_group_ids]
-    : []
+  serviceForm.resource_group_ids = []
   serviceForm.service_tag_ids = []
   delete serviceForm.recommendation_id
   serviceFormError.value = ''
@@ -355,6 +622,8 @@ function openServiceDialog(
     serviceForm.host = service.host
     serviceForm.port = service.port
     serviceForm.user = service.user
+    serviceForm.monitoring_enabled = service.monitoring_enabled
+    setServiceMonitoringCollectors(serviceForm, service.monitoring_collectors)
     serviceForm.is_ssl = service.is_ssl
     serviceForm.verify_ssl = service.verify_ssl
     serviceForm.db_name = service.db_name
@@ -383,6 +652,7 @@ function closeServiceDialog() {
 
 function applyEngineDefaultPort() {
   serviceForm.port = serviceForm.engine === 'pgsql' ? 5432 : 3306
+  setServiceMonitoringCollectors(serviceForm)
 }
 
 async function submitService() {
@@ -415,9 +685,21 @@ async function submitService() {
   }
 }
 
+function openNewNodeDialog() {
+  agentTargetNodeId.value = null
+  agentForm.node_name = ''
+  agentForm.monitoring_enabled = true
+  setMonitoringCollectors(agentForm)
+  agentFormError.value = ''
+  createdAgent.value = null
+  isAgentDialogOpen.value = true
+}
+
 function openAgentDialog() {
-  agentForm.name = selectedNode.value ? `${selectedNode.value.name}-agent` : ''
-  agentForm.display_name = selectedNode.value?.name ? `${selectedNode.value.name} Agent` : ''
+  agentTargetNodeId.value = selectedNode.value?.id ?? null
+  agentForm.node_name = selectedNode.value?.name ?? ''
+  agentForm.monitoring_enabled = selectedNode.value?.monitoring_enabled ?? true
+  setMonitoringCollectors(agentForm, selectedNode.value?.monitoring_collectors)
   agentFormError.value = ''
   createdAgent.value = null
   isAgentDialogOpen.value = true
@@ -426,22 +708,29 @@ function openAgentDialog() {
 function closeAgentDialog() {
   isAgentDialogOpen.value = false
   createdAgent.value = null
+  agentTargetNodeId.value = null
 }
 
 async function submitAgent() {
-  if (!selectedNode.value || !agentForm.name.trim()) {
-    agentFormError.value = 'Agent name is required.'
+  if (!agentTargetNodeId.value && !agentForm.node_name.trim()) {
+    agentFormError.value = 'Node name is required.'
     return
   }
   agentSaving.value = true
   agentFormError.value = ''
   try {
     createdAgent.value = await createAgent(
-      {
-        name: agentForm.name.trim(),
-        display_name: agentForm.display_name.trim(),
-        local_node: selectedNode.value.id,
-      },
+      agentTargetNodeId.value
+        ? {
+            local_node: agentTargetNodeId.value,
+            monitoring_enabled: agentForm.monitoring_enabled,
+            monitoring_collectors: [...agentForm.monitoring_collectors],
+          }
+        : {
+            node_name: agentForm.node_name.trim(),
+            monitoring_enabled: agentForm.monitoring_enabled,
+            monitoring_collectors: [...agentForm.monitoring_collectors],
+          },
       requireToken(),
     )
     await loadSelectedNode()
@@ -450,6 +739,26 @@ async function submitAgent() {
     agentFormError.value = toUserFacingMessage(errorValue, 'Failed to create agent.')
   } finally {
     agentSaving.value = false
+  }
+}
+
+async function issueExistingAgentInstallKey() {
+  if (!selectedNode.value?.agent_id) {
+    return
+  }
+  agentInstallIssuing.value = true
+  error.value = ''
+  feedback.value = ''
+  try {
+    createdAgent.value = await issueAgentInstallKey(selectedNode.value.agent_id, requireToken())
+    isAgentDialogOpen.value = true
+    feedback.value = 'WorkOS organization API key created for agent install.'
+    await loadSelectedNode()
+    await loadNodes()
+  } catch (errorValue) {
+    error.value = toUserFacingMessage(errorValue, 'Failed to create WorkOS agent API key.')
+  } finally {
+    agentInstallIssuing.value = false
   }
 }
 
@@ -509,12 +818,34 @@ async function testService(service: DatabaseServiceRecord) {
 }
 
 onMounted(async () => {
+  clockTimer = setInterval(() => {
+    nowMs.value = Date.now()
+  }, 1000)
   await authStore.loadCurrentUser()
   if (!canAccessInfrastructure.value) {
     error.value = 'You do not have permission to access infrastructure.'
     return
   }
   await Promise.all([loadMetadata(), loadNodes()])
+  refreshTimer = setInterval(() => {
+    if (
+      !isLoading.value &&
+      !detailLoading.value &&
+      !isServiceDialogOpen.value &&
+      !isNodeDialogOpen.value
+    ) {
+      void loadNodes()
+    }
+  }, 30_000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+  }
+  if (clockTimer) {
+    clearInterval(clockTimer)
+  }
 })
 
 watch([currentPage, pageSize], () => {
@@ -533,9 +864,9 @@ watch([currentPage, pageSize], () => {
           <RefreshCw class="h-4 w-4" />
           Refresh
         </Button>
-        <Button type="button" @click="openNodeDialog()">
+        <Button type="button" @click="openNewNodeDialog">
           <Plus class="h-4 w-4" />
-          Add Node
+          Add New Node
         </Button>
       </div>
     </div>
@@ -605,9 +936,9 @@ watch([currentPage, pageSize], () => {
             <tr>
               <th class="px-4 py-3">Node</th>
               <th class="px-4 py-3">Agent</th>
+              <th class="px-4 py-3">Monitoring</th>
               <th class="px-4 py-3">Services</th>
               <th class="px-4 py-3">Recommendations</th>
-              <th class="px-4 py-3">Resource Groups</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100 bg-white">
@@ -622,19 +953,37 @@ watch([currentPage, pageSize], () => {
               <td class="px-4 py-3">
                 <div class="grid gap-1">
                   <span class="font-medium text-slate-900">{{ node.name }}</span>
-                  <span class="font-mono text-xs text-slate-500">{{ node.address }}</span>
+                  <span class="font-mono text-xs text-slate-500">
+                    {{ displayNodeAddress(node.address) }}
+                  </span>
                 </div>
               </td>
               <td class="px-4 py-3">
-                <Badge variant="secondary" :class="statusBadgeClass(node.agent_status)">
-                  {{ node.agent_status || 'No agent' }}
+                <div class="grid gap-1">
+                  <div class="flex items-center gap-2">
+                    <Badge variant="secondary" :class="statusBadgeClass(node.agent_status)">
+                      {{ node.agent_status || 'No agent' }}
+                    </Badge>
+                  </div>
+                  <span v-if="node.agent" class="text-xs text-slate-500">
+                    {{ displayAgentVersion(node.agent.agent_version) }}
+                  </span>
+                </div>
+              </td>
+              <td class="px-4 py-3">
+                <Badge
+                  variant="secondary"
+                  :class="
+                    node.monitoring_enabled
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : 'bg-slate-100 text-slate-700'
+                  "
+                >
+                  {{ node.monitoring_enabled ? 'Enabled' : 'Disabled' }}
                 </Badge>
               </td>
               <td class="px-4 py-3 text-slate-700">{{ node.service_count }}</td>
               <td class="px-4 py-3 text-slate-700">{{ node.recommendation_count }}</td>
-              <td class="px-4 py-3 text-slate-600">
-                {{ resourceGroupNames(node.resource_group_ids) || 'No groups' }}
-              </td>
             </tr>
             <tr v-if="!isLoading && nodes.length === 0">
               <td colspan="5" class="px-4 py-10 text-center text-sm text-slate-500">
@@ -664,8 +1013,7 @@ watch([currentPage, pageSize], () => {
                 {{ selectedNode?.name || 'Node detail' }}
               </h3>
               <p v-if="selectedNode" class="mt-1 text-sm text-slate-500">
-                {{ selectedNode.address }} ·
-                {{ resourceGroupNames(selectedNode.resource_group_ids) || 'No groups' }}
+                {{ displayNodeAddress(selectedNode.address) }}
               </p>
             </div>
             <div class="flex flex-wrap items-center gap-2">
@@ -680,7 +1028,17 @@ watch([currentPage, pageSize], () => {
                   @click="openAgentDialog"
                 >
                   <ServerCog class="h-4 w-4" />
-                  Add Agent
+                  Install Agent
+                </Button>
+                <Button
+                  v-else
+                  variant="outline"
+                  type="button"
+                  :disabled="agentInstallIssuing"
+                  @click="void issueExistingAgentInstallKey()"
+                >
+                  <ServerCog class="h-4 w-4" />
+                  Install Agent
                 </Button>
                 <Button
                   variant="outline"
@@ -712,6 +1070,93 @@ watch([currentPage, pageSize], () => {
           </div>
           <div v-else class="grid gap-8">
             <section class="grid gap-3">
+              <h4 class="text-sm font-semibold uppercase text-slate-500">Agent</h4>
+              <div class="rounded-lg border border-slate-200 bg-white p-4">
+                <div v-if="selectedNode.agent" class="grid gap-4 md:grid-cols-4">
+                  <div class="grid gap-1">
+                    <span class="text-xs font-semibold uppercase text-slate-500">Status</span>
+                    <Badge
+                      variant="secondary"
+                      class="w-fit"
+                      :class="statusBadgeClass(selectedNode.agent.status)"
+                    >
+                      {{ selectedNode.agent.status }}
+                    </Badge>
+                  </div>
+                  <div class="grid gap-1">
+                    <span class="text-xs font-semibold uppercase text-slate-500">Version</span>
+                    <span class="text-sm text-slate-900">
+                      {{ displayAgentVersion(selectedNode.agent.agent_version) }}
+                    </span>
+                  </div>
+                  <div class="grid gap-1">
+                    <span class="text-xs font-semibold uppercase text-slate-500">Host</span>
+                    <span class="text-sm text-slate-900">
+                      {{
+                        displayAgentHost(
+                          selectedNode.agent.hostname,
+                          selectedNode.agent.platform,
+                          selectedNode.agent.architecture,
+                        )
+                      }}
+                    </span>
+                  </div>
+                  <div class="grid gap-1">
+                    <span class="text-xs font-semibold uppercase text-slate-500">Last Seen</span>
+                    <div class="grid gap-0.5">
+                      <span class="text-sm text-slate-900">
+                        {{ formatRelativeTime(selectedNode.agent.last_seen_at) }}
+                      </span>
+                      <span class="text-xs text-slate-500">
+                        {{ formatDateTime(selectedNode.agent.last_seen_at) }}
+                      </span>
+                    </div>
+                  </div>
+                  <div class="grid gap-1">
+                    <span class="text-xs font-semibold uppercase text-slate-500">WS Heartbeat</span>
+                    <div class="grid gap-0.5">
+                      <span class="text-sm text-slate-900">
+                        {{ formatRelativeTime(selectedNode.agent.last_websocket_pong_at) }}
+                      </span>
+                      <span class="text-xs text-slate-500">
+                        {{ formatDateTime(selectedNode.agent.last_websocket_pong_at) }}
+                      </span>
+                    </div>
+                  </div>
+                  <div class="grid gap-1">
+                    <span class="text-xs font-semibold uppercase text-slate-500"
+                      >Configuration</span
+                    >
+                    <Badge
+                      variant="secondary"
+                      class="w-fit"
+                      :class="
+                        agentConfigInSync(selectedNode.agent)
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-amber-100 text-amber-800'
+                      "
+                    >
+                      {{ agentConfigInSync(selectedNode.agent) ? 'In sync' : 'Change pending' }}
+                    </Badge>
+                  </div>
+                  <div class="grid gap-1">
+                    <span class="text-xs font-semibold uppercase text-slate-500">Connected</span>
+                    <span class="text-sm text-slate-900">
+                      {{ formatDateTime(selectedNode.agent.last_connected_at) }}
+                    </span>
+                  </div>
+                  <div class="grid gap-1">
+                    <span class="text-xs font-semibold uppercase text-slate-500">Enabled</span>
+                    <span class="text-sm text-slate-900">
+                      {{ selectedNode.agent.enabled ? 'Yes' : 'No' }}
+                    </span>
+                  </div>
+                </div>
+                <div v-else class="text-sm text-slate-500">No agent is attached to this node.</div>
+              </div>
+            </section>
+
+            <section class="grid gap-3">
               <h4 class="text-sm font-semibold uppercase text-slate-500">Services</h4>
               <div class="overflow-x-auto rounded-lg border border-slate-200">
                 <table class="min-w-full divide-y divide-slate-200 text-sm">
@@ -720,6 +1165,7 @@ watch([currentPage, pageSize], () => {
                       <th class="px-4 py-3">Service</th>
                       <th class="px-4 py-3">Engine</th>
                       <th class="px-4 py-3">Endpoint</th>
+                      <th class="px-4 py-3">Monitoring</th>
                       <th class="px-4 py-3">Status</th>
                       <th class="px-4 py-3 text-right">Actions</th>
                     </tr>
@@ -732,6 +1178,18 @@ watch([currentPage, pageSize], () => {
                       <td class="px-4 py-3 text-slate-600">{{ service.engine.toUpperCase() }}</td>
                       <td class="px-4 py-3 text-slate-600">
                         {{ service.host }}:{{ service.port }}
+                      </td>
+                      <td class="px-4 py-3">
+                        <Badge
+                          variant="secondary"
+                          :class="
+                            service.monitoring_enabled
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-slate-100 text-slate-600'
+                          "
+                        >
+                          {{ service.monitoring_enabled ? 'Enabled' : 'Disabled' }}
+                        </Badge>
                       </td>
                       <td class="px-4 py-3">
                         <Badge
@@ -764,7 +1222,7 @@ watch([currentPage, pageSize], () => {
                       </td>
                     </tr>
                     <tr v-if="selectedNode.services.length === 0">
-                      <td colspan="5" class="px-4 py-8 text-center text-slate-500">
+                      <td colspan="6" class="px-4 py-8 text-center text-slate-500">
                         No services added.
                       </td>
                     </tr>
@@ -845,9 +1303,7 @@ watch([currentPage, pageSize], () => {
         @submit.prevent="void submitNode()"
       >
         <div class="flex items-start justify-between border-b border-slate-200 px-6 py-4">
-          <h3 class="text-lg font-semibold text-slate-900">
-            {{ editingNodeId ? 'Edit Node' : 'Add Node' }}
-          </h3>
+          <h3 class="text-lg font-semibold text-slate-900">Edit Node</h3>
           <Button variant="ghost" size="icon" type="button" @click="closeNodeDialog">
             <X class="h-4 w-4" />
           </Button>
@@ -865,29 +1321,69 @@ watch([currentPage, pageSize], () => {
           </label>
           <label class="grid gap-2">
             <span class="text-sm font-medium text-slate-700">Address</span>
-            <Input v-model="nodeForm.address" required placeholder="10.0.0.12" />
+            <Input v-model="nodeForm.address" placeholder="Pending agent registration" />
           </label>
           <label class="grid gap-2">
             <span class="text-sm font-medium text-slate-700">Description</span>
             <textarea v-model="nodeForm.description" :class="fieldClass" rows="3" />
           </label>
-          <label class="grid gap-2">
-            <span class="text-sm font-medium text-slate-700">Resource Groups</span>
-            <select
-              :class="multiSelectClass"
-              multiple
-              :value="nodeForm.resource_group_ids.map(String)"
-              @change="updateNumericSelections($event, 'node')"
-            >
-              <option
-                v-for="group in metadata?.resource_groups ?? []"
-                :key="group.group_id"
-                :value="group.group_id"
-              >
-                {{ group.group_name }}
-              </option>
-            </select>
+          <label class="flex items-center gap-2 text-sm font-medium text-slate-700">
+            <input
+              v-model="nodeForm.monitoring_enabled"
+              type="checkbox"
+              class="h-4 w-4 rounded border-slate-300"
+            />
+            Enable monitoring
           </label>
+          <details
+            class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3"
+            :class="{ 'opacity-60': !nodeForm.monitoring_enabled }"
+          >
+            <summary class="cursor-pointer text-sm font-medium text-slate-800">
+              Advanced collectors
+              <span class="ml-2 text-xs font-normal text-slate-500">
+                {{ nodeForm.monitoring_collectors.length }} selected
+              </span>
+            </summary>
+            <div class="mt-4 grid gap-4">
+              <div class="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  :disabled="!nodeForm.monitoring_enabled"
+                  @click="selectAllMonitoringCollectors(nodeForm)"
+                >
+                  Select all
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  :disabled="!nodeForm.monitoring_enabled"
+                  @click="resetDefaultMonitoringCollectors(nodeForm)"
+                >
+                  Reset defaults
+                </Button>
+              </div>
+              <div class="grid max-h-56 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 md:grid-cols-3">
+                <label
+                  v-for="collector in DEFAULT_NODE_EXPORTER_COLLECTORS"
+                  :key="collector"
+                  class="flex min-w-0 items-center gap-2 rounded-md bg-white px-2 py-1.5 text-sm text-slate-700"
+                >
+                  <input
+                    :checked="isMonitoringCollectorSelected(nodeForm, collector)"
+                    :disabled="!nodeForm.monitoring_enabled"
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-slate-300"
+                    @change="toggleMonitoringCollector(nodeForm, collector, $event)"
+                  />
+                  <span class="truncate">{{ collector }}</span>
+                </label>
+              </div>
+            </div>
+          </details>
         </div>
         <div class="flex justify-end gap-2 border-t border-slate-200 px-6 py-4">
           <Button variant="outline" type="button" @click="closeNodeDialog">Cancel</Button>
@@ -951,6 +1447,63 @@ watch([currentPage, pageSize], () => {
             <span class="text-sm font-medium text-slate-700">Password</span>
             <Input v-model="serviceForm.password" type="password" autocomplete="new-password" />
           </label>
+          <label class="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              v-model="serviceForm.monitoring_enabled"
+              type="checkbox"
+              class="h-4 w-4 rounded border-slate-300"
+            />
+            Enable monitoring
+          </label>
+          <details
+            class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 md:col-span-2"
+            :class="{ 'opacity-60': !serviceForm.monitoring_enabled }"
+          >
+            <summary class="cursor-pointer text-sm font-medium text-slate-800">
+              Advanced collectors
+              <span class="ml-2 text-xs font-normal text-slate-500">
+                {{ serviceForm.monitoring_collectors.length }} selected
+              </span>
+            </summary>
+            <div class="mt-4 grid gap-4">
+              <div class="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  :disabled="!serviceForm.monitoring_enabled"
+                  @click="selectAllServiceMonitoringCollectors(serviceForm)"
+                >
+                  Select all
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  :disabled="!serviceForm.monitoring_enabled"
+                  @click="resetDefaultServiceMonitoringCollectors(serviceForm)"
+                >
+                  Reset defaults
+                </Button>
+              </div>
+              <div class="grid max-h-56 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 md:grid-cols-3">
+                <label
+                  v-for="collector in serviceCollectorOptions(serviceForm.engine)"
+                  :key="collector"
+                  class="flex min-w-0 items-center gap-2 rounded-md bg-white px-2 py-1.5 text-sm text-slate-700"
+                >
+                  <input
+                    :checked="isMonitoringCollectorSelected(serviceForm, collector)"
+                    :disabled="!serviceForm.monitoring_enabled"
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-slate-300"
+                    @change="toggleMonitoringCollector(serviceForm, collector, $event)"
+                  />
+                  <span class="truncate">{{ collector }}</span>
+                </label>
+              </div>
+            </div>
+          </details>
           <label class="grid gap-2">
             <span class="text-sm font-medium text-slate-700">Default Database</span>
             <Input v-model="serviceForm.db_name" />
@@ -1023,7 +1576,11 @@ watch([currentPage, pageSize], () => {
     >
       <div class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white shadow-xl">
         <div class="flex items-start justify-between border-b border-slate-200 px-6 py-4">
-          <h3 class="text-lg font-semibold text-slate-900">Add Agent</h3>
+          <h3 class="text-lg font-semibold text-slate-900">
+            {{
+              createdAgent ? 'Install Agent' : agentTargetNodeId ? 'Install Agent' : 'Add New Node'
+            }}
+          </h3>
           <Button variant="ghost" size="icon" type="button" @click="closeAgentDialog">
             <X class="h-4 w-4" />
           </Button>
@@ -1040,27 +1597,95 @@ watch([currentPage, pageSize], () => {
             {{ agentFormError }}
           </p>
           <label class="grid gap-2">
-            <span class="text-sm font-medium text-slate-700">Name</span>
-            <Input v-model="agentForm.name" required />
+            <span class="text-sm font-medium text-slate-700">Node Name</span>
+            <Input
+              v-model="agentForm.node_name"
+              required
+              :readonly="Boolean(agentTargetNodeId)"
+              placeholder="prod-db-node-01"
+            />
           </label>
-          <label class="grid gap-2">
-            <span class="text-sm font-medium text-slate-700">Display Name</span>
-            <Input v-model="agentForm.display_name" />
+          <label class="flex items-center gap-2 text-sm font-medium text-slate-700">
+            <input
+              v-model="agentForm.monitoring_enabled"
+              type="checkbox"
+              class="h-4 w-4 rounded border-slate-300"
+            />
+            Enable monitoring
           </label>
+          <details
+            class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3"
+            :class="{ 'opacity-60': !agentForm.monitoring_enabled }"
+          >
+            <summary class="cursor-pointer text-sm font-medium text-slate-800">
+              Advanced collectors
+              <span class="ml-2 text-xs font-normal text-slate-500">
+                {{ agentForm.monitoring_collectors.length }} selected
+              </span>
+            </summary>
+            <div class="mt-4 grid gap-4">
+              <div class="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  :disabled="!agentForm.monitoring_enabled"
+                  @click="selectAllMonitoringCollectors(agentForm)"
+                >
+                  Select all
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  :disabled="!agentForm.monitoring_enabled"
+                  @click="resetDefaultMonitoringCollectors(agentForm)"
+                >
+                  Reset defaults
+                </Button>
+              </div>
+              <div class="grid max-h-56 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 md:grid-cols-3">
+                <label
+                  v-for="collector in DEFAULT_NODE_EXPORTER_COLLECTORS"
+                  :key="collector"
+                  class="flex min-w-0 items-center gap-2 rounded-md bg-white px-2 py-1.5 text-sm text-slate-700"
+                >
+                  <input
+                    :checked="isMonitoringCollectorSelected(agentForm, collector)"
+                    :disabled="!agentForm.monitoring_enabled"
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-slate-300"
+                    @change="toggleMonitoringCollector(agentForm, collector, $event)"
+                  />
+                  <span class="truncate">{{ collector }}</span>
+                </label>
+              </div>
+            </div>
+          </details>
           <div class="flex justify-end gap-2 border-t border-slate-200 pt-4">
             <Button variant="outline" type="button" @click="closeAgentDialog">Cancel</Button>
-            <Button type="submit" :disabled="agentSaving">Create</Button>
+            <Button type="submit" :disabled="agentSaving">
+              {{ agentTargetNodeId ? 'Create WorkOS Key' : 'Create Node and Key' }}
+            </Button>
           </div>
         </form>
         <div v-else class="grid gap-5 px-6 py-5">
           <div
             class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
           >
-            The API key is shown once.
+            A WorkOS organization API key was created for this agent. The full key is shown once.
+          </div>
+          <p class="text-sm text-slate-600">
+            Run the install command on the node. Creating new install instructions rotates the agent
+            key and invalidates the previous key.
+          </p>
+          <div class="grid gap-1 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+            <span class="font-medium text-slate-700">Key backend</span>
+            <span class="text-slate-600">{{ createdAgent.api_key_backend }}</span>
           </div>
           <div class="grid gap-2">
             <div class="flex items-center justify-between">
-              <span class="text-sm font-medium text-slate-700">API Key</span>
+              <span class="text-sm font-medium text-slate-700">WorkOS API Key</span>
               <Button
                 variant="outline"
                 size="sm"

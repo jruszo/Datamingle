@@ -1,6 +1,8 @@
+import asyncio
+import contextlib
+
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
-from django.utils import timezone
 
 from api_agents.dispatch import (
     ACTIVE_WEBSOCKET_METADATA_KEY,
@@ -10,6 +12,9 @@ from api_agents.models import Agent
 from api_agents.models import AgentCommand
 from api_agents.models import AgentStatus
 from api_agents.services import AgentAPIKeyRejected, authenticate_agent_api_key
+from api_agents.time import agent_datetime_to_utc_iso, agent_utc_now
+
+WEBSOCKET_HEARTBEAT_INTERVAL_SECONDS = 30
 
 
 class AgentConsumer(AsyncJsonWebsocketConsumer):
@@ -38,10 +43,17 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
                 "type": "hello.ack",
                 "agent_id": self.agent.id,
                 "desired_config_revision": self.agent.desired_config_revision,
+                "heartbeat_interval": WEBSOCKET_HEARTBEAT_INTERVAL_SECONDS,
             }
         )
+        self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
     async def disconnect(self, code):
+        heartbeat_task = getattr(self, "heartbeat_task", None)
+        if heartbeat_task is not None:
+            heartbeat_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await heartbeat_task
         if hasattr(self, "agent"):
             await self._mark_disconnected()
 
@@ -53,10 +65,11 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
                     "type": "hello.ack",
                     "agent_id": self.agent.id,
                     "desired_config_revision": self.agent.desired_config_revision,
+                    "heartbeat_interval": WEBSOCKET_HEARTBEAT_INTERVAL_SECONDS,
                 }
             )
         elif message_type == "pong":
-            await self._store_metadata("last_pong", content)
+            await self._mark_websocket_pong(content)
         elif message_type == "config.applied":
             await self._mark_config_applied(
                 content.get("revision", 0), content.get("config_hash", "")
@@ -103,16 +116,27 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
             return parts[1]
         return ""
 
+    async def _heartbeat_loop(self):
+        while True:
+            await asyncio.sleep(WEBSOCKET_HEARTBEAT_INTERVAL_SECONDS)
+            now = agent_utc_now()
+            await self.send_json(
+                {
+                    "type": "ping",
+                    "sent_at": agent_datetime_to_utc_iso(now),
+                }
+            )
+
     @database_sync_to_async
     def _mark_connected(self):
-        now = timezone.now()
+        now = agent_utc_now()
         self.agent.status = "online"
         self.agent.last_connected_at = now
         self.agent.last_seen_at = now
         metadata = dict(self.agent.metadata or {})
         metadata[ACTIVE_WEBSOCKET_METADATA_KEY] = {
             WEBSOCKET_CHANNEL_METADATA_KEY: self.channel_name,
-            "connected_at": now.isoformat(),
+            "connected_at": agent_datetime_to_utc_iso(now),
         }
         self.agent.metadata = metadata
         self.agent.save(
@@ -136,7 +160,7 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
             metadata.pop(ACTIVE_WEBSOCKET_METADATA_KEY, None)
             agent.status = AgentStatus.OFFLINE
         agent.metadata = metadata
-        agent.last_disconnected_at = timezone.now()
+        agent.last_disconnected_at = agent_utc_now()
         agent.save(
             update_fields=["metadata", "last_disconnected_at", "status", "update_time"]
         )
@@ -152,7 +176,7 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         ).get(pk=self.agent.pk)
         metadata = dict(agent.metadata or {})
         metadata["last_config_hash"] = config_hash
-        now = timezone.now()
+        now = agent_utc_now()
         agent.last_config_revision = revision
         agent.metadata = metadata
         agent.last_seen_at = now
@@ -173,7 +197,7 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         agent = Agent.objects.only("metadata", "last_seen_at").get(pk=self.agent.pk)
         metadata = dict(agent.metadata or {})
         metadata[key] = value
-        now = timezone.now()
+        now = agent_utc_now()
         agent.metadata = metadata
         agent.last_seen_at = now
         agent.save(update_fields=["metadata", "last_seen_at", "update_time"])
@@ -181,17 +205,43 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         self.agent.last_seen_at = now
 
     @database_sync_to_async
+    def _mark_websocket_pong(self, content):
+        agent = Agent.objects.only(
+            "metadata", "last_seen_at", "last_websocket_pong_at"
+        ).get(pk=self.agent.pk)
+        metadata = dict(agent.metadata or {})
+        now = agent_utc_now()
+        metadata["last_pong"] = {
+            **content,
+            "received_at": agent_datetime_to_utc_iso(now),
+        }
+        agent.metadata = metadata
+        agent.last_seen_at = now
+        agent.last_websocket_pong_at = now
+        agent.save(
+            update_fields=[
+                "metadata",
+                "last_seen_at",
+                "last_websocket_pong_at",
+                "update_time",
+            ]
+        )
+        self.agent.metadata = metadata
+        self.agent.last_seen_at = now
+        self.agent.last_websocket_pong_at = now
+
+    @database_sync_to_async
     def _store_module_status(self, content):
         agent = Agent.objects.only("metadata", "last_seen_at").get(pk=self.agent.pk)
         metadata = dict(agent.metadata or {})
         statuses = dict(metadata.get("module_status") or {})
         module_name = content.get("module")
-        now = timezone.now()
+        now = agent_utc_now()
         if module_name:
             statuses[module_name] = {
                 "status": content.get("status", ""),
                 "message": content.get("message", ""),
-                "updated_at": now.isoformat(),
+                "updated_at": agent_datetime_to_utc_iso(now),
             }
         metadata["module_status"] = statuses
         agent.metadata = metadata

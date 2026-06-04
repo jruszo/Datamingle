@@ -1,6 +1,7 @@
 import {
   createAgent,
   fetchInstanceInventoryMetadata,
+  issueAgentInstallKey,
   type AgentCreateResponse,
   type AgentStatus,
   type InstanceInventoryMetadata,
@@ -11,6 +12,7 @@ import { apiGet, apiPatch, apiPost, isRecord } from '@/shared/api/http'
 export {
   createAgent,
   fetchInstanceInventoryMetadata,
+  issueAgentInstallKey,
   type AgentCreateResponse,
   type AgentStatus,
   type InstanceInventoryMetadata,
@@ -28,11 +30,30 @@ export type InfrastructureNodePayload = {
   address: string
   description: string
   metadata: Record<string, unknown>
-  resource_group_ids: number[]
+  monitoring_enabled: boolean
+  monitoring_collectors: string[]
+  resource_group_ids?: number[]
+}
+
+export type InfrastructureNodeAgentRecord = {
+  id: number
+  status: AgentStatus
+  hostname: string
+  platform: string
+  architecture: string
+  agent_version: string
+  last_seen_at: string | null
+  last_websocket_pong_at: string | null
+  last_connected_at: string | null
+  last_disconnected_at: string | null
+  last_config_revision: number
+  desired_config_revision: number
+  enabled: boolean
 }
 
 export type InfrastructureNodeRecord = InfrastructureNodePayload & {
   id: number
+  agent: InfrastructureNodeAgentRecord | null
   agent_id: number | null
   agent_status: AgentStatus | null
   service_count: number
@@ -50,6 +71,8 @@ export type DatabaseServicePayload = {
   port: number
   user: string
   password?: string
+  monitoring_enabled: boolean
+  monitoring_collectors: string[]
   is_ssl: boolean
   verify_ssl: boolean
   db_name: string
@@ -61,7 +84,10 @@ export type DatabaseServicePayload = {
   recommendation_id?: number
 }
 
-export type DatabaseServiceRecord = Omit<DatabaseServicePayload, 'password' | 'recommendation_id'> & {
+export type DatabaseServiceRecord = Omit<
+  DatabaseServicePayload,
+  'password' | 'recommendation_id'
+> & {
   id: number
   inventory_status: 'never' | 'ok' | 'stale' | 'failed'
   inventory_detected_hostname?: string
@@ -124,33 +150,35 @@ export function fetchInfrastructureNode(nodeId: number, token: string) {
   )
 }
 
-export function createInfrastructureNode(payload: InfrastructureNodePayload, token: string) {
-  return apiPost<unknown>('/v1/infrastructure/nodes/', payload, { token }).then((responsePayload) =>
-    extractData<InfrastructureNodeDetailRecord>(responsePayload),
-  )
-}
-
-export function updateInfrastructureNode(nodeId: number, payload: InfrastructureNodePayload, token: string) {
-  return apiPatch<unknown>(`/v1/infrastructure/nodes/${nodeId}/`, payload, { token }).then((responsePayload) =>
-    extractData<InfrastructureNodeDetailRecord>(responsePayload),
+export function updateInfrastructureNode(
+  nodeId: number,
+  payload: InfrastructureNodePayload,
+  token: string,
+) {
+  return apiPatch<unknown>(`/v1/infrastructure/nodes/${nodeId}/`, payload, { token }).then(
+    (responsePayload) => extractData<InfrastructureNodeDetailRecord>(responsePayload),
   )
 }
 
 export function createDatabaseService(payload: DatabaseServicePayload, token: string) {
-  return apiPost<unknown>('/v1/infrastructure/services/', payload, { token }).then((responsePayload) =>
-    extractData<DatabaseServiceRecord>(responsePayload),
+  return apiPost<unknown>('/v1/infrastructure/services/', payload, { token }).then(
+    (responsePayload) => extractData<DatabaseServiceRecord>(responsePayload),
   )
 }
 
-export function updateDatabaseService(serviceId: number, payload: DatabaseServicePayload, token: string) {
-  return apiPatch<unknown>(`/v1/infrastructure/services/${serviceId}/`, payload, { token }).then((responsePayload) =>
-    extractData<DatabaseServiceRecord>(responsePayload),
+export function updateDatabaseService(
+  serviceId: number,
+  payload: DatabaseServicePayload,
+  token: string,
+) {
+  return apiPatch<unknown>(`/v1/infrastructure/services/${serviceId}/`, payload, { token }).then(
+    (responsePayload) => extractData<DatabaseServiceRecord>(responsePayload),
   )
 }
 
 export function discoverInfrastructureNodeServices(nodeId: number, token: string) {
-  return apiPost<unknown>(`/v1/infrastructure/nodes/${nodeId}/discover/`, {}, { token }).then((responsePayload) =>
-    extractData<Record<string, unknown>>(responsePayload),
+  return apiPost<unknown>(`/v1/infrastructure/nodes/${nodeId}/discover/`, {}, { token }).then(
+    (responsePayload) => extractData<Record<string, unknown>>(responsePayload),
   )
 }
 
@@ -159,25 +187,29 @@ export function updateServiceRecommendationStatus(
   status: ServiceRecommendationRecord['status'],
   token: string,
 ) {
-  return apiPatch<unknown>(`/v1/infrastructure/recommendations/${recommendationId}/`, { status }, { token }).then(
-    (responsePayload) => extractData<ServiceRecommendationRecord>(responsePayload),
-  )
+  return apiPatch<unknown>(
+    `/v1/infrastructure/recommendations/${recommendationId}/`,
+    { status },
+    { token },
+  ).then((responsePayload) => extractData<ServiceRecommendationRecord>(responsePayload))
 }
 
 export function testDatabaseServiceConnection(serviceId: number, token: string) {
-  return apiPost<unknown>(`/v1/infrastructure/services/${serviceId}/test/`, {}, { token }).then((responsePayload) => {
-    const payload = extractData<unknown>(responsePayload)
-    if (typeof payload === 'string') {
-      return payload
-    }
-    if (isRecord(payload)) {
-      if (typeof payload.message === 'string') {
-        return payload.message
+  return apiPost<unknown>(`/v1/infrastructure/services/${serviceId}/test/`, {}, { token }).then(
+    (responsePayload) => {
+      const payload = extractData<unknown>(responsePayload)
+      if (typeof payload === 'string') {
+        return payload
       }
-      if (typeof payload.detail === 'string') {
-        return payload.detail
+      if (isRecord(payload)) {
+        if (typeof payload.message === 'string') {
+          return payload.message
+        }
+        if (typeof payload.detail === 'string') {
+          return payload.detail
+        }
       }
-    }
-    return 'Connection test completed.'
-  })
+      return 'Connection test completed.'
+    },
+  )
 }

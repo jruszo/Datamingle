@@ -23,6 +23,7 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: env.VITE_BACKEND_PROXY_TARGET || 'http://localhost:9123',
           changeOrigin: false,
+          ws: true,
         },
       },
     },

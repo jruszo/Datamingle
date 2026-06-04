@@ -1,9 +1,11 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -34,6 +36,28 @@ func TestHandleConfigChangedRefreshesConfig(t *testing.T) {
 	}
 	if got := runner.effectiveRevision(0); got != 9 {
 		t.Fatalf("expected revision 9, got %d", got)
+	}
+}
+
+func TestApplyConfigLogsMonitoringExpectation(t *testing.T) {
+	var buffer bytes.Buffer
+	previousWriter := log.Writer()
+	log.SetOutput(&buffer)
+	defer log.SetOutput(previousWriter)
+
+	runner := NewRunner(config.Config{})
+	err := runner.applyConfig(context.Background(), client.AgentConfig{
+		Node: &client.NodeConfig{
+			ID:                7,
+			Name:              "db-node-01",
+			MonitoringEnabled: false,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buffer.String(), "node monitoring expected for db-node-01 (7): false") {
+		t.Fatalf("expected monitoring log, got %q", buffer.String())
 	}
 }
 

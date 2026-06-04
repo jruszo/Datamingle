@@ -392,14 +392,19 @@ export type AgentDetailRecord = AgentRecord & {
 }
 
 export type AgentCreatePayload = {
-  name: string
+  name?: string
   display_name?: string
+  node_name?: string
   local_node?: number | null
+  monitoring_enabled?: boolean
+  monitoring_collectors?: string[]
 }
 
 export type AgentCreateResponse = AgentDetailRecord & {
   api_key: string
   api_key_backend: string
+  api_key_id?: string
+  api_key_prefix?: string
   install_command: string
 }
 
@@ -735,10 +740,7 @@ export function fetchResourceGroup(resourceGroupId: number, token: string) {
   )
 }
 
-export function createResourceGroup(
-  payload: ResourceGroupUpsertPayload,
-  token: string,
-) {
+export function createResourceGroup(payload: ResourceGroupUpsertPayload, token: string) {
   return apiPost<unknown>('/v1/user/resourcegroup/', payload, { token }).then((responsePayload) =>
     extractData<ResourceGroupDetailRecord>(responsePayload),
   )
@@ -833,6 +835,12 @@ export function fetchAgents(token: string, options: AgentListOptions = {}) {
 export function createAgent(payload: AgentCreatePayload, token: string) {
   return apiPost<unknown>('/v1/agents/', payload, { token }).then((responsePayload) =>
     extractData<AgentCreateResponse>(responsePayload),
+  )
+}
+
+export function issueAgentInstallKey(agentId: number, token: string) {
+  return apiPost<unknown>(`/v1/agents/${agentId}/install-key/`, {}, { token }).then(
+    (responsePayload) => extractData<AgentCreateResponse>(responsePayload),
   )
 }
 

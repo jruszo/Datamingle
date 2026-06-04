@@ -1,6 +1,9 @@
 package tools
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -55,6 +58,53 @@ func TestEnsureArtifactDownloadsVerifiesAndCaches(t *testing.T) {
 	}
 }
 
+func TestEnsureArtifactExtractsTarGzBinary(t *testing.T) {
+	archive := tarGz(t, "node_exporter-1.11.1.linux-amd64/node_exporter", []byte("#!/bin/sh\n"))
+	sum := sha256.Sum256(archive)
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_, _ = w.Write(archive)
+	}))
+	defer server.Close()
+
+	cacheDir := filepath.Join(t.TempDir(), "tools")
+	path, err := EnsureArtifact(context.Background(), cacheDir, Artifact{
+		ToolName:     "node_exporter",
+		Version:      "1.11.1",
+		Platform:     "linux",
+		Architecture: "amd64",
+		DownloadURL:  server.URL + "/node_exporter-1.11.1.linux-amd64.tar.gz",
+		SHA256:       hex.EncodeToString(sum[:]),
+		SizeBytes:    int64(len(archive)),
+	}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "#!/bin/sh\n" {
+		t.Fatalf("unexpected extracted binary: %q", string(raw))
+	}
+
+	secondPath, err := EnsureArtifact(context.Background(), cacheDir, Artifact{
+		ToolName:     "node_exporter",
+		Version:      "1.11.1",
+		Platform:     "linux",
+		Architecture: "amd64",
+		DownloadURL:  server.URL + "/node_exporter-1.11.1.linux-amd64.tar.gz",
+		SHA256:       hex.EncodeToString(sum[:]),
+	}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondPath != path || requests != 1 {
+		t.Fatalf("expected cached extracted binary, path=%s second=%s requests=%d", path, secondPath, requests)
+	}
+}
+
 func TestEnsureArtifactSanitizesArtifactInputs(t *testing.T) {
 	body := []byte("online schema tool")
 	sum := sha256.Sum256(body)
@@ -81,6 +131,30 @@ func TestEnsureArtifactSanitizesArtifactInputs(t *testing.T) {
 	if !strings.HasSuffix(path, expectedSuffix) {
 		t.Fatalf("expected sanitized artifact path suffix %q, got %q", expectedSuffix, path)
 	}
+}
+
+func tarGz(t *testing.T, name string, body []byte) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	gzipWriter := gzip.NewWriter(&buffer)
+	tarWriter := tar.NewWriter(gzipWriter)
+	if err := tarWriter.WriteHeader(&tar.Header{
+		Name: name,
+		Mode: 0o755,
+		Size: int64(len(body)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tarWriter.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
 }
 
 func TestEnsureArtifactRejectsChecksumMismatch(t *testing.T) {

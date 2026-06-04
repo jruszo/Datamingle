@@ -1,10 +1,12 @@
-from datetime import timedelta
+import asyncio
+from datetime import datetime, timedelta, timezone as datetime_timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import requests
 from asgiref.sync import async_to_sync, sync_to_async
 from channels.testing import WebsocketCommunicator
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework import status
@@ -33,15 +35,21 @@ from api_agents.services import (
     AgentCommandDispatchError,
     AgentAPIKeyRejected,
     authenticate_agent_api_key,
-    create_agent_api_key,
     dispatch_sql_workflow_to_agent,
     dispatch_agent_command,
     filter_agent_runnable_instances,
     issue_agent_api_key,
+    validate_workos_api_key,
 )
+from api_agents.time import agent_utc_now
 from common.utils.const import WorkflowStatus, WorkflowType
-from sql.models import SqlWorkflow, SqlWorkflowContent, WorkflowAudit
-from sql.models import Instance, Users
+from sql.models import (
+    DEFAULT_NODE_EXPORTER_COLLECTORS,
+    SqlWorkflow,
+    SqlWorkflowContent,
+    WorkflowAudit,
+)
+from sql.models import InfrastructureNode, Instance, Users
 
 
 def create_instance(name="primary"):
@@ -256,7 +264,26 @@ class AgentModelTests(APITestCase):
             artifact.full_clean()
 
 
-@override_settings(DATAMINGLE_AGENT_API_KEY_BACKEND="local")
+def mock_workos_api_key_response(mock_post, value="sk_agent_created_once"):
+    mock_post.return_value.json.return_value = {
+        "object": "api_key",
+        "id": f"api_key_{value[-4:]}",
+        "owner": {"type": "organization", "id": "org_test_123"},
+        "name": "Datamingle Agent",
+        "value": value,
+        "obfuscated_value": f"sk_...{value[-4:]}",
+        "permissions": list(WORKOS_AGENT_API_KEY_PERMISSIONS),
+    }
+    mock_post.return_value.raise_for_status.return_value = None
+
+
+@override_settings(
+    DATAMINGLE_AGENT_API_KEY_BACKEND="workos",
+    WORKOS_API_KEY="sk_test_123",
+    WORKOS_CLIENT_ID="client_test_123",
+    WORKOS_ORGANIZATION_ID="org_test_123",
+    WORKOS_BASE_URL="https://api.workos.test/",
+)
 class AgentApiTests(APITestCase):
     def setUp(self):
         self.user = Users.objects.create_user(
@@ -268,30 +295,93 @@ class AgentApiTests(APITestCase):
         )
         self.client.force_authenticate(user=self.user)
 
-    def test_create_and_list_agent(self):
+    @patch("api_agents.services.requests.post")
+    def test_create_and_list_agent(self, mock_post):
+        mock_workos_api_key_response(mock_post)
         response = self.client.post(
             "/api/v1/agents/",
             {
-                "name": "prod-agent-01",
-                "display_name": "Production Agent",
+                "node_name": "prod-db-node-01",
                 "organization_id": "org_evil",
+                "monitoring_enabled": False,
+                "monitoring_collectors": ["cpu", "meminfo"],
             },
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         payload = response.json()["data"]
-        self.assertEqual(payload["name"], "prod-agent-01")
-        self.assertTrue(payload["api_key"].startswith("dma_"))
-        self.assertEqual(payload["api_key_backend"], "local")
+        self.assertEqual(payload["name"], "prod-db-node-01")
+        self.assertEqual(payload["display_name"], "prod-db-node-01 Agent")
+        self.assertEqual(payload["api_key"], "sk_agent_created_once")
+        self.assertEqual(payload["api_key_backend"], "workos")
         self.assertIn("DATAMINGLE_AGENT_API_KEY", payload["install_command"])
-        agent = Agent.objects.get(name="prod-agent-01")
+        agent = Agent.objects.get(name="prod-db-node-01")
         self.assertNotEqual(agent.organization_id, "org_evil")
-        self.assertEqual(agent.api_key_prefix, payload["api_key"][:16])
-        self.assertNotEqual(agent.api_key_hash, payload["api_key"])
+        self.assertEqual(agent.organization_id, "org_test_123")
+        self.assertEqual(agent.workos_api_key_id, "api_key_once")
+        self.assertEqual(agent.api_key_prefix, "sk_...once")
+        self.assertIsNone(agent.api_key_hash)
+        self.assertEqual(agent.local_node.name, "prod-db-node-01")
+        self.assertEqual(agent.local_node.address, "")
+        self.assertFalse(agent.local_node.monitoring_enabled)
+        self.assertEqual(agent.local_node.monitoring_collectors, ["cpu", "meminfo"])
+        self.assertEqual(
+            agent.local_node.metadata["provisioning_status"],
+            "pending_agent_install",
+        )
 
         list_response = self.client.get("/api/v1/agents/")
         self.assertEqual(list_response.status_code, status.HTTP_200_OK)
         self.assertEqual(list_response.json()["data"]["count"], 1)
+
+    @patch("api_agents.services.requests.post")
+    def test_create_agent_returns_json_error_when_workos_rejects_permissions(
+        self, mock_post
+    ):
+        mock_post.return_value.status_code = 422
+        mock_post.return_value.text = '{"error":"Unknown permission"}'
+        mock_post.return_value.raise_for_status.side_effect = requests.HTTPError(
+            "422 Client Error"
+        )
+
+        response = self.client.post(
+            "/api/v1/agents/",
+            {"node_name": "prod-db-node-01"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+        self.assertIn("Organization API key permissions", response.json()["detail"])
+        self.assertIn("datamingle-agent:connect", response.json()["detail"])
+        self.assertIn("Unknown permission", response.json()["detail"])
+        self.assertFalse(Agent.objects.filter(name="prod-db-node-01").exists())
+        self.assertFalse(
+            InfrastructureNode.objects.filter(name="prod-db-node-01").exists()
+        )
+
+    @patch("api_agents.services.requests.post")
+    @patch("api_agents.services.workos_client")
+    def test_issue_install_key_rotates_workos_key(self, mock_workos_client, mock_post):
+        mock_workos_api_key_response(mock_post, value="sk_agent_rotated_once")
+        agent = Agent.objects.create(
+            name="agent-a",
+            organization_id="org_test_123",
+            workos_api_key_id="api_key_old",
+        )
+
+        response = self.client.post(f"/api/v1/agents/{agent.id}/install-key/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response.json()["data"]
+        self.assertEqual(payload["api_key"], "sk_agent_rotated_once")
+        self.assertEqual(payload["api_key_backend"], "workos")
+        self.assertIn("DATAMINGLE_AGENT_API_KEY", payload["install_command"])
+        mock_workos_client.return_value.api_keys.delete_api_key.assert_called_once_with(
+            "api_key_old"
+        )
+        agent.refresh_from_db()
+        self.assertEqual(agent.workos_api_key_id, "api_key_once")
+        self.assertIsNone(agent.api_key_hash)
 
     def test_replace_assignments_increments_revision_once(self):
         agent = Agent.objects.create(name="agent-a")
@@ -425,6 +515,13 @@ class WorkOSAgentAPIKeyTests(APITestCase):
             list(WORKOS_AGENT_API_KEY_PERMISSIONS),
         )
 
+    @override_settings(DATAMINGLE_AGENT_API_KEY_BACKEND="local")
+    def test_local_agent_api_keys_are_disabled(self):
+        agent = Agent.objects.create(name="agent-a")
+
+        with self.assertRaises(ImproperlyConfigured):
+            issue_agent_api_key(agent)
+
     @patch("api_agents.services.validate_workos_api_key")
     def test_validates_workos_key_owner_permissions_and_agent_record(
         self, mock_validate
@@ -443,6 +540,15 @@ class WorkOSAgentAPIKeyTests(APITestCase):
 
         self.assertEqual(authenticated, agent)
 
+    @patch("api_agents.services.workos_client")
+    def test_extracts_api_key_from_workos_validation_response(self, mock_client):
+        api_key = SimpleNamespace(id="api_key_123")
+        mock_client.return_value.api_keys.validate_api_key.return_value = {
+            "api_key": api_key
+        }
+
+        self.assertEqual(validate_workos_api_key("sk_agent_value"), api_key)
+
     @patch("api_agents.services.validate_workos_api_key")
     def test_rejects_workos_key_missing_agent_permissions(self, mock_validate):
         mock_validate.return_value = SimpleNamespace(
@@ -455,22 +561,49 @@ class WorkOSAgentAPIKeyTests(APITestCase):
             authenticate_agent_api_key("sk_agent_value")
 
 
-@override_settings(DATAMINGLE_AGENT_API_KEY_BACKEND="local")
+@override_settings(
+    DATAMINGLE_AGENT_API_KEY_BACKEND="workos",
+    WORKOS_API_KEY="sk_test_123",
+    WORKOS_CLIENT_ID="client_test_123",
+    WORKOS_ORGANIZATION_ID="org_test_123",
+    WORKOS_BASE_URL="https://api.workos.test/",
+)
 class AgentFacingApiTests(APITestCase):
+    def setUp(self):
+        self.validate_workos_key = patch(
+            "api_agents.services.validate_workos_api_key"
+        ).start()
+        self.workos_api_keys = {}
+        self.validate_workos_key.side_effect = lambda api_key: self.workos_api_keys.get(
+            api_key
+        )
+        self.addCleanup(patch.stopall)
+
     def authenticate_agent(self, agent):
-        issued_key = create_agent_api_key(agent)
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {issued_key.value}")
-        return issued_key.value
+        key_id = f"api_key_agent_{agent.id}"
+        agent.workos_api_key_id = key_id
+        agent.save(update_fields=["workos_api_key_id", "update_time"])
+        api_key = f"sk_agent_value_{agent.id}"
+        self.workos_api_keys[api_key] = SimpleNamespace(
+            id=key_id,
+            owner=SimpleNamespace(type="organization", id="org_test_123"),
+            permissions=list(REQUIRED_AGENT_KEY_PERMISSIONS),
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {api_key}")
+        return api_key
 
     def test_register_binds_install_id_and_marks_agent_online(self):
-        agent = Agent.objects.create(name="agent-a")
+        node = InfrastructureNode.objects.create(name="db-node-01", address="")
+        agent = Agent.objects.create(name="agent-a", local_node=node)
         self.authenticate_agent(agent)
+        before = datetime.now(datetime_timezone.utc).replace(tzinfo=None)
 
         response = self.client.post(
             "/api/v1/agent/register/",
             {
                 "install_id": "ins_test_123",
                 "name": "agent-a",
+                "address": "10.0.0.12",
                 "hostname": "db-host-01",
                 "platform": "linux",
                 "architecture": "amd64",
@@ -481,11 +614,19 @@ class AgentFacingApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        after = datetime.now(datetime_timezone.utc).replace(tzinfo=None)
         self.assertEqual(response.json()["agent_id"], agent.id)
         agent.refresh_from_db()
         self.assertEqual(agent.install_id, "ins_test_123")
         self.assertEqual(agent.status, AgentStatus.ONLINE)
         self.assertEqual(agent.hostname, "db-host-01")
+        self.assertGreaterEqual(agent.last_seen_at, before - timedelta(seconds=1))
+        self.assertLessEqual(agent.last_seen_at, after + timedelta(seconds=1))
+        node.refresh_from_db()
+        self.assertEqual(node.address, "10.0.0.12")
+        self.assertEqual(node.metadata["provisioning_status"], "agent_registered")
+        self.assertEqual(node.metadata["agent_host"]["hostname"], "db-host-01")
+        self.assertTrue(node.metadata["agent_host"]["last_registered_at"].endswith("Z"))
 
     def test_register_does_not_clear_existing_optional_metadata(self):
         agent = Agent.objects.create(
@@ -522,21 +663,44 @@ class AgentFacingApiTests(APITestCase):
     def test_config_includes_only_authenticated_agent_assignments_with_credentials(
         self,
     ):
-        agent = Agent.objects.create(name="agent-a")
+        node = InfrastructureNode.objects.create(
+            name="node-a",
+            address="10.0.0.10",
+            monitoring_enabled=False,
+        )
+        agent = Agent.objects.create(name="agent-a", local_node=node)
         other_agent = Agent.objects.create(name="agent-b")
         instance = create_instance("primary")
+        instance.node = node
+        instance.save(update_fields=["node", "update_time"])
         other_instance = create_instance("secondary")
-        AgentInstanceAssignment.objects.create(
-            agent=agent,
-            instance=instance,
-            command_enabled=True,
-            metrics_enabled=True,
-        )
+        assignment = AgentInstanceAssignment.objects.get(agent=agent, instance=instance)
+        assignment.command_enabled = True
+        assignment.metrics_enabled = True
+        assignment.save(update_fields=["command_enabled", "metrics_enabled"])
         AgentInstanceAssignment.objects.create(
             agent=other_agent,
             instance=other_instance,
             command_enabled=False,
             metrics_enabled=True,
+        )
+        AgentToolArtifact.objects.create(
+            tool_name=AgentToolArtifact.TOOL_NODE_EXPORTER,
+            version="1.9.1",
+            platform="linux",
+            architecture="amd64",
+            download_url="https://example.com/node_exporter",
+            sha256="d459a6c4b0867e9f665a7db35f4387d11fa7fa79a00a85c2c172ba0fa4295c14",
+            enabled=True,
+        )
+        AgentToolArtifact.objects.create(
+            tool_name=AgentToolArtifact.TOOL_MYSQLD_EXPORTER,
+            version="0.19.0",
+            platform="linux",
+            architecture="amd64",
+            download_url="https://example.com/mysqld_exporter",
+            sha256="d459a6c4b0867e9f665a7db35f4387d11fa7fa79a00a85c2c172ba0fa4295c14",
+            enabled=True,
         )
         self.authenticate_agent(agent)
 
@@ -545,15 +709,68 @@ class AgentFacingApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         payload = response.json()
         self.assertEqual(payload["agent_id"], agent.id)
+        self.assertEqual(payload["node"]["id"], node.id)
+        self.assertFalse(payload["node"]["monitoring_enabled"])
+        self.assertEqual(
+            payload["node"]["monitoring_collectors"],
+            list(DEFAULT_NODE_EXPORTER_COLLECTORS),
+        )
+        self.assertEqual(payload["nodes"][0]["id"], node.id)
+        self.assertFalse(payload["nodes"][0]["monitoring_enabled"])
+        self.assertEqual(
+            payload["nodes"][0]["monitoring_collectors"],
+            list(DEFAULT_NODE_EXPORTER_COLLECTORS),
+        )
         self.assertEqual(len(payload["assignments"]), 1)
         assignment = payload["assignments"][0]
         self.assertEqual(assignment["instance_id"], instance.id)
+        self.assertEqual(assignment["node_id"], node.id)
+        self.assertFalse(assignment["node_monitoring_enabled"])
+        self.assertTrue(assignment["service_monitoring_enabled"])
+        self.assertEqual(
+            assignment["service_monitoring_collectors"],
+            ["global_status", "global_variables", "slave_status"],
+        )
+        self.assertEqual(
+            assignment["node_monitoring_collectors"],
+            list(DEFAULT_NODE_EXPORTER_COLLECTORS),
+        )
         self.assertEqual(assignment["username"], "root")
         self.assertEqual(assignment["password"], "secret")
         self.assertNotIn(other_instance.instance_name, str(payload))
         module_names = {module["name"]: module for module in payload["modules"]}
         self.assertTrue(module_names["mysql"]["enabled"])
         self.assertTrue(module_names["metrics"]["enabled"])
+        self.assertFalse(module_names["node_monitoring"]["enabled"])
+        self.assertTrue(module_names["service_monitoring"]["enabled"])
+        self.assertEqual(
+            module_names["node_monitoring"]["raw"]["remote_write_url"],
+            "http://localhost:4430/api/v1/prometheus/write",
+        )
+        self.assertEqual(
+            module_names["node_monitoring"]["raw"]["node_exporter"]["artifact"][
+                "tool_name"
+            ],
+            AgentToolArtifact.TOOL_NODE_EXPORTER,
+        )
+        self.assertEqual(
+            module_names["node_monitoring"]["raw"]["node_exporter"]["collectors"],
+            list(DEFAULT_NODE_EXPORTER_COLLECTORS),
+        )
+        services = module_names["service_monitoring"]["raw"]["services"]
+        self.assertEqual(len(services), 1)
+        self.assertEqual(services[0]["db_type"], "mysql")
+        self.assertEqual(services[0]["username"], "root")
+        self.assertEqual(services[0]["password"], "secret")
+        self.assertEqual(
+            services[0]["collectors"],
+            ["global_status", "global_variables", "slave_status"],
+        )
+        self.assertEqual(services[0]["exporter"]["listen_address"], "127.0.0.1:9200")
+        self.assertEqual(
+            services[0]["exporter"]["artifact"]["tool_name"],
+            AgentToolArtifact.TOOL_MYSQLD_EXPORTER,
+        )
 
     def test_heartbeat_updates_last_seen_revision_and_module_health(self):
         agent = Agent.objects.create(name="agent-a", install_id="ins_test_123")
@@ -815,15 +1032,37 @@ class AgentFacingApiTests(APITestCase):
 
 
 @override_settings(
-    DATAMINGLE_AGENT_API_KEY_BACKEND="local",
+    DATAMINGLE_AGENT_API_KEY_BACKEND="workos",
+    WORKOS_API_KEY="sk_test_123",
+    WORKOS_CLIENT_ID="client_test_123",
+    WORKOS_ORGANIZATION_ID="org_test_123",
+    WORKOS_BASE_URL="https://api.workos.test/",
     CHANNEL_LAYERS={"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}},
 )
 class AgentWebsocketTests(TransactionTestCase):
     reset_sequences = True
 
+    def setUp(self):
+        self.validate_workos_key = patch(
+            "api_agents.services.validate_workos_api_key"
+        ).start()
+        self.workos_api_keys = {}
+        self.validate_workos_key.side_effect = lambda api_key: self.workos_api_keys.get(
+            api_key
+        )
+        self.addCleanup(patch.stopall)
+
     def authenticate_agent(self, agent):
-        issued_key = create_agent_api_key(agent)
-        return issued_key.value
+        key_id = f"api_key_agent_{agent.id}"
+        agent.workos_api_key_id = key_id
+        agent.save(update_fields=["workos_api_key_id", "update_time"])
+        api_key = f"sk_agent_value_{agent.id}"
+        self.workos_api_keys[api_key] = SimpleNamespace(
+            id=key_id,
+            owner=SimpleNamespace(type="organization", id="org_test_123"),
+            permissions=list(REQUIRED_AGENT_KEY_PERMISSIONS),
+        )
+        return api_key
 
     def test_websocket_receives_config_changed_notification(self):
         agent = Agent.objects.create(name="agent-a", desired_config_revision=4)
@@ -858,6 +1097,47 @@ class AgentWebsocketTests(TransactionTestCase):
         await sync_to_async(agent.refresh_from_db)()
         self.assertEqual(agent.status, AgentStatus.OFFLINE)
         self.assertNotIn(ACTIVE_WEBSOCKET_METADATA_KEY, agent.metadata)
+
+    def test_websocket_pong_updates_heartbeat_time(self):
+        agent = Agent.objects.create(name="agent-a")
+        api_key = self.authenticate_agent(agent)
+        async_to_sync(self._websocket_pong_updates_heartbeat_time)(agent, api_key)
+
+    async def _websocket_pong_updates_heartbeat_time(self, agent, api_key):
+        from archery.asgi import application
+
+        communicator = WebsocketCommunicator(
+            application,
+            "/api/ws/agent/",
+            headers=[(b"authorization", f"Bearer {api_key}".encode("utf-8"))],
+        )
+
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+        hello = await communicator.receive_json_from()
+        self.assertEqual(hello["type"], "hello.ack")
+        self.assertEqual(hello["heartbeat_interval"], 30)
+
+        before = agent_utc_now()
+        await communicator.send_json_to(
+            {"type": "pong", "sent_at": "2026-06-03T20:00:00Z"}
+        )
+        after = agent_utc_now()
+
+        for _ in range(20):
+            await sync_to_async(agent.refresh_from_db)()
+            if agent.last_websocket_pong_at is not None:
+                break
+            await asyncio.sleep(0.05)
+        self.assertGreaterEqual(
+            agent.last_websocket_pong_at, before - timedelta(seconds=1)
+        )
+        self.assertLessEqual(agent.last_websocket_pong_at, after + timedelta(seconds=1))
+        self.assertEqual(agent.metadata["last_pong"]["sent_at"], "2026-06-03T20:00:00Z")
+        self.assertTrue(agent.metadata["last_pong"]["received_at"].endswith("Z"))
+        self.assertEqual(agent.last_seen_at, agent.last_websocket_pong_at)
+
+        await communicator.disconnect()
 
     def test_websocket_receives_command_available_notification(self):
         agent = Agent.objects.create(name="agent-a")

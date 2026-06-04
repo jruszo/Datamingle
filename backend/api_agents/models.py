@@ -43,6 +43,7 @@ class Agent(models.Model):
     last_seen_at = models.DateTimeField(null=True, blank=True)
     last_connected_at = models.DateTimeField(null=True, blank=True)
     last_disconnected_at = models.DateTimeField(null=True, blank=True)
+    last_websocket_pong_at = models.DateTimeField(null=True, blank=True)
     last_config_revision = models.PositiveIntegerField(default=0)
     desired_config_revision = models.PositiveIntegerField(default=1)
     enabled = models.BooleanField(default=True)
@@ -68,8 +69,10 @@ class Agent(models.Model):
         }
 
     def mark_seen(self, status=AgentStatus.ONLINE, config_revision=None):
+        from api_agents.time import agent_utc_now
+
         self.status = status
-        self.last_seen_at = timezone.now()
+        self.last_seen_at = agent_utc_now()
         update_fields = ["status", "last_seen_at", "update_time"]
         if config_revision is not None:
             self.last_config_revision = config_revision
@@ -375,9 +378,15 @@ class AgentCommandEvent(models.Model):
 class AgentToolArtifact(models.Model):
     TOOL_GHOST = "gh-ost"
     TOOL_PT_OSC = "pt-online-schema-change"
+    TOOL_NODE_EXPORTER = "node_exporter"
+    TOOL_MYSQLD_EXPORTER = "mysqld_exporter"
+    TOOL_POSTGRES_EXPORTER = "postgres_exporter"
     TOOL_CHOICES = (
         (TOOL_GHOST, "gh-ost"),
         (TOOL_PT_OSC, "pt-online-schema-change"),
+        (TOOL_NODE_EXPORTER, "node_exporter"),
+        (TOOL_MYSQLD_EXPORTER, "mysqld_exporter"),
+        (TOOL_POSTGRES_EXPORTER, "postgres_exporter"),
     )
 
     tool_name = models.CharField(max_length=64, choices=TOOL_CHOICES)

@@ -2,13 +2,46 @@ from django.db import transaction
 from rest_framework import serializers
 
 from api_agents.models import Agent, AgentNodeAssignment
+from api_agents.services import notify_node_config_changed
+from api_agents.time import agent_datetime_to_utc_iso
 from sql.models import (
+    DEFAULT_NODE_EXPORTER_COLLECTORS,
     InfrastructureNode,
     Instance,
     InstanceTag,
     ResourceGroup,
     ServiceRecommendation,
+    normalize_service_monitoring_collectors,
+    service_exporter_collectors_for_engine,
 )
+
+NODE_EXPORTER_COLLECTOR_SET = set(DEFAULT_NODE_EXPORTER_COLLECTORS)
+
+
+def normalize_node_exporter_collectors(value):
+    if value in (None, ""):
+        return list(DEFAULT_NODE_EXPORTER_COLLECTORS)
+    if not isinstance(value, list):
+        raise serializers.ValidationError("Collectors must be a list.")
+
+    normalized = []
+    invalid = []
+    seen = set()
+    for item in value:
+        collector = str(item).strip()
+        if not collector:
+            continue
+        if collector not in NODE_EXPORTER_COLLECTOR_SET:
+            invalid.append(collector)
+            continue
+        if collector not in seen:
+            normalized.append(collector)
+            seen.add(collector)
+    if invalid:
+        raise serializers.ValidationError(
+            f"Unknown node_exporter collectors: {', '.join(sorted(set(invalid)))}."
+        )
+    return normalized
 
 
 def primary_node_agent(node):
@@ -36,6 +69,7 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
     engine = serializers.CharField(source="db_type", read_only=True)
     resource_group_ids = serializers.SerializerMethodField()
     service_tag_ids = serializers.SerializerMethodField()
+    monitoring_collectors = serializers.SerializerMethodField()
     inventory_last_refresh_at = serializers.DateTimeField(
         source="inventory_last_success_at", read_only=True
     )
@@ -48,6 +82,11 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
     def get_service_tag_ids(self, obj):
         return list(obj.instance_tag.values_list("id", flat=True).order_by("id"))
 
+    def get_monitoring_collectors(self, obj):
+        return normalize_service_monitoring_collectors(
+            obj.db_type, obj.monitoring_collectors
+        )
+
     class Meta:
         model = Instance
         fields = (
@@ -59,6 +98,8 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
             "host",
             "port",
             "user",
+            "monitoring_enabled",
+            "monitoring_collectors",
             "is_ssl",
             "verify_ssl",
             "db_name",
@@ -97,6 +138,7 @@ class ServiceRecommendationSerializer(serializers.ModelSerializer):
 
 class InfrastructureNodeSerializer(serializers.ModelSerializer):
     resource_group_ids = serializers.SerializerMethodField()
+    agent = serializers.SerializerMethodField()
     agent_id = serializers.SerializerMethodField()
     agent_status = serializers.SerializerMethodField()
     service_count = serializers.SerializerMethodField()
@@ -116,6 +158,30 @@ class InfrastructureNodeSerializer(serializers.ModelSerializer):
     def get_agent_status(self, obj):
         agent = primary_node_agent(obj)
         return agent.status if agent is not None else None
+
+    def get_agent(self, obj):
+        agent = primary_node_agent(obj)
+        if agent is None:
+            return None
+        return {
+            "id": agent.id,
+            "status": agent.status,
+            "hostname": agent.hostname,
+            "platform": agent.platform,
+            "architecture": agent.architecture,
+            "agent_version": agent.agent_version,
+            "last_seen_at": agent_datetime_to_utc_iso(agent.last_seen_at),
+            "last_websocket_pong_at": agent_datetime_to_utc_iso(
+                agent.last_websocket_pong_at
+            ),
+            "last_connected_at": agent_datetime_to_utc_iso(agent.last_connected_at),
+            "last_disconnected_at": agent_datetime_to_utc_iso(
+                agent.last_disconnected_at
+            ),
+            "last_config_revision": agent.last_config_revision,
+            "desired_config_revision": agent.desired_config_revision,
+            "enabled": agent.enabled,
+        }
 
     def get_service_count(self, obj):
         if hasattr(obj, "service_count"):
@@ -155,7 +221,10 @@ class InfrastructureNodeSerializer(serializers.ModelSerializer):
             "address",
             "description",
             "metadata",
+            "monitoring_enabled",
+            "monitoring_collectors",
             "resource_group_ids",
+            "agent",
             "agent_id",
             "agent_status",
             "service_count",
@@ -183,12 +252,13 @@ class InfrastructureNodeWriteSerializer(serializers.ModelSerializer):
 
     def validate_address(self, value):
         address = value.strip()
-        if not address:
-            raise serializers.ValidationError("Node address cannot be blank.")
         return address
 
     def validate_description(self, value):
         return value.strip()
+
+    def validate_monitoring_collectors(self, value):
+        return normalize_node_exporter_collectors(value)
 
     def create(self, validated_data):
         resource_groups = validated_data.pop("resource_group", [])
@@ -199,17 +269,47 @@ class InfrastructureNodeWriteSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         resource_groups = validated_data.pop("resource_group", None)
+        previous_monitoring_enabled = instance.monitoring_enabled
+        previous_monitoring_collectors = list(instance.monitoring_collectors or [])
         with transaction.atomic():
             for field, value in validated_data.items():
                 setattr(instance, field, value)
             instance.save()
             if resource_groups is not None:
                 instance.resource_group.set(resource_groups)
+            monitoring_changed = (
+                "monitoring_enabled" in validated_data
+                and previous_monitoring_enabled != instance.monitoring_enabled
+            )
+            collectors_changed = (
+                "monitoring_collectors" in validated_data
+                and previous_monitoring_collectors
+                != list(instance.monitoring_collectors or [])
+            )
+            if monitoring_changed or collectors_changed:
+                notify_node_config_changed(
+                    instance,
+                    summary={
+                        "action": "node.monitoring_changed",
+                        "node_id": instance.id,
+                        "monitoring_enabled": instance.monitoring_enabled,
+                        "monitoring_collectors": instance.monitoring_collectors,
+                    },
+                    reason="node.monitoring_changed",
+                )
         return instance
 
     class Meta:
         model = InfrastructureNode
-        fields = ("name", "address", "description", "metadata", "resource_group_ids")
+        fields = (
+            "name",
+            "address",
+            "description",
+            "metadata",
+            "monitoring_enabled",
+            "monitoring_collectors",
+            "resource_group_ids",
+        )
 
 
 class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
@@ -246,6 +346,11 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
         allow_null=True,
         write_only=True,
     )
+    monitoring_collectors = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        allow_empty=True,
+    )
 
     def validate_service_name(self, value):
         instance_name = value.strip()
@@ -273,6 +378,41 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
 
     def validate_charset(self, value):
         return value.strip()
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        engine = attrs.get("db_type") or getattr(self.instance, "db_type", "")
+        if "monitoring_collectors" in attrs:
+            collectors = attrs["monitoring_collectors"]
+            allowed = set(service_exporter_collectors_for_engine(engine))
+            invalid = sorted(
+                {
+                    str(collector).strip()
+                    for collector in collectors
+                    if str(collector).strip() not in allowed
+                }
+            )
+            if invalid:
+                raise serializers.ValidationError(
+                    {
+                        "monitoring_collectors": (
+                            "Unknown exporter collectors: " + ", ".join(invalid)
+                        )
+                    }
+                )
+            attrs["monitoring_collectors"] = normalize_service_monitoring_collectors(
+                engine, collectors
+            )
+        else:
+            attrs["monitoring_collectors"] = normalize_service_monitoring_collectors(
+                engine,
+                (
+                    getattr(self.instance, "monitoring_collectors", None)
+                    if self.instance is not None
+                    else None
+                ),
+            )
+        return attrs
 
     def create(self, validated_data):
         resource_groups = validated_data.pop("resource_group", [])
@@ -318,6 +458,8 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
             "port",
             "user",
             "password",
+            "monitoring_enabled",
+            "monitoring_collectors",
             "is_ssl",
             "verify_ssl",
             "db_name",

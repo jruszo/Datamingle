@@ -105,6 +105,12 @@ func (c Client) runOnce(ctx context.Context, handler Handler) error {
 		if message.Type == "" {
 			continue
 		}
+		if message.Type == "ping" {
+			if err := conn.WriteJSON(Message{Type: "pong", SentAt: message.SentAt}); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := handler(ctx, message); err != nil {
 			return err
 		}

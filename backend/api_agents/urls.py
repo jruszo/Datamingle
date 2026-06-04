@@ -61,6 +61,11 @@ urlpatterns = [
         name="agent-detail",
     ),
     path(
+        "v1/agents/<int:agent_id>/install-key/",
+        views.AgentInstallKeyView.as_view(),
+        name="agent-install-key",
+    ),
+    path(
         "v1/agents/<int:agent_id>/assignments/",
         views.AgentAssignmentListReplaceView.as_view(),
         name="agent-assignments",

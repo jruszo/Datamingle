@@ -1,3 +1,4 @@
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -6,9 +7,15 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from api_agents.models import Agent, AgentCommandStatus, AgentInstanceAssignment
+from api_agents.models import (
+    Agent,
+    AgentCommandStatus,
+    AgentInstanceAssignment,
+    AgentStatus,
+)
 from api_agents.services import build_agent_config
 from sql.models import (
+    DEFAULT_NODE_EXPORTER_COLLECTORS,
     InfrastructureNode,
     Instance,
     ResourceGroup,
@@ -27,11 +34,22 @@ def create_resource_group(name):
     )
 
 
-def create_node(name="db-node-01", address="10.0.0.10"):
+def create_node(
+    name="db-node-01",
+    address="10.0.0.10",
+    monitoring_enabled=True,
+    monitoring_collectors=None,
+):
     return InfrastructureNode.objects.create(
         name=name,
         address=address,
         description="Database host",
+        monitoring_enabled=monitoring_enabled,
+        monitoring_collectors=(
+            monitoring_collectors
+            if monitoring_collectors is not None
+            else list(DEFAULT_NODE_EXPORTER_COLLECTORS)
+        ),
     )
 
 
@@ -48,7 +66,13 @@ def create_instance(name="primary", node=None):
     )
 
 
-@override_settings(DATAMINGLE_AGENT_API_KEY_BACKEND="local")
+@override_settings(
+    DATAMINGLE_AGENT_API_KEY_BACKEND="workos",
+    WORKOS_API_KEY="sk_test_123",
+    WORKOS_CLIENT_ID="client_test_123",
+    WORKOS_ORGANIZATION_ID="org_test_123",
+    WORKOS_BASE_URL="https://api.workos.test/",
+)
 class InfrastructureNodeApiTests(APITestCase):
     def setUp(self):
         self.user = Users.objects.create_user(
@@ -62,8 +86,23 @@ class InfrastructureNodeApiTests(APITestCase):
 
     def test_node_list_includes_services_and_recommendations(self):
         group = create_resource_group("primary services")
-        node = create_node()
+        node = create_node(monitoring_enabled=False)
         node.resource_group.set([group])
+        agent = Agent.objects.create(
+            name="db-node-agent",
+            display_name="DB Node Agent",
+            local_node=node,
+            status=AgentStatus.ONLINE,
+            hostname="db-host-01",
+            platform="linux",
+            architecture="amd64",
+            agent_version="0.1.0",
+            last_seen_at=datetime(2026, 6, 3, 20, 7, 0),
+            last_websocket_pong_at=datetime(2026, 6, 3, 20, 8, 0),
+            last_connected_at=datetime(2026, 6, 3, 20, 6, 0),
+            last_config_revision=2,
+            desired_config_revision=3,
+        )
         service = create_instance("orders-primary", node=node)
         service.resource_group.set([group])
         ServiceRecommendation.objects.create(
@@ -84,15 +123,52 @@ class InfrastructureNodeApiTests(APITestCase):
         payload = response.json()["data"]["results"][0]
         self.assertEqual(payload["name"], node.name)
         self.assertEqual(payload["address"], node.address)
+        self.assertFalse(payload["monitoring_enabled"])
+        self.assertEqual(
+            payload["monitoring_collectors"], list(DEFAULT_NODE_EXPORTER_COLLECTORS)
+        )
         self.assertEqual(payload["resource_group_ids"], [group.group_id])
+        self.assertEqual(payload["agent_id"], agent.id)
+        self.assertEqual(payload["agent_status"], AgentStatus.ONLINE)
+        self.assertEqual(payload["agent"]["hostname"], "db-host-01")
+        self.assertEqual(payload["agent"]["platform"], "linux")
+        self.assertEqual(payload["agent"]["architecture"], "amd64")
+        self.assertEqual(payload["agent"]["agent_version"], "0.1.0")
+        self.assertEqual(payload["agent"]["last_seen_at"], "2026-06-03T20:07:00Z")
+        self.assertEqual(
+            payload["agent"]["last_websocket_pong_at"], "2026-06-03T20:08:00Z"
+        )
+        self.assertEqual(payload["agent"]["last_connected_at"], "2026-06-03T20:06:00Z")
+        self.assertEqual(payload["agent"]["last_config_revision"], 2)
+        agent.refresh_from_db()
+        self.assertEqual(
+            payload["agent"]["desired_config_revision"],
+            agent.desired_config_revision,
+        )
         self.assertEqual(payload["service_count"], 1)
         self.assertEqual(payload["recommendation_count"], 1)
         self.assertEqual(payload["services"][0]["service_name"], service.instance_name)
+        self.assertTrue(payload["services"][0]["monitoring_enabled"])
+        self.assertEqual(
+            payload["services"][0]["monitoring_collectors"],
+            ["global_status", "global_variables", "slave_status"],
+        )
         self.assertEqual(
             payload["recommendations"][0]["service_name"], "orders-replica"
         )
 
-    def test_create_service_under_node_syncs_local_agent_assignment(self):
+    @patch("api_agents.services.requests.post")
+    def test_create_service_under_node_syncs_local_agent_assignment(self, mock_post):
+        mock_post.return_value.json.return_value = {
+            "object": "api_key",
+            "id": "api_key_123",
+            "owner": {"type": "organization", "id": "org_test_123"},
+            "name": "Datamingle Agent",
+            "value": "sk_agent_created_once",
+            "obfuscated_value": "sk_...once",
+            "permissions": ["datamingle-agent:connect"],
+        }
+        mock_post.return_value.raise_for_status.return_value = None
         node = create_node()
 
         create_agent_response = self.client.post(
@@ -101,6 +177,7 @@ class InfrastructureNodeApiTests(APITestCase):
                 "name": "local-agent-01",
                 "display_name": "Local Agent",
                 "local_node": node.id,
+                "monitoring_enabled": False,
             },
             format="json",
         )
@@ -117,6 +194,8 @@ class InfrastructureNodeApiTests(APITestCase):
                 "port": 3306,
                 "user": "root",
                 "password": "secret",
+                "monitoring_enabled": True,
+                "monitoring_collectors": ["global_status", "binlog_size"],
                 "is_ssl": False,
                 "verify_ssl": True,
                 "db_name": "",
@@ -135,9 +214,68 @@ class InfrastructureNodeApiTests(APITestCase):
         assignment = AgentInstanceAssignment.objects.get(agent=agent, instance=service)
         self.assertEqual(assignment.local_node_id, node.id)
         self.assertTrue(assignment.command_enabled)
+        self.assertTrue(service.monitoring_enabled)
+        self.assertEqual(
+            service.monitoring_collectors, ["global_status", "binlog_size"]
+        )
+        agent.local_node.refresh_from_db()
+        self.assertFalse(agent.local_node.monitoring_enabled)
         config = build_agent_config(agent)
+        self.assertFalse(config["node"]["monitoring_enabled"])
         self.assertEqual(config["assignments"][0]["instance_id"], service.id)
         self.assertEqual(config["assignments"][0]["node_id"], node.id)
+        self.assertTrue(config["assignments"][0]["service_monitoring_enabled"])
+        self.assertEqual(
+            config["assignments"][0]["service_monitoring_collectors"],
+            ["global_status", "binlog_size"],
+        )
+        service_monitoring = {module["name"]: module for module in config["modules"]}[
+            "service_monitoring"
+        ]
+        self.assertTrue(service_monitoring["enabled"])
+        self.assertEqual(
+            service_monitoring["raw"]["services"][0]["username"],
+            "root",
+        )
+        self.assertEqual(
+            service_monitoring["raw"]["services"][0]["collectors"],
+            ["global_status", "binlog_size"],
+        )
+
+    def test_update_node_monitoring_bumps_agent_config_revision(self):
+        node = create_node()
+        agent = Agent.objects.create(name="agent-a", local_node=node)
+
+        response = self.client.patch(
+            f"/api/v1/infrastructure/nodes/{node.id}/",
+            {
+                "name": node.name,
+                "address": node.address,
+                "description": node.description,
+                "metadata": node.metadata,
+                "monitoring_enabled": False,
+                "monitoring_collectors": ["cpu", "meminfo", "filesystem"],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response.json()["data"]
+        self.assertFalse(payload["monitoring_enabled"])
+        self.assertEqual(
+            payload["monitoring_collectors"], ["cpu", "meminfo", "filesystem"]
+        )
+        node.refresh_from_db()
+        agent.refresh_from_db()
+        self.assertFalse(node.monitoring_enabled)
+        self.assertEqual(node.monitoring_collectors, ["cpu", "meminfo", "filesystem"])
+        self.assertEqual(agent.desired_config_revision, 2)
+        config = build_agent_config(agent)
+        self.assertFalse(config["node"]["monitoring_enabled"])
+        self.assertEqual(
+            config["modules"][-1]["raw"]["node_exporter"]["collectors"],
+            ["cpu", "meminfo", "filesystem"],
+        )
 
     def test_create_service_accepts_recommendation(self):
         node = create_node()

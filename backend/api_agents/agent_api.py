@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import permissions, serializers, status, views
 from rest_framework.response import Response
@@ -8,6 +9,7 @@ from rest_framework.response import Response
 from api_agents.authentication import AgentAPIKeyAuthentication
 from api_agents.models import AgentCommand, AgentCommandStatus, AgentStatus
 from api_agents.services import build_agent_config, complete_agent_workflow_command
+from api_agents.time import agent_datetime_to_utc_iso, agent_utc_now
 
 TERMINAL_COMMAND_STATUSES = {
     AgentCommandStatus.SUCCEEDED,
@@ -25,6 +27,7 @@ class IsAuthenticatedAgent(permissions.BasePermission):
 class AgentRegisterSerializer(serializers.Serializer):
     install_id = serializers.CharField(max_length=80)
     name = serializers.CharField(max_length=128, allow_blank=True, required=False)
+    address = serializers.CharField(max_length=200, allow_blank=True, required=False)
     hostname = serializers.CharField(max_length=255, allow_blank=True, required=False)
     platform = serializers.CharField(max_length=64, allow_blank=True, required=False)
     architecture = serializers.CharField(
@@ -88,34 +91,55 @@ class AgentRegisterView(views.APIView):
         if agent.install_id and agent.install_id != install_id:
             raise PermissionDenied("Agent install ID is already bound.")
 
-        now = timezone.now()
-        agent.install_id = install_id
-        agent.name = data.get("name") or agent.name
-        agent.hostname = data.get("hostname") or agent.hostname
-        agent.platform = data.get("platform") or agent.platform
-        agent.architecture = data.get("architecture") or agent.architecture
-        agent.agent_version = data.get("agent_version") or agent.agent_version
-        agent.last_seen_at = now
-        agent.last_connected_at = agent.last_connected_at or now
-        agent.last_config_revision = (
-            data.get("config_revision") or agent.last_config_revision
-        )
-        agent.status = AgentStatus.ONLINE
-        agent.save(
-            update_fields=[
-                "install_id",
-                "name",
-                "hostname",
-                "platform",
-                "architecture",
-                "agent_version",
-                "last_seen_at",
-                "last_connected_at",
-                "last_config_revision",
-                "status",
-                "update_time",
-            ]
-        )
+        now = agent_utc_now()
+        address = data.get("address", "").strip()
+        with transaction.atomic():
+            agent.install_id = install_id
+            agent.name = data.get("name") or agent.name
+            agent.hostname = data.get("hostname") or agent.hostname
+            agent.platform = data.get("platform") or agent.platform
+            agent.architecture = data.get("architecture") or agent.architecture
+            agent.agent_version = data.get("agent_version") or agent.agent_version
+            agent.last_seen_at = now
+            agent.last_connected_at = agent.last_connected_at or now
+            agent.last_config_revision = (
+                data.get("config_revision") or agent.last_config_revision
+            )
+            agent.status = AgentStatus.ONLINE
+            agent.save(
+                update_fields=[
+                    "install_id",
+                    "name",
+                    "hostname",
+                    "platform",
+                    "architecture",
+                    "agent_version",
+                    "last_seen_at",
+                    "last_connected_at",
+                    "last_config_revision",
+                    "status",
+                    "update_time",
+                ]
+            )
+            if agent.local_node_id:
+                node = agent.local_node
+                metadata = dict(node.metadata or {})
+                metadata["agent_host"] = {
+                    "agent_id": agent.id,
+                    "install_id": install_id,
+                    "hostname": agent.hostname,
+                    "platform": agent.platform,
+                    "architecture": agent.architecture,
+                    "agent_version": agent.agent_version,
+                    "last_registered_at": agent_datetime_to_utc_iso(now),
+                }
+                metadata["provisioning_status"] = "agent_registered"
+                node.metadata = metadata
+                update_fields = ["metadata", "update_time"]
+                if address:
+                    node.address = address
+                    update_fields.append("address")
+                node.save(update_fields=update_fields)
         return Response(
             {
                 "agent_id": agent.id,
@@ -148,13 +172,13 @@ class AgentHeartbeatView(views.APIView):
         if agent.install_id and agent.install_id != data["install_id"]:
             raise PermissionDenied("Agent install ID does not match.")
 
-        now = timezone.now()
+        now = agent_utc_now()
         metadata = dict(agent.metadata or {})
         metadata["module_health"] = data["module_health"]
         metadata["heartbeat"] = {
             "status": data["status"],
             "config_revision": data["config_revision"],
-            "received_at": now.isoformat(),
+            "received_at": agent_datetime_to_utc_iso(now),
         }
         agent.metadata = metadata
         agent.status = data["status"]

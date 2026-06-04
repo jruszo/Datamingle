@@ -4,7 +4,7 @@ from django.contrib.auth.models import Group, Permission
 from django.db import transaction
 from django.utils import timezone
 
-from api_agents.models import Agent, AgentStatus
+from api_agents.models import Agent, AgentStatus, AgentToolArtifact
 from common.auth import ensure_superadmin_group
 from common.utils.const import WorkflowType
 from sql.models import (
@@ -241,6 +241,7 @@ def seed_local_demo(write_line=None):
         _remove_legacy_seeded_users(log)
         instances = _seed_instances(resource_groups, tags, log)
         nodes = _seed_infrastructure_nodes(resource_groups, instances, log)
+        _seed_agent_tool_artifacts(log)
         _seed_workflow_settings(auth_groups, resource_groups, log)
 
     return {
@@ -408,6 +409,53 @@ def _seed_infrastructure_nodes(resource_groups, instances, log):
             )
         )
     return nodes
+
+
+def _seed_agent_tool_artifacts(log):
+    artifacts = [
+        {
+            "tool_name": AgentToolArtifact.TOOL_NODE_EXPORTER,
+            "version": "1.11.1",
+            "download_url": "https://github.com/prometheus/node_exporter/releases/download/v1.11.1/node_exporter-1.11.1.linux-amd64.tar.gz",
+            "sha256": "9f5ea48e5bc7b656f8a91a32e7d7deb89f70f73dabd0d974418aca15f37d6810",
+            "notes": "Local demo host metrics exporter.",
+        },
+        {
+            "tool_name": AgentToolArtifact.TOOL_MYSQLD_EXPORTER,
+            "version": "0.19.0",
+            "download_url": "https://github.com/prometheus/mysqld_exporter/releases/download/v0.19.0/mysqld_exporter-0.19.0.linux-amd64.tar.gz",
+            "sha256": "97238be558bd1a6aa6b9a927fa21d91dc5cabe6b9e00678b5cafa2bbb3899e72",
+            "notes": "Local demo MySQL service metrics exporter.",
+        },
+        {
+            "tool_name": AgentToolArtifact.TOOL_POSTGRES_EXPORTER,
+            "version": "0.19.1",
+            "download_url": "https://github.com/prometheus-community/postgres_exporter/releases/download/v0.19.1/postgres_exporter-0.19.1.linux-amd64.tar.gz",
+            "sha256": "229096c7988df6ca41fe5b4bf66865089971535e7f0d819c12c920ec64dd2bd0",
+            "notes": "Local demo PostgreSQL service metrics exporter.",
+        },
+    ]
+    for config in artifacts:
+        artifact, created = AgentToolArtifact.objects.update_or_create(
+            tool_name=config["tool_name"],
+            version=config["version"],
+            platform="linux",
+            architecture="amd64",
+            defaults={
+                "download_url": config["download_url"],
+                "sha256": config["sha256"],
+                "size_bytes": 0,
+                "enabled": True,
+                "notes": config["notes"],
+            },
+        )
+        log(
+            "Agent tool artifact {}: {} {}".format(
+                "created" if created else "updated",
+                artifact.tool_name,
+                artifact.version,
+            )
+        )
 
 
 def _seed_workflow_settings(auth_groups, resource_groups, log):

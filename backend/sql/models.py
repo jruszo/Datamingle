@@ -340,13 +340,200 @@ class InstanceTag(models.Model):
         verbose_name_plural = "Instance Tag"
 
 
+DEFAULT_NODE_EXPORTER_COLLECTORS = (
+    "arp",
+    "bcache",
+    "bcachefs",
+    "bonding",
+    "btrfs",
+    "conntrack",
+    "cpu",
+    "cpufreq",
+    "diskstats",
+    "dmi",
+    "edac",
+    "entropy",
+    "fibrechannel",
+    "filefd",
+    "filesystem",
+    "hwmon",
+    "infiniband",
+    "ipvs",
+    "kernel_hung",
+    "loadavg",
+    "mdadm",
+    "meminfo",
+    "netclass",
+    "netdev",
+    "netstat",
+    "nfs",
+    "nfsd",
+    "nvme",
+    "os",
+    "powersupplyclass",
+    "pressure",
+    "rapl",
+    "schedstat",
+    "selinux",
+    "sockstat",
+    "softnet",
+    "stat",
+    "tapestats",
+    "textfile",
+    "thermal_zone",
+    "time",
+    "timex",
+    "udp_queues",
+    "uname",
+    "vmstat",
+    "watchdog",
+    "xfs",
+    "zfs",
+)
+
+
+def default_node_exporter_collectors():
+    return list(DEFAULT_NODE_EXPORTER_COLLECTORS)
+
+
+MYSQLD_EXPORTER_COLLECTORS = (
+    "heartbeat.utc",
+    "info_schema.processlist.processes_by_user",
+    "info_schema.processlist.processes_by_host",
+    "mysql.user.privileges",
+    "perf_schema.indexiowaits",
+    "perf_schema.tablelocks",
+    "perf_schema.eventsstatements",
+    "perf_schema.eventsstatementssum",
+    "perf_schema.eventswaits",
+    "heartbeat",
+    "slave_hosts",
+    "info_schema.replica_host",
+    "info_schema.rocksdb_perf_context",
+    "perf_schema.file_events",
+    "perf_schema.file_instances",
+    "perf_schema.memory_events",
+    "perf_schema.replication_group_members",
+    "perf_schema.replication_group_member_stats",
+    "perf_schema.replication_applier_status_by_worker",
+    "sys.user_summary",
+    "info_schema.userstats",
+    "info_schema.clientstats",
+    "info_schema.tablestats",
+    "info_schema.schemastats",
+    "info_schema.innodb_cmp",
+    "info_schema.innodb_cmpmem",
+    "info_schema.query_response_time",
+    "engine_tokudb_status",
+    "engine_innodb_status",
+    "global_status",
+    "global_variables",
+    "slave_status",
+    "info_schema.processlist",
+    "mysql.user",
+    "info_schema.tables",
+    "info_schema.innodb_tablespaces",
+    "info_schema.innodb_metrics",
+    "auto_increment.columns",
+    "binlog_size",
+    "perf_schema.tableiowaits",
+)
+
+DEFAULT_MYSQLD_EXPORTER_COLLECTORS = (
+    "global_status",
+    "global_variables",
+    "slave_status",
+)
+
+POSTGRES_EXPORTER_COLLECTORS = (
+    "buffercache_summary",
+    "database",
+    "database_wraparound",
+    "locks",
+    "long_running_transactions",
+    "postmaster",
+    "process_idle",
+    "replication",
+    "replication_slot",
+    "roles",
+    "stat_activity_autovacuum",
+    "stat_bgwriter",
+    "stat_checkpointer",
+    "stat_database",
+    "stat_progress_vacuum",
+    "stat_statements",
+    "stat_statements.include_query",
+    "stat_user_tables",
+    "stat_wal_receiver",
+    "statio_user_indexes",
+    "statio_user_tables",
+    "wal",
+    "xlog_location",
+)
+
+DEFAULT_POSTGRES_EXPORTER_COLLECTORS = (
+    "database",
+    "locks",
+    "replication",
+    "replication_slot",
+    "roles",
+    "stat_bgwriter",
+    "stat_database",
+    "stat_progress_vacuum",
+    "stat_user_tables",
+    "statio_user_tables",
+    "wal",
+)
+
+
+def default_service_monitoring_collectors():
+    return []
+
+
+def service_exporter_collectors_for_engine(engine):
+    if engine == "mysql":
+        return list(MYSQLD_EXPORTER_COLLECTORS)
+    if engine == "pgsql":
+        return list(POSTGRES_EXPORTER_COLLECTORS)
+    return []
+
+
+def default_service_monitoring_collectors_for_engine(engine):
+    if engine == "mysql":
+        return list(DEFAULT_MYSQLD_EXPORTER_COLLECTORS)
+    if engine == "pgsql":
+        return list(DEFAULT_POSTGRES_EXPORTER_COLLECTORS)
+    return []
+
+
+def normalize_service_monitoring_collectors(engine, collectors):
+    allowed = service_exporter_collectors_for_engine(engine)
+    if collectors is None:
+        return default_service_monitoring_collectors_for_engine(engine)
+    allowed_set = set(allowed)
+    normalized = []
+    seen = set()
+    for collector in collectors:
+        collector = str(collector).strip()
+        if collector in allowed_set and collector not in seen:
+            normalized.append(collector)
+            seen.add(collector)
+    return normalized
+
+
 class InfrastructureNode(models.Model):
     """Server or host that owns one or more database services."""
 
     name = models.CharField("Node Name", max_length=128, unique=True)
-    address = models.CharField("Node Address", max_length=200, db_index=True)
+    address = models.CharField(
+        "Node Address", max_length=200, blank=True, default="", db_index=True
+    )
     description = models.TextField("Description", blank=True, default="")
     metadata = models.JSONField("Metadata", default=dict, blank=True)
+    monitoring_enabled = models.BooleanField("Monitoring Enabled", default=True)
+    monitoring_collectors = models.JSONField(
+        "Monitoring Collectors", default=default_node_exporter_collectors, blank=True
+    )
     enabled = models.BooleanField("Enabled", default=True)
     resource_group = models.ManyToManyField(
         ResourceGroup, verbose_name="Resource Group", blank=True
@@ -487,6 +674,13 @@ class Instance(models.Model, PasswordMixin):
     )
     password = EncryptedCharField(
         verbose_name="Password", max_length=300, default="", blank=True
+    )
+    monitoring_enabled = models.BooleanField("Monitoring Enabled", default=True)
+    monitoring_collectors = models.JSONField(
+        "Monitoring Collectors",
+        default=None,
+        blank=True,
+        null=True,
     )
     is_ssl = models.BooleanField("Enable SSL", default=False)
     verify_ssl = models.BooleanField("Verify Server SSL Certificate", default=True)
