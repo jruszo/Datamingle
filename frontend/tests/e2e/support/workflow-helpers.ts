@@ -23,8 +23,8 @@ export async function loginAs(page: Page, username: DemoUser) {
 
   await page.goto('/login')
   await page.evaluate((issuedTokens) => {
-    localStorage.setItem('archery.access_token', issuedTokens.access)
-    localStorage.setItem('archery.refresh_token', issuedTokens.refresh)
+    localStorage.setItem('workos.access_token', issuedTokens.access)
+    localStorage.setItem('workos.refresh_token', issuedTokens.refresh)
   }, tokens)
   await page.goto('/')
   await expect(page.getByRole('link', { name: 'Workflows' })).toBeVisible()

@@ -19,6 +19,8 @@ class WorkOSAuthenticationResult:
     profile_picture_url: str
     organization_id: str
     session_id: str
+    access_token: str = ""
+    refresh_token: str = ""
     role_slugs: Tuple[str, ...] = ()
 
     @property
@@ -185,8 +187,9 @@ class WorkOSAuthClient:
         user = _get_attr(response, "user")
         organization_id = _get_attr(response, "organization_id")
         access_token = _get_attr(response, "access_token")
+        refresh_token = _get_attr(response, "refresh_token")
 
-        if not user or not access_token:
+        if not user or not access_token or not refresh_token:
             raise SuspiciousOperation(
                 "WorkOS did not return a valid authentication payload."
             )
@@ -224,8 +227,25 @@ class WorkOSAuthClient:
             ).strip(),
             organization_id=str(organization_id or ""),
             session_id=str(session_id),
+            access_token=str(access_token or ""),
+            refresh_token=str(refresh_token or ""),
             role_slugs=role_slugs,
         )
+
+    def authenticate_with_refresh_token(
+        self, refresh_token, ip_address="", user_agent=""
+    ):
+        response = self.client.user_management.authenticate_with_refresh_token(
+            refresh_token=refresh_token,
+            organization_id=settings.WORKOS_ORGANIZATION_ID,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        access_token = str(_get_attr(response, "access_token", "") or "")
+        next_refresh_token = str(_get_attr(response, "refresh_token", "") or "")
+        if not access_token or not next_refresh_token:
+            raise SuspiciousOperation("WorkOS did not return refreshed tokens.")
+        return {"access": access_token, "refresh": next_refresh_token}
 
     def _organization_membership_role_slugs(
         self, user_id, organization_id, organization_membership_id=""

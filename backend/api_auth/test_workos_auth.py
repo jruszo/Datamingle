@@ -9,11 +9,14 @@ from django.contrib.auth.models import Group
 from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 from rest_framework import status
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.test import APIRequestFactory
 from rest_framework.test import APITestCase
 
 from common.config import SysConfig
 from common.auth import SUPERADMIN_GROUP_NAME
 from common.authenticate.workos import WorkOSAuthClient
+from common.authenticate.workos_jwt import WorkOSJWTAuthentication
 from common.authenticate.workos_directory import process_directory_event
 from sql.models import (
     ResourceGroup,
@@ -110,6 +113,7 @@ class WorkOSAuthClientConfigTests(APITestCase):
                             "roles": ["admin"],
                         }
                     ),
+                    refresh_token="workos_refresh_123",
                 )
             )
         )
@@ -125,6 +129,8 @@ class WorkOSAuthClientConfigTests(APITestCase):
             auth_result.role_slugs,
             ("admin",),
         )
+        self.assertTrue(auth_result.access_token)
+        self.assertEqual(auth_result.refresh_token, "workos_refresh_123")
 
     def test_authenticate_with_code_refreshes_organization_membership_roles(self):
         client = WorkOSAuthClient.__new__(WorkOSAuthClient)
@@ -155,6 +161,7 @@ class WorkOSAuthClientConfigTests(APITestCase):
                     ),
                     organization_id="org_test_123",
                     access_token=_jwt({"sid": "session_123"}),
+                    refresh_token="workos_refresh_123",
                 ),
                 list_organization_memberships=list_organization_memberships,
             )
@@ -179,6 +186,51 @@ class WorkOSAuthClientConfigTests(APITestCase):
                 }
             ],
         )
+
+
+class WorkOSJWTAuthenticationTests(APITestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.user = Users.objects.create_user(
+            username="jwt@datamingle.dev",
+            email="jwt@datamingle.dev",
+            display="JWT User",
+            is_active=True,
+            workos_user_id="user_jwt_123",
+        )
+
+    @patch("common.authenticate.workos_jwt.WorkOSJWTVerifier.verify")
+    def test_authenticates_linked_workos_user(self, mock_verify):
+        mock_verify.return_value = {
+            "sub": "user_jwt_123",
+            "user_id": "user_jwt_123",
+            "org_id": "org_test_123",
+        }
+        request = self.factory.get(
+            "/api/v1/user/current/",
+            HTTP_AUTHORIZATION="Bearer workos_access_123",
+        )
+
+        user, payload = WorkOSJWTAuthentication().authenticate(request)
+
+        self.assertEqual(user.pk, self.user.pk)
+        self.assertEqual(payload["org_id"], "org_test_123")
+        self.assertEqual(user.organization_id, "org_test_123")
+
+    @patch("common.authenticate.workos_jwt.WorkOSJWTVerifier.verify")
+    def test_rejects_unlinked_workos_user(self, mock_verify):
+        mock_verify.return_value = {
+            "sub": "user_missing",
+            "user_id": "user_missing",
+            "org_id": "org_test_123",
+        }
+        request = self.factory.get(
+            "/api/v1/user/current/",
+            HTTP_AUTHORIZATION="Bearer workos_access_123",
+        )
+
+        with self.assertRaises(AuthenticationFailed):
+            WorkOSJWTAuthentication().authenticate(request)
 
 
 class FakeRedis:
@@ -278,7 +330,7 @@ class WorkOSAuthApiTests(APITestCase):
 
     @patch("api_auth.views.get_redis_connection")
     @patch("api_auth.views.WorkOSAuthClient")
-    def test_callback_jit_provisions_user_and_exchange_returns_local_tokens(
+    def test_callback_jit_provisions_user_and_exchange_returns_workos_tokens(
         self, mock_client_class, mock_redis_connection
     ):
         mock_redis_connection.return_value = self.redis
@@ -291,6 +343,8 @@ class WorkOSAuthApiTests(APITestCase):
             profile_picture_url="https://images.workos.dev/avatar.png",
             organization_id="org_test_123",
             session_id="session_123",
+            access_token="workos_access_123",
+            refresh_token="workos_refresh_123",
             display_name="Admin User",
         )
 
@@ -326,8 +380,8 @@ class WorkOSAuthApiTests(APITestCase):
 
         self.assertEqual(exchange_response.status_code, status.HTTP_200_OK)
         payload = exchange_response.json()["data"]
-        self.assertIn("access", payload)
-        self.assertIn("refresh", payload)
+        self.assertEqual(payload["access"], "workos_access_123")
+        self.assertEqual(payload["refresh"], "workos_refresh_123")
         self.assertIsNone(self.redis.get(f"workos-exchange-code:{exchange_code}"))
 
     @patch("api_auth.views.get_redis_connection")
@@ -352,6 +406,8 @@ class WorkOSAuthApiTests(APITestCase):
             profile_picture_url="",
             organization_id="org_test_123",
             session_id="session_123",
+            access_token="workos_access_123",
+            refresh_token="workos_refresh_123",
             display_name="Temporary Admin",
             role_slugs=("admin",),
         )
@@ -376,6 +432,8 @@ class WorkOSAuthApiTests(APITestCase):
             profile_picture_url="",
             organization_id="org_test_123",
             session_id="session_456",
+            access_token="workos_access_456",
+            refresh_token="workos_refresh_456",
             display_name="Temporary Admin",
             role_slugs=("member",),
         )
@@ -410,6 +468,24 @@ class WorkOSAuthApiTests(APITestCase):
             response.json()["errors"],
             "The WorkOS login exchange code is invalid or expired.",
         )
+
+    @patch("api_auth.views.WorkOSAuthClient")
+    def test_token_refresh_returns_workos_tokens(self, mock_client_class):
+        mock_client_class.return_value.authenticate_with_refresh_token.return_value = {
+            "access": "workos_access_refreshed",
+            "refresh": "workos_refresh_rotated",
+        }
+
+        response = self.client.post(
+            "/api/auth/token/refresh/",
+            {"refresh": "workos_refresh_old"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response.json()["data"]
+        self.assertEqual(payload["access"], "workos_access_refreshed")
+        self.assertEqual(payload["refresh"], "workos_refresh_rotated")
 
     @patch("api_auth.views.WorkOSAuthClient")
     def test_logout_redirects_through_workos_when_session_cookie_present(

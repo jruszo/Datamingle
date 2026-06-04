@@ -2,7 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
 import { fetchCurrentUserContext, type CurrentUserContext } from '@/shared/auth/api'
-import { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, setStoredTokens } from '@/shared/auth/auth'
+import { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, clearStoredTokens, setStoredTokens } from '@/shared/auth/auth'
 
 export const useAuthStore = defineStore('auth', () => {
   const accessToken = ref(localStorage.getItem(ACCESS_TOKEN_KEY) || '')
@@ -29,8 +29,7 @@ export const useAuthStore = defineStore('auth', () => {
     refreshToken.value = ''
     currentUser.value = null
     currentUserRequest.value = null
-    localStorage.removeItem(ACCESS_TOKEN_KEY)
-    localStorage.removeItem(REFRESH_TOKEN_KEY)
+    clearStoredTokens()
   }
 
   function setCurrentUser(user: CurrentUserContext | null) {

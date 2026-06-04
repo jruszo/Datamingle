@@ -1,7 +1,10 @@
-export const ACCESS_TOKEN_KEY = 'archery.access_token'
-export const REFRESH_TOKEN_KEY = 'archery.refresh_token'
+export const ACCESS_TOKEN_KEY = 'workos.access_token'
+export const REFRESH_TOKEN_KEY = 'workos.refresh_token'
 export const AUTH_UNAUTHORIZED_EVENT = 'archery:auth-unauthorized'
 export const AUTH_TOKENS_UPDATED_EVENT = 'archery:auth-tokens-updated'
+
+const LEGACY_ACCESS_TOKEN_KEY = 'archery.access_token'
+const LEGACY_REFRESH_TOKEN_KEY = 'archery.refresh_token'
 
 import {
   buildUrl,
@@ -62,6 +65,8 @@ export function getStoredRefreshToken(): string {
 export function setStoredTokens(access: string, refresh: string) {
   localStorage.setItem(ACCESS_TOKEN_KEY, access)
   localStorage.setItem(REFRESH_TOKEN_KEY, refresh)
+  localStorage.removeItem(LEGACY_ACCESS_TOKEN_KEY)
+  localStorage.removeItem(LEGACY_REFRESH_TOKEN_KEY)
   window.dispatchEvent(
     new CustomEvent(AUTH_TOKENS_UPDATED_EVENT, {
       detail: { access, refresh },
@@ -72,6 +77,8 @@ export function setStoredTokens(access: string, refresh: string) {
 export function clearStoredTokens() {
   localStorage.removeItem(ACCESS_TOKEN_KEY)
   localStorage.removeItem(REFRESH_TOKEN_KEY)
+  localStorage.removeItem(LEGACY_ACCESS_TOKEN_KEY)
+  localStorage.removeItem(LEGACY_REFRESH_TOKEN_KEY)
 }
 
 export function notifyUnauthorized(message: string) {

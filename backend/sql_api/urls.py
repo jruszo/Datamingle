@@ -25,6 +25,7 @@ urlpatterns = [
     path("", include("api_mailbox.urls")),
     path("", include("api_agents.urls")),
     path("", include("api_infrastructure.urls")),
+    path("", include("api_metrics.urls")),
     path("schema/", SpectacularAPIView.as_view(), name="schema"),
     path(
         "swagger/",

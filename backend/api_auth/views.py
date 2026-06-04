@@ -15,11 +15,9 @@ from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status, permissions, views
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
-from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
-
 from common.auth import SUPERADMIN_GROUP_NAME, ensure_superadmin_group, init_user
 from common.authenticate.workos import WorkOSAuthClient
+from common.authenticate.workos_jwt import WorkOSJWTVerifier
 from common.celery_tasks import process_workos_webhook_task
 from sql.models import Users
 from api_core.response import success_response
@@ -52,11 +50,6 @@ def _workos_logout_return_uri(request):
 def _login_redirect_with_error(message):
     query = urlencode({"error": message})
     return HttpResponseRedirect(f"/login?{query}")
-
-
-def _issue_local_token_pair(user):
-    refresh = RefreshToken.for_user(user)
-    return {"access": str(refresh.access_token), "refresh": str(refresh)}
 
 
 def _workos_attr(source, name, default=""):
@@ -327,28 +320,50 @@ def _provision_or_update_workos_user(auth_result):
     return user
 
 
-class SPATokenRefreshView(TokenRefreshView):
+class WorkOSTokenRefreshSerializer(serializers.Serializer):
+    refresh = serializers.CharField()
+
+
+class SPATokenRefreshView(views.APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request, *args, **kwargs):
-        response = super().post(request, *args, **kwargs)
-        if response.status_code < 400:
-            return success_response(
-                data=response.data, status_code=response.status_code
+        serializer = WorkOSTokenRefreshSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            tokens = WorkOSAuthClient().authenticate_with_refresh_token(
+                refresh_token=serializer.validated_data["refresh"],
+                ip_address=request.META.get("REMOTE_ADDR", ""),
+                user_agent=request.META.get("HTTP_USER_AGENT", ""),
             )
-        return response
+        except Exception as exc:
+            return Response(
+                {"detail": str(exc) or "Unable to refresh WorkOS session."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        return success_response(data=tokens)
 
 
-class SPATokenVerifyView(TokenVerifyView):
+class SPATokenVerifyView(views.APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request, *args, **kwargs):
-        response = super().post(request, *args, **kwargs)
-        if response.status_code < 400:
-            return success_response(
-                data=response.data, status_code=response.status_code
+        token = str(request.data.get("token", "") or "").strip()
+        if not token:
+            return Response(
+                {"detail": "Token is required."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        return response
+        try:
+            WorkOSJWTVerifier().verify(token)
+        except Exception as exc:
+            return Response(
+                {"detail": str(exc) or "Invalid WorkOS access token."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        return success_response()
 
 
 class WorkOSAuthorizeView(views.APIView):
@@ -403,7 +418,13 @@ class WorkOSCallbackView(views.APIView):
             redis_connection = get_redis_connection("default")
             redis_connection.set(
                 f"{WORKOS_EXCHANGE_PREFIX}{exchange_code}",
-                json.dumps({"user_id": user.pk}),
+                json.dumps(
+                    {
+                        "user_id": user.pk,
+                        "access": auth_result.access_token,
+                        "refresh": auth_result.refresh_token,
+                    }
+                ),
                 ex=60,
             )
 
@@ -466,7 +487,20 @@ class WorkOSExchangeView(views.APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        return success_response(data=_issue_local_token_pair(user))
+        access_token = str(data.get("access") or "")
+        refresh_token = str(data.get("refresh") or "")
+        if not access_token or not refresh_token:
+            return Response(
+                {"errors": "The WorkOS login exchange payload is incomplete."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return success_response(
+            data={
+                "access": access_token,
+                "refresh": refresh_token,
+            }
+        )
 
 
 class WorkOSProfileUpdateSerializer(serializers.Serializer):
