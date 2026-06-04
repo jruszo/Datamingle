@@ -27,7 +27,7 @@ from common.utils.const import WorkflowType
 from sql.engines import ResultSet
 from sql.engines.models import ReviewResult, ReviewSet
 from sql.mailbox import emit_execution_finished_notifications, resolve_mailbox_items
-from sql.models import SqlWorkflow
+from sql.models import DEFAULT_NODE_EXPORTER_COLLECTORS, SqlWorkflow
 from sql.utils.workflow_audit import Audit
 from api_agents.models import (
     Agent,
@@ -299,6 +299,11 @@ def serialize_assignment(assignment):
         "node_monitoring_enabled": (
             instance.node.monitoring_enabled if instance.node_id else False
         ),
+        "node_monitoring_collectors": (
+            list(instance.node.monitoring_collectors or [])
+            if instance.node_id
+            else list(DEFAULT_NODE_EXPORTER_COLLECTORS)
+        ),
         "db_type": instance.db_type,
         "host": instance.host,
         "port": instance.port,
@@ -325,6 +330,7 @@ def serialize_node(node):
         "name": node.name,
         "address": node.address,
         "monitoring_enabled": node.monitoring_enabled,
+        "monitoring_collectors": list(node.monitoring_collectors or []),
     }
 
 
@@ -611,6 +617,11 @@ def build_node_monitoring_module_config(agent):
         "node_exporter": {
             "listen_address": "127.0.0.1:9100",
             "metrics_url": "http://127.0.0.1:9100/metrics",
+            "collectors": (
+                list(agent.local_node.monitoring_collectors or [])
+                if agent.local_node_id
+                else list(DEFAULT_NODE_EXPORTER_COLLECTORS)
+            ),
             "artifact": serialize_tool_artifact(artifact) if artifact else None,
         },
         "labels": {

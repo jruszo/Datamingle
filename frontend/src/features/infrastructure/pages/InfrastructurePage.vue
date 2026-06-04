@@ -31,6 +31,61 @@ import {
 
 const authStore = useAuthStore()
 
+const DEFAULT_NODE_EXPORTER_COLLECTORS = [
+  'arp',
+  'bcache',
+  'bcachefs',
+  'bonding',
+  'btrfs',
+  'conntrack',
+  'cpu',
+  'cpufreq',
+  'diskstats',
+  'dmi',
+  'edac',
+  'entropy',
+  'fibrechannel',
+  'filefd',
+  'filesystem',
+  'hwmon',
+  'infiniband',
+  'ipvs',
+  'kernel_hung',
+  'loadavg',
+  'mdadm',
+  'meminfo',
+  'netclass',
+  'netdev',
+  'netstat',
+  'nfs',
+  'nfsd',
+  'nvme',
+  'os',
+  'powersupplyclass',
+  'pressure',
+  'rapl',
+  'schedstat',
+  'selinux',
+  'sockstat',
+  'softnet',
+  'stat',
+  'tapestats',
+  'textfile',
+  'thermal_zone',
+  'time',
+  'timex',
+  'udp_queues',
+  'uname',
+  'vmstat',
+  'watchdog',
+  'xfs',
+  'zfs',
+]
+
+type MonitoringCollectorForm = {
+  monitoring_collectors: string[]
+}
+
 const nodes = ref<InfrastructureNodeRecord[]>([])
 const selectedNode = ref<InfrastructureNodeDetailRecord | null>(null)
 const metadata = ref<InstanceInventoryMetadata | null>(null)
@@ -59,6 +114,7 @@ const nodeForm = reactive<InfrastructureNodePayload>({
   description: '',
   metadata: {},
   monitoring_enabled: true,
+  monitoring_collectors: [...DEFAULT_NODE_EXPORTER_COLLECTORS],
 })
 
 const isServiceDialogOpen = ref(false)
@@ -92,6 +148,7 @@ const createdAgent = ref<AgentCreateResponse | null>(null)
 const agentForm = reactive({
   node_name: '',
   monitoring_enabled: true,
+  monitoring_collectors: [...DEFAULT_NODE_EXPORTER_COLLECTORS],
 })
 const agentTargetNodeId = ref<number | null>(null)
 
@@ -135,6 +192,48 @@ function toUserFacingMessage(errorValue: unknown, fallback: string) {
   return separatorIndex === -1
     ? errorValue.message
     : errorValue.message.slice(separatorIndex + separator.length)
+}
+
+function orderedCollectors(collectors?: string[]) {
+  const selected = new Set((collectors ?? DEFAULT_NODE_EXPORTER_COLLECTORS).filter(Boolean))
+  return DEFAULT_NODE_EXPORTER_COLLECTORS.filter((collector) => selected.has(collector))
+}
+
+function setMonitoringCollectors(target: MonitoringCollectorForm, collectors?: string[]) {
+  target.monitoring_collectors.splice(
+    0,
+    target.monitoring_collectors.length,
+    ...orderedCollectors(collectors),
+  )
+}
+
+function isMonitoringCollectorSelected(target: MonitoringCollectorForm, collector: string) {
+  return target.monitoring_collectors.includes(collector)
+}
+
+function toggleMonitoringCollector(
+  target: MonitoringCollectorForm,
+  collector: string,
+  event: Event,
+) {
+  const checked = (event.target as HTMLInputElement).checked
+  if (checked && !target.monitoring_collectors.includes(collector)) {
+    setMonitoringCollectors(target, [...target.monitoring_collectors, collector])
+  }
+  if (!checked) {
+    setMonitoringCollectors(
+      target,
+      target.monitoring_collectors.filter((selected) => selected !== collector),
+    )
+  }
+}
+
+function selectAllMonitoringCollectors(target: MonitoringCollectorForm) {
+  setMonitoringCollectors(target, DEFAULT_NODE_EXPORTER_COLLECTORS)
+}
+
+function resetDefaultMonitoringCollectors(target: MonitoringCollectorForm) {
+  setMonitoringCollectors(target, DEFAULT_NODE_EXPORTER_COLLECTORS)
 }
 
 function statusBadgeClass(status: string | null) {
@@ -303,6 +402,7 @@ function resetNodeForm() {
   nodeForm.description = ''
   nodeForm.metadata = {}
   nodeForm.monitoring_enabled = true
+  setMonitoringCollectors(nodeForm)
   nodeFormError.value = ''
 }
 
@@ -315,6 +415,7 @@ function openNodeDialog(node?: InfrastructureNodeRecord) {
     nodeForm.description = node.description
     nodeForm.metadata = node.metadata
     nodeForm.monitoring_enabled = node.monitoring_enabled
+    setMonitoringCollectors(nodeForm, node.monitoring_collectors)
   }
   isNodeDialogOpen.value = true
 }
@@ -342,6 +443,7 @@ async function submitNode() {
       description: nodeForm.description.trim(),
       metadata: nodeForm.metadata,
       monitoring_enabled: nodeForm.monitoring_enabled,
+      monitoring_collectors: [...nodeForm.monitoring_collectors],
     }
     const detail = await updateInfrastructureNode(editingNodeId.value, payload, requireToken())
     selectedNode.value = detail
@@ -456,6 +558,7 @@ function openNewNodeDialog() {
   agentTargetNodeId.value = null
   agentForm.node_name = ''
   agentForm.monitoring_enabled = true
+  setMonitoringCollectors(agentForm)
   agentFormError.value = ''
   createdAgent.value = null
   isAgentDialogOpen.value = true
@@ -465,6 +568,7 @@ function openAgentDialog() {
   agentTargetNodeId.value = selectedNode.value?.id ?? null
   agentForm.node_name = selectedNode.value?.name ?? ''
   agentForm.monitoring_enabled = selectedNode.value?.monitoring_enabled ?? true
+  setMonitoringCollectors(agentForm, selectedNode.value?.monitoring_collectors)
   agentFormError.value = ''
   createdAgent.value = null
   isAgentDialogOpen.value = true
@@ -489,10 +593,12 @@ async function submitAgent() {
         ? {
             local_node: agentTargetNodeId.value,
             monitoring_enabled: agentForm.monitoring_enabled,
+            monitoring_collectors: [...agentForm.monitoring_collectors],
           }
         : {
             node_name: agentForm.node_name.trim(),
             monitoring_enabled: agentForm.monitoring_enabled,
+            monitoring_collectors: [...agentForm.monitoring_collectors],
           },
       requireToken(),
     )
@@ -1085,6 +1191,55 @@ watch([currentPage, pageSize], () => {
             />
             Enable monitoring
           </label>
+          <details
+            class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3"
+            :class="{ 'opacity-60': !nodeForm.monitoring_enabled }"
+          >
+            <summary class="cursor-pointer text-sm font-medium text-slate-800">
+              Advanced collectors
+              <span class="ml-2 text-xs font-normal text-slate-500">
+                {{ nodeForm.monitoring_collectors.length }} selected
+              </span>
+            </summary>
+            <div class="mt-4 grid gap-4">
+              <div class="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  :disabled="!nodeForm.monitoring_enabled"
+                  @click="selectAllMonitoringCollectors(nodeForm)"
+                >
+                  Select all
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  :disabled="!nodeForm.monitoring_enabled"
+                  @click="resetDefaultMonitoringCollectors(nodeForm)"
+                >
+                  Reset defaults
+                </Button>
+              </div>
+              <div class="grid max-h-56 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 md:grid-cols-3">
+                <label
+                  v-for="collector in DEFAULT_NODE_EXPORTER_COLLECTORS"
+                  :key="collector"
+                  class="flex min-w-0 items-center gap-2 rounded-md bg-white px-2 py-1.5 text-sm text-slate-700"
+                >
+                  <input
+                    :checked="isMonitoringCollectorSelected(nodeForm, collector)"
+                    :disabled="!nodeForm.monitoring_enabled"
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-slate-300"
+                    @change="toggleMonitoringCollector(nodeForm, collector, $event)"
+                  />
+                  <span class="truncate">{{ collector }}</span>
+                </label>
+              </div>
+            </div>
+          </details>
         </div>
         <div class="flex justify-end gap-2 border-t border-slate-200 px-6 py-4">
           <Button variant="outline" type="button" @click="closeNodeDialog">Cancel</Button>
@@ -1257,6 +1412,55 @@ watch([currentPage, pageSize], () => {
             />
             Enable monitoring
           </label>
+          <details
+            class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3"
+            :class="{ 'opacity-60': !agentForm.monitoring_enabled }"
+          >
+            <summary class="cursor-pointer text-sm font-medium text-slate-800">
+              Advanced collectors
+              <span class="ml-2 text-xs font-normal text-slate-500">
+                {{ agentForm.monitoring_collectors.length }} selected
+              </span>
+            </summary>
+            <div class="mt-4 grid gap-4">
+              <div class="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  :disabled="!agentForm.monitoring_enabled"
+                  @click="selectAllMonitoringCollectors(agentForm)"
+                >
+                  Select all
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  :disabled="!agentForm.monitoring_enabled"
+                  @click="resetDefaultMonitoringCollectors(agentForm)"
+                >
+                  Reset defaults
+                </Button>
+              </div>
+              <div class="grid max-h-56 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 md:grid-cols-3">
+                <label
+                  v-for="collector in DEFAULT_NODE_EXPORTER_COLLECTORS"
+                  :key="collector"
+                  class="flex min-w-0 items-center gap-2 rounded-md bg-white px-2 py-1.5 text-sm text-slate-700"
+                >
+                  <input
+                    :checked="isMonitoringCollectorSelected(agentForm, collector)"
+                    :disabled="!agentForm.monitoring_enabled"
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-slate-300"
+                    @change="toggleMonitoringCollector(agentForm, collector, $event)"
+                  />
+                  <span class="truncate">{{ collector }}</span>
+                </label>
+              </div>
+            </div>
+          </details>
           <div class="flex justify-end gap-2 border-t border-slate-200 pt-4">
             <Button variant="outline" type="button" @click="closeAgentDialog">Cancel</Button>
             <Button type="submit" :disabled="agentSaving">

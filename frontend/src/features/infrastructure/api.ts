@@ -31,6 +31,7 @@ export type InfrastructureNodePayload = {
   description: string
   metadata: Record<string, unknown>
   monitoring_enabled: boolean
+  monitoring_collectors: string[]
   resource_group_ids?: number[]
 }
 

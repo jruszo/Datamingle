@@ -340,6 +340,62 @@ class InstanceTag(models.Model):
         verbose_name_plural = "Instance Tag"
 
 
+DEFAULT_NODE_EXPORTER_COLLECTORS = (
+    "arp",
+    "bcache",
+    "bcachefs",
+    "bonding",
+    "btrfs",
+    "conntrack",
+    "cpu",
+    "cpufreq",
+    "diskstats",
+    "dmi",
+    "edac",
+    "entropy",
+    "fibrechannel",
+    "filefd",
+    "filesystem",
+    "hwmon",
+    "infiniband",
+    "ipvs",
+    "kernel_hung",
+    "loadavg",
+    "mdadm",
+    "meminfo",
+    "netclass",
+    "netdev",
+    "netstat",
+    "nfs",
+    "nfsd",
+    "nvme",
+    "os",
+    "powersupplyclass",
+    "pressure",
+    "rapl",
+    "schedstat",
+    "selinux",
+    "sockstat",
+    "softnet",
+    "stat",
+    "tapestats",
+    "textfile",
+    "thermal_zone",
+    "time",
+    "timex",
+    "udp_queues",
+    "uname",
+    "vmstat",
+    "watchdog",
+    "xfs",
+    "zfs",
+)
+
+
+def default_node_exporter_collectors():
+    return list(DEFAULT_NODE_EXPORTER_COLLECTORS)
+
+
 class InfrastructureNode(models.Model):
     """Server or host that owns one or more database services."""
 
@@ -350,6 +406,9 @@ class InfrastructureNode(models.Model):
     description = models.TextField("Description", blank=True, default="")
     metadata = models.JSONField("Metadata", default=dict, blank=True)
     monitoring_enabled = models.BooleanField("Monitoring Enabled", default=True)
+    monitoring_collectors = models.JSONField(
+        "Monitoring Collectors", default=default_node_exporter_collectors, blank=True
+    )
     enabled = models.BooleanField("Enabled", default=True)
     resource_group = models.ManyToManyField(
         ResourceGroup, verbose_name="Resource Group", blank=True

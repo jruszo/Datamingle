@@ -15,6 +15,7 @@ from api_agents.models import (
 )
 from api_agents.services import build_agent_config
 from sql.models import (
+    DEFAULT_NODE_EXPORTER_COLLECTORS,
     InfrastructureNode,
     Instance,
     ResourceGroup,
@@ -33,12 +34,22 @@ def create_resource_group(name):
     )
 
 
-def create_node(name="db-node-01", address="10.0.0.10", monitoring_enabled=True):
+def create_node(
+    name="db-node-01",
+    address="10.0.0.10",
+    monitoring_enabled=True,
+    monitoring_collectors=None,
+):
     return InfrastructureNode.objects.create(
         name=name,
         address=address,
         description="Database host",
         monitoring_enabled=monitoring_enabled,
+        monitoring_collectors=(
+            monitoring_collectors
+            if monitoring_collectors is not None
+            else list(DEFAULT_NODE_EXPORTER_COLLECTORS)
+        ),
     )
 
 
@@ -113,6 +124,9 @@ class InfrastructureNodeApiTests(APITestCase):
         self.assertEqual(payload["name"], node.name)
         self.assertEqual(payload["address"], node.address)
         self.assertFalse(payload["monitoring_enabled"])
+        self.assertEqual(
+            payload["monitoring_collectors"], list(DEFAULT_NODE_EXPORTER_COLLECTORS)
+        )
         self.assertEqual(payload["resource_group_ids"], [group.group_id])
         self.assertEqual(payload["agent_id"], agent.id)
         self.assertEqual(payload["agent_status"], AgentStatus.ONLINE)
@@ -212,6 +226,7 @@ class InfrastructureNodeApiTests(APITestCase):
                 "description": node.description,
                 "metadata": node.metadata,
                 "monitoring_enabled": False,
+                "monitoring_collectors": ["cpu", "meminfo", "filesystem"],
             },
             format="json",
         )
@@ -219,11 +234,20 @@ class InfrastructureNodeApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         payload = response.json()["data"]
         self.assertFalse(payload["monitoring_enabled"])
+        self.assertEqual(
+            payload["monitoring_collectors"], ["cpu", "meminfo", "filesystem"]
+        )
         node.refresh_from_db()
         agent.refresh_from_db()
         self.assertFalse(node.monitoring_enabled)
+        self.assertEqual(node.monitoring_collectors, ["cpu", "meminfo", "filesystem"])
         self.assertEqual(agent.desired_config_revision, 2)
-        self.assertFalse(build_agent_config(agent)["node"]["monitoring_enabled"])
+        config = build_agent_config(agent)
+        self.assertFalse(config["node"]["monitoring_enabled"])
+        self.assertEqual(
+            config["modules"][-1]["raw"]["node_exporter"]["collectors"],
+            ["cpu", "meminfo", "filesystem"],
+        )
 
     def test_create_service_accepts_recommendation(self):
         node = create_node()

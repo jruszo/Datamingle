@@ -11,7 +11,40 @@ from api_agents.models import (
     AgentNodeAssignment,
     AgentToolArtifact,
 )
-from sql.models import InfrastructureNode, Instance
+from sql.models import (
+    DEFAULT_NODE_EXPORTER_COLLECTORS,
+    InfrastructureNode,
+    Instance,
+    default_node_exporter_collectors,
+)
+
+NODE_EXPORTER_COLLECTOR_SET = set(DEFAULT_NODE_EXPORTER_COLLECTORS)
+
+
+def normalize_node_exporter_collectors(value):
+    if value in (None, ""):
+        return list(DEFAULT_NODE_EXPORTER_COLLECTORS)
+    if not isinstance(value, list):
+        raise serializers.ValidationError("Collectors must be a list.")
+
+    normalized = []
+    invalid = []
+    seen = set()
+    for item in value:
+        collector = str(item).strip()
+        if not collector:
+            continue
+        if collector not in NODE_EXPORTER_COLLECTOR_SET:
+            invalid.append(collector)
+            continue
+        if collector not in seen:
+            normalized.append(collector)
+            seen.add(collector)
+    if invalid:
+        raise serializers.ValidationError(
+            f"Unknown node_exporter collectors: {', '.join(sorted(set(invalid)))}."
+        )
+    return normalized
 
 
 def infrastructure_node_queryset(current_node_id=None):
@@ -70,6 +103,12 @@ class AgentCreateSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
     monitoring_enabled = serializers.BooleanField(default=True, write_only=True)
+    monitoring_collectors = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        write_only=True,
+        default=default_node_exporter_collectors,
+    )
 
     class Meta:
         model = Agent
@@ -81,6 +120,7 @@ class AgentCreateSerializer(serializers.ModelSerializer):
             "local_node",
             "node_name",
             "monitoring_enabled",
+            "monitoring_collectors",
         )
         read_only_fields = ("id",)
 
@@ -97,6 +137,9 @@ class AgentCreateSerializer(serializers.ModelSerializer):
         if InfrastructureNode.objects.filter(name=value).exists():
             raise serializers.ValidationError("A node with this name already exists.")
         return value
+
+    def validate_monitoring_collectors(self, value):
+        return normalize_node_exporter_collectors(value)
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
@@ -130,6 +173,9 @@ class AgentCreateSerializer(serializers.ModelSerializer):
         agent_name = validated_data.pop("name", "").strip()
         display_name = validated_data.pop("display_name", "").strip()
         monitoring_enabled = validated_data.pop("monitoring_enabled", True)
+        monitoring_collectors = validated_data.pop(
+            "monitoring_collectors", list(DEFAULT_NODE_EXPORTER_COLLECTORS)
+        )
 
         with transaction.atomic():
             if local_node is None:
@@ -137,20 +183,38 @@ class AgentCreateSerializer(serializers.ModelSerializer):
                     name=node_name,
                     address="",
                     monitoring_enabled=monitoring_enabled,
+                    monitoring_collectors=monitoring_collectors,
                     metadata={"provisioning_status": "pending_agent_install"},
                 )
-            elif local_node.monitoring_enabled != monitoring_enabled:
-                local_node.monitoring_enabled = monitoring_enabled
-                local_node.save(update_fields=["monitoring_enabled", "update_time"])
-                notify_node_config_changed(
-                    local_node,
-                    summary={
-                        "action": "node.monitoring_changed",
-                        "node_id": local_node.id,
-                        "monitoring_enabled": monitoring_enabled,
-                    },
-                    reason="node.monitoring_changed",
+            else:
+                previous_monitoring_enabled = local_node.monitoring_enabled
+                previous_monitoring_collectors = list(
+                    local_node.monitoring_collectors or []
                 )
+                local_node.monitoring_enabled = monitoring_enabled
+                local_node.monitoring_collectors = monitoring_collectors
+                monitoring_changed = (
+                    previous_monitoring_enabled != monitoring_enabled
+                    or previous_monitoring_collectors != monitoring_collectors
+                )
+                if monitoring_changed:
+                    local_node.save(
+                        update_fields=[
+                            "monitoring_enabled",
+                            "monitoring_collectors",
+                            "update_time",
+                        ]
+                    )
+                    notify_node_config_changed(
+                        local_node,
+                        summary={
+                            "action": "node.monitoring_changed",
+                            "node_id": local_node.id,
+                            "monitoring_enabled": monitoring_enabled,
+                            "monitoring_collectors": monitoring_collectors,
+                        },
+                        reason="node.monitoring_changed",
+                    )
 
             if not agent_name:
                 agent_name = local_node.name

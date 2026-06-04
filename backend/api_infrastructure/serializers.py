@@ -5,12 +5,41 @@ from api_agents.models import Agent, AgentNodeAssignment
 from api_agents.services import notify_node_config_changed
 from api_agents.time import agent_datetime_to_utc_iso
 from sql.models import (
+    DEFAULT_NODE_EXPORTER_COLLECTORS,
     InfrastructureNode,
     Instance,
     InstanceTag,
     ResourceGroup,
     ServiceRecommendation,
 )
+
+NODE_EXPORTER_COLLECTOR_SET = set(DEFAULT_NODE_EXPORTER_COLLECTORS)
+
+
+def normalize_node_exporter_collectors(value):
+    if value in (None, ""):
+        return list(DEFAULT_NODE_EXPORTER_COLLECTORS)
+    if not isinstance(value, list):
+        raise serializers.ValidationError("Collectors must be a list.")
+
+    normalized = []
+    invalid = []
+    seen = set()
+    for item in value:
+        collector = str(item).strip()
+        if not collector:
+            continue
+        if collector not in NODE_EXPORTER_COLLECTOR_SET:
+            invalid.append(collector)
+            continue
+        if collector not in seen:
+            normalized.append(collector)
+            seen.add(collector)
+    if invalid:
+        raise serializers.ValidationError(
+            f"Unknown node_exporter collectors: {', '.join(sorted(set(invalid)))}."
+        )
+    return normalized
 
 
 def primary_node_agent(node):
@@ -183,6 +212,7 @@ class InfrastructureNodeSerializer(serializers.ModelSerializer):
             "description",
             "metadata",
             "monitoring_enabled",
+            "monitoring_collectors",
             "resource_group_ids",
             "agent",
             "agent_id",
@@ -217,6 +247,9 @@ class InfrastructureNodeWriteSerializer(serializers.ModelSerializer):
     def validate_description(self, value):
         return value.strip()
 
+    def validate_monitoring_collectors(self, value):
+        return normalize_node_exporter_collectors(value)
+
     def create(self, validated_data):
         resource_groups = validated_data.pop("resource_group", [])
         with transaction.atomic():
@@ -227,22 +260,30 @@ class InfrastructureNodeWriteSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         resource_groups = validated_data.pop("resource_group", None)
         previous_monitoring_enabled = instance.monitoring_enabled
+        previous_monitoring_collectors = list(instance.monitoring_collectors or [])
         with transaction.atomic():
             for field, value in validated_data.items():
                 setattr(instance, field, value)
             instance.save()
             if resource_groups is not None:
                 instance.resource_group.set(resource_groups)
-            if (
+            monitoring_changed = (
                 "monitoring_enabled" in validated_data
                 and previous_monitoring_enabled != instance.monitoring_enabled
-            ):
+            )
+            collectors_changed = (
+                "monitoring_collectors" in validated_data
+                and previous_monitoring_collectors
+                != list(instance.monitoring_collectors or [])
+            )
+            if monitoring_changed or collectors_changed:
                 notify_node_config_changed(
                     instance,
                     summary={
                         "action": "node.monitoring_changed",
                         "node_id": instance.id,
                         "monitoring_enabled": instance.monitoring_enabled,
+                        "monitoring_collectors": instance.monitoring_collectors,
                     },
                     reason="node.monitoring_changed",
                 )
@@ -256,6 +297,7 @@ class InfrastructureNodeWriteSerializer(serializers.ModelSerializer):
             "description",
             "metadata",
             "monitoring_enabled",
+            "monitoring_collectors",
             "resource_group_ids",
         )
 

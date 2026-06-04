@@ -93,10 +93,7 @@ func (m *Module) ApplyConfig(ctx context.Context, cfg modules.Config) error {
 	}
 
 	runCtx, cancel := context.WithCancel(context.Background())
-	cmd := exec.Command(
-		binaryPath,
-		"--web.listen-address="+parsed.NodeExporter.ListenAddress,
-	)
+	cmd := exec.Command(binaryPath, nodeExporterArgs(parsed.NodeExporter)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -266,9 +263,11 @@ type config struct {
 }
 
 type nodeExporterConfig struct {
-	ListenAddress string
-	MetricsURL    string
-	Artifact      tools.Artifact
+	ListenAddress        string
+	MetricsURL           string
+	Collectors           []string
+	CollectorsConfigured bool
+	Artifact             tools.Artifact
 }
 
 func parseConfig(raw map[string]any) (config, error) {
@@ -281,6 +280,10 @@ func parseConfig(raw map[string]any) (config, error) {
 	cfg.NodeExporter = nodeExporterConfig{
 		ListenAddress: stringValue(exporterRaw["listen_address"]),
 		MetricsURL:    stringValue(exporterRaw["metrics_url"]),
+	}
+	if _, ok := exporterRaw["collectors"]; ok {
+		cfg.NodeExporter.CollectorsConfigured = true
+		cfg.NodeExporter.Collectors = stringList(exporterRaw["collectors"])
 	}
 	if cfg.NodeExporter.ListenAddress == "" {
 		cfg.NodeExporter.ListenAddress = "127.0.0.1:9100"
@@ -299,6 +302,17 @@ func parseConfig(raw map[string]any) (config, error) {
 		SizeBytes:    int64(intValue(artifactRaw["size_bytes"], 0)),
 	}
 	return cfg, nil
+}
+
+func nodeExporterArgs(cfg nodeExporterConfig) []string {
+	args := []string{"--web.listen-address=" + cfg.ListenAddress}
+	if cfg.CollectorsConfigured {
+		args = append(args, "--collector.disable-defaults")
+		for _, collector := range cfg.Collectors {
+			args = append(args, "--collector."+collector)
+		}
+	}
+	return args
 }
 
 func stringValue(value any) string {
@@ -342,4 +356,20 @@ func stringMap(value any) map[string]string {
 		}
 	}
 	return result
+}
+
+func stringList(value any) []string {
+	rawItems, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	items := make([]string, 0, len(rawItems))
+	for _, item := range rawItems {
+		itemValue := stringValue(item)
+		if itemValue == "" {
+			continue
+		}
+		items = append(items, itemValue)
+	}
+	return items
 }

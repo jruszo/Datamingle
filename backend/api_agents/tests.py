@@ -43,7 +43,12 @@ from api_agents.services import (
 )
 from api_agents.time import agent_utc_now
 from common.utils.const import WorkflowStatus, WorkflowType
-from sql.models import SqlWorkflow, SqlWorkflowContent, WorkflowAudit
+from sql.models import (
+    DEFAULT_NODE_EXPORTER_COLLECTORS,
+    SqlWorkflow,
+    SqlWorkflowContent,
+    WorkflowAudit,
+)
 from sql.models import InfrastructureNode, Instance, Users
 
 
@@ -299,6 +304,7 @@ class AgentApiTests(APITestCase):
                 "node_name": "prod-db-node-01",
                 "organization_id": "org_evil",
                 "monitoring_enabled": False,
+                "monitoring_collectors": ["cpu", "meminfo"],
             },
             format="json",
         )
@@ -318,6 +324,7 @@ class AgentApiTests(APITestCase):
         self.assertEqual(agent.local_node.name, "prod-db-node-01")
         self.assertEqual(agent.local_node.address, "")
         self.assertFalse(agent.local_node.monitoring_enabled)
+        self.assertEqual(agent.local_node.monitoring_collectors, ["cpu", "meminfo"])
         self.assertEqual(
             agent.local_node.metadata["provisioning_status"],
             "pending_agent_install",
@@ -695,13 +702,25 @@ class AgentFacingApiTests(APITestCase):
         self.assertEqual(payload["agent_id"], agent.id)
         self.assertEqual(payload["node"]["id"], node.id)
         self.assertFalse(payload["node"]["monitoring_enabled"])
+        self.assertEqual(
+            payload["node"]["monitoring_collectors"],
+            list(DEFAULT_NODE_EXPORTER_COLLECTORS),
+        )
         self.assertEqual(payload["nodes"][0]["id"], node.id)
         self.assertFalse(payload["nodes"][0]["monitoring_enabled"])
+        self.assertEqual(
+            payload["nodes"][0]["monitoring_collectors"],
+            list(DEFAULT_NODE_EXPORTER_COLLECTORS),
+        )
         self.assertEqual(len(payload["assignments"]), 1)
         assignment = payload["assignments"][0]
         self.assertEqual(assignment["instance_id"], instance.id)
         self.assertEqual(assignment["node_id"], node.id)
         self.assertFalse(assignment["node_monitoring_enabled"])
+        self.assertEqual(
+            assignment["node_monitoring_collectors"],
+            list(DEFAULT_NODE_EXPORTER_COLLECTORS),
+        )
         self.assertEqual(assignment["username"], "root")
         self.assertEqual(assignment["password"], "secret")
         self.assertNotIn(other_instance.instance_name, str(payload))
@@ -718,6 +737,10 @@ class AgentFacingApiTests(APITestCase):
                 "tool_name"
             ],
             AgentToolArtifact.TOOL_NODE_EXPORTER,
+        )
+        self.assertEqual(
+            module_names["node_monitoring"]["raw"]["node_exporter"]["collectors"],
+            list(DEFAULT_NODE_EXPORTER_COLLECTORS),
         )
 
     def test_heartbeat_updates_last_seen_revision_and_module_health(self):
