@@ -28,6 +28,7 @@ from sql.engines import ResultSet
 from sql.engines.models import ReviewResult, ReviewSet
 from sql.mailbox import emit_execution_finished_notifications, resolve_mailbox_items
 from sql.models import DEFAULT_NODE_EXPORTER_COLLECTORS, SqlWorkflow
+from sql.models import normalize_service_monitoring_collectors
 from sql.utils.workflow_audit import Audit
 from api_agents.models import (
     Agent,
@@ -306,6 +307,9 @@ def serialize_assignment(assignment):
         ),
         "service_monitoring_enabled": (
             instance.monitoring_enabled and instance.db_type in ("mysql", "pgsql")
+        ),
+        "service_monitoring_collectors": normalize_service_monitoring_collectors(
+            instance.db_type, instance.monitoring_collectors
         ),
         "db_type": instance.db_type,
         "host": instance.host,
@@ -692,6 +696,7 @@ def build_service_monitoring_module_config(agent, assignments):
                 "username": assignment["username"],
                 "password": assignment["password"],
                 "database": assignment["database"],
+                "collectors": assignment["service_monitoring_collectors"],
                 "ssl": assignment["ssl"],
                 "exporter": {
                     "listen_address": f"127.0.0.1:{port}",

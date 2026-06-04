@@ -11,6 +11,8 @@ from sql.models import (
     InstanceTag,
     ResourceGroup,
     ServiceRecommendation,
+    normalize_service_monitoring_collectors,
+    service_exporter_collectors_for_engine,
 )
 
 NODE_EXPORTER_COLLECTOR_SET = set(DEFAULT_NODE_EXPORTER_COLLECTORS)
@@ -67,6 +69,7 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
     engine = serializers.CharField(source="db_type", read_only=True)
     resource_group_ids = serializers.SerializerMethodField()
     service_tag_ids = serializers.SerializerMethodField()
+    monitoring_collectors = serializers.SerializerMethodField()
     inventory_last_refresh_at = serializers.DateTimeField(
         source="inventory_last_success_at", read_only=True
     )
@@ -78,6 +81,11 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
 
     def get_service_tag_ids(self, obj):
         return list(obj.instance_tag.values_list("id", flat=True).order_by("id"))
+
+    def get_monitoring_collectors(self, obj):
+        return normalize_service_monitoring_collectors(
+            obj.db_type, obj.monitoring_collectors
+        )
 
     class Meta:
         model = Instance
@@ -91,6 +99,7 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
             "port",
             "user",
             "monitoring_enabled",
+            "monitoring_collectors",
             "is_ssl",
             "verify_ssl",
             "db_name",
@@ -337,6 +346,11 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
         allow_null=True,
         write_only=True,
     )
+    monitoring_collectors = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        allow_empty=True,
+    )
 
     def validate_service_name(self, value):
         instance_name = value.strip()
@@ -364,6 +378,41 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
 
     def validate_charset(self, value):
         return value.strip()
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        engine = attrs.get("db_type") or getattr(self.instance, "db_type", "")
+        if "monitoring_collectors" in attrs:
+            collectors = attrs["monitoring_collectors"]
+            allowed = set(service_exporter_collectors_for_engine(engine))
+            invalid = sorted(
+                {
+                    str(collector).strip()
+                    for collector in collectors
+                    if str(collector).strip() not in allowed
+                }
+            )
+            if invalid:
+                raise serializers.ValidationError(
+                    {
+                        "monitoring_collectors": (
+                            "Unknown exporter collectors: " + ", ".join(invalid)
+                        )
+                    }
+                )
+            attrs["monitoring_collectors"] = normalize_service_monitoring_collectors(
+                engine, collectors
+            )
+        else:
+            attrs["monitoring_collectors"] = normalize_service_monitoring_collectors(
+                engine,
+                (
+                    getattr(self.instance, "monitoring_collectors", None)
+                    if self.instance is not None
+                    else None
+                ),
+            )
+        return attrs
 
     def create(self, validated_data):
         resource_groups = validated_data.pop("resource_group", [])
@@ -410,6 +459,7 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
             "user",
             "password",
             "monitoring_enabled",
+            "monitoring_collectors",
             "is_ssl",
             "verify_ssl",
             "db_name",

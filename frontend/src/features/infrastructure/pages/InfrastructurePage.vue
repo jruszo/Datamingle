@@ -82,6 +82,91 @@ const DEFAULT_NODE_EXPORTER_COLLECTORS = [
   'zfs',
 ]
 
+const MYSQLD_EXPORTER_COLLECTORS = [
+  'heartbeat.utc',
+  'info_schema.processlist.processes_by_user',
+  'info_schema.processlist.processes_by_host',
+  'mysql.user.privileges',
+  'perf_schema.indexiowaits',
+  'perf_schema.tablelocks',
+  'perf_schema.eventsstatements',
+  'perf_schema.eventsstatementssum',
+  'perf_schema.eventswaits',
+  'heartbeat',
+  'slave_hosts',
+  'info_schema.replica_host',
+  'info_schema.rocksdb_perf_context',
+  'perf_schema.file_events',
+  'perf_schema.file_instances',
+  'perf_schema.memory_events',
+  'perf_schema.replication_group_members',
+  'perf_schema.replication_group_member_stats',
+  'perf_schema.replication_applier_status_by_worker',
+  'sys.user_summary',
+  'info_schema.userstats',
+  'info_schema.clientstats',
+  'info_schema.tablestats',
+  'info_schema.schemastats',
+  'info_schema.innodb_cmp',
+  'info_schema.innodb_cmpmem',
+  'info_schema.query_response_time',
+  'engine_tokudb_status',
+  'engine_innodb_status',
+  'global_status',
+  'global_variables',
+  'slave_status',
+  'info_schema.processlist',
+  'mysql.user',
+  'info_schema.tables',
+  'info_schema.innodb_tablespaces',
+  'info_schema.innodb_metrics',
+  'auto_increment.columns',
+  'binlog_size',
+  'perf_schema.tableiowaits',
+]
+
+const DEFAULT_MYSQLD_EXPORTER_COLLECTORS = ['global_status', 'global_variables', 'slave_status']
+
+const POSTGRES_EXPORTER_COLLECTORS = [
+  'buffercache_summary',
+  'database',
+  'database_wraparound',
+  'locks',
+  'long_running_transactions',
+  'postmaster',
+  'process_idle',
+  'replication',
+  'replication_slot',
+  'roles',
+  'stat_activity_autovacuum',
+  'stat_bgwriter',
+  'stat_checkpointer',
+  'stat_database',
+  'stat_progress_vacuum',
+  'stat_statements',
+  'stat_statements.include_query',
+  'stat_user_tables',
+  'stat_wal_receiver',
+  'statio_user_indexes',
+  'statio_user_tables',
+  'wal',
+  'xlog_location',
+]
+
+const DEFAULT_POSTGRES_EXPORTER_COLLECTORS = [
+  'database',
+  'locks',
+  'replication',
+  'replication_slot',
+  'roles',
+  'stat_bgwriter',
+  'stat_database',
+  'stat_progress_vacuum',
+  'stat_user_tables',
+  'statio_user_tables',
+  'wal',
+]
+
 type MonitoringCollectorForm = {
   monitoring_collectors: string[]
 }
@@ -131,6 +216,7 @@ const serviceForm = reactive<DatabaseServicePayload>({
   user: '',
   password: '',
   monitoring_enabled: true,
+  monitoring_collectors: [...DEFAULT_MYSQLD_EXPORTER_COLLECTORS],
   is_ssl: false,
   verify_ssl: true,
   db_name: '',
@@ -235,6 +321,45 @@ function selectAllMonitoringCollectors(target: MonitoringCollectorForm) {
 
 function resetDefaultMonitoringCollectors(target: MonitoringCollectorForm) {
   setMonitoringCollectors(target, DEFAULT_NODE_EXPORTER_COLLECTORS)
+}
+
+function serviceCollectorOptions(engine: DatabaseServicePayload['engine']) {
+  return engine === 'pgsql' ? POSTGRES_EXPORTER_COLLECTORS : MYSQLD_EXPORTER_COLLECTORS
+}
+
+function defaultServiceCollectors(engine: DatabaseServicePayload['engine']) {
+  return engine === 'pgsql'
+    ? DEFAULT_POSTGRES_EXPORTER_COLLECTORS
+    : DEFAULT_MYSQLD_EXPORTER_COLLECTORS
+}
+
+function orderedServiceCollectors(engine: DatabaseServicePayload['engine'], collectors?: string[]) {
+  const fallback = defaultServiceCollectors(engine)
+  const selected = new Set((collectors === undefined ? fallback : collectors).filter(Boolean))
+  return serviceCollectorOptions(engine).filter((collector) => selected.has(collector))
+}
+
+function setServiceMonitoringCollectors(
+  target: MonitoringCollectorForm & { engine: DatabaseServicePayload['engine'] },
+  collectors?: string[],
+) {
+  target.monitoring_collectors.splice(
+    0,
+    target.monitoring_collectors.length,
+    ...orderedServiceCollectors(target.engine, collectors),
+  )
+}
+
+function selectAllServiceMonitoringCollectors(
+  target: MonitoringCollectorForm & { engine: DatabaseServicePayload['engine'] },
+) {
+  setServiceMonitoringCollectors(target, serviceCollectorOptions(target.engine))
+}
+
+function resetDefaultServiceMonitoringCollectors(
+  target: MonitoringCollectorForm & { engine: DatabaseServicePayload['engine'] },
+) {
+  setServiceMonitoringCollectors(target, defaultServiceCollectors(target.engine))
 }
 
 function statusBadgeClass(status: string | null) {
@@ -470,6 +595,7 @@ function resetServiceForm() {
   serviceForm.user = ''
   serviceForm.password = ''
   serviceForm.monitoring_enabled = true
+  setServiceMonitoringCollectors(serviceForm)
   serviceForm.is_ssl = false
   serviceForm.verify_ssl = true
   serviceForm.db_name = ''
@@ -497,6 +623,7 @@ function openServiceDialog(
     serviceForm.port = service.port
     serviceForm.user = service.user
     serviceForm.monitoring_enabled = service.monitoring_enabled
+    setServiceMonitoringCollectors(serviceForm, service.monitoring_collectors)
     serviceForm.is_ssl = service.is_ssl
     serviceForm.verify_ssl = service.verify_ssl
     serviceForm.db_name = service.db_name
@@ -525,6 +652,7 @@ function closeServiceDialog() {
 
 function applyEngineDefaultPort() {
   serviceForm.port = serviceForm.engine === 'pgsql' ? 5432 : 3306
+  setServiceMonitoringCollectors(serviceForm)
 }
 
 async function submitService() {
@@ -1327,6 +1455,55 @@ watch([currentPage, pageSize], () => {
             />
             Enable monitoring
           </label>
+          <details
+            class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 md:col-span-2"
+            :class="{ 'opacity-60': !serviceForm.monitoring_enabled }"
+          >
+            <summary class="cursor-pointer text-sm font-medium text-slate-800">
+              Advanced collectors
+              <span class="ml-2 text-xs font-normal text-slate-500">
+                {{ serviceForm.monitoring_collectors.length }} selected
+              </span>
+            </summary>
+            <div class="mt-4 grid gap-4">
+              <div class="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  :disabled="!serviceForm.monitoring_enabled"
+                  @click="selectAllServiceMonitoringCollectors(serviceForm)"
+                >
+                  Select all
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  :disabled="!serviceForm.monitoring_enabled"
+                  @click="resetDefaultServiceMonitoringCollectors(serviceForm)"
+                >
+                  Reset defaults
+                </Button>
+              </div>
+              <div class="grid max-h-56 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 md:grid-cols-3">
+                <label
+                  v-for="collector in serviceCollectorOptions(serviceForm.engine)"
+                  :key="collector"
+                  class="flex min-w-0 items-center gap-2 rounded-md bg-white px-2 py-1.5 text-sm text-slate-700"
+                >
+                  <input
+                    :checked="isMonitoringCollectorSelected(serviceForm, collector)"
+                    :disabled="!serviceForm.monitoring_enabled"
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-slate-300"
+                    @change="toggleMonitoringCollector(serviceForm, collector, $event)"
+                  />
+                  <span class="truncate">{{ collector }}</span>
+                </label>
+              </div>
+            </div>
+          </details>
           <label class="grid gap-2">
             <span class="text-sm font-medium text-slate-700">Default Database</span>
             <Input v-model="serviceForm.db_name" />

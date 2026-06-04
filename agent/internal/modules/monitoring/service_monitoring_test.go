@@ -12,6 +12,10 @@ func TestServiceExporterCommandUsesEnvironmentForCredentials(t *testing.T) {
 		Port:     3306,
 		Username: "metrics_user",
 		Password: "secret",
+		Collectors: []string{
+			"global_status",
+			"slave_status",
+		},
 		Exporter: serviceExporterConfig{
 			ListenAddress: "127.0.0.1:9200",
 		},
@@ -32,6 +36,12 @@ func TestServiceExporterCommandUsesEnvironmentForCredentials(t *testing.T) {
 	if !contains(cmd.Args, "--mysqld.address=mysql_demo:3306") {
 		t.Fatalf("expected mysql address flag in %#v", cmd.Args)
 	}
+	if !contains(cmd.Args, "--collect.global_status") {
+		t.Fatalf("expected selected mysql collector in %#v", cmd.Args)
+	}
+	if !contains(cmd.Args, "--no-collect.global_variables") {
+		t.Fatalf("expected deselected mysql default collector in %#v", cmd.Args)
+	}
 }
 
 func TestPostgresExporterCommandUsesSplitDataSourceEnvironment(t *testing.T) {
@@ -42,6 +52,10 @@ func TestPostgresExporterCommandUsesSplitDataSourceEnvironment(t *testing.T) {
 		Username: "metrics_user",
 		Password: "secret",
 		Database: "postgres",
+		Collectors: []string{
+			"database",
+			"wal",
+		},
 		Exporter: serviceExporterConfig{
 			ListenAddress: "127.0.0.1:9201",
 		},
@@ -64,6 +78,12 @@ func TestPostgresExporterCommandUsesSplitDataSourceEnvironment(t *testing.T) {
 	}
 	if !contains(cmd.Env, "DATA_SOURCE_URI=postgres_demo:5432/postgres?sslmode=disable") {
 		t.Fatalf("expected postgres uri in env")
+	}
+	if !contains(cmd.Args, "--collector.database") {
+		t.Fatalf("expected selected postgres collector in %#v", cmd.Args)
+	}
+	if !contains(cmd.Args, "--no-collector.locks") {
+		t.Fatalf("expected deselected postgres default collector in %#v", cmd.Args)
 	}
 }
 

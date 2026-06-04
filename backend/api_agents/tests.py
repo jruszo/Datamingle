@@ -728,6 +728,10 @@ class AgentFacingApiTests(APITestCase):
         self.assertFalse(assignment["node_monitoring_enabled"])
         self.assertTrue(assignment["service_monitoring_enabled"])
         self.assertEqual(
+            assignment["service_monitoring_collectors"],
+            ["global_status", "global_variables", "slave_status"],
+        )
+        self.assertEqual(
             assignment["node_monitoring_collectors"],
             list(DEFAULT_NODE_EXPORTER_COLLECTORS),
         )
@@ -758,6 +762,10 @@ class AgentFacingApiTests(APITestCase):
         self.assertEqual(services[0]["db_type"], "mysql")
         self.assertEqual(services[0]["username"], "root")
         self.assertEqual(services[0]["password"], "secret")
+        self.assertEqual(
+            services[0]["collectors"],
+            ["global_status", "global_variables", "slave_status"],
+        )
         self.assertEqual(services[0]["exporter"]["listen_address"], "127.0.0.1:9200")
         self.assertEqual(
             services[0]["exporter"]["artifact"]["tool_name"],

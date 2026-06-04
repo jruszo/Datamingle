@@ -150,6 +150,10 @@ class InfrastructureNodeApiTests(APITestCase):
         self.assertEqual(payload["services"][0]["service_name"], service.instance_name)
         self.assertTrue(payload["services"][0]["monitoring_enabled"])
         self.assertEqual(
+            payload["services"][0]["monitoring_collectors"],
+            ["global_status", "global_variables", "slave_status"],
+        )
+        self.assertEqual(
             payload["recommendations"][0]["service_name"], "orders-replica"
         )
 
@@ -191,6 +195,7 @@ class InfrastructureNodeApiTests(APITestCase):
                 "user": "root",
                 "password": "secret",
                 "monitoring_enabled": True,
+                "monitoring_collectors": ["global_status", "binlog_size"],
                 "is_ssl": False,
                 "verify_ssl": True,
                 "db_name": "",
@@ -210,6 +215,9 @@ class InfrastructureNodeApiTests(APITestCase):
         self.assertEqual(assignment.local_node_id, node.id)
         self.assertTrue(assignment.command_enabled)
         self.assertTrue(service.monitoring_enabled)
+        self.assertEqual(
+            service.monitoring_collectors, ["global_status", "binlog_size"]
+        )
         agent.local_node.refresh_from_db()
         self.assertFalse(agent.local_node.monitoring_enabled)
         config = build_agent_config(agent)
@@ -217,6 +225,10 @@ class InfrastructureNodeApiTests(APITestCase):
         self.assertEqual(config["assignments"][0]["instance_id"], service.id)
         self.assertEqual(config["assignments"][0]["node_id"], node.id)
         self.assertTrue(config["assignments"][0]["service_monitoring_enabled"])
+        self.assertEqual(
+            config["assignments"][0]["service_monitoring_collectors"],
+            ["global_status", "binlog_size"],
+        )
         service_monitoring = {module["name"]: module for module in config["modules"]}[
             "service_monitoring"
         ]
@@ -224,6 +236,10 @@ class InfrastructureNodeApiTests(APITestCase):
         self.assertEqual(
             service_monitoring["raw"]["services"][0]["username"],
             "root",
+        )
+        self.assertEqual(
+            service_monitoring["raw"]["services"][0]["collectors"],
+            ["global_status", "binlog_size"],
         )
 
     def test_update_node_monitoring_bumps_agent_config_revision(self):

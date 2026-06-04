@@ -72,6 +72,7 @@ export type DatabaseServicePayload = {
   user: string
   password?: string
   monitoring_enabled: boolean
+  monitoring_collectors: string[]
   is_ssl: boolean
   verify_ssl: boolean
   db_name: string

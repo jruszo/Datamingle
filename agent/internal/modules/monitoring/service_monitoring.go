@@ -17,6 +17,75 @@ import (
 	"github.com/jruszo/datamingle/agent/internal/tools"
 )
 
+var mysqlExporterCollectors = []string{
+	"heartbeat.utc",
+	"info_schema.processlist.processes_by_user",
+	"info_schema.processlist.processes_by_host",
+	"mysql.user.privileges",
+	"perf_schema.indexiowaits",
+	"perf_schema.tablelocks",
+	"perf_schema.eventsstatements",
+	"perf_schema.eventsstatementssum",
+	"perf_schema.eventswaits",
+	"heartbeat",
+	"slave_hosts",
+	"info_schema.replica_host",
+	"info_schema.rocksdb_perf_context",
+	"perf_schema.file_events",
+	"perf_schema.file_instances",
+	"perf_schema.memory_events",
+	"perf_schema.replication_group_members",
+	"perf_schema.replication_group_member_stats",
+	"perf_schema.replication_applier_status_by_worker",
+	"sys.user_summary",
+	"info_schema.userstats",
+	"info_schema.clientstats",
+	"info_schema.tablestats",
+	"info_schema.schemastats",
+	"info_schema.innodb_cmp",
+	"info_schema.innodb_cmpmem",
+	"info_schema.query_response_time",
+	"engine_tokudb_status",
+	"engine_innodb_status",
+	"global_status",
+	"global_variables",
+	"slave_status",
+	"info_schema.processlist",
+	"mysql.user",
+	"info_schema.tables",
+	"info_schema.innodb_tablespaces",
+	"info_schema.innodb_metrics",
+	"auto_increment.columns",
+	"binlog_size",
+	"perf_schema.tableiowaits",
+}
+
+var postgresExporterCollectors = []string{
+	"buffercache_summary",
+	"database",
+	"database_wraparound",
+	"locks",
+	"long_running_transactions",
+	"postmaster",
+	"process_idle",
+	"replication",
+	"replication_slot",
+	"roles",
+	"stat_activity_autovacuum",
+	"stat_bgwriter",
+	"stat_checkpointer",
+	"stat_database",
+	"stat_progress_vacuum",
+	"stat_statements",
+	"stat_statements.include_query",
+	"stat_user_tables",
+	"stat_wal_receiver",
+	"statio_user_indexes",
+	"statio_user_tables",
+	"wal",
+	"xlog_location",
+}
+
 type ServiceModule struct {
 	mu             sync.RWMutex
 	dataDir        string
@@ -324,6 +393,7 @@ type monitoredService struct {
 	Username     string
 	Password     string
 	Database     string
+	Collectors   []string
 	SSL          serviceSSLConfig
 	Exporter     serviceExporterConfig
 }
@@ -362,6 +432,7 @@ func parseServiceMonitoringConfig(raw map[string]any) (serviceMonitoringConfig, 
 			Username:     stringValue(serviceRaw["username"]),
 			Password:     stringValue(serviceRaw["password"]),
 			Database:     stringValue(serviceRaw["database"]),
+			Collectors:   stringList(serviceRaw["collectors"]),
 			SSL: serviceSSLConfig{
 				Enabled: boolValue(sslRaw["enabled"], false),
 				Verify:  boolValue(sslRaw["verify"], true),
@@ -390,14 +461,50 @@ func serviceExporterCommand(binaryPath string, service monitoredService) (*exec.
 		if service.Username != "" {
 			args = append(args, "--mysqld.username="+service.Username)
 		}
+		args = append(args, mysqlCollectorArgs(service.Collectors)...)
 		cmd = exec.Command(binaryPath, args...)
 		cmd.Env = append(os.Environ(), serviceExporterEnv(service)...)
 		return cmd, nil
 	case "pgsql":
+		args = append(args, postgresCollectorArgs(service.Collectors)...)
+		cmd = exec.Command(binaryPath, args...)
+		cmd.Env = append(os.Environ(), serviceExporterEnv(service)...)
 		return cmd, nil
 	default:
 		return nil, fmt.Errorf("unsupported service monitoring engine %q", service.DBType)
 	}
+}
+
+func mysqlCollectorArgs(collectors []string) []string {
+	selected := map[string]bool{}
+	for _, collector := range collectors {
+		selected[collector] = true
+	}
+	args := make([]string, 0, len(mysqlExporterCollectors))
+	for _, collector := range mysqlExporterCollectors {
+		if selected[collector] {
+			args = append(args, "--collect."+collector)
+		} else {
+			args = append(args, "--no-collect."+collector)
+		}
+	}
+	return args
+}
+
+func postgresCollectorArgs(collectors []string) []string {
+	selected := map[string]bool{}
+	for _, collector := range collectors {
+		selected[collector] = true
+	}
+	args := make([]string, 0, len(postgresExporterCollectors))
+	for _, collector := range postgresExporterCollectors {
+		if selected[collector] {
+			args = append(args, "--collector."+collector)
+		} else {
+			args = append(args, "--no-collector."+collector)
+		}
+	}
+	return args
 }
 
 func serviceExporterEnv(service monitoredService) []string {
