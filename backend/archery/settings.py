@@ -34,6 +34,7 @@ env = environ.Env(
     WORKOS_SUPERUSER_EMAILS=(list, []),
     WORKOS_SUPERADMIN_ROLE_SLUGS=(list, ["admin"]),
     DATAMINGLE_AGENT_API_KEY_BACKEND=(str, "workos"),
+    DATAMINGLE_INGEST_GATEWAY_URL=(str, "http://localhost:4430"),
     CHANNEL_LAYER_URL=(str, ""),
     # CSRF_TRUSTED_ORIGINS=subdomain.example.com,subdomain.example2.com subdomain.example.com
     CSRF_TRUSTED_ORIGINS=(list, []),
@@ -369,6 +370,9 @@ WORKOS_BASE_URL = env("WORKOS_BASE_URL", default="https://api.workos.com/")
 DATAMINGLE_AGENT_API_KEY_BACKEND = env(
     "DATAMINGLE_AGENT_API_KEY_BACKEND", default="workos"
 )
+DATAMINGLE_INGEST_GATEWAY_URL = env(
+    "DATAMINGLE_INGEST_GATEWAY_URL", default="http://localhost:4430"
+).rstrip("/")
 WORKOS_STAFF_EMAILS = [
     email.strip().lower()
     for email in env("WORKOS_STAFF_EMAILS", default=[])

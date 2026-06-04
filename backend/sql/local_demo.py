@@ -4,7 +4,7 @@ from django.contrib.auth.models import Group, Permission
 from django.db import transaction
 from django.utils import timezone
 
-from api_agents.models import Agent, AgentStatus
+from api_agents.models import Agent, AgentStatus, AgentToolArtifact
 from common.auth import ensure_superadmin_group
 from common.utils.const import WorkflowType
 from sql.models import (
@@ -241,6 +241,7 @@ def seed_local_demo(write_line=None):
         _remove_legacy_seeded_users(log)
         instances = _seed_instances(resource_groups, tags, log)
         nodes = _seed_infrastructure_nodes(resource_groups, instances, log)
+        _seed_agent_tool_artifacts(log)
         _seed_workflow_settings(auth_groups, resource_groups, log)
 
     return {
@@ -408,6 +409,29 @@ def _seed_infrastructure_nodes(resource_groups, instances, log):
             )
         )
     return nodes
+
+
+def _seed_agent_tool_artifacts(log):
+    artifact, created = AgentToolArtifact.objects.update_or_create(
+        tool_name=AgentToolArtifact.TOOL_NODE_EXPORTER,
+        version="1.11.1",
+        platform="linux",
+        architecture="amd64",
+        defaults={
+            "download_url": "https://github.com/prometheus/node_exporter/releases/download/v1.11.1/node_exporter-1.11.1.linux-amd64.tar.gz",
+            "sha256": "9f5ea48e5bc7b656f8a91a32e7d7deb89f70f73dabd0d974418aca15f37d6810",
+            "size_bytes": 0,
+            "enabled": True,
+            "notes": "Local demo host metrics exporter.",
+        },
+    )
+    log(
+        "Agent tool artifact {}: {} {}".format(
+            "created" if created else "updated",
+            artifact.tool_name,
+            artifact.version,
+        )
+    )
 
 
 def _seed_workflow_settings(auth_groups, resource_groups, log):

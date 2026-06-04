@@ -17,6 +17,7 @@ import (
 	"github.com/jruszo/datamingle/agent/internal/config"
 	"github.com/jruszo/datamingle/agent/internal/modules"
 	"github.com/jruszo/datamingle/agent/internal/modules/logs"
+	"github.com/jruszo/datamingle/agent/internal/modules/monitoring"
 	"github.com/jruszo/datamingle/agent/internal/modules/placeholder"
 	"github.com/jruszo/datamingle/agent/internal/secrets"
 	"github.com/jruszo/datamingle/agent/internal/tools"
@@ -46,6 +47,7 @@ func NewRunner(cfg config.Config) *Runner {
 			placeholder.New("mysql", []string{"connection.test", "query.execute"}),
 			placeholder.New("metrics", []string{"metrics.export"}),
 			placeholder.New("online_schema", []string{"schema.change"}),
+			monitoring.New(cfg.DataDir, cfg.APIKeyEnv),
 			logs.New(),
 		),
 	}

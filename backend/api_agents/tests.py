@@ -677,6 +677,15 @@ class AgentFacingApiTests(APITestCase):
             command_enabled=False,
             metrics_enabled=True,
         )
+        AgentToolArtifact.objects.create(
+            tool_name=AgentToolArtifact.TOOL_NODE_EXPORTER,
+            version="1.9.1",
+            platform="linux",
+            architecture="amd64",
+            download_url="https://example.com/node_exporter",
+            sha256="d459a6c4b0867e9f665a7db35f4387d11fa7fa79a00a85c2c172ba0fa4295c14",
+            enabled=True,
+        )
         self.authenticate_agent(agent)
 
         response = self.client.get("/api/v1/agent/me/config/")
@@ -699,6 +708,17 @@ class AgentFacingApiTests(APITestCase):
         module_names = {module["name"]: module for module in payload["modules"]}
         self.assertTrue(module_names["mysql"]["enabled"])
         self.assertTrue(module_names["metrics"]["enabled"])
+        self.assertFalse(module_names["node_monitoring"]["enabled"])
+        self.assertEqual(
+            module_names["node_monitoring"]["raw"]["remote_write_url"],
+            "http://localhost:4430/api/v1/prometheus/write",
+        )
+        self.assertEqual(
+            module_names["node_monitoring"]["raw"]["node_exporter"]["artifact"][
+                "tool_name"
+            ],
+            AgentToolArtifact.TOOL_NODE_EXPORTER,
+        )
 
     def test_heartbeat_updates_last_seen_revision_and_module_health(self):
         agent = Agent.objects.create(name="agent-a", install_id="ins_test_123")

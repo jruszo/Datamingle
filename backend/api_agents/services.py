@@ -563,7 +563,10 @@ def clear_node_assignment_from_services(node_assignment):
 
 def build_module_configs(agent, assignments):
     configs = []
-    for module_name in ("mysql", "metrics", "online_schema", "logs"):
+    node_monitoring_enabled = any(
+        node.get("monitoring_enabled") for node in build_agent_node_configs(agent, [])
+    ) or any(assignment.get("node_monitoring_enabled") for assignment in assignments)
+    for module_name in ("mysql", "metrics", "online_schema", "logs", "node_monitoring"):
         module_assignments = [
             {
                 "id": assignment["id"],
@@ -573,15 +576,50 @@ def build_module_configs(agent, assignments):
             for assignment in assignments
             if module_name in assignment["modules"]
         ]
+        raw = {}
+        enabled = bool(module_assignments)
+        if module_name == "node_monitoring":
+            enabled = node_monitoring_enabled
+            raw = build_node_monitoring_module_config(agent)
         configs.append(
             {
                 "name": module_name,
-                "enabled": bool(module_assignments),
+                "enabled": enabled,
                 "revision": agent.desired_config_revision,
                 "assignments": module_assignments,
+                "raw": raw,
             }
         )
     return configs
+
+
+def build_node_monitoring_module_config(agent):
+    artifact = (
+        AgentToolArtifact.objects.filter(
+            tool_name=AgentToolArtifact.TOOL_NODE_EXPORTER,
+            enabled=True,
+        )
+        .order_by("-version", "id")
+        .first()
+    )
+    remote_write_url = (
+        settings.DATAMINGLE_INGEST_GATEWAY_URL.rstrip("/") + "/api/v1/prometheus/write"
+    )
+    return {
+        "remote_write_url": remote_write_url,
+        "scrape_interval_seconds": 30,
+        "node_exporter": {
+            "listen_address": "127.0.0.1:9100",
+            "metrics_url": "http://127.0.0.1:9100/metrics",
+            "artifact": serialize_tool_artifact(artifact) if artifact else None,
+        },
+        "labels": {
+            "agent_id": str(agent.id),
+            "agent_name": agent.name,
+            "node_id": str(agent.local_node_id or ""),
+            "node_name": agent.local_node.name if agent.local_node_id else "",
+        },
+    }
 
 
 def serialize_tool_artifact(artifact):

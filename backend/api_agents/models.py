@@ -378,9 +378,11 @@ class AgentCommandEvent(models.Model):
 class AgentToolArtifact(models.Model):
     TOOL_GHOST = "gh-ost"
     TOOL_PT_OSC = "pt-online-schema-change"
+    TOOL_NODE_EXPORTER = "node_exporter"
     TOOL_CHOICES = (
         (TOOL_GHOST, "gh-ost"),
         (TOOL_PT_OSC, "pt-online-schema-change"),
+        (TOOL_NODE_EXPORTER, "node_exporter"),
     )
 
     tool_name = models.CharField(max_length=64, choices=TOOL_CHOICES)

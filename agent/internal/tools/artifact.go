@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
@@ -37,10 +39,11 @@ func EnsureArtifact(ctx context.Context, cacheDir string, artifact Artifact, htt
 		return "", err
 	}
 	path := ArtifactPath(cacheDir, artifact)
-	if err := VerifySHA256(path, artifact.SHA256); err == nil {
+	if cachedArtifactMatches(path, artifact.SHA256) {
 		return path, nil
 	}
 	_ = os.Remove(path)
+	_ = os.Remove(artifactChecksumPath(path))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}
@@ -89,10 +92,20 @@ func EnsureArtifact(ctx context.Context, cacheDir string, artifact Artifact, htt
 	if err := VerifySHA256(tmpPath, artifact.SHA256); err != nil {
 		return "", err
 	}
-	if err := os.Chmod(tmpPath, 0o755); err != nil {
-		return "", err
+
+	if strings.HasSuffix(strings.ToLower(artifact.DownloadURL), ".tar.gz") || strings.HasSuffix(strings.ToLower(artifact.DownloadURL), ".tgz") {
+		if err := extractArtifactBinary(tmpPath, path, artifact.ToolName); err != nil {
+			return "", err
+		}
+	} else {
+		if err := os.Chmod(tmpPath, 0o755); err != nil {
+			return "", err
+		}
+		if err := os.Rename(tmpPath, path); err != nil {
+			return "", err
+		}
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := os.WriteFile(artifactChecksumPath(path), []byte(artifact.SHA256), 0o644); err != nil {
 		return "", err
 	}
 	return path, nil
@@ -171,4 +184,75 @@ func normalizePathComponent(value string) string {
 		}
 		return r
 	}, value)
+}
+
+func cachedArtifactMatches(path, expectedSHA256 string) bool {
+	if err := VerifySHA256(path, expectedSHA256); err == nil {
+		return true
+	}
+	raw, err := os.ReadFile(artifactChecksumPath(path))
+	if err != nil {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(string(raw)), strings.TrimSpace(expectedSHA256)) {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+func artifactChecksumPath(path string) string {
+	return path + ".sha256"
+}
+
+func extractArtifactBinary(archivePath, targetPath, toolName string) error {
+	file, err := os.Open(archivePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	gzipReader, err := gzip.NewReader(file)
+	if err != nil {
+		return fmt.Errorf("open gzip artifact: %w", err)
+	}
+	defer gzipReader.Close()
+
+	tarReader := tar.NewReader(gzipReader)
+	tmp, err := os.CreateTemp(filepath.Dir(targetPath), ".extract-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	defer tmp.Close()
+
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("read tar artifact: %w", err)
+		}
+		if header.Typeflag != tar.TypeReg {
+			continue
+		}
+		if filepath.Base(header.Name) != toolName {
+			continue
+		}
+		if _, err := io.Copy(tmp, tarReader); err != nil {
+			return err
+		}
+		if err := tmp.Close(); err != nil {
+			return err
+		}
+		if err := os.Chmod(tmpPath, 0o755); err != nil {
+			return err
+		}
+		if err := os.Rename(tmpPath, targetPath); err != nil {
+			return err
+		}
+		return nil
+	}
+	return fmt.Errorf("artifact archive did not contain %s", toolName)
 }
