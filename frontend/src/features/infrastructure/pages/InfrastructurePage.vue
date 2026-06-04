@@ -21,6 +21,7 @@ import {
   type AgentCreateResponse,
   type DatabaseServicePayload,
   type DatabaseServiceRecord,
+  type InfrastructureNodeAgentRecord,
   type InfrastructureNodeDetailRecord,
   type InfrastructureNodePayload,
   type InfrastructureNodeRecord,
@@ -207,6 +208,10 @@ function displayAgentHost(hostname: string, platform: string, architecture: stri
   const host = hostname.trim() || 'Host pending'
   const runtime = [platform, architecture].filter(Boolean).join('/')
   return runtime ? `${host} · ${runtime}` : host
+}
+
+function agentConfigInSync(agent: InfrastructureNodeAgentRecord) {
+  return agent.last_config_revision >= agent.desired_config_revision
 }
 
 function updateNumericSelections(event: Event, target: 'service_groups' | 'service_tags') {
@@ -882,11 +887,20 @@ watch([currentPage, pageSize], () => {
                     </div>
                   </div>
                   <div class="grid gap-1">
-                    <span class="text-xs font-semibold uppercase text-slate-500">Config</span>
-                    <span class="text-sm text-slate-900">
-                      {{ selectedNode.agent.last_config_revision }} /
-                      {{ selectedNode.agent.desired_config_revision }}
-                    </span>
+                    <span class="text-xs font-semibold uppercase text-slate-500"
+                      >Configuration</span
+                    >
+                    <Badge
+                      variant="secondary"
+                      class="w-fit"
+                      :class="
+                        agentConfigInSync(selectedNode.agent)
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-amber-100 text-amber-800'
+                      "
+                    >
+                      {{ agentConfigInSync(selectedNode.agent) ? 'In sync' : 'Change pending' }}
+                    </Badge>
                   </div>
                   <div class="grid gap-1">
                     <span class="text-xs font-semibold uppercase text-slate-500">Connected</span>
