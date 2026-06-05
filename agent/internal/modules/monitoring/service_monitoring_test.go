@@ -3,6 +3,7 @@ package monitoring
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestServiceExporterCommandUsesEnvironmentForCredentials(t *testing.T) {
@@ -84,6 +85,55 @@ func TestPostgresExporterCommandUsesSplitDataSourceEnvironment(t *testing.T) {
 	}
 	if !contains(cmd.Args, "--no-collector.locks") {
 		t.Fatalf("expected deselected postgres default collector in %#v", cmd.Args)
+	}
+}
+
+func TestParseServiceMonitoringConfigUsesServiceScrapeProfiles(t *testing.T) {
+	cfg, err := parseServiceMonitoringConfig(map[string]any{
+		"scrape_interval_seconds": 30,
+		"scrape_profiles": []any{
+			map[string]any{
+				"name":             "high",
+				"interval_seconds": 5,
+			},
+			map[string]any{
+				"name":             "low",
+				"interval_seconds": 60,
+			},
+		},
+		"services": []any{
+			map[string]any{
+				"assignment_id": 1,
+				"db_type":       "mysql",
+				"collectors":    []any{"global_status", "global_variables"},
+				"scrape_profiles": []any{
+					map[string]any{
+						"name":             "high",
+						"interval_seconds": 5,
+						"collectors":       []any{"global_status"},
+					},
+					map[string]any{
+						"name":             "low",
+						"interval_seconds": 60,
+						"collectors":       []any{"global_variables"},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := cfg.effectiveScrapeProfiles()
+	if len(profiles) != 2 {
+		t.Fatalf("expected two effective profiles, got %#v", profiles)
+	}
+	if profiles[0].Name != "high" || profiles[0].Interval != 5*time.Second {
+		t.Fatalf("unexpected high profile: %#v", profiles[0])
+	}
+	collectors, ok := cfg.Services[0].collectorsForProfile("low")
+	if !ok || !contains(collectors, "global_variables") {
+		t.Fatalf("expected low profile collectors, got %#v", collectors)
 	}
 }
 

@@ -110,7 +110,9 @@ func (m *Module) ApplyConfig(ctx context.Context, cfg modules.Config) error {
 	m.mu.Unlock()
 
 	go m.waitForNodeExporter(cmd)
-	go m.scrapeLoop(runCtx, parsed)
+	for _, profile := range parsed.effectiveScrapeProfiles() {
+		go m.scrapeLoop(runCtx, parsed, profile)
+	}
 	return nil
 }
 
@@ -142,8 +144,8 @@ func (m *Module) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (m *Module) scrapeLoop(ctx context.Context, cfg config) {
-	interval := cfg.ScrapeInterval
+func (m *Module) scrapeLoop(ctx context.Context, cfg config, profile scrapeProfile) {
+	interval := profile.Interval
 	if interval <= 0 {
 		interval = 30 * time.Second
 	}
@@ -155,14 +157,14 @@ func (m *Module) scrapeLoop(ctx context.Context, cfg config) {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			count, err := m.scrapeAndWrite(ctx, cfg)
+			count, err := m.scrapeAndWrite(ctx, cfg, profile.Collectors)
 			if err != nil {
 				m.setHealth("degraded", err.Error())
 			} else {
 				now := time.Now().UTC()
 				m.mu.Lock()
 				m.status = "online"
-				m.message = "node metrics remote-write succeeded"
+				m.message = fmt.Sprintf("node metrics %s remote-write succeeded", profile.Name)
 				m.lastScrapeAt = now
 				m.lastWriteAt = now
 				m.lastWriteCount = count
@@ -173,8 +175,12 @@ func (m *Module) scrapeLoop(ctx context.Context, cfg config) {
 	}
 }
 
-func (m *Module) scrapeAndWrite(ctx context.Context, cfg config) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.NodeExporter.MetricsURL, nil)
+func (m *Module) scrapeAndWrite(ctx context.Context, cfg config, collectors []string) (int, error) {
+	metricsURL, err := metricsURLWithCollectors(cfg.NodeExporter.MetricsURL, collectors)
+	if err != nil {
+		return 0, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metricsURL, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -258,6 +264,7 @@ func (m *Module) setHealth(status, message string) {
 type config struct {
 	RemoteWriteURL string
 	ScrapeInterval time.Duration
+	ScrapeProfiles []scrapeProfile
 	NodeExporter   nodeExporterConfig
 	Labels         map[string]string
 }
@@ -276,6 +283,7 @@ func parseConfig(raw map[string]any) (config, error) {
 		ScrapeInterval: time.Duration(intValue(raw["scrape_interval_seconds"], 30)) * time.Second,
 		Labels:         stringMap(raw["labels"]),
 	}
+	cfg.ScrapeProfiles = parseScrapeProfiles(raw["scrape_profiles"], cfg.ScrapeInterval)
 	exporterRaw, _ := raw["node_exporter"].(map[string]any)
 	cfg.NodeExporter = nodeExporterConfig{
 		ListenAddress: stringValue(exporterRaw["listen_address"]),
@@ -302,6 +310,23 @@ func parseConfig(raw map[string]any) (config, error) {
 		SizeBytes:    int64(intValue(artifactRaw["size_bytes"], 0)),
 	}
 	return cfg, nil
+}
+
+func (cfg config) effectiveScrapeProfiles() []scrapeProfile {
+	if len(cfg.ScrapeProfiles) == 0 {
+		return []scrapeProfile{{
+			Name:     "default",
+			Interval: cfg.ScrapeInterval,
+		}}
+	}
+	profiles := make([]scrapeProfile, 0, len(cfg.ScrapeProfiles))
+	for _, profile := range cfg.ScrapeProfiles {
+		if len(profile.Collectors) == 0 {
+			continue
+		}
+		profiles = append(profiles, profile)
+	}
+	return profiles
 }
 
 func nodeExporterArgs(cfg nodeExporterConfig) []string {

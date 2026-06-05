@@ -202,7 +202,9 @@ func (m *ServiceModule) ApplyConfig(ctx context.Context, cfg modules.Config) err
 	for assignmentID, cmd := range started {
 		go m.waitForExporter(assignmentID, cmd)
 	}
-	go m.scrapeLoop(runCtx, parsed)
+	for _, profile := range parsed.effectiveScrapeProfiles() {
+		go m.scrapeLoop(runCtx, parsed, profile)
+	}
 	return nil
 }
 
@@ -235,8 +237,8 @@ func (m *ServiceModule) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (m *ServiceModule) scrapeLoop(ctx context.Context, cfg serviceMonitoringConfig) {
-	interval := cfg.ScrapeInterval
+func (m *ServiceModule) scrapeLoop(ctx context.Context, cfg serviceMonitoringConfig, profile scrapeProfile) {
+	interval := profile.Interval
 	if interval <= 0 {
 		interval = 30 * time.Second
 	}
@@ -248,14 +250,14 @@ func (m *ServiceModule) scrapeLoop(ctx context.Context, cfg serviceMonitoringCon
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			count, err := m.scrapeAndWrite(ctx, cfg)
+			count, err := m.scrapeAndWrite(ctx, cfg, profile.Name)
 			if err != nil {
 				m.setHealth("degraded", err.Error())
 			} else {
 				now := time.Now().UTC()
 				m.mu.Lock()
 				m.status = "online"
-				m.message = "service metrics remote-write succeeded"
+				m.message = fmt.Sprintf("service metrics %s remote-write succeeded", profile.Name)
 				m.lastScrapeAt = now
 				m.lastWriteAt = now
 				m.lastWriteCount = count
@@ -266,10 +268,14 @@ func (m *ServiceModule) scrapeLoop(ctx context.Context, cfg serviceMonitoringCon
 	}
 }
 
-func (m *ServiceModule) scrapeAndWrite(ctx context.Context, cfg serviceMonitoringConfig) (int, error) {
+func (m *ServiceModule) scrapeAndWrite(ctx context.Context, cfg serviceMonitoringConfig, profileName string) (int, error) {
 	total := 0
 	for _, service := range cfg.Services {
-		count, err := m.scrapeServiceAndWrite(ctx, cfg, service)
+		collectors, ok := service.collectorsForProfile(profileName)
+		if !ok {
+			continue
+		}
+		count, err := m.scrapeServiceAndWrite(ctx, cfg, service, collectors)
 		if err != nil {
 			return total, err
 		}
@@ -278,8 +284,12 @@ func (m *ServiceModule) scrapeAndWrite(ctx context.Context, cfg serviceMonitorin
 	return total, nil
 }
 
-func (m *ServiceModule) scrapeServiceAndWrite(ctx context.Context, cfg serviceMonitoringConfig, service monitoredService) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, service.Exporter.MetricsURL, nil)
+func (m *ServiceModule) scrapeServiceAndWrite(ctx context.Context, cfg serviceMonitoringConfig, service monitoredService, collectors []string) (int, error) {
+	metricsURL, err := metricsURLWithCollectors(service.Exporter.MetricsURL, collectors)
+	if err != nil {
+		return 0, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metricsURL, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -377,25 +387,27 @@ func (m *ServiceModule) setHealth(status, message string) {
 type serviceMonitoringConfig struct {
 	RemoteWriteURL string
 	ScrapeInterval time.Duration
+	ScrapeProfiles []scrapeProfile
 	Labels         map[string]string
 	Services       []monitoredService
 }
 
 type monitoredService struct {
-	AssignmentID int64
-	InstanceID   int64
-	InstanceName string
-	NodeID       int64
-	NodeName     string
-	DBType       string
-	Host         string
-	Port         int
-	Username     string
-	Password     string
-	Database     string
-	Collectors   []string
-	SSL          serviceSSLConfig
-	Exporter     serviceExporterConfig
+	AssignmentID   int64
+	InstanceID     int64
+	InstanceName   string
+	NodeID         int64
+	NodeName       string
+	DBType         string
+	Host           string
+	Port           int
+	Username       string
+	Password       string
+	Database       string
+	Collectors     []string
+	ScrapeProfiles []scrapeProfile
+	SSL            serviceSSLConfig
+	Exporter       serviceExporterConfig
 }
 
 type serviceSSLConfig struct {
@@ -415,6 +427,7 @@ func parseServiceMonitoringConfig(raw map[string]any) (serviceMonitoringConfig, 
 		ScrapeInterval: time.Duration(intValue(raw["scrape_interval_seconds"], 30)) * time.Second,
 		Labels:         stringMap(raw["labels"]),
 	}
+	cfg.ScrapeProfiles = parseScrapeProfiles(raw["scrape_profiles"], cfg.ScrapeInterval)
 	for _, item := range anyList(raw["services"]) {
 		serviceRaw, _ := item.(map[string]any)
 		exporterRaw, _ := serviceRaw["exporter"].(map[string]any)
@@ -433,6 +446,10 @@ func parseServiceMonitoringConfig(raw map[string]any) (serviceMonitoringConfig, 
 			Password:     stringValue(serviceRaw["password"]),
 			Database:     stringValue(serviceRaw["database"]),
 			Collectors:   stringList(serviceRaw["collectors"]),
+			ScrapeProfiles: parseScrapeProfiles(
+				serviceRaw["scrape_profiles"],
+				cfg.ScrapeInterval,
+			),
 			SSL: serviceSSLConfig{
 				Enabled: boolValue(sslRaw["enabled"], false),
 				Verify:  boolValue(sslRaw["verify"], true),
@@ -449,6 +466,37 @@ func parseServiceMonitoringConfig(raw map[string]any) (serviceMonitoringConfig, 
 		cfg.Services = append(cfg.Services, service)
 	}
 	return cfg, nil
+}
+
+func (cfg serviceMonitoringConfig) effectiveScrapeProfiles() []scrapeProfile {
+	if len(cfg.ScrapeProfiles) == 0 {
+		return []scrapeProfile{{
+			Name:     "default",
+			Interval: cfg.ScrapeInterval,
+		}}
+	}
+	profiles := make([]scrapeProfile, 0, len(cfg.ScrapeProfiles))
+	for _, profile := range cfg.ScrapeProfiles {
+		for _, service := range cfg.Services {
+			if collectors, ok := service.collectorsForProfile(profile.Name); ok && len(collectors) > 0 {
+				profiles = append(profiles, profile)
+				break
+			}
+		}
+	}
+	return profiles
+}
+
+func (service monitoredService) collectorsForProfile(name string) ([]string, bool) {
+	if len(service.ScrapeProfiles) == 0 {
+		return service.Collectors, true
+	}
+	for _, profile := range service.ScrapeProfiles {
+		if profile.Name == name {
+			return profile.Collectors, len(profile.Collectors) > 0
+		}
+	}
+	return nil, false
 }
 
 func serviceExporterCommand(binaryPath string, service monitoredService) (*exec.Cmd, error) {
