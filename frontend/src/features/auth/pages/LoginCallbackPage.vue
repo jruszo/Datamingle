@@ -50,7 +50,7 @@ onMounted(() => {
       </CardHeader>
       <CardContent class="space-y-3">
         <p v-if="isExchanging" class="text-sm text-slate-600">
-          Exchanging your WorkOS login for a Datamingle session...
+          Finishing your WorkOS session...
         </p>
         <p v-else-if="error" class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {{ error }}

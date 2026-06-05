@@ -30,11 +30,20 @@ env = environ.Env(
     WORKOS_CLIENT_ID=(str, ""),
     WORKOS_ORGANIZATION_ID=(str, ""),
     WORKOS_BASE_URL=(str, "https://api.workos.com/"),
+    WORKOS_JWKS_URL=(str, ""),
+    WORKOS_JWT_ISSUER=(str, ""),
     WORKOS_STAFF_EMAILS=(list, []),
     WORKOS_SUPERUSER_EMAILS=(list, []),
     WORKOS_SUPERADMIN_ROLE_SLUGS=(list, ["admin"]),
     DATAMINGLE_AGENT_API_KEY_BACKEND=(str, "workos"),
     DATAMINGLE_INGEST_GATEWAY_URL=(str, "http://localhost:4430"),
+    DATAMINGLE_CORTEX_URL=(str, "http://cortex:9009"),
+    DATAMINGLE_METRICS_PROXY_TIMEOUT_SECONDS=(int, 20),
+    DATAMINGLE_METRICS_MAX_QUERY_LENGTH=(int, 8192),
+    DATAMINGLE_METRICS_MAX_RANGE_SECONDS=(int, 2592000),
+    DATAMINGLE_METRICS_MIN_STEP_SECONDS=(int, 15),
+    DATAMINGLE_METRICS_MAX_RANGE_POINTS=(int, 11000),
+    DATAMINGLE_METRICS_MAX_MATCHERS=(int, 32),
     CHANNEL_LAYER_URL=(str, ""),
     # CSRF_TRUSTED_ORIGINS=subdomain.example.com,subdomain.example2.com subdomain.example.com
     CSRF_TRUSTED_ORIGINS=(list, []),
@@ -157,6 +166,7 @@ INSTALLED_APPS = (
     "api_mailbox",
     "api_agents",
     "api_infrastructure",
+    "api_metrics",
     "api_admin",
     "common",
     "rest_framework",
@@ -329,7 +339,7 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
     # Authentication
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "common.authenticate.workos_jwt.WorkOSJWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ),
     # Permissions
@@ -339,7 +349,13 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
     ),
-    "DEFAULT_THROTTLE_RATES": {"anon": "120/min", "user": "600/min"},
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "120/min",
+        "user": "600/min",
+        "metrics_metadata": "300/min",
+        "metrics_query": "120/min",
+        "metrics_query_range": "60/min",
+    },
     # Filtering
     "DEFAULT_FILTER_BACKENDS": ("django_filters.rest_framework.DjangoFilterBackend",),
     # Pagination
@@ -367,12 +383,33 @@ WORKOS_API_KEY = env("WORKOS_API_KEY", default="")
 WORKOS_CLIENT_ID = env("WORKOS_CLIENT_ID", default="")
 WORKOS_ORGANIZATION_ID = env("WORKOS_ORGANIZATION_ID", default="")
 WORKOS_BASE_URL = env("WORKOS_BASE_URL", default="https://api.workos.com/")
+WORKOS_JWKS_URL = env("WORKOS_JWKS_URL", default="")
+WORKOS_JWT_ISSUER = env("WORKOS_JWT_ISSUER", default="") or WORKOS_BASE_URL.rstrip("/")
 DATAMINGLE_AGENT_API_KEY_BACKEND = env(
     "DATAMINGLE_AGENT_API_KEY_BACKEND", default="workos"
 )
 DATAMINGLE_INGEST_GATEWAY_URL = env(
     "DATAMINGLE_INGEST_GATEWAY_URL", default="http://localhost:4430"
 ).rstrip("/")
+DATAMINGLE_CORTEX_URL = env(
+    "DATAMINGLE_CORTEX_URL", default="http://cortex:9009"
+).rstrip("/")
+DATAMINGLE_METRICS_PROXY_TIMEOUT_SECONDS = env(
+    "DATAMINGLE_METRICS_PROXY_TIMEOUT_SECONDS", default=20
+)
+DATAMINGLE_METRICS_MAX_QUERY_LENGTH = env(
+    "DATAMINGLE_METRICS_MAX_QUERY_LENGTH", default=8192
+)
+DATAMINGLE_METRICS_MAX_RANGE_SECONDS = env(
+    "DATAMINGLE_METRICS_MAX_RANGE_SECONDS", default=2592000
+)
+DATAMINGLE_METRICS_MIN_STEP_SECONDS = env(
+    "DATAMINGLE_METRICS_MIN_STEP_SECONDS", default=15
+)
+DATAMINGLE_METRICS_MAX_RANGE_POINTS = env(
+    "DATAMINGLE_METRICS_MAX_RANGE_POINTS", default=11000
+)
+DATAMINGLE_METRICS_MAX_MATCHERS = env("DATAMINGLE_METRICS_MAX_MATCHERS", default=32)
 WORKOS_STAFF_EMAILS = [
     email.strip().lower()
     for email in env("WORKOS_STAFF_EMAILS", default=[])

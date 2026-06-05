@@ -757,6 +757,17 @@ class AgentFacingApiTests(APITestCase):
             module_names["node_monitoring"]["raw"]["node_exporter"]["collectors"],
             list(DEFAULT_NODE_EXPORTER_COLLECTORS),
         )
+        self.assertEqual(
+            [
+                (profile["name"], profile["interval_seconds"])
+                for profile in module_names["node_monitoring"]["raw"]["scrape_profiles"]
+            ],
+            [("high", 5), ("normal", 30), ("low", 60)],
+        )
+        self.assertIn(
+            "cpu",
+            module_names["node_monitoring"]["raw"]["scrape_profiles"][0]["collectors"],
+        )
         services = module_names["service_monitoring"]["raw"]["services"]
         self.assertEqual(len(services), 1)
         self.assertEqual(services[0]["db_type"], "mysql")
@@ -765,6 +776,21 @@ class AgentFacingApiTests(APITestCase):
         self.assertEqual(
             services[0]["collectors"],
             ["global_status", "global_variables", "slave_status"],
+        )
+        self.assertEqual(
+            [
+                (profile["name"], profile["interval_seconds"])
+                for profile in services[0]["scrape_profiles"]
+            ],
+            [("high", 5), ("normal", 30), ("low", 60)],
+        )
+        self.assertEqual(
+            services[0]["scrape_profiles"][0]["collectors"],
+            ["global_status", "slave_status"],
+        )
+        self.assertEqual(
+            services[0]["scrape_profiles"][2]["collectors"],
+            ["global_variables"],
         )
         self.assertEqual(services[0]["exporter"]["listen_address"], "127.0.0.1:9200")
         self.assertEqual(

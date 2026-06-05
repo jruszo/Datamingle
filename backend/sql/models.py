@@ -391,6 +391,63 @@ DEFAULT_NODE_EXPORTER_COLLECTORS = (
     "zfs",
 )
 
+NODE_EXPORTER_COLLECTOR_PROFILES = {
+    "high": (
+        "cpu",
+        "diskstats",
+        "filesystem",
+        "loadavg",
+        "meminfo",
+        "netdev",
+        "netstat",
+        "pressure",
+        "stat",
+        "time",
+        "vmstat",
+    ),
+    "normal": (
+        "arp",
+        "bcache",
+        "bonding",
+        "btrfs",
+        "conntrack",
+        "cpufreq",
+        "entropy",
+        "filefd",
+        "hwmon",
+        "mdadm",
+        "netclass",
+        "nvme",
+        "os",
+        "powersupplyclass",
+        "rapl",
+        "schedstat",
+        "sockstat",
+        "softnet",
+        "textfile",
+        "thermal_zone",
+        "timex",
+        "udp_queues",
+        "uname",
+    ),
+    "low": (
+        "bcachefs",
+        "dmi",
+        "edac",
+        "fibrechannel",
+        "infiniband",
+        "ipvs",
+        "kernel_hung",
+        "nfs",
+        "nfsd",
+        "selinux",
+        "tapestats",
+        "watchdog",
+        "xfs",
+        "zfs",
+    ),
+}
+
 
 def default_node_exporter_collectors():
     return list(DEFAULT_NODE_EXPORTER_COLLECTORS)
@@ -445,6 +502,55 @@ DEFAULT_MYSQLD_EXPORTER_COLLECTORS = (
     "slave_status",
 )
 
+MYSQLD_EXPORTER_COLLECTOR_PROFILES = {
+    "high": (
+        "global_status",
+        "info_schema.innodb_metrics",
+        "slave_status",
+    ),
+    "normal": (
+        "engine_innodb_status",
+        "info_schema.innodb_cmp",
+        "info_schema.innodb_cmpmem",
+        "info_schema.processlist",
+        "info_schema.processlist.processes_by_host",
+        "info_schema.processlist.processes_by_user",
+        "info_schema.query_response_time",
+        "perf_schema.eventswaits",
+        "perf_schema.file_events",
+        "perf_schema.tablelocks",
+    ),
+    "low": (
+        "auto_increment.columns",
+        "binlog_size",
+        "engine_tokudb_status",
+        "global_variables",
+        "heartbeat",
+        "heartbeat.utc",
+        "info_schema.clientstats",
+        "info_schema.replica_host",
+        "info_schema.innodb_tablespaces",
+        "info_schema.rocksdb_perf_context",
+        "info_schema.schemastats",
+        "info_schema.tables",
+        "info_schema.tablestats",
+        "info_schema.userstats",
+        "mysql.user",
+        "mysql.user.privileges",
+        "perf_schema.eventsstatements",
+        "perf_schema.eventsstatementssum",
+        "perf_schema.file_instances",
+        "perf_schema.indexiowaits",
+        "perf_schema.memory_events",
+        "perf_schema.replication_applier_status_by_worker",
+        "perf_schema.replication_group_member_stats",
+        "perf_schema.replication_group_members",
+        "perf_schema.tableiowaits",
+        "slave_hosts",
+        "sys.user_summary",
+    ),
+}
+
 POSTGRES_EXPORTER_COLLECTORS = (
     "buffercache_summary",
     "database",
@@ -484,6 +590,38 @@ DEFAULT_POSTGRES_EXPORTER_COLLECTORS = (
     "statio_user_tables",
     "wal",
 )
+
+POSTGRES_EXPORTER_COLLECTOR_PROFILES = {
+    "high": (
+        "database",
+        "locks",
+        "postmaster",
+        "replication",
+        "replication_slot",
+        "stat_activity_autovacuum",
+        "stat_bgwriter",
+        "stat_checkpointer",
+        "stat_database",
+        "stat_wal_receiver",
+        "wal",
+        "xlog_location",
+    ),
+    "normal": (
+        "database_wraparound",
+        "long_running_transactions",
+        "process_idle",
+        "roles",
+        "stat_progress_vacuum",
+        "stat_user_tables",
+        "statio_user_indexes",
+        "statio_user_tables",
+    ),
+    "low": (
+        "buffercache_summary",
+        "stat_statements",
+        "stat_statements.include_query",
+    ),
+}
 
 
 def default_service_monitoring_collectors():

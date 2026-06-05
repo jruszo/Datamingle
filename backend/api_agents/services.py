@@ -28,6 +28,9 @@ from sql.engines import ResultSet
 from sql.engines.models import ReviewResult, ReviewSet
 from sql.mailbox import emit_execution_finished_notifications, resolve_mailbox_items
 from sql.models import DEFAULT_NODE_EXPORTER_COLLECTORS, SqlWorkflow
+from sql.models import MYSQLD_EXPORTER_COLLECTOR_PROFILES
+from sql.models import NODE_EXPORTER_COLLECTOR_PROFILES
+from sql.models import POSTGRES_EXPORTER_COLLECTOR_PROFILES
 from sql.models import normalize_service_monitoring_collectors
 from sql.utils.workflow_audit import Audit
 from api_agents.models import (
@@ -43,6 +46,11 @@ from api_agents.models import (
 
 logger = logging.getLogger("default")
 AGENT_KEY_VISIBLE_PREFIX_LENGTH = 16
+METRICS_SCRAPE_PROFILE_INTERVALS = {
+    "high": 5,
+    "normal": 30,
+    "low": 60,
+}
 ACTIVE_WEBSOCKET_METADATA_KEY = "active_websocket"
 WEBSOCKET_CHANNEL_METADATA_KEY = "channel_name"
 TERMINAL_COMMAND_STATUSES = {
@@ -635,17 +643,22 @@ def build_node_monitoring_module_config(agent):
     remote_write_url = (
         settings.DATAMINGLE_INGEST_GATEWAY_URL.rstrip("/") + "/api/v1/prometheus/write"
     )
+    collectors = (
+        list(agent.local_node.monitoring_collectors or [])
+        if agent.local_node_id
+        else list(DEFAULT_NODE_EXPORTER_COLLECTORS)
+    )
     return {
         "remote_write_url": remote_write_url,
         "scrape_interval_seconds": 30,
+        "scrape_profiles": build_scrape_profiles(
+            collectors,
+            NODE_EXPORTER_COLLECTOR_PROFILES,
+        ),
         "node_exporter": {
             "listen_address": "127.0.0.1:9100",
             "metrics_url": "http://127.0.0.1:9100/metrics",
-            "collectors": (
-                list(agent.local_node.monitoring_collectors or [])
-                if agent.local_node_id
-                else list(DEFAULT_NODE_EXPORTER_COLLECTORS)
-            ),
+            "collectors": collectors,
             "artifact": serialize_tool_artifact(artifact) if artifact else None,
         },
         "labels": {
@@ -683,6 +696,11 @@ def build_service_monitoring_module_config(agent, assignments):
         artifact = (
             mysql_artifact if assignment["db_type"] == "mysql" else postgres_artifact
         )
+        collector_profiles = (
+            MYSQLD_EXPORTER_COLLECTOR_PROFILES
+            if assignment["db_type"] == "mysql"
+            else POSTGRES_EXPORTER_COLLECTOR_PROFILES
+        )
         services.append(
             {
                 "assignment_id": assignment["id"],
@@ -697,6 +715,10 @@ def build_service_monitoring_module_config(agent, assignments):
                 "password": assignment["password"],
                 "database": assignment["database"],
                 "collectors": assignment["service_monitoring_collectors"],
+                "scrape_profiles": build_scrape_profiles(
+                    assignment["service_monitoring_collectors"],
+                    collector_profiles,
+                ),
                 "ssl": assignment["ssl"],
                 "exporter": {
                     "listen_address": f"127.0.0.1:{port}",
@@ -708,12 +730,58 @@ def build_service_monitoring_module_config(agent, assignments):
     return {
         "remote_write_url": remote_write_url,
         "scrape_interval_seconds": 30,
+        "scrape_profiles": [
+            {
+                "name": name,
+                "interval_seconds": interval,
+            }
+            for name, interval in METRICS_SCRAPE_PROFILE_INTERVALS.items()
+        ],
         "services": services,
         "labels": {
             "agent_id": str(agent.id),
             "agent_name": agent.name,
         },
     }
+
+
+def build_scrape_profiles(collectors, collector_profiles):
+    selected = set(collectors or [])
+    profiles = []
+    assigned = set()
+    for name, interval in METRICS_SCRAPE_PROFILE_INTERVALS.items():
+        profile_collectors = [
+            collector
+            for collector in collector_profiles.get(name, ())
+            if collector in selected
+        ]
+        assigned.update(profile_collectors)
+        profiles.append(
+            {
+                "name": name,
+                "interval_seconds": interval,
+                "collectors": profile_collectors,
+            }
+        )
+    remaining = [
+        collector for collector in collectors or [] if collector not in assigned
+    ]
+    if remaining:
+        normal_profile = next(
+            (profile for profile in profiles if profile["name"] == "normal"),
+            None,
+        )
+        if normal_profile is None:
+            profiles.append(
+                {
+                    "name": "normal",
+                    "interval_seconds": METRICS_SCRAPE_PROFILE_INTERVALS["normal"],
+                    "collectors": remaining,
+                }
+            )
+        else:
+            normal_profile["collectors"].extend(remaining)
+    return profiles
 
 
 def serialize_tool_artifact(artifact):
