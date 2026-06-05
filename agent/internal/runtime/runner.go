@@ -58,6 +58,13 @@ func (r *Runner) Run(ctx context.Context) error {
 	if err := r.RunOnce(ctx); err != nil {
 		return err
 	}
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := r.modules.Stop(cleanupCtx); err != nil {
+			log.Printf("agent module shutdown failed: %v", err)
+		}
+	}()
 
 	heartbeat := time.NewTicker(30 * time.Second)
 	refresh := time.NewTicker(5 * time.Minute)

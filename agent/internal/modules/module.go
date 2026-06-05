@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -105,6 +106,9 @@ func (m *Manager) Apply(ctx context.Context, configs []Config) error {
 
 	applied := make([]string, 0, len(names))
 	for _, name := range names {
+		if activeConfig, ok := backup[name]; ok && configsEqual(activeConfig, desired[name]) {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return withRollbackError(fmt.Errorf("apply cancelled: %w", err), m.rollback(ctx, applied, backup))
 		}
@@ -134,6 +138,46 @@ func (m *Manager) Apply(ctx context.Context, configs []Config) error {
 	m.active = desired
 	m.mu.Unlock()
 	return nil
+}
+
+func (m *Manager) Stop(ctx context.Context) error {
+	m.applyMu.Lock()
+	defer m.applyMu.Unlock()
+
+	m.mu.RLock()
+	names := make([]string, 0, len(m.active))
+	for name := range m.active {
+		names = append(names, name)
+	}
+	m.mu.RUnlock()
+	sort.Strings(names)
+
+	var stopErrors []error
+	for _, name := range names {
+		if err := ctx.Err(); err != nil {
+			stopErrors = append(stopErrors, fmt.Errorf("stop cancelled: %w", err))
+			break
+		}
+		module, ok := m.modules[name]
+		if !ok || module == nil {
+			continue
+		}
+		if err := module.Stop(ctx); err != nil {
+			stopErrors = append(stopErrors, fmt.Errorf("stop module %s: %w", name, err))
+		}
+	}
+
+	m.mu.Lock()
+	m.active = map[string]Config{}
+	m.mu.Unlock()
+	return errors.Join(stopErrors...)
+}
+
+func configsEqual(left, right Config) bool {
+	return left.Name == right.Name &&
+		left.Enabled == right.Enabled &&
+		left.Revision == right.Revision &&
+		reflect.DeepEqual(left.Raw, right.Raw)
 }
 
 func (m *Manager) Health(ctx context.Context) []Health {

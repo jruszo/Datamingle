@@ -66,8 +66,9 @@ func (c Client) Run(ctx context.Context, handler Handler) error {
 		c.WriteTimeout = defaultWriteTimeout
 	}
 
-	for attempt := 0; ; attempt++ {
-		err := c.runOnce(ctx, handler)
+	attempt := 0
+	for {
+		connected, err := c.runOnce(ctx, handler)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -75,7 +76,11 @@ func (c Client) Run(ctx context.Context, handler Handler) error {
 			attempt = 0
 			continue
 		}
+		if connected {
+			attempt = 0
+		}
 		delay := c.Backoff.Delay(attempt)
+		attempt++
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
@@ -86,7 +91,7 @@ func (c Client) Run(ctx context.Context, handler Handler) error {
 	}
 }
 
-func (c Client) runOnce(ctx context.Context, handler Handler) error {
+func (c Client) runOnce(ctx context.Context, handler Handler) (bool, error) {
 	conn, response, err := c.Dialer.DialContext(ctx, c.Endpoint, c.Header)
 	if err != nil {
 		if response != nil {
@@ -94,17 +99,18 @@ func (c Client) runOnce(ctx context.Context, handler Handler) error {
 				_, _ = io.Copy(io.Discard, response.Body)
 				_ = response.Body.Close()
 			}
-			return fmt.Errorf("websocket dial failed: %s: %w", response.Status, err)
+			return false, fmt.Errorf("websocket dial failed: %s: %w", response.Status, err)
 		}
-		return err
+		return false, err
 	}
 	defer conn.Close()
+	connected := true
 
 	refreshReadDeadline := func() error {
 		return conn.SetReadDeadline(time.Now().Add(c.ReadTimeout))
 	}
 	if err := refreshReadDeadline(); err != nil {
-		return err
+		return connected, err
 	}
 
 	if c.Hello != nil {
@@ -113,29 +119,29 @@ func (c Client) runOnce(ctx context.Context, handler Handler) error {
 			hello.Type = "hello"
 		}
 		if err := c.writeJSON(conn, hello); err != nil {
-			return err
+			return connected, err
 		}
 	}
 
 	for {
 		var message Message
 		if err := conn.ReadJSON(&message); err != nil {
-			return err
+			return connected, err
 		}
 		if err := refreshReadDeadline(); err != nil {
-			return err
+			return connected, err
 		}
 		if message.Type == "" {
 			continue
 		}
 		if message.Type == "ping" {
 			if err := c.writeJSON(conn, Message{Type: "pong", SentAt: message.SentAt}); err != nil {
-				return err
+				return connected, err
 			}
 			continue
 		}
 		if err := handler(ctx, message); err != nil {
-			return err
+			return connected, err
 		}
 	}
 }
