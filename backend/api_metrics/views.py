@@ -24,6 +24,8 @@ DEFAULT_MAX_RANGE_SECONDS = 30 * 24 * 60 * 60
 DEFAULT_MIN_STEP_SECONDS = 15
 DEFAULT_MAX_RANGE_POINTS = 11000
 DEFAULT_MAX_MATCHERS = 32
+DEFAULT_METRIC_NAME_LIMIT = 300
+DEFAULT_MAX_METRIC_NAME_LIMIT = 1000
 
 PROMETHEUS_READ_BASE_PATH = "/prometheus/api/v1"
 TENANT_PARAM_NAMES = {
@@ -171,7 +173,7 @@ class CortexMetricsProxyView(views.APIView):
                 "DATAMINGLE_METRICS_PROXY_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS
             ),
         }
-        param_pairs = _request_param_pairs(request)
+        param_pairs = self.get_request_param_pairs(request)
         if request.method == "GET":
             request_kwargs["params"] = param_pairs
         else:
@@ -190,9 +192,9 @@ class CortexMetricsProxyView(views.APIView):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
-        return self.build_response(response)
+        return self.build_response(response, request=request)
 
-    def build_response(self, response):
+    def build_response(self, response, request=None):
         try:
             payload = response.json()
         except ValueError:
@@ -202,6 +204,9 @@ class CortexMetricsProxyView(views.APIView):
                 or "Metrics backend returned a non-JSON response.",
             }
         return Response(payload, status=response.status_code)
+
+    def get_request_param_pairs(self, request):
+        return _request_param_pairs(request)
 
     def get_org_id(self, request):
         auth = request.auth if isinstance(request.auth, dict) else {}
@@ -274,6 +279,66 @@ class CortexMetricsProxyView(views.APIView):
 
 class MetricsLabelsView(CortexMetricsProxyView):
     cortex_path = "/labels"
+
+
+class MetricsNamesView(CortexMetricsProxyView):
+    cortex_path = "/label/__name__/values"
+
+    def validate_request(self, request, **kwargs):
+        search = _first_param(request, "search").strip()
+        if len(search) > 256:
+            raise ValidationError({"search": "Search must be 256 characters or fewer."})
+        self.get_limit(request)
+
+    def get_limit(self, request):
+        raw_limit = _first_param(request, "limit").strip()
+        if not raw_limit:
+            return DEFAULT_METRIC_NAME_LIMIT
+        try:
+            limit = int(raw_limit)
+        except ValueError as exc:
+            raise ValidationError({"limit": "Must be an integer."}) from exc
+        if limit < 1 or limit > DEFAULT_MAX_METRIC_NAME_LIMIT:
+            raise ValidationError(
+                {"limit": f"Must be between 1 and {DEFAULT_MAX_METRIC_NAME_LIMIT}."}
+            )
+        return limit
+
+    def get_request_param_pairs(self, request):
+        return [
+            (key, value)
+            for key, value in _request_param_pairs(request)
+            if key not in {"search", "limit"}
+        ]
+
+    def build_response(self, response, request=None):
+        if response.status_code < 200 or response.status_code >= 300:
+            return super().build_response(response, request=request)
+
+        try:
+            payload = response.json()
+        except ValueError:
+            return super().build_response(response, request=request)
+
+        names = payload.get("data") or []
+        if not isinstance(names, list):
+            return Response(payload, status=response.status_code)
+
+        request_search = (
+            _first_param(request, "search").strip().lower() if request else ""
+        )
+        limit = self.get_limit(request) if request else DEFAULT_METRIC_NAME_LIMIT
+        filtered_names = []
+        for name in names:
+            metric_name = str(name)
+            if request_search and request_search not in metric_name.lower():
+                continue
+            filtered_names.append(metric_name)
+            if len(filtered_names) >= limit:
+                break
+
+        payload["data"] = filtered_names
+        return Response(payload, status=response.status_code)
 
 
 class MetricsLabelValuesView(CortexMetricsProxyView):

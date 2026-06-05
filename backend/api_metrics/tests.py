@@ -54,6 +54,44 @@ class MetricsProxyTests(APITestCase):
 
     @override_settings(DATAMINGLE_CORTEX_URL="http://cortex.test")
     @patch("api_metrics.views.requests.request")
+    def test_metric_names_are_filtered_and_limited_server_side(self, mock_request):
+        mock_request.return_value = SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "status": "success",
+                "data": [
+                    "mysql_global_status_threads_connected",
+                    "node_cpu_seconds_total",
+                    "node_memory_MemAvailable_bytes",
+                    "node_network_receive_bytes_total",
+                ],
+            },
+            text="",
+        )
+
+        response = self.client.get(
+            "/api/v1/metrics/names",
+            {
+                "search": "node_",
+                "limit": "2",
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data["data"],
+            ["node_cpu_seconds_total", "node_memory_MemAvailable_bytes"],
+        )
+        _, url = mock_request.call_args.args
+        self.assertEqual(
+            url,
+            "http://cortex.test/prometheus/api/v1/label/__name__/values",
+        )
+        self.assertNotIn(("search", "node_"), mock_request.call_args.kwargs["params"])
+        self.assertNotIn(("limit", "2"), mock_request.call_args.kwargs["params"])
+
+    @override_settings(DATAMINGLE_CORTEX_URL="http://cortex.test")
+    @patch("api_metrics.views.requests.request")
     def test_query_range_post_is_proxied_to_cortex(self, mock_request):
         mock_request.return_value = SimpleNamespace(
             status_code=200,

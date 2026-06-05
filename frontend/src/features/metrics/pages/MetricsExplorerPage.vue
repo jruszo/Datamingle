@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { EditorState } from '@codemirror/state'
+import { EditorView } from '@codemirror/view'
+import { basicSetup } from 'codemirror'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { use } from 'echarts/core'
@@ -18,6 +21,7 @@ import {
   X,
 } from 'lucide-vue-next'
 import VChart from 'vue-echarts'
+import { PromQLExtension, type PrometheusClient } from '@prometheus-io/codemirror-promql'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -52,6 +56,7 @@ type LabelSummary = {
 
 const authStore = useAuthStore()
 const loading = ref(false)
+const metricSearchLoading = ref(false)
 const detailLoading = ref(false)
 const statsLoading = ref(false)
 const running = ref(false)
@@ -75,7 +80,47 @@ const rangePreset = ref('1h')
 const stepSeconds = ref(60)
 const promql = ref('')
 const result = ref<PrometheusRangeResult | null>(null)
+const legendLabels = ref<string[]>([])
+const promqlEditorRoot = ref<HTMLDivElement | null>(null)
 let detailRequestId = 0
+let metricSearchRequestId = 0
+let metricSearchTimer: ReturnType<typeof window.setTimeout> | undefined
+let promqlEditorView: EditorView | null = null
+let promqlExtension: PromQLExtension | null = null
+
+const graphColorPalette = [
+  '#7EB26D',
+  '#EAB839',
+  '#6ED0E0',
+  '#EF843C',
+  '#E24D42',
+  '#1F78C1',
+  '#BA43A9',
+  '#705DA0',
+  '#508642',
+  '#CCA300',
+  '#447EBC',
+  '#C15C17',
+  '#890F02',
+  '#0A437C',
+  '#6D1F62',
+  '#584477',
+]
+
+const noisyLegendLabels = new Set(['agent_id', 'node_id', '__name__'])
+const preferredLegendLabels = [
+  'instance_name',
+  'node_name',
+  'db_type',
+  'service_name',
+  'mode',
+  'cpu',
+  'device',
+  'mountpoint',
+  'fstype',
+  'interface',
+  'job',
+]
 
 const rangeOptions = [
   { value: '1h', label: '1 hour', seconds: 60 * 60 },
@@ -85,11 +130,7 @@ const rangeOptions = [
 ]
 
 const filteredMetricNames = computed(() => {
-  const search = metricSearch.value.trim().toLowerCase()
-  const names = search
-    ? metricNames.value.filter((name) => name.toLowerCase().includes(search))
-    : metricNames.value
-  return names.slice(0, 300)
+  return metricNames.value
 })
 
 const selectedRange = computed(
@@ -192,15 +233,60 @@ const metricStats = computed(() => {
   }
 })
 
+const graphLabelOptions = computed(() => {
+  const labelSet = new Set<string>()
+  for (const item of result.value?.result ?? []) {
+    for (const label of Object.keys(item.metric)) {
+      if (!noisyLegendLabels.has(label)) {
+        labelSet.add(label)
+      }
+    }
+  }
+  for (const label of selectedMetricLabels.value) {
+    if (!noisyLegendLabels.has(label)) {
+      labelSet.add(label)
+    }
+  }
+  return [...labelSet].sort((left, right) => {
+    const leftIndex = preferredLegendLabels.indexOf(left)
+    const rightIndex = preferredLegendLabels.indexOf(right)
+    if (leftIndex !== -1 || rightIndex !== -1) {
+      return (leftIndex === -1 ? 999 : leftIndex) - (rightIndex === -1 ? 999 : rightIndex)
+    }
+    return left.localeCompare(right)
+  })
+})
+
 const chartOption = computed(() => {
   const series = result.value?.result ?? []
   return {
-    tooltip: { trigger: 'axis' },
-    legend: { type: 'scroll', bottom: 0, textStyle: { color: '#475569' } },
-    grid: { top: 24, left: 56, right: 24, bottom: 72 },
+    color: graphColorPalette,
+    tooltip: {
+      trigger: 'axis',
+      confine: true,
+      backgroundColor: 'rgba(255,255,255,0.98)',
+      borderColor: '#cbd5e1',
+      textStyle: { color: '#0f172a', fontSize: 12 },
+      formatter: formatTooltip,
+    },
+    legend: {
+      type: 'scroll',
+      bottom: 0,
+      itemWidth: 10,
+      itemHeight: 10,
+      pageIconColor: '#334155',
+      pageTextStyle: { color: '#64748b' },
+      textStyle: {
+        color: '#334155',
+        overflow: 'truncate',
+        width: 260,
+      },
+    },
+    grid: { top: 20, left: 56, right: 24, bottom: 78 },
     xAxis: {
       type: 'time',
       axisLabel: { color: '#64748b' },
+      axisLine: { lineStyle: { color: '#cbd5e1' } },
     },
     yAxis: {
       type: 'value',
@@ -208,10 +294,12 @@ const chartOption = computed(() => {
       splitLine: { lineStyle: { color: '#e2e8f0' } },
     },
     series: series.map((item, index) => ({
-      name: seriesName(item.metric, index),
+      name: chartSeriesName(item.metric, index),
       type: 'line',
       showSymbol: false,
-      smooth: true,
+      smooth: false,
+      lineStyle: { width: 1.5 },
+      emphasis: { focus: 'series' },
       data: (item.values ?? []).map(([timestamp, value]) => [
         timestamp * 1000,
         Number.parseFloat(value),
@@ -237,6 +325,83 @@ function seriesName(labels: Record<string, string>, index: number) {
     return labels.__name__ || `series ${index + 1}`
   }
   return entries.map(([key, value]) => `${key}=${value}`).join(', ')
+}
+
+function chartSeriesName(labels: Record<string, string>, index: number) {
+  const selectedLabels = legendLabels.value.filter((label) => labels[label])
+  if (selectedLabels.length > 0) {
+    return selectedLabels.map((label) => `${label}=${labels[label]}`).join(', ')
+  }
+  return labels.__name__ || `series ${index + 1}`
+}
+
+function chooseDefaultLegendLabels(series: PrometheusSeriesSelector[]) {
+  const available = new Set<string>()
+  for (const item of series) {
+    for (const label of Object.keys(item)) {
+      if (!noisyLegendLabels.has(label)) {
+        available.add(label)
+      }
+    }
+  }
+  const preferred = preferredLegendLabels.filter((label) => available.has(label)).slice(0, 3)
+  if (preferred.length > 0) {
+    return preferred
+  }
+  return [...available].sort().slice(0, 3)
+}
+
+function resetLegendLabels() {
+  const source = result.value?.result?.map((item) => item.metric) ?? metricSeries.value
+  legendLabels.value = chooseDefaultLegendLabels(source)
+}
+
+function clearLegendLabels() {
+  legendLabels.value = []
+}
+
+function toggleLegendLabel(label: string) {
+  legendLabels.value = legendLabels.value.includes(label)
+    ? legendLabels.value.filter((item) => item !== label)
+    : [...legendLabels.value, label]
+}
+
+function formatTooltip(params: unknown) {
+  const items = Array.isArray(params) ? params : [params]
+  const first = items[0] as { axisValueLabel?: string } | undefined
+  const rows = items
+    .slice(0, 24)
+    .map((item) => {
+      const point = item as {
+        marker?: string
+        seriesName?: string
+        value?: [number, number]
+      }
+      const value = Array.isArray(point.value) ? point.value[1] : null
+      return `<div style="display:flex;gap:12px;align-items:center;justify-content:space-between;min-width:220px;max-width:520px;">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${point.marker ?? ''}${escapeHtml(point.seriesName ?? '')}</span>
+        <strong>${formatNumber(typeof value === 'number' ? value : null)}</strong>
+      </div>`
+    })
+    .join('')
+  const remaining =
+    items.length > 24
+      ? `<div style="color:#64748b;margin-top:4px;">+${items.length - 24} more series</div>`
+      : ''
+  return `<div style="display:grid;gap:4px;">
+    <div style="font-weight:600;margin-bottom:4px;">${escapeHtml(first?.axisValueLabel ?? '')}</div>
+    ${rows}
+    ${remaining}
+  </div>`
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }
 
 function formatNumber(value: number | null) {
@@ -287,13 +452,150 @@ function buildQuery() {
   }
 }
 
+function createPromqlClient(): PrometheusClient {
+  return {
+    labelNames: async (metricName?: string) => {
+      if (metricName) {
+        const series = await fetchMetricSeries(metricName, requireToken())
+        return labelsFromSeries(series)
+      }
+      return fetchMetricLabelNames(requireToken())
+    },
+    labelValues: async (labelName: string, metricName?: string) => {
+      if (metricName) {
+        const series = await fetchMetricSeries(metricName, requireToken())
+        return [
+          ...new Set(
+            series
+              .map((item) => item[labelName])
+              .filter((value): value is string => Boolean(value)),
+          ),
+        ].sort()
+      }
+      return fetchMetricLabelValues(labelName, requireToken())
+    },
+    metricMetadata: async () => {
+      const metadata = await fetchMetricMetadata('', requireToken())
+      return Object.fromEntries(
+        Object.entries(metadata).map(([name, entries]) => [
+          name,
+          entries.map((entry) => ({
+            type: entry.type ?? '',
+            help: entry.help ?? '',
+          })),
+        ]),
+      )
+    },
+    series: async (metricName: string) => {
+      const series = await fetchMetricSeries(metricName || '{__name__!=""}', requireToken())
+      return series.map((item) => new Map(Object.entries(item)))
+    },
+    metricNames: async (prefix?: string) => fetchMetricNames(requireToken(), prefix ?? '', 300),
+    flags: async () => ({}),
+  }
+}
+
+function labelsFromSeries(series: PrometheusSeriesSelector[]) {
+  const labels = new Set<string>()
+  for (const item of series) {
+    for (const label of Object.keys(item)) {
+      if (label !== '__name__') {
+        labels.add(label)
+      }
+    }
+  }
+  return [...labels].sort()
+}
+
+function createPromqlEditor() {
+  if (!promqlEditorRoot.value || promqlEditorView) {
+    return
+  }
+
+  promqlExtension = new PromQLExtension().setComplete({
+    remote: createPromqlClient(),
+  })
+  const updateListener = EditorView.updateListener.of((update) => {
+    if (!update.docChanged) {
+      return
+    }
+    const nextValue = update.state.doc.toString()
+    if (nextValue !== promql.value) {
+      promql.value = nextValue
+    }
+  })
+
+  promqlEditorView = new EditorView({
+    parent: promqlEditorRoot.value,
+    state: EditorState.create({
+      doc: promql.value,
+      extensions: [
+        basicSetup,
+        promqlExtension.asExtension(),
+        updateListener,
+        EditorView.lineWrapping,
+        EditorView.theme({
+          '&': {
+            minHeight: '6rem',
+            border: '1px solid #e2e8f0',
+            borderRadius: '0.375rem',
+            backgroundColor: '#f8fafc',
+            fontSize: '0.875rem',
+          },
+          '&.cm-focused': {
+            outline: 'none',
+            borderColor: '#94a3b8',
+          },
+          '.cm-scroller': {
+            minHeight: '6rem',
+            fontFamily:
+              'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+          },
+          '.cm-content': {
+            padding: '0.75rem',
+          },
+          '.cm-tooltip': {
+            border: '1px solid #cbd5e1',
+            borderRadius: '0.375rem',
+            boxShadow: '0 10px 15px -3px rgb(15 23 42 / 0.12)',
+          },
+        }),
+      ],
+    }),
+  })
+}
+
+function destroyPromqlEditor() {
+  promqlExtension?.destroy()
+  promqlExtension = null
+  promqlEditorView?.destroy()
+  promqlEditorView = null
+}
+
+function syncPromqlEditorDoc(value: string) {
+  if (!promqlEditorView) {
+    return
+  }
+  const currentValue = promqlEditorView.state.doc.toString()
+  if (currentValue === value) {
+    return
+  }
+  promqlEditorView.dispatch({
+    changes: {
+      from: 0,
+      to: currentValue.length,
+      insert: value,
+    },
+  })
+}
+
 async function loadCatalog() {
   loading.value = true
   error.value = ''
   try {
     const token = requireToken()
     const [names, labels] = await Promise.all([
-      fetchMetricNames(token),
+      fetchMetricNames(token, metricSearch.value),
       fetchMetricLabelNames(token),
     ])
     metricNames.value = names.sort()
@@ -303,6 +605,36 @@ async function loadCatalog() {
   } finally {
     loading.value = false
   }
+}
+
+async function searchMetricNames() {
+  const requestId = ++metricSearchRequestId
+  metricSearchLoading.value = true
+  error.value = ''
+  try {
+    const names = await fetchMetricNames(requireToken(), metricSearch.value)
+    if (requestId !== metricSearchRequestId) {
+      return
+    }
+    metricNames.value = names.sort()
+  } catch (loadError) {
+    if (requestId === metricSearchRequestId) {
+      error.value = loadError instanceof Error ? loadError.message : 'Failed to search metrics.'
+    }
+  } finally {
+    if (requestId === metricSearchRequestId) {
+      metricSearchLoading.value = false
+    }
+  }
+}
+
+function scheduleMetricSearch() {
+  if (metricSearchTimer) {
+    window.clearTimeout(metricSearchTimer)
+  }
+  metricSearchTimer = window.setTimeout(() => {
+    void searchMetricNames()
+  }, 250)
 }
 
 async function selectMetric(metricName: string) {
@@ -333,6 +665,7 @@ async function selectMetric(metricName: string) {
     }
     metricSeries.value = series
     metricMetadata.value = metadata
+    legendLabels.value = chooseDefaultLegendLabels(series)
     buildQuery()
     await refreshInstantStats(requestId)
   } catch (loadError) {
@@ -444,6 +777,29 @@ async function runQuery() {
 onMounted(() => {
   void loadCatalog()
 })
+
+onBeforeUnmount(() => {
+  destroyPromqlEditor()
+})
+
+watch(metricSearch, () => {
+  scheduleMetricSearch()
+})
+
+watch(viewMode, (mode) => {
+  if (mode === 'graph') {
+    void nextTick(() => {
+      createPromqlEditor()
+      syncPromqlEditorDoc(promql.value)
+    })
+  } else {
+    destroyPromqlEditor()
+  }
+})
+
+watch(promql, (value) => {
+  syncPromqlEditorDoc(value)
+})
 </script>
 
 <template>
@@ -488,10 +844,15 @@ onMounted(() => {
           <div class="relative">
             <Search class="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
             <Input v-model="metricSearch" class="pl-9" placeholder="Search metrics" />
+            <RefreshCw
+              v-if="metricSearchLoading"
+              class="pointer-events-none absolute right-3 top-2.5 h-4 w-4 animate-spin text-slate-400"
+            />
           </div>
           <div class="mt-2 flex items-center justify-between text-xs text-slate-500">
-            <span>{{ metricNames.length }} metrics</span>
-            <span>{{ filteredMetricNames.length }} shown</span>
+            <span>{{ filteredMetricNames.length }} results</span>
+            <span v-if="metricSearch.trim()">server filtered</span>
+            <span v-else>latest metrics</span>
           </div>
         </div>
         <div class="max-h-[calc(100vh-18rem)] overflow-y-auto p-2">
@@ -775,6 +1136,42 @@ onMounted(() => {
           </Button>
         </div>
 
+        <div
+          v-if="graphLabelOptions.length > 0"
+          class="mb-3 rounded-md border border-slate-200 bg-slate-50 p-3"
+        >
+          <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <Tag class="h-4 w-4" />
+              Legend labels
+            </div>
+            <div class="flex gap-2">
+              <Button variant="outline" size="xs" type="button" @click="resetLegendLabels">
+                Auto
+              </Button>
+              <Button variant="outline" size="xs" type="button" @click="clearLegendLabels">
+                Clear
+              </Button>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button
+              v-for="label in graphLabelOptions"
+              :key="label"
+              type="button"
+              :class="
+                legendLabels.includes(label)
+                  ? 'border-slate-900 bg-slate-900 text-white'
+                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'
+              "
+              class="rounded-md border px-2 py-1 font-mono text-xs transition"
+              @click="toggleLegendLabel(label)"
+            >
+              {{ label }}
+            </button>
+          </div>
+        </div>
+
         <div class="grid gap-3 xl:grid-cols-[10rem_1fr_9rem_8rem_auto] xl:items-end">
           <label class="grid gap-1 text-sm">
             <span class="font-medium text-slate-700">Template</span>
@@ -815,12 +1212,7 @@ onMounted(() => {
           </Button>
         </div>
 
-        <textarea
-          v-model="promql"
-          class="mt-3 min-h-24 w-full rounded-md border border-slate-200 bg-slate-50 p-3 font-mono text-sm outline-none focus:border-slate-400"
-          spellcheck="false"
-          placeholder="Select a metric or enter PromQL"
-        />
+        <div ref="promqlEditorRoot" class="mt-3" />
       </div>
 
       <div class="min-h-[30rem] rounded-lg border border-slate-200 bg-white p-4">

@@ -36,11 +36,14 @@ export type PrometheusInstantResult = {
 
 export type PrometheusSeriesSelector = Record<string, string>
 
-export type PrometheusMetadata = Record<string, Array<{
-  type?: string
-  help?: string
-  unit?: string
-}>>
+export type PrometheusMetadata = Record<
+  string,
+  Array<{
+    type?: string
+    help?: string
+    unit?: string
+  }>
+>
 
 function metricsUrl(path: string, params?: URLSearchParams) {
   const query = params?.toString()
@@ -101,8 +104,12 @@ async function metricsGet<T>(path: string, options: MetricsRequestOptions): Prom
   return payload.data
 }
 
-export function fetchMetricNames(token: string) {
-  return metricsGet<string[]>('/v1/metrics/label/__name__/values', { token })
+export function fetchMetricNames(token: string, search = '', limit = 300) {
+  const params = new URLSearchParams({ limit: `${limit}` })
+  if (search.trim()) {
+    params.set('search', search.trim())
+  }
+  return metricsGet<string[]>('/v1/metrics/names', { token, params })
 }
 
 export function fetchMetricLabelNames(token: string) {
@@ -125,7 +132,13 @@ export function fetchMetricSeries(metricName: string, token: string) {
   return metricsGet<PrometheusSeriesSelector[]>('/v1/metrics/series', { token, params })
 }
 
-export function queryMetricRange(query: string, start: Date, end: Date, stepSeconds: number, token: string) {
+export function queryMetricRange(
+  query: string,
+  start: Date,
+  end: Date,
+  stepSeconds: number,
+  token: string,
+) {
   const params = new URLSearchParams({
     query,
     start: `${Math.floor(start.getTime() / 1000)}`,

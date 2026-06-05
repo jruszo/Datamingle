@@ -3,6 +3,7 @@ from django.urls import path
 from api_metrics import views
 
 urlpatterns = [
+    path("v1/metrics/names", views.MetricsNamesView.as_view(), name="metrics-names"),
     path("v1/metrics/labels", views.MetricsLabelsView.as_view(), name="metrics-labels"),
     path(
         "v1/metrics/label/<str:label_name>/values",
