@@ -75,15 +75,24 @@ func (r *Runner) Run(ctx context.Context) error {
 			return nil
 		case message := <-websocketMessages:
 			if err := r.handleWebsocketMessage(ctx, message); err != nil {
-				return err
+				if ctx.Err() != nil {
+					return nil
+				}
+				log.Printf("agent websocket message handling failed: %v", err)
 			}
 		case <-heartbeat.C:
 			if err := r.sendHeartbeat(ctx, "online", 0); err != nil {
-				return err
+				if ctx.Err() != nil {
+					return nil
+				}
+				log.Printf("agent heartbeat failed: %v", err)
 			}
 		case <-refresh.C:
 			if err := r.refreshConfig(ctx); err != nil {
-				return err
+				if ctx.Err() != nil {
+					return nil
+				}
+				log.Printf("agent config refresh failed: %v", err)
 			}
 		}
 	}

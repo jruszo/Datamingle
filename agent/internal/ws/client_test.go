@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -97,5 +98,61 @@ func TestClientSendsHelloAndHandlesMessages(t *testing.T) {
 	}
 	if messages[1].Type != "config.changed" || messages[1].Revision != 5 {
 		t.Fatalf("unexpected config message: %+v", messages[1])
+	}
+}
+
+func TestClientReconnectsWhenReadDeadlineExpires(t *testing.T) {
+	var connections atomic.Int32
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade failed: %v", err)
+			return
+		}
+		defer conn.Close()
+
+		var hello Hello
+		if err := conn.ReadJSON(&hello); err != nil {
+			t.Errorf("hello read failed: %v", err)
+			return
+		}
+
+		if connections.Add(1) == 1 {
+			time.Sleep(100 * time.Millisecond)
+			return
+		}
+
+		if err := conn.WriteJSON(Message{Type: "config.changed", Revision: 7}); err != nil {
+			t.Errorf("config changed write failed: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	endpoint := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/ws/agent/"
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	client := Client{
+		Endpoint:     endpoint,
+		Backoff:      NewBackoff(time.Millisecond, time.Millisecond),
+		ReadTimeout:  20 * time.Millisecond,
+		WriteTimeout: time.Second,
+		Hello: func() Hello {
+			return Hello{AgentVersion: "test"}
+		},
+	}
+	err := client.Run(ctx, func(_ context.Context, message Message) error {
+		if message.Type == "config.changed" {
+			cancel()
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := connections.Load(); got < 2 {
+		t.Fatalf("expected websocket reconnect after read timeout, got %d connection(s)", got)
 	}
 }

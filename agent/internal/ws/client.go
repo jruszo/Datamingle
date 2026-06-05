@@ -27,16 +27,23 @@ type Hello struct {
 
 type Handler func(context.Context, Message) error
 
+const (
+	defaultReadTimeout  = 90 * time.Second
+	defaultWriteTimeout = 10 * time.Second
+)
+
 type Dialer interface {
 	DialContext(ctx context.Context, urlStr string, requestHeader http.Header) (*websocket.Conn, *http.Response, error)
 }
 
 type Client struct {
-	Endpoint string
-	Header   http.Header
-	Dialer   Dialer
-	Backoff  Backoff
-	Hello    func() Hello
+	Endpoint     string
+	Header       http.Header
+	Dialer       Dialer
+	Backoff      Backoff
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
+	Hello        func() Hello
 }
 
 func (c Client) Run(ctx context.Context, handler Handler) error {
@@ -51,6 +58,12 @@ func (c Client) Run(ctx context.Context, handler Handler) error {
 	}
 	if c.Backoff.Base == 0 && c.Backoff.Max == 0 {
 		c.Backoff = NewBackoff(time.Second, time.Minute)
+	}
+	if c.ReadTimeout <= 0 {
+		c.ReadTimeout = defaultReadTimeout
+	}
+	if c.WriteTimeout <= 0 {
+		c.WriteTimeout = defaultWriteTimeout
 	}
 
 	for attempt := 0; ; attempt++ {
@@ -87,12 +100,19 @@ func (c Client) runOnce(ctx context.Context, handler Handler) error {
 	}
 	defer conn.Close()
 
+	refreshReadDeadline := func() error {
+		return conn.SetReadDeadline(time.Now().Add(c.ReadTimeout))
+	}
+	if err := refreshReadDeadline(); err != nil {
+		return err
+	}
+
 	if c.Hello != nil {
 		hello := c.Hello()
 		if hello.Type == "" {
 			hello.Type = "hello"
 		}
-		if err := conn.WriteJSON(hello); err != nil {
+		if err := c.writeJSON(conn, hello); err != nil {
 			return err
 		}
 	}
@@ -102,11 +122,14 @@ func (c Client) runOnce(ctx context.Context, handler Handler) error {
 		if err := conn.ReadJSON(&message); err != nil {
 			return err
 		}
+		if err := refreshReadDeadline(); err != nil {
+			return err
+		}
 		if message.Type == "" {
 			continue
 		}
 		if message.Type == "ping" {
-			if err := conn.WriteJSON(Message{Type: "pong", SentAt: message.SentAt}); err != nil {
+			if err := c.writeJSON(conn, Message{Type: "pong", SentAt: message.SentAt}); err != nil {
 				return err
 			}
 			continue
@@ -115,4 +138,11 @@ func (c Client) runOnce(ctx context.Context, handler Handler) error {
 			return err
 		}
 	}
+}
+
+func (c Client) writeJSON(conn *websocket.Conn, value any) error {
+	if err := conn.SetWriteDeadline(time.Now().Add(c.WriteTimeout)); err != nil {
+		return err
+	}
+	return conn.WriteJSON(value)
 }
