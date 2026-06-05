@@ -12,13 +12,11 @@ import {
   ArrowLeft,
   BarChart3,
   Database,
-  Filter,
   Info,
   Play,
   RefreshCw,
   Search,
   Tag,
-  X,
 } from 'lucide-vue-next'
 import VChart from 'vue-echarts'
 import { PromQLExtension, type PrometheusClient } from '@prometheus-io/codemirror-promql'
@@ -43,11 +41,6 @@ import { useAuthStore } from '@/stores/auth'
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent])
 
-type LabelFilter = {
-  label: string
-  value: string
-}
-
 type LabelSummary = {
   label: string
   values: Array<{ value: string; count: number }>
@@ -65,15 +58,11 @@ const viewMode = ref<'explore' | 'graph'>('explore')
 const metricSearch = ref('')
 const selectedMetric = ref('')
 const labelNames = ref<string[]>([])
-const labelValues = ref<string[]>([])
 const metricNames = ref<string[]>([])
 const metricSeries = ref<PrometheusSeriesSelector[]>([])
 const metricMetadata = ref<PrometheusMetadata>({})
 const instantSamples = ref<PrometheusSeries[]>([])
 const instantLoadedAt = ref<Date | null>(null)
-const selectedLabel = ref('')
-const selectedValue = ref('')
-const labelFilters = ref<LabelFilter[]>([])
 const queryMode = ref<'raw' | 'rate' | 'sum' | 'avg' | 'max'>('rate')
 const groupBy = ref('')
 const rangePreset = ref('1h')
@@ -141,10 +130,7 @@ const selector = computed(() => {
   if (!selectedMetric.value) {
     return ''
   }
-  const filters = labelFilters.value
-    .filter((item) => item.label && item.value)
-    .map((item) => `${item.label}="${escapeLabelValue(item.value)}"`)
-  return filters.length > 0 ? `${selectedMetric.value}{${filters.join(',')}}` : selectedMetric.value
+  return selectedMetric.value
 })
 
 const metadataEntries = computed(() => {
@@ -157,12 +143,7 @@ const metadataEntries = computed(() => {
 const primaryMetadata = computed(() => metadataEntries.value[0] ?? {})
 
 const filteredSeries = computed(() => {
-  if (labelFilters.value.length === 0) {
-    return metricSeries.value
-  }
-  return metricSeries.value.filter((series) =>
-    labelFilters.value.every((filter) => series[filter.label] === filter.value),
-  )
+  return metricSeries.value
 })
 
 const labelSummaries = computed<LabelSummary[]>(() => {
@@ -190,24 +171,6 @@ const labelSummaries = computed<LabelSummary[]>(() => {
 })
 
 const selectedMetricLabels = computed(() => labelSummaries.value.map((summary) => summary.label))
-
-const activeLabelOptions = computed(() => {
-  if (selectedMetric.value) {
-    return selectedMetricLabels.value
-  }
-  return labelNames.value
-})
-
-const activeLabelValues = computed(() => {
-  if (!selectedLabel.value) {
-    return []
-  }
-  if (!selectedMetric.value) {
-    return labelValues.value
-  }
-  const summary = labelSummaries.value.find((item) => item.label === selectedLabel.value)
-  return summary?.values.map((item) => item.value) ?? []
-})
 
 const numericInstantValues = computed(() =>
   instantSamples.value
@@ -640,10 +603,6 @@ function scheduleMetricSearch() {
 async function selectMetric(metricName: string) {
   const requestId = ++detailRequestId
   selectedMetric.value = metricName
-  labelFilters.value = []
-  selectedLabel.value = ''
-  selectedValue.value = ''
-  labelValues.value = []
   metricSeries.value = []
   metricMetadata.value = {}
   instantSamples.value = []
@@ -704,41 +663,6 @@ async function refreshInstantStats(requestId = detailRequestId) {
       statsLoading.value = false
     }
   }
-}
-
-async function loadLabelValues() {
-  selectedValue.value = ''
-  if (!selectedLabel.value) {
-    labelValues.value = []
-    return
-  }
-  if (selectedMetric.value) {
-    labelValues.value = activeLabelValues.value
-    return
-  }
-  try {
-    labelValues.value = (await fetchMetricLabelValues(selectedLabel.value, requireToken())).sort()
-  } catch (loadError) {
-    error.value = loadError instanceof Error ? loadError.message : 'Failed to load label values.'
-  }
-}
-
-function addFilter() {
-  if (!selectedLabel.value || !selectedValue.value) {
-    return
-  }
-  labelFilters.value = [
-    ...labelFilters.value.filter((item) => item.label !== selectedLabel.value),
-    { label: selectedLabel.value, value: selectedValue.value },
-  ]
-  buildQuery()
-  void refreshInstantStats()
-}
-
-function removeFilter(label: string) {
-  labelFilters.value = labelFilters.value.filter((item) => item.label !== label)
-  buildQuery()
-  void refreshInstantStats()
 }
 
 function graphSelectedMetric() {
@@ -905,91 +829,25 @@ watch(promql, (value) => {
                 No metric metadata is available from the metrics backend.
               </p>
             </div>
-            <Button
-              type="button"
-              :disabled="detailLoading || !selectedMetric"
-              @click="graphSelectedMetric"
-            >
-              <BarChart3 class="h-4 w-4" />
-              Graph metric
-            </Button>
-          </div>
-        </div>
-
-        <div class="rounded-lg border border-slate-200 bg-white p-4">
-          <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div class="flex items-center gap-2">
-              <Filter class="h-4 w-4 text-slate-500" />
-              <p class="text-sm font-semibold text-slate-900">Filters</p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              type="button"
-              :disabled="statsLoading"
-              @click="void refreshInstantStats()"
-            >
-              <RefreshCw :class="['h-4 w-4', { 'animate-spin': statsLoading }]" />
-              Refresh stats
-            </Button>
-          </div>
-          <div class="grid gap-3 xl:grid-cols-[1fr_1fr_auto] xl:items-end">
-            <label class="grid gap-1 text-sm">
-              <span class="font-medium text-slate-700">Label</span>
-              <select
-                v-model="selectedLabel"
-                class="h-10 rounded-md border border-slate-200 px-3 text-sm"
-                @change="void loadLabelValues()"
-              >
-                <option value="">Select label</option>
-                <option v-for="label in activeLabelOptions" :key="label" :value="label">
-                  {{ label }}
-                </option>
-              </select>
-            </label>
-            <label class="grid gap-1 text-sm">
-              <span class="font-medium text-slate-700">Value</span>
-              <select
-                v-model="selectedValue"
-                class="h-10 rounded-md border border-slate-200 px-3 text-sm"
-                :disabled="!selectedLabel"
-              >
-                <option value="">Select value</option>
-                <option v-for="value in activeLabelValues" :key="value" :value="value">
-                  {{ value }}
-                </option>
-              </select>
-            </label>
-            <Button
-              variant="outline"
-              type="button"
-              :disabled="!selectedLabel || !selectedValue"
-              @click="addFilter"
-            >
-              <Filter class="h-4 w-4" />
-              Add filter
-            </Button>
-          </div>
-
-          <div class="mt-3 flex flex-wrap gap-2">
-            <Badge
-              v-for="filter in labelFilters"
-              :key="filter.label"
-              variant="outline"
-              class="gap-1"
-            >
-              {{ filter.label }}="{{ filter.value }}"
-              <button
+            <div class="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
                 type="button"
-                class="text-slate-500 hover:text-slate-900"
-                @click="removeFilter(filter.label)"
+                :disabled="statsLoading"
+                @click="void refreshInstantStats()"
               >
-                <X class="h-3 w-3" />
-              </button>
-            </Badge>
-            <span v-if="labelFilters.length === 0" class="text-sm text-slate-500">
-              No filters applied.
-            </span>
+                <RefreshCw :class="['h-4 w-4', { 'animate-spin': statsLoading }]" />
+                Refresh stats
+              </Button>
+              <Button
+                type="button"
+                :disabled="detailLoading || !selectedMetric"
+                @click="graphSelectedMetric"
+              >
+                <BarChart3 class="h-4 w-4" />
+                Graph metric
+              </Button>
+            </div>
           </div>
         </div>
 
