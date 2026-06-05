@@ -11,7 +11,7 @@ const metricsModule: FeatureModule = {
       name: 'metrics',
       component: MetricsExplorerPage,
       meta: {
-        title: 'Metrics',
+        title: 'Metrics Explorer',
         access: {
           anyPermissions: ['sql.menu_infrastructure', 'sql.menu_instance', 'api_agents.menu_agent'],
         },
@@ -21,7 +21,7 @@ const metricsModule: FeatureModule = {
   navigation: [
     {
       to: '/metrics',
-      label: 'Metrics',
+      label: 'Metrics Explorer',
       section: 'primary',
       icon: Activity,
       group: { id: 'infrastructure', label: 'Infrastructure', icon: Network, order: 20 },
