@@ -58,6 +58,56 @@ func TestManagerAppliesEnabledModulesAndStopsRemovedModules(t *testing.T) {
 	}
 }
 
+func TestManagerSkipsUnchangedActiveModule(t *testing.T) {
+	module := &fakeModule{name: "node_monitoring"}
+	manager := NewManager(module)
+	cfg := Config{
+		Name:     "node_monitoring",
+		Enabled:  true,
+		Revision: 3,
+		Raw: map[string]any{
+			"listen_address": "127.0.0.1:9100",
+			"collectors":     []any{"cpu", "meminfo"},
+		},
+	}
+
+	if err := manager.Apply(context.Background(), []Config{cfg}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Apply(context.Background(), []Config{cfg}); err != nil {
+		t.Fatal(err)
+	}
+
+	if module.applied != 1 {
+		t.Fatalf("expected unchanged config to be applied once, got %d", module.applied)
+	}
+	if module.stopped != 0 {
+		t.Fatalf("expected unchanged config not to stop module, got %d", module.stopped)
+	}
+}
+
+func TestManagerStopStopsActiveModulesAndClearsState(t *testing.T) {
+	module := &fakeModule{name: "logs"}
+	manager := NewManager(module)
+
+	if err := manager.Apply(context.Background(), []Config{{Name: "logs", Enabled: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if module.stopped != 1 {
+		t.Fatalf("expected active module to stop once, got %d", module.stopped)
+	}
+
+	if err := manager.Apply(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if module.stopped != 1 {
+		t.Fatalf("expected stopped module to be inactive, got %d stops", module.stopped)
+	}
+}
+
 func TestManagerRejectsUnknownEnabledModule(t *testing.T) {
 	manager := NewManager()
 
