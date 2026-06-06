@@ -2,7 +2,7 @@ import uuid
 
 from rest_framework import serializers
 
-from api_metrics.models import MetricsDashboard
+from api_metrics.models import MetricsDashboard, MetricsDashboardRevision
 from api_metrics.views import (
     DEFAULT_MAX_QUERY_LENGTH,
     DEFAULT_MIN_STEP_SECONDS,
@@ -324,3 +324,40 @@ class MetricsDashboardSerializer(serializers.ModelSerializer):
         if len(names) != len(set(names)):
             raise serializers.ValidationError("Variable names must be unique.")
         return value
+
+
+class MetricsDashboardRevisionSummarySerializer(serializers.ModelSerializer):
+    saved_by = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MetricsDashboardRevision
+        fields = (
+            "revision",
+            "saved_by",
+            "saved_at",
+            "restored_from_revision",
+        )
+
+    def get_saved_by(self, obj):
+        if obj.saved_by is None:
+            return None
+        return {
+            "id": obj.saved_by_id,
+            "username": obj.saved_by.username,
+            "display": obj.saved_by.display or obj.saved_by.username,
+        }
+
+
+class MetricsDashboardRevisionSerializer(MetricsDashboardRevisionSummarySerializer):
+    variables = DashboardVariableSerializer(many=True)
+    panels = DashboardPanelSerializer(many=True)
+
+    class Meta(MetricsDashboardRevisionSummarySerializer.Meta):
+        fields = MetricsDashboardRevisionSummarySerializer.Meta.fields + (
+            "name",
+            "description",
+            "time_range_seconds",
+            "refresh_interval_seconds",
+            "variables",
+            "panels",
+        )

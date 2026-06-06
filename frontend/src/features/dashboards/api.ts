@@ -74,6 +74,15 @@ export type MetricsDashboard = {
   update_time: string
 }
 
+export type DashboardRevisionSummary = {
+  revision: number
+  saved_by: MetricsDashboard['created_by']
+  saved_at: string
+  restored_from_revision: number | null
+}
+
+export type DashboardRevision = DashboardRevisionSummary & DashboardWritePayload
+
 export type DashboardWritePayload = Pick<
   MetricsDashboard,
   | 'name'
@@ -115,6 +124,24 @@ export function fetchMetricsDashboard(dashboardId: number, token: string) {
   }).then(extractData)
 }
 
+export function listDashboardRevisions(dashboardId: number, token: string) {
+  return apiGet<ApiEnvelope<DashboardRevisionSummary[]>>(
+    `/v1/metrics/dashboards/${dashboardId}/revisions/`,
+    { token },
+  ).then(extractData)
+}
+
+export function fetchDashboardRevision(
+  dashboardId: number,
+  revision: number,
+  token: string,
+) {
+  return apiGet<ApiEnvelope<DashboardRevision>>(
+    `/v1/metrics/dashboards/${dashboardId}/revisions/${revision}/`,
+    { token },
+  ).then(extractData)
+}
+
 export function createMetricsDashboard(payload: DashboardWritePayload, token: string) {
   return apiPost<ApiEnvelope<MetricsDashboard>>('/v1/metrics/dashboards/', payload, {
     token,
@@ -131,6 +158,31 @@ export async function updateMetricsDashboard(
     return await apiPatch<ApiEnvelope<MetricsDashboard>>(
       `/v1/metrics/dashboards/${dashboardId}/`,
       { ...payload, expected_revision: expectedRevision },
+      { token },
+    ).then(extractData)
+  } catch (error) {
+    if (
+      error instanceof ApiRequestError &&
+      error.status === 409 &&
+      isRecord(error.data) &&
+      isRecord(error.data.data)
+    ) {
+      throw new DashboardConflictError(error.data.data as MetricsDashboard)
+    }
+    throw error
+  }
+}
+
+export async function restoreDashboardRevision(
+  dashboardId: number,
+  revision: number,
+  expectedRevision: number,
+  token: string,
+) {
+  try {
+    return await apiPost<ApiEnvelope<MetricsDashboard>>(
+      `/v1/metrics/dashboards/${dashboardId}/revisions/${revision}/restore/`,
+      { expected_revision: expectedRevision },
       { token },
     ).then(extractData)
   } catch (error) {

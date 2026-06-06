@@ -8,10 +8,12 @@ import {
   ArrowLeft,
   Copy,
   Ellipsis,
+  History,
   Maximize2,
   Pencil,
   Plus,
   RefreshCw,
+  RotateCcw,
   Save,
   Settings,
   Trash2,
@@ -23,14 +25,20 @@ import { Input } from '@/components/ui/input'
 import {
   DashboardConflictError,
   createMetricsDashboard,
+  fetchDashboardRevision,
   fetchMetricsDashboard,
+  listDashboardRevisions,
+  restoreDashboardRevision,
   updateMetricsDashboard,
   type DashboardPanel,
+  type DashboardRevision,
+  type DashboardRevisionSummary,
   type DashboardVariable,
   type DashboardWritePayload,
   type MetricsDashboard,
 } from '@/features/dashboards/api'
 import DashboardLinePanel from '@/features/dashboards/components/DashboardLinePanel.vue'
+import DashboardRevisionPreview from '@/features/dashboards/components/DashboardRevisionPreview.vue'
 import { nextDashboardPanelY } from '@/features/dashboards/layout'
 import GraphEditor from '@/features/graph-editor/GraphEditor.vue'
 import {
@@ -53,6 +61,12 @@ const saving = ref(false)
 const error = ref('')
 const editing = ref(false)
 const settingsOpen = ref(false)
+const historyOpen = ref(false)
+const historyLoading = ref(false)
+const historyError = ref('')
+const revisions = ref<DashboardRevisionSummary[]>([])
+const selectedRevision = ref<DashboardRevision | null>(null)
+const restoring = ref(false)
 const refreshTick = ref(0)
 const gridRoot = ref<HTMLElement | null>(null)
 const panelDraft = ref<DashboardPanel | null>(null)
@@ -363,6 +377,7 @@ async function saveDashboard() {
     )
     destroyGrid()
     setLoadedDashboard(saved)
+    if (historyOpen.value) await loadHistory(saved.revision)
     await nextTick()
     initializeGrid()
   } catch (saveError) {
@@ -370,6 +385,93 @@ async function saveDashboard() {
     else error.value = saveError instanceof Error ? saveError.message : 'Failed to save dashboard.'
   } finally {
     saving.value = false
+  }
+}
+
+async function loadHistory(preferredRevision?: number) {
+  if (!dashboard.value) return
+  historyLoading.value = true
+  historyError.value = ''
+  try {
+    revisions.value = await listDashboardRevisions(dashboard.value.id, requireToken())
+    const revision = preferredRevision ?? selectedRevision.value?.revision ?? revisions.value[0]?.revision
+    if (revision !== undefined) {
+      selectedRevision.value = await fetchDashboardRevision(
+        dashboard.value.id,
+        revision,
+        requireToken(),
+      )
+    } else {
+      selectedRevision.value = null
+    }
+  } catch (loadError) {
+    historyError.value =
+      loadError instanceof Error ? loadError.message : 'Failed to load dashboard history.'
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+function openHistory() {
+  historyOpen.value = true
+  void loadHistory()
+}
+
+async function selectRevision(revision: number) {
+  if (!dashboard.value || selectedRevision.value?.revision === revision) return
+  historyLoading.value = true
+  historyError.value = ''
+  try {
+    selectedRevision.value = await fetchDashboardRevision(
+      dashboard.value.id,
+      revision,
+      requireToken(),
+    )
+  } catch (loadError) {
+    historyError.value =
+      loadError instanceof Error ? loadError.message : 'Failed to load dashboard revision.'
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+async function restoreSelectedRevision() {
+  if (!dashboard.value || !selectedRevision.value) return
+  const unsavedWarning = isDirty.value
+    ? ' Unsaved dashboard changes will be discarded.'
+    : ''
+  if (
+    !window.confirm(
+      `Restore revision ${selectedRevision.value.revision}? The current version will remain in history.${unsavedWarning}`,
+    )
+  ) {
+    return
+  }
+  restoring.value = true
+  historyError.value = ''
+  try {
+    const restored = await restoreDashboardRevision(
+      dashboard.value.id,
+      selectedRevision.value.revision,
+      dashboard.value.revision,
+      requireToken(),
+    )
+    destroyGrid()
+    historyOpen.value = false
+    selectedRevision.value = null
+    setLoadedDashboard(restored)
+    await nextTick()
+    initializeGrid()
+  } catch (restoreError) {
+    if (restoreError instanceof DashboardConflictError) {
+      historyOpen.value = false
+      conflictLatest.value = restoreError.latest
+    } else {
+      historyError.value =
+        restoreError instanceof Error ? restoreError.message : 'Failed to restore dashboard.'
+    }
+  } finally {
+    restoring.value = false
   }
 }
 
@@ -404,6 +506,7 @@ function handleKeyboard(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     if (panelDraft.value) void closePanelEditor()
     else if (fullscreenPanel.value) fullscreenPanel.value = null
+    else if (historyOpen.value) historyOpen.value = false
     else settingsOpen.value = false
   }
 }
@@ -462,6 +565,9 @@ watch(panelRoute, syncPanelRoute)
           </Button>
           <Button variant="outline" type="button" @click="settingsOpen = true">
             <Settings class="h-4 w-4" /> Settings
+          </Button>
+          <Button variant="outline" type="button" @click="openHistory">
+            <History class="h-4 w-4" /> History
           </Button>
           <Button variant="outline" type="button" @click="toggleEditing">
             <Pencil class="h-4 w-4" /> {{ editing ? 'View mode' : 'Edit layout' }}
@@ -576,6 +682,106 @@ watch(panelRoute, syncPanelRoute)
             @cancel="void closePanelEditor()"
           />
         </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="historyOpen && dashboard"
+        key="dashboard-history"
+        class="fixed inset-0 z-50 flex justify-end bg-slate-950/35"
+        @click.self="historyOpen = false"
+      >
+        <aside class="flex h-full w-full max-w-[92vw] flex-col bg-white shadow-xl">
+          <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+            <div>
+              <h3 class="font-semibold text-slate-950">Dashboard history</h3>
+              <p class="text-xs text-slate-500">The latest 50 saved revisions are retained.</p>
+            </div>
+            <Button variant="ghost" size="icon" type="button" @click="historyOpen = false">
+              <X class="h-4 w-4" />
+            </Button>
+          </div>
+          <p
+            v-if="historyError"
+            class="mx-5 mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+          >
+            {{ historyError }}
+          </p>
+          <div class="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[18rem_minmax(0,1fr)]">
+            <div class="max-h-64 overflow-auto border-b border-slate-200 p-3 lg:max-h-none lg:border-b-0 lg:border-r">
+              <p v-if="historyLoading && revisions.length === 0" class="p-3 text-sm text-slate-500">
+                Loading history...
+              </p>
+              <p v-else-if="revisions.length === 0" class="p-3 text-sm text-slate-500">
+                No saved revisions are available.
+              </p>
+              <button
+                v-for="item in revisions"
+                :key="item.revision"
+                type="button"
+                :class="[
+                  'mb-2 w-full rounded-md border p-3 text-left',
+                  selectedRevision?.revision === item.revision
+                    ? 'border-slate-900 bg-slate-50'
+                    : 'border-slate-200 hover:bg-slate-50',
+                ]"
+                @click="void selectRevision(item.revision)"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-sm font-semibold text-slate-900">
+                    Revision {{ item.revision }}
+                  </span>
+                  <span
+                    v-if="item.revision === dashboard.revision"
+                    class="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700"
+                  >
+                    Current
+                  </span>
+                </div>
+                <p class="mt-1 text-xs text-slate-500">
+                  {{ new Date(item.saved_at).toLocaleString() }}
+                </p>
+                <p class="mt-1 truncate text-xs text-slate-600">
+                  {{ item.saved_by?.display || 'Unknown user' }}
+                </p>
+                <p v-if="item.restored_from_revision" class="mt-1 text-xs text-blue-700">
+                  Restored from revision {{ item.restored_from_revision }}
+                </p>
+              </button>
+            </div>
+            <div class="min-w-0 overflow-auto p-5">
+              <div v-if="selectedRevision" class="grid gap-4">
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h4 class="text-lg font-semibold text-slate-950">
+                      {{ selectedRevision.name }}
+                    </h4>
+                    <p class="text-sm text-slate-500">
+                      Revision {{ selectedRevision.revision }} saved
+                      {{ new Date(selectedRevision.saved_at).toLocaleString() }}
+                    </p>
+                    <p v-if="selectedRevision.description" class="mt-1 text-sm text-slate-600">
+                      {{ selectedRevision.description }}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    :disabled="restoring || selectedRevision.revision === dashboard.revision"
+                    @click="void restoreSelectedRevision()"
+                  >
+                    <RotateCcw class="h-4 w-4" />
+                    {{ restoring ? 'Restoring...' : 'Restore this revision' }}
+                  </Button>
+                </div>
+                <DashboardRevisionPreview :revision="selectedRevision" />
+              </div>
+              <p v-else-if="historyLoading" class="text-sm text-slate-500">
+                Loading revision...
+              </p>
+            </div>
+          </div>
+        </aside>
       </div>
     </Teleport>
 

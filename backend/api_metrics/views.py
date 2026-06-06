@@ -9,6 +9,7 @@ from django.conf import settings
 from django.db import transaction
 from django.http import QueryDict
 from django.shortcuts import get_object_or_404
+from django.utils import timezone as django_timezone
 from rest_framework import permissions, status, views
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
@@ -35,6 +36,7 @@ DEFAULT_MAX_METRIC_NAME_LIMIT = 1000
 AI_METRIC_CONTEXT_LIMIT = 300
 AI_LABEL_CONTEXT_LIMIT = 200
 AI_METADATA_CONTEXT_LIMIT = 100
+DASHBOARD_HISTORY_LIMIT = 50
 
 PROMETHEUS_READ_BASE_PATH = "/prometheus/api/v1"
 TENANT_PARAM_NAMES = {
@@ -583,6 +585,47 @@ def _dashboard_serializer():
     return MetricsDashboardSerializer
 
 
+def _dashboard_revision_data(dashboard):
+    return {
+        "revision": dashboard.revision,
+        "name": dashboard.name,
+        "description": dashboard.description,
+        "time_range_seconds": dashboard.time_range_seconds,
+        "refresh_interval_seconds": dashboard.refresh_interval_seconds,
+        "variables": dashboard.variables,
+        "panels": dashboard.panels,
+    }
+
+
+def _snapshot_dashboard(
+    dashboard,
+    saved_by,
+    *,
+    saved_at=None,
+    restored_from_revision=None,
+):
+    from api_metrics.models import MetricsDashboardRevision
+
+    snapshot, _ = MetricsDashboardRevision.objects.get_or_create(
+        dashboard=dashboard,
+        revision=dashboard.revision,
+        defaults={
+            **_dashboard_revision_data(dashboard),
+            "saved_by": saved_by,
+            "saved_at": saved_at or django_timezone.now(),
+            "restored_from_revision": restored_from_revision,
+        },
+    )
+    stale_ids = list(
+        MetricsDashboardRevision.objects.filter(dashboard=dashboard)
+        .order_by("-revision")
+        .values_list("id", flat=True)[DASHBOARD_HISTORY_LIMIT:]
+    )
+    if stale_ids:
+        MetricsDashboardRevision.objects.filter(id__in=stale_ids).delete()
+    return snapshot
+
+
 class MetricsDashboardListCreateView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -600,10 +643,12 @@ class MetricsDashboardListCreateView(views.APIView):
     def post(self, request):
         serializer = _dashboard_serializer()(data=request.data)
         serializer.is_valid(raise_exception=True)
-        dashboard = serializer.save(
-            organization_id=_request_organization_id(request),
-            created_by=request.user,
-        )
+        with transaction.atomic():
+            dashboard = serializer.save(
+                organization_id=_request_organization_id(request),
+                created_by=request.user,
+            )
+            _snapshot_dashboard(dashboard, request.user)
         return success_response(
             data=_dashboard_serializer()(dashboard).data,
             detail="Dashboard created.",
@@ -649,6 +694,12 @@ class MetricsDashboardDetailView(views.APIView):
                     detail="Dashboard was changed by another user.",
                     status_code=status.HTTP_409_CONFLICT,
                 )
+            if not dashboard.history.exists():
+                _snapshot_dashboard(
+                    dashboard,
+                    None,
+                    saved_at=dashboard.update_time,
+                )
             serializer = _dashboard_serializer()(
                 dashboard,
                 data=payload,
@@ -656,6 +707,7 @@ class MetricsDashboardDetailView(views.APIView):
             )
             serializer.is_valid(raise_exception=True)
             dashboard = serializer.save(revision=dashboard.revision + 1)
+            _snapshot_dashboard(dashboard, request.user)
 
         return success_response(
             data=_dashboard_serializer()(dashboard).data,
@@ -666,6 +718,112 @@ class MetricsDashboardDetailView(views.APIView):
         dashboard = self.get_object(request, dashboard_id)
         dashboard.delete()
         return success_response(detail="Dashboard deleted.")
+
+
+class MetricsDashboardRevisionListView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, dashboard_id):
+        from api_metrics.models import MetricsDashboard
+        from api_metrics.serializers import MetricsDashboardRevisionSummarySerializer
+
+        dashboard = get_object_or_404(
+            MetricsDashboard,
+            pk=dashboard_id,
+            organization_id=_request_organization_id(request),
+        )
+        revisions = dashboard.history.select_related("saved_by").all()
+        return success_response(
+            data=MetricsDashboardRevisionSummarySerializer(
+                revisions,
+                many=True,
+            ).data
+        )
+
+
+class MetricsDashboardRevisionDetailView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self, request, dashboard_id, revision):
+        from api_metrics.models import MetricsDashboardRevision
+
+        return get_object_or_404(
+            MetricsDashboardRevision.objects.select_related(
+                "dashboard",
+                "saved_by",
+            ),
+            dashboard_id=dashboard_id,
+            dashboard__organization_id=_request_organization_id(request),
+            revision=revision,
+        )
+
+    def get(self, request, dashboard_id, revision):
+        from api_metrics.serializers import MetricsDashboardRevisionSerializer
+
+        snapshot = self.get_object(request, dashboard_id, revision)
+        return success_response(data=MetricsDashboardRevisionSerializer(snapshot).data)
+
+
+class MetricsDashboardRevisionRestoreView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, dashboard_id, revision):
+        expected_revision = request.data.get("expected_revision")
+        if isinstance(expected_revision, bool) or not isinstance(
+            expected_revision, int
+        ):
+            raise ValidationError(
+                {"expected_revision": "This field is required and must be an integer."}
+            )
+
+        from api_metrics.models import MetricsDashboard, MetricsDashboardRevision
+
+        organization_id = _request_organization_id(request)
+        with transaction.atomic():
+            dashboard = get_object_or_404(
+                MetricsDashboard.objects.select_for_update().select_related(
+                    "created_by"
+                ),
+                pk=dashboard_id,
+                organization_id=organization_id,
+            )
+            if dashboard.revision != expected_revision:
+                return success_response(
+                    data=_dashboard_serializer()(dashboard).data,
+                    detail="Dashboard was changed by another user.",
+                    status_code=status.HTTP_409_CONFLICT,
+                )
+            snapshot = get_object_or_404(
+                MetricsDashboardRevision,
+                dashboard=dashboard,
+                revision=revision,
+            )
+            for field, value in _dashboard_revision_data(snapshot).items():
+                if field != "revision":
+                    setattr(dashboard, field, value)
+            dashboard.revision += 1
+            dashboard.save(
+                update_fields=(
+                    "name",
+                    "description",
+                    "time_range_seconds",
+                    "refresh_interval_seconds",
+                    "variables",
+                    "panels",
+                    "revision",
+                    "update_time",
+                )
+            )
+            _snapshot_dashboard(
+                dashboard,
+                request.user,
+                restored_from_revision=snapshot.revision,
+            )
+
+        return success_response(
+            data=_dashboard_serializer()(dashboard).data,
+            detail=f"Dashboard restored from revision {snapshot.revision}.",
+        )
 
 
 class MetricsAIAssistantAvailabilityView(views.APIView):

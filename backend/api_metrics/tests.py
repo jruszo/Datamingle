@@ -7,7 +7,7 @@ from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from api_metrics.models import MetricsDashboard
+from api_metrics.models import MetricsDashboard, MetricsDashboardRevision
 from sql.models import Users
 
 
@@ -303,6 +303,12 @@ class MetricsDashboardTests(APITestCase):
         list_response = self.client.get("/api/v1/metrics/dashboards/")
         self.assertEqual(list_response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(list_response.data["data"]), 1)
+        snapshot = MetricsDashboardRevision.objects.get(
+            dashboard_id=response.data["data"]["id"],
+            revision=1,
+        )
+        self.assertEqual(snapshot.name, "API overview")
+        self.assertEqual(snapshot.saved_by, self.user)
 
     def test_org_collaborator_can_update_dashboard(self):
         dashboard_id = self.create_dashboard().data["data"]["id"]
@@ -320,6 +326,161 @@ class MetricsDashboardTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["data"]["revision"], 2)
         self.assertEqual(response.data["data"]["name"], "Collaborative API overview")
+        snapshot = MetricsDashboardRevision.objects.get(
+            dashboard_id=dashboard_id,
+            revision=2,
+        )
+        self.assertEqual(snapshot.saved_by, self.other_user)
+        self.assertEqual(snapshot.name, "Collaborative API overview")
+
+    def test_first_save_of_legacy_dashboard_captures_previous_state(self):
+        dashboard_id = self.create_dashboard().data["data"]["id"]
+        dashboard = MetricsDashboard.objects.get(pk=dashboard_id)
+        previous_update_time = dashboard.update_time
+        dashboard.history.all().delete()
+
+        response = self.client.patch(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/",
+            {
+                "expected_revision": 1,
+                "description": "First save after history deployment",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        baseline = MetricsDashboardRevision.objects.get(
+            dashboard_id=dashboard_id,
+            revision=1,
+        )
+        self.assertIsNone(baseline.saved_by)
+        self.assertEqual(baseline.saved_at, previous_update_time)
+        self.assertEqual(baseline.description, "Shared service metrics")
+        self.assertTrue(
+            MetricsDashboardRevision.objects.filter(
+                dashboard_id=dashboard_id,
+                revision=2,
+                saved_by=self.user,
+            ).exists()
+        )
+
+    def test_revision_history_can_be_listed_and_inspected(self):
+        dashboard_id = self.create_dashboard().data["data"]["id"]
+        self.client.patch(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/",
+            {
+                "expected_revision": 1,
+                "name": "Updated overview",
+            },
+            format="json",
+        )
+
+        list_response = self.client.get(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/revisions/"
+        )
+        detail_response = self.client.get(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/revisions/1/"
+        )
+
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [item["revision"] for item in list_response.data["data"]],
+            [2, 1],
+        )
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail_response.data["data"]["name"], "API overview")
+        self.assertEqual(len(detail_response.data["data"]["panels"]), 1)
+
+    def test_revision_history_is_hidden_from_other_organization(self):
+        dashboard_id = self.create_dashboard().data["data"]["id"]
+        self.authenticate(self.other_user, "org_other")
+
+        list_response = self.client.get(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/revisions/"
+        )
+        detail_response = self.client.get(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/revisions/1/"
+        )
+
+        self.assertEqual(list_response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(detail_response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_restore_creates_a_new_revision_and_preserves_history(self):
+        dashboard_id = self.create_dashboard().data["data"]["id"]
+        self.client.patch(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/",
+            {
+                "expected_revision": 1,
+                "name": "Updated overview",
+                "panels": [],
+            },
+            format="json",
+        )
+
+        response = self.client.post(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/revisions/1/restore/",
+            {"expected_revision": 2},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["data"]["revision"], 3)
+        self.assertEqual(response.data["data"]["name"], "API overview")
+        self.assertEqual(len(response.data["data"]["panels"]), 1)
+        self.assertEqual(
+            list(
+                MetricsDashboardRevision.objects.filter(dashboard_id=dashboard_id)
+                .order_by("revision")
+                .values_list("revision", flat=True)
+            ),
+            [1, 2, 3],
+        )
+        restored = MetricsDashboardRevision.objects.get(
+            dashboard_id=dashboard_id,
+            revision=3,
+        )
+        self.assertEqual(restored.restored_from_revision, 1)
+        self.assertEqual(restored.saved_by, self.user)
+
+    def test_stale_restore_returns_latest_dashboard(self):
+        dashboard_id = self.create_dashboard().data["data"]["id"]
+        self.client.patch(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/",
+            {
+                "expected_revision": 1,
+                "description": "Updated",
+            },
+            format="json",
+        )
+
+        response = self.client.post(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/revisions/1/restore/",
+            {"expected_revision": 1},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(response.data["data"]["revision"], 2)
+
+    def test_revision_history_retains_latest_fifty_snapshots(self):
+        dashboard_id = self.create_dashboard().data["data"]["id"]
+        for revision in range(1, 52):
+            response = self.client.patch(
+                f"/api/v1/metrics/dashboards/{dashboard_id}/",
+                {
+                    "expected_revision": revision,
+                    "description": f"Revision {revision + 1}",
+                },
+                format="json",
+            )
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        revisions = MetricsDashboardRevision.objects.filter(dashboard_id=dashboard_id)
+        self.assertEqual(revisions.count(), 50)
+        self.assertEqual(
+            revisions.order_by("revision").first().revision,
+            3,
+        )
 
     def test_stale_update_returns_latest_dashboard(self):
         dashboard_id = self.create_dashboard().data["data"]["id"]
@@ -457,6 +618,9 @@ class MetricsDashboardTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(MetricsDashboard.objects.filter(pk=dashboard_id).exists())
+        self.assertFalse(
+            MetricsDashboardRevision.objects.filter(dashboard_id=dashboard_id).exists()
+        )
 
 
 class MetricsAIAssistantTests(APITestCase):
