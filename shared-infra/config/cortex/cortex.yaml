@@ -42,7 +42,9 @@ blocks_storage:
   bucket_store:
     sync_dir: /data/tsdb-sync
     bucket_index:
-      enabled: true
+      # Local stacks are commonly suspended with Docker still retaining MinIO data.
+      # Scan the bucket directly so queries recover immediately after a resume.
+      enabled: false
 
 compactor:
   data_dir: /data/compactor

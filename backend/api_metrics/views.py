@@ -1,15 +1,21 @@
 import logging
+import json
 import re
 from datetime import datetime, timezone
 from urllib.parse import quote
 
 import requests
 from django.conf import settings
+from django.db import transaction
 from django.http import QueryDict
+from django.shortcuts import get_object_or_404
 from rest_framework import permissions, status, views
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
+
+from api_core.response import success_response
+from common.utils.openai import get_openai_config
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +32,9 @@ DEFAULT_MAX_RANGE_POINTS = 11000
 DEFAULT_MAX_MATCHERS = 32
 DEFAULT_METRIC_NAME_LIMIT = 300
 DEFAULT_MAX_METRIC_NAME_LIMIT = 1000
+AI_METRIC_CONTEXT_LIMIT = 300
+AI_LABEL_CONTEXT_LIMIT = 200
+AI_METADATA_CONTEXT_LIMIT = 100
 
 PROMETHEUS_READ_BASE_PATH = "/prometheus/api/v1"
 TENANT_PARAM_NAMES = {
@@ -49,6 +58,89 @@ def _setting_int(name, default):
 def _cortex_url(path):
     base_url = getattr(settings, "DATAMINGLE_CORTEX_URL", "http://cortex:9009")
     return f"{base_url.rstrip('/')}{PROMETHEUS_READ_BASE_PATH}{path}"
+
+
+def _cortex_json(path, organization_id, params=None):
+    response = requests.get(
+        _cortex_url(path),
+        params=params,
+        headers={
+            "Accept": "application/json",
+            "X-Scope-OrgID": organization_id,
+        },
+        timeout=_setting_int(
+            "DATAMINGLE_METRICS_PROXY_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS
+        ),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if payload.get("status") != "success":
+        raise ValueError(payload.get("error") or "Metrics backend request failed.")
+    return payload.get("data")
+
+
+def _promql_ai_context(organization_id, search_text=""):
+    names = _cortex_json("/label/__name__/values", organization_id)
+    labels = _cortex_json("/labels", organization_id)
+    metadata = _cortex_json("/metadata", organization_id)
+    if not isinstance(names, list) or not isinstance(labels, list):
+        raise ValueError("Metrics backend returned invalid discovery data.")
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    search_tokens = {
+        token
+        for token in re.findall(r"[a-zA-Z_:][a-zA-Z0-9_:]*", search_text.lower())
+        if len(token) >= 2
+    }
+
+    def metric_rank(name):
+        lowered = name.lower()
+        matches = [token for token in search_tokens if token in lowered]
+        return (
+            -len(matches),
+            -max((len(token) for token in matches), default=0),
+            lowered,
+        )
+
+    metric_names = sorted(
+        {str(name)[:255] for name in names if str(name).strip()},
+        key=metric_rank,
+    )[:AI_METRIC_CONTEXT_LIMIT]
+    label_names = sorted(
+        {
+            str(label)[:128]
+            for label in labels
+            if str(label).strip() and str(label) != "__name__"
+        },
+        key=str.lower,
+    )[:AI_LABEL_CONTEXT_LIMIT]
+    metric_help = []
+    for metric in metric_names:
+        entries = metadata.get(metric) or []
+        if not isinstance(entries, list):
+            continue
+        for entry in entries[:2]:
+            if not isinstance(entry, dict):
+                continue
+            metric_help.append(
+                {
+                    "metric": metric,
+                    "type": str(entry.get("type") or "")[:40],
+                    "unit": str(entry.get("unit") or "")[:40],
+                    "help": str(entry.get("help") or "")[:500],
+                }
+            )
+            if len(metric_help) >= AI_METADATA_CONTEXT_LIMIT:
+                break
+        if len(metric_help) >= AI_METADATA_CONTEXT_LIMIT:
+            break
+
+    return {
+        "metric_names": metric_names,
+        "label_names": label_names,
+        "metric_help": metric_help,
+    }
 
 
 def _request_param_lists(request):
@@ -203,6 +295,22 @@ class CortexMetricsProxyView(views.APIView):
                 "error": response.text[:1000]
                 or "Metrics backend returned a non-JSON response.",
             }
+        if (
+            response.status_code >= 500
+            and isinstance(payload, dict)
+            and "bucket index is too old" in str(payload.get("error") or "").lower()
+        ):
+            logger.warning("Cortex bucket index is stale.")
+            return Response(
+                {
+                    "status": "error",
+                    "error": (
+                        "Metrics storage is refreshing after a restart. "
+                        "Retry the query shortly."
+                    ),
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         return Response(payload, status=response.status_code)
 
     def get_request_param_pairs(self, request):
@@ -334,14 +442,27 @@ class MetricsNamesView(CortexMetricsProxyView):
             if request_search and request_search not in metric_name.lower():
                 continue
             filtered_names.append(metric_name)
-            if len(filtered_names) >= limit:
-                break
 
-        payload["data"] = filtered_names
+        if request_search:
+            filtered_names.sort(
+                key=lambda name: (
+                    name.lower() != request_search,
+                    not name.lower().startswith(request_search),
+                    name.lower().find(request_search),
+                    name.lower(),
+                )
+            )
+        else:
+            filtered_names.sort(key=str.lower)
+
+        payload["data"] = filtered_names[:limit]
         return Response(payload, status=response.status_code)
 
 
 class MetricsLabelValuesView(CortexMetricsProxyView):
+    def validate_request(self, request, **kwargs):
+        self.validate_matchers(request)
+
     def get_cortex_path(self, **kwargs):
         label_name = kwargs.get("label_name", "")
         if not LABEL_NAME_RE.match(label_name):
@@ -440,3 +561,208 @@ class MetricsParseQueryView(CortexMetricsProxyView):
 
     def validate_request(self, request, **kwargs):
         self.validate_query(request)
+
+
+def _request_organization_id(request):
+    auth = request.auth if isinstance(request.auth, dict) else {}
+    organization_id = str(
+        auth.get("org_id")
+        or getattr(request.user, "organization_id", "")
+        or getattr(request.user, "workos_claims", {}).get("org_id", "")
+    ).strip()
+    if not organization_id:
+        raise PermissionDenied(
+            "Authenticated dashboard requests require a WorkOS org_id."
+        )
+    return organization_id
+
+
+def _dashboard_serializer():
+    from api_metrics.serializers import MetricsDashboardSerializer
+
+    return MetricsDashboardSerializer
+
+
+class MetricsDashboardListCreateView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from api_metrics.models import MetricsDashboard
+
+        organization_id = _request_organization_id(request)
+        dashboards = MetricsDashboard.objects.filter(
+            organization_id=organization_id
+        ).select_related("created_by")
+        return success_response(
+            data=_dashboard_serializer()(dashboards, many=True).data
+        )
+
+    def post(self, request):
+        serializer = _dashboard_serializer()(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        dashboard = serializer.save(
+            organization_id=_request_organization_id(request),
+            created_by=request.user,
+        )
+        return success_response(
+            data=_dashboard_serializer()(dashboard).data,
+            detail="Dashboard created.",
+            status_code=status.HTTP_201_CREATED,
+        )
+
+
+class MetricsDashboardDetailView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self, request, dashboard_id, for_update=False):
+        from api_metrics.models import MetricsDashboard
+
+        queryset = MetricsDashboard.objects.select_related("created_by")
+        if for_update:
+            queryset = queryset.select_for_update()
+        return get_object_or_404(
+            queryset,
+            pk=dashboard_id,
+            organization_id=_request_organization_id(request),
+        )
+
+    def get(self, request, dashboard_id):
+        dashboard = self.get_object(request, dashboard_id)
+        return success_response(data=_dashboard_serializer()(dashboard).data)
+
+    def patch(self, request, dashboard_id):
+        expected_revision = request.data.get("expected_revision")
+        if isinstance(expected_revision, bool) or not isinstance(
+            expected_revision, int
+        ):
+            raise ValidationError(
+                {"expected_revision": "This field is required and must be an integer."}
+            )
+
+        payload = request.data.copy()
+        payload.pop("expected_revision", None)
+        with transaction.atomic():
+            dashboard = self.get_object(request, dashboard_id, for_update=True)
+            if dashboard.revision != expected_revision:
+                return success_response(
+                    data=_dashboard_serializer()(dashboard).data,
+                    detail="Dashboard was changed by another user.",
+                    status_code=status.HTTP_409_CONFLICT,
+                )
+            serializer = _dashboard_serializer()(
+                dashboard,
+                data=payload,
+                partial=True,
+            )
+            serializer.is_valid(raise_exception=True)
+            dashboard = serializer.save(revision=dashboard.revision + 1)
+
+        return success_response(
+            data=_dashboard_serializer()(dashboard).data,
+            detail="Dashboard saved.",
+        )
+
+    def delete(self, request, dashboard_id):
+        dashboard = self.get_object(request, dashboard_id)
+        dashboard.delete()
+        return success_response(detail="Dashboard deleted.")
+
+
+class MetricsAIAssistantAvailabilityView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        return success_response(
+            data={"available": bool(get_openai_config()["api_key"])}
+        )
+
+
+class MetricsAIAssistantView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "metrics_ai"
+
+    def post(self, request):
+        prompt = str(request.data.get("prompt") or "").strip()
+        if not prompt:
+            raise ValidationError({"prompt": "This field is required."})
+        if len(prompt) > 2000:
+            raise ValidationError({"prompt": "Must be 2000 characters or fewer."})
+
+        config = get_openai_config()
+        api_key = config["api_key"]
+        if not api_key:
+            return success_response(
+                data={"available": False},
+                detail="PromQL assistant is not configured.",
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        try:
+            context = _promql_ai_context(
+                _request_organization_id(request),
+                prompt,
+            )
+        except (requests.RequestException, ValueError):
+            logger.warning("Failed to load PromQL assistant context.", exc_info=True)
+            return success_response(
+                detail="Metrics context is temporarily unavailable.",
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        from openai import OpenAI
+
+        client = OpenAI(
+            api_key=api_key,
+            base_url=config["base_url"] or None,
+            timeout=20,
+        )
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a PromQL assistant. Return JSON only with keys "
+                    "query, explanation, assumptions, warnings. The query must be "
+                    "valid PromQL and use only metrics or labels present in the "
+                    "provided context unless the user explicitly supplies another. "
+                    "Never invent observed metric values."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Request: {prompt}\nContext: {json.dumps(context)}",
+            },
+        ]
+        try:
+            completion = client.chat.completions.create(
+                model=config["model"],
+                messages=messages,
+                temperature=0.1,
+                response_format={"type": "json_object"},
+            )
+            content = completion.choices[0].message.content or "{}"
+            payload = json.loads(content)
+        except Exception:
+            logger.warning("PromQL assistant request failed.", exc_info=True)
+            return success_response(
+                detail="PromQL assistant is unavailable.",
+                status_code=status.HTTP_502_BAD_GATEWAY,
+            )
+        query = str(payload.get("query") or "").strip()
+        if not query or len(query) > DEFAULT_MAX_QUERY_LENGTH:
+            return success_response(
+                detail="PromQL assistant returned an invalid suggestion.",
+                status_code=status.HTTP_502_BAD_GATEWAY,
+            )
+        return success_response(
+            data={
+                "available": True,
+                "query": query,
+                "explanation": str(payload.get("explanation") or "")[:4000],
+                "assumptions": [
+                    str(item)[:500] for item in (payload.get("assumptions") or [])[:10]
+                ],
+                "warnings": [
+                    str(item)[:500] for item in (payload.get("warnings") or [])[:10]
+                ],
+            }
+        )

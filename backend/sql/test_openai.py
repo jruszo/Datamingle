@@ -1,24 +1,38 @@
 from typing import List
+from unittest.mock import patch
 
 import pytest
 
-from common.utils.openai import OpenaiClient
+from common.utils.openai import OpenaiClient, check_openai_config
 
 
 @pytest.fixture
-def openai_client(setup_sys_config):
-    # Use mock config values.
-    setup_sys_config.set("openai_base_url", "https://api.openai.com")
-    setup_sys_config.set("openai_api_key", "sk-xxxx")
-    setup_sys_config.set("default_chat_model", "gpt-3.5-turbo")
-    yield OpenaiClient()
+def openai_client():
+    with patch.dict(
+        "os.environ",
+        {
+            "OPENAI_BASE_URL": "https://api.openai.com",
+            "OPENAI_KEY": "sk-xxxx",
+            "OPENAI_MODEL": "gpt-3.5-turbo",
+        },
+        clear=False,
+    ):
+        client = OpenaiClient()
+        yield client
+        client.client.close()
 
 
 def test_init(openai_client):
     assert openai_client.base_url == "https://api.openai.com"
     assert openai_client.api_key == "sk-xxxx"
     assert openai_client.default_chat_model == "gpt-3.5-turbo"
-    openai_client.client.close()
+
+
+def test_database_openai_config_is_ignored(setup_sys_config):
+    setup_sys_config.set("openai_api_key", "legacy-db-key")
+
+    with patch.dict("os.environ", {"OPENAI_KEY": ""}, clear=False):
+        assert check_openai_config() is False
 
 
 def test_request_chat_completion(openai_client, mocker):

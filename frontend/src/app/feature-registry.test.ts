@@ -34,8 +34,10 @@ describe('feature registry', () => {
     expect(ids).toEqual([
       'auth',
       'dashboard',
+      'dashboards',
       'reports',
       'infrastructure',
+      'metrics',
       'inventory',
       'agents',
       'instance-operations',
@@ -54,7 +56,9 @@ describe('feature registry', () => {
 
     expect(labels).toEqual([
       'Dashboard',
+      'Dashboards',
       'Nodes',
+      'Metrics Explorer',
       'Instances',
       'Data Dictionary',
       'Databases',

@@ -1,6 +1,7 @@
 import type { CurrentUserContext } from '@/lib/api'
 import authModule from '@/features/auth/manifest'
 import dashboardModule from '@/features/dashboard/manifest'
+import dashboardsModule from '@/features/dashboards/manifest'
 import reportsModule from '@/features/reports/manifest'
 import infrastructureModule from '@/features/infrastructure/manifest'
 import metricsModule from '@/features/metrics/manifest'
@@ -25,6 +26,7 @@ import enterpriseFeatureModules from '@enterprise-feature-modules'
 const builtInFeatureModules: FeatureModule[] = [
   authModule,
   dashboardModule,
+  dashboardsModule,
   reportsModule,
   infrastructureModule,
   metricsModule,

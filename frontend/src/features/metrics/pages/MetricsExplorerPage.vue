@@ -1,45 +1,44 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { EditorState } from '@codemirror/state'
-import { EditorView } from '@codemirror/view'
-import { basicSetup } from 'codemirror'
-import { LineChart } from 'echarts/charts'
-import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
-import { use } from 'echarts/core'
-import { CanvasRenderer } from 'echarts/renderers'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   Activity,
   ArrowLeft,
   BarChart3,
   Database,
   Info,
-  Play,
+  LayoutDashboard,
   RefreshCw,
   Search,
   Tag,
+  X,
 } from 'lucide-vue-next'
-import VChart from 'vue-echarts'
-import { PromQLExtension, type PrometheusClient } from '@prometheus-io/codemirror-promql'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
+  DashboardConflictError,
+  createMetricsDashboard,
+  emptyDashboardPayload,
+  listMetricsDashboards,
+  updateMetricsDashboard,
+  type DashboardPanel,
+  type MetricsDashboard,
+} from '@/features/dashboards/api'
+import { nextDashboardPanelY } from '@/features/dashboards/layout'
+import GraphEditor from '@/features/graph-editor/GraphEditor.vue'
+import { clonePanel, createGraphPanel, createUuid } from '@/features/graph-editor/model'
+import {
   fetchMetricLabelNames,
-  fetchMetricLabelValues,
   fetchMetricMetadata,
   fetchMetricNames,
   fetchMetricSeries,
   queryMetricInstant,
-  queryMetricRange,
   type PrometheusMetadata,
-  type PrometheusRangeResult,
   type PrometheusSeries,
   type PrometheusSeriesSelector,
 } from '@/features/metrics/api'
 import { useAuthStore } from '@/stores/auth'
-
-use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent])
 
 type LabelSummary = {
   label: string
@@ -52,7 +51,6 @@ const loading = ref(false)
 const metricSearchLoading = ref(false)
 const detailLoading = ref(false)
 const statsLoading = ref(false)
-const running = ref(false)
 const error = ref('')
 const viewMode = ref<'explore' | 'graph'>('explore')
 const metricSearch = ref('')
@@ -68,33 +66,19 @@ const groupBy = ref('')
 const rangePreset = ref('1h')
 const stepSeconds = ref(60)
 const promql = ref('')
-const result = ref<PrometheusRangeResult | null>(null)
 const legendLabels = ref<string[]>([])
-const promqlEditorRoot = ref<HTMLDivElement | null>(null)
+const addToDashboardOpen = ref(false)
+const dashboardOptions = ref<MetricsDashboard[]>([])
+const dashboardOptionsLoading = ref(false)
+const dashboardSaving = ref(false)
+const selectedDashboardId = ref<string>('new')
+const newDashboardName = ref('')
+const dashboardPanelTitle = ref('')
+const dashboardMessage = ref('')
+const explorerPanel = ref<DashboardPanel>(createGraphPanel('', 'Metrics graph'))
 let detailRequestId = 0
 let metricSearchRequestId = 0
 let metricSearchTimer: ReturnType<typeof window.setTimeout> | undefined
-let promqlEditorView: EditorView | null = null
-let promqlExtension: PromQLExtension | null = null
-
-const graphColorPalette = [
-  '#7EB26D',
-  '#EAB839',
-  '#6ED0E0',
-  '#EF843C',
-  '#E24D42',
-  '#1F78C1',
-  '#BA43A9',
-  '#705DA0',
-  '#508642',
-  '#CCA300',
-  '#447EBC',
-  '#C15C17',
-  '#890F02',
-  '#0A437C',
-  '#6D1F62',
-  '#584477',
-]
 
 const noisyLegendLabels = new Set(['agent_id', 'node_id', '__name__'])
 const preferredLegendLabels = [
@@ -170,8 +154,6 @@ const labelSummaries = computed<LabelSummary[]>(() => {
     .sort((left, right) => left.label.localeCompare(right.label))
 })
 
-const selectedMetricLabels = computed(() => labelSummaries.value.map((summary) => summary.label))
-
 const numericInstantValues = computed(() =>
   instantSamples.value
     .map((sample) => Number.parseFloat(sample.value?.[1] ?? ''))
@@ -196,90 +178,11 @@ const metricStats = computed(() => {
   }
 })
 
-const graphLabelOptions = computed(() => {
-  const labelSet = new Set<string>()
-  for (const item of result.value?.result ?? []) {
-    for (const label of Object.keys(item.metric)) {
-      if (!noisyLegendLabels.has(label)) {
-        labelSet.add(label)
-      }
-    }
-  }
-  for (const label of selectedMetricLabels.value) {
-    if (!noisyLegendLabels.has(label)) {
-      labelSet.add(label)
-    }
-  }
-  return [...labelSet].sort((left, right) => {
-    const leftIndex = preferredLegendLabels.indexOf(left)
-    const rightIndex = preferredLegendLabels.indexOf(right)
-    if (leftIndex !== -1 || rightIndex !== -1) {
-      return (leftIndex === -1 ? 999 : leftIndex) - (rightIndex === -1 ? 999 : rightIndex)
-    }
-    return left.localeCompare(right)
-  })
-})
-
-const chartOption = computed(() => {
-  const series = result.value?.result ?? []
-  return {
-    color: graphColorPalette,
-    tooltip: {
-      trigger: 'axis',
-      confine: true,
-      backgroundColor: 'rgba(255,255,255,0.98)',
-      borderColor: '#cbd5e1',
-      textStyle: { color: '#0f172a', fontSize: 12 },
-      formatter: formatTooltip,
-    },
-    legend: {
-      type: 'scroll',
-      bottom: 0,
-      itemWidth: 10,
-      itemHeight: 10,
-      pageIconColor: '#334155',
-      pageTextStyle: { color: '#64748b' },
-      textStyle: {
-        color: '#334155',
-        overflow: 'truncate',
-        width: 260,
-      },
-    },
-    grid: { top: 20, left: 56, right: 24, bottom: 78 },
-    xAxis: {
-      type: 'time',
-      axisLabel: { color: '#64748b' },
-      axisLine: { lineStyle: { color: '#cbd5e1' } },
-    },
-    yAxis: {
-      type: 'value',
-      axisLabel: { color: '#64748b' },
-      splitLine: { lineStyle: { color: '#e2e8f0' } },
-    },
-    series: series.map((item, index) => ({
-      name: chartSeriesName(item.metric, index),
-      type: 'line',
-      showSymbol: false,
-      smooth: false,
-      lineStyle: { width: 1.5 },
-      emphasis: { focus: 'series' },
-      data: (item.values ?? []).map(([timestamp, value]) => [
-        timestamp * 1000,
-        Number.parseFloat(value),
-      ]),
-    })),
-  }
-})
-
 function requireToken() {
   if (!authStore.accessToken) {
     throw new Error('Missing access token. Please login again.')
   }
   return authStore.accessToken
-}
-
-function escapeLabelValue(value: string) {
-  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 }
 
 function seriesName(labels: Record<string, string>, index: number) {
@@ -288,14 +191,6 @@ function seriesName(labels: Record<string, string>, index: number) {
     return labels.__name__ || `series ${index + 1}`
   }
   return entries.map(([key, value]) => `${key}=${value}`).join(', ')
-}
-
-function chartSeriesName(labels: Record<string, string>, index: number) {
-  const selectedLabels = legendLabels.value.filter((label) => labels[label])
-  if (selectedLabels.length > 0) {
-    return selectedLabels.map((label) => `${label}=${labels[label]}`).join(', ')
-  }
-  return labels.__name__ || `series ${index + 1}`
 }
 
 function chooseDefaultLegendLabels(series: PrometheusSeriesSelector[]) {
@@ -312,59 +207,6 @@ function chooseDefaultLegendLabels(series: PrometheusSeriesSelector[]) {
     return preferred
   }
   return [...available].sort().slice(0, 3)
-}
-
-function resetLegendLabels() {
-  const source = result.value?.result?.map((item) => item.metric) ?? metricSeries.value
-  legendLabels.value = chooseDefaultLegendLabels(source)
-}
-
-function clearLegendLabels() {
-  legendLabels.value = []
-}
-
-function toggleLegendLabel(label: string) {
-  legendLabels.value = legendLabels.value.includes(label)
-    ? legendLabels.value.filter((item) => item !== label)
-    : [...legendLabels.value, label]
-}
-
-function formatTooltip(params: unknown) {
-  const items = Array.isArray(params) ? params : [params]
-  const first = items[0] as { axisValueLabel?: string } | undefined
-  const rows = items
-    .slice(0, 24)
-    .map((item) => {
-      const point = item as {
-        marker?: string
-        seriesName?: string
-        value?: [number, number]
-      }
-      const value = Array.isArray(point.value) ? point.value[1] : null
-      return `<div style="display:flex;gap:12px;align-items:center;justify-content:space-between;min-width:220px;max-width:520px;">
-        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${point.marker ?? ''}${escapeHtml(point.seriesName ?? '')}</span>
-        <strong>${formatNumber(typeof value === 'number' ? value : null)}</strong>
-      </div>`
-    })
-    .join('')
-  const remaining =
-    items.length > 24
-      ? `<div style="color:#64748b;margin-top:4px;">+${items.length - 24} more series</div>`
-      : ''
-  return `<div style="display:grid;gap:4px;">
-    <div style="font-weight:600;margin-bottom:4px;">${escapeHtml(first?.axisValueLabel ?? '')}</div>
-    ${rows}
-    ${remaining}
-  </div>`
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
 }
 
 function formatNumber(value: number | null) {
@@ -415,171 +257,40 @@ function buildQuery() {
   }
 }
 
-function createPromqlClient(): PrometheusClient {
-  return {
-    labelNames: async (metricName?: string) => {
-      if (metricName) {
-        const series = await fetchMetricSeries(metricName, requireToken())
-        return labelsFromSeries(series)
-      }
-      return fetchMetricLabelNames(requireToken())
-    },
-    labelValues: async (labelName: string, metricName?: string) => {
-      if (metricName) {
-        const series = await fetchMetricSeries(metricName, requireToken())
-        return [
-          ...new Set(
-            series
-              .map((item) => item[labelName])
-              .filter((value): value is string => Boolean(value)),
-          ),
-        ].sort()
-      }
-      return fetchMetricLabelValues(labelName, requireToken())
-    },
-    metricMetadata: async () => {
-      const metadata = await fetchMetricMetadata('', requireToken())
-      return Object.fromEntries(
-        Object.entries(metadata).map(([name, entries]) => [
-          name,
-          entries.map((entry) => ({
-            type: entry.type ?? '',
-            help: entry.help ?? '',
-          })),
-        ]),
-      )
-    },
-    series: async (metricName: string) => {
-      const series = await fetchMetricSeries(metricName || '{__name__!=""}', requireToken())
-      return series.map((item) => new Map(Object.entries(item)))
-    },
-    metricNames: async (prefix?: string) => fetchMetricNames(requireToken(), prefix ?? '', 300),
-    flags: async () => ({}),
-  }
-}
-
-function labelsFromSeries(series: PrometheusSeriesSelector[]) {
-  const labels = new Set<string>()
-  for (const item of series) {
-    for (const label of Object.keys(item)) {
-      if (label !== '__name__') {
-        labels.add(label)
-      }
-    }
-  }
-  return [...labels].sort()
-}
-
-function createPromqlEditor() {
-  if (!promqlEditorRoot.value || promqlEditorView) {
-    return
-  }
-
-  promqlExtension = new PromQLExtension().setComplete({
-    remote: createPromqlClient(),
-  })
-  const updateListener = EditorView.updateListener.of((update) => {
-    if (!update.docChanged) {
-      return
-    }
-    const nextValue = update.state.doc.toString()
-    if (nextValue !== promql.value) {
-      promql.value = nextValue
-    }
-  })
-
-  promqlEditorView = new EditorView({
-    parent: promqlEditorRoot.value,
-    state: EditorState.create({
-      doc: promql.value,
-      extensions: [
-        basicSetup,
-        promqlExtension.asExtension(),
-        updateListener,
-        EditorView.lineWrapping,
-        EditorView.theme({
-          '&': {
-            minHeight: '6rem',
-            border: '1px solid #e2e8f0',
-            borderRadius: '0.375rem',
-            backgroundColor: '#f8fafc',
-            fontSize: '0.875rem',
-          },
-          '&.cm-focused': {
-            outline: 'none',
-            borderColor: '#94a3b8',
-          },
-          '.cm-scroller': {
-            minHeight: '6rem',
-            fontFamily:
-              'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-          },
-          '.cm-content': {
-            padding: '0.75rem',
-          },
-          '.cm-tooltip': {
-            border: '1px solid #cbd5e1',
-            borderRadius: '0.375rem',
-            boxShadow: '0 10px 15px -3px rgb(15 23 42 / 0.12)',
-          },
-        }),
-      ],
-    }),
-  })
-}
-
-function destroyPromqlEditor() {
-  promqlExtension?.destroy()
-  promqlExtension = null
-  promqlEditorView?.destroy()
-  promqlEditorView = null
-}
-
-function syncPromqlEditorDoc(value: string) {
-  if (!promqlEditorView) {
-    return
-  }
-  const currentValue = promqlEditorView.state.doc.toString()
-  if (currentValue === value) {
-    return
-  }
-  promqlEditorView.dispatch({
-    changes: {
-      from: 0,
-      to: currentValue.length,
-      insert: value,
-    },
-  })
-}
-
 async function loadCatalog() {
   loading.value = true
   error.value = ''
+  const searchRequestId = ++metricSearchRequestId
+  metricSearchLoading.value = true
   try {
     const token = requireToken()
     const [names, labels] = await Promise.all([
-      fetchMetricNames(token, metricSearch.value),
+      fetchMetricNames(token, metricSearch.value.trim()),
       fetchMetricLabelNames(token),
     ])
-    metricNames.value = names.sort()
+    if (searchRequestId === metricSearchRequestId) {
+      metricNames.value = names
+      metricSearchLoading.value = false
+    }
     labelNames.value = labels.filter((label) => label !== '__name__').sort()
   } catch (loadError) {
-    error.value = loadError instanceof Error ? loadError.message : 'Failed to load metrics.'
+    if (searchRequestId === metricSearchRequestId) {
+      error.value = loadError instanceof Error ? loadError.message : 'Failed to load metrics.'
+      metricSearchLoading.value = false
+    }
   } finally {
     loading.value = false
   }
 }
 
-async function searchMetricNames() {
-  const requestId = ++metricSearchRequestId
-  metricSearchLoading.value = true
-  error.value = ''
+async function searchMetricNames(search: string, requestId: number) {
   try {
-    const names = await fetchMetricNames(requireToken(), metricSearch.value)
+    const names = await fetchMetricNames(requireToken(), search)
     if (requestId !== metricSearchRequestId) {
       return
     }
-    metricNames.value = names.sort()
+    metricNames.value = names
+    error.value = ''
   } catch (loadError) {
     if (requestId === metricSearchRequestId) {
       error.value = loadError instanceof Error ? loadError.message : 'Failed to search metrics.'
@@ -595,9 +306,12 @@ function scheduleMetricSearch() {
   if (metricSearchTimer) {
     window.clearTimeout(metricSearchTimer)
   }
+  const requestId = ++metricSearchRequestId
+  const search = metricSearch.value.trim()
+  metricSearchLoading.value = true
   metricSearchTimer = window.setTimeout(() => {
-    void searchMetricNames()
-  }, 250)
+    void searchMetricNames(search, requestId)
+  }, 200)
 }
 
 async function selectMetric(metricName: string) {
@@ -607,7 +321,6 @@ async function selectMetric(metricName: string) {
   metricMetadata.value = {}
   instantSamples.value = []
   instantLoadedAt.value = null
-  result.value = null
   error.value = ''
   viewMode.value = 'explore'
   buildQuery()
@@ -670,31 +383,108 @@ function graphSelectedMetric() {
     return
   }
   buildQuery()
+  explorerPanel.value = createGraphPanel(promql.value, selectedMetric.value)
+  explorerPanel.value.step_seconds = stepSeconds.value
+  explorerPanel.value.queries[0]!.legend = legendLabels.value
+    .map((label) => `{{${label}}}`)
+    .join(' · ')
   viewMode.value = 'graph'
-  void runQuery()
 }
 
-async function runQuery() {
-  if (!promql.value.trim()) {
-    error.value = 'Select a metric or enter a PromQL query.'
+async function openAddToDashboard() {
+  dashboardPanelTitle.value = explorerPanel.value.title || selectedMetric.value || 'Metrics graph'
+  newDashboardName.value = ''
+  selectedDashboardId.value = 'new'
+  dashboardMessage.value = ''
+  addToDashboardOpen.value = true
+  dashboardOptionsLoading.value = true
+  try {
+    dashboardOptions.value = await listMetricsDashboards(requireToken())
+    if (dashboardOptions.value.length > 0) {
+      selectedDashboardId.value = `${dashboardOptions.value[0]!.id}`
+    }
+  } catch (loadError) {
+    dashboardMessage.value =
+      loadError instanceof Error ? loadError.message : 'Failed to load dashboards.'
+  } finally {
+    dashboardOptionsLoading.value = false
+  }
+}
+
+function buildDashboardPanel(dashboard: MetricsDashboard | null): DashboardPanel {
+  const nextY = nextDashboardPanelY(dashboard?.panels ?? [])
+  const panel = clonePanel(explorerPanel.value)
+  panel.id = createUuid()
+  panel.title = dashboardPanelTitle.value.trim()
+  panel.layout = { x: 0, y: nextY, w: 6, h: 4 }
+  return panel
+}
+
+async function addGraphToDashboard() {
+  if (
+    !dashboardPanelTitle.value.trim() ||
+    !explorerPanel.value.queries.some((query) => query.query.trim())
+  ) {
+    dashboardMessage.value = 'Panel title and PromQL query are required.'
     return
   }
-  running.value = true
-  error.value = ''
+  dashboardSaving.value = true
+  dashboardMessage.value = ''
   try {
-    const end = new Date()
-    const start = new Date(end.getTime() - selectedRange.value.seconds * 1000)
-    result.value = await queryMetricRange(
-      promql.value.trim(),
-      start,
-      end,
-      Math.max(15, stepSeconds.value),
-      requireToken(),
-    )
-  } catch (queryError) {
-    error.value = queryError instanceof Error ? queryError.message : 'Metrics query failed.'
+    if (selectedDashboardId.value === 'new') {
+      if (!newDashboardName.value.trim()) {
+        dashboardMessage.value = 'Dashboard name is required.'
+        return
+      }
+      const payload = emptyDashboardPayload(newDashboardName.value.trim())
+      payload.panels = [buildDashboardPanel(null)]
+      await createMetricsDashboard(payload, requireToken())
+    } else {
+      const dashboard = dashboardOptions.value.find(
+        (item) => item.id === Number(selectedDashboardId.value),
+      )
+      if (!dashboard) {
+        dashboardMessage.value = 'Select a dashboard.'
+        return
+      }
+      const panel = buildDashboardPanel(dashboard)
+      const payload = {
+        name: dashboard.name,
+        description: dashboard.description,
+        time_range_seconds: dashboard.time_range_seconds,
+        refresh_interval_seconds: dashboard.refresh_interval_seconds,
+        variables: dashboard.variables,
+        panels: [...dashboard.panels, panel],
+      }
+      try {
+        await updateMetricsDashboard(dashboard.id, dashboard.revision, payload, requireToken())
+      } catch (saveError) {
+        if (!(saveError instanceof DashboardConflictError)) {
+          throw saveError
+        }
+        const latest = saveError.latest
+        await updateMetricsDashboard(
+          latest.id,
+          latest.revision,
+          {
+            name: latest.name,
+            description: latest.description,
+            time_range_seconds: latest.time_range_seconds,
+            refresh_interval_seconds: latest.refresh_interval_seconds,
+            variables: latest.variables,
+            panels: [...latest.panels, { ...panel, layout: buildDashboardPanel(latest).layout }],
+          },
+          requireToken(),
+        )
+      }
+    }
+    addToDashboardOpen.value = false
+    dashboardMessage.value = 'Graph added to dashboard.'
+  } catch (saveError) {
+    dashboardMessage.value =
+      saveError instanceof Error ? saveError.message : 'Failed to add graph to dashboard.'
   } finally {
-    running.value = false
+    dashboardSaving.value = false
   }
 }
 
@@ -703,27 +493,15 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  destroyPromqlEditor()
+  if (metricSearchTimer) {
+    window.clearTimeout(metricSearchTimer)
+  }
 })
 
 watch(metricSearch, () => {
   scheduleMetricSearch()
 })
 
-watch(viewMode, (mode) => {
-  if (mode === 'graph') {
-    void nextTick(() => {
-      createPromqlEditor()
-      syncPromqlEditorDoc(promql.value)
-    })
-  } else {
-    destroyPromqlEditor()
-  }
-})
-
-watch(promql, (value) => {
-  syncPromqlEditorDoc(value)
-})
 </script>
 
 <template>
@@ -736,6 +514,12 @@ watch(promql, (value) => {
         </p>
       </div>
       <div class="flex flex-wrap gap-2">
+        <p
+          v-if="dashboardMessage && !addToDashboardOpen"
+          class="self-center text-sm text-emerald-700"
+        >
+          {{ dashboardMessage }}
+        </p>
         <Button
           v-if="viewMode === 'graph'"
           variant="outline"
@@ -974,116 +758,101 @@ watch(promql, (value) => {
       </div>
     </div>
 
-    <div v-else class="grid min-h-[calc(100vh-12rem)] gap-4">
-      <div class="rounded-lg border border-slate-200 bg-white p-4">
-        <div class="mb-3 flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-          <div class="min-w-0">
-            <p class="text-sm font-semibold text-slate-900">Graphing workspace</p>
-            <p class="mt-1 break-all font-mono text-xs text-slate-500">
-              {{ selector || 'Custom PromQL query' }}
-            </p>
-          </div>
+    <div v-else class="grid min-h-[calc(100vh-12rem)] gap-3">
+      <div class="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-3 lg:flex-row lg:items-center lg:justify-between">
+        <div class="min-w-0">
+          <p class="text-sm font-semibold text-slate-900">Graph</p>
+          <p class="truncate font-mono text-xs text-slate-500">{{ selectedMetric || 'Custom PromQL' }}</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
           <Button
             variant="outline"
             type="button"
-            :disabled="!selectedMetric"
-            @click="viewMode = 'explore'"
+            :disabled="!explorerPanel.queries.some((query) => query.query.trim())"
+            @click="void openAddToDashboard()"
           >
+            <LayoutDashboard class="h-4 w-4" />
+            Add to dashboard
+          </Button>
+          <Button variant="outline" type="button" :disabled="!selectedMetric" @click="viewMode = 'explore'">
             <Info class="h-4 w-4" />
             Metric details
           </Button>
         </div>
+      </div>
+      <GraphEditor
+        v-model="explorerPanel"
+        :token="requireToken()"
+        :range-seconds="selectedRange.seconds"
+        :context-metric="selectedMetric"
+      />
+    </div>
 
-        <div
-          v-if="graphLabelOptions.length > 0"
-          class="mb-3 rounded-md border border-slate-200 bg-slate-50 p-3"
-        >
-          <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <div class="flex items-center gap-2 text-sm font-medium text-slate-700">
-              <Tag class="h-4 w-4" />
-              Legend labels
-            </div>
-            <div class="flex gap-2">
-              <Button variant="outline" size="xs" type="button" @click="resetLegendLabels">
-                Auto
-              </Button>
-              <Button variant="outline" size="xs" type="button" @click="clearLegendLabels">
-                Clear
-              </Button>
-            </div>
-          </div>
-          <div class="flex flex-wrap gap-2">
-            <button
-              v-for="label in graphLabelOptions"
-              :key="label"
-              type="button"
-              :class="
-                legendLabels.includes(label)
-                  ? 'border-slate-900 bg-slate-900 text-white'
-                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'
-              "
-              class="rounded-md border px-2 py-1 font-mono text-xs transition"
-              @click="toggleLegendLabel(label)"
-            >
-              {{ label }}
-            </button>
-          </div>
+    <div
+      v-if="addToDashboardOpen"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4"
+      @click.self="addToDashboardOpen = false"
+    >
+      <form
+        class="w-full max-w-lg rounded-lg border border-slate-200 bg-white shadow-xl"
+        @submit.prevent="void addGraphToDashboard()"
+      >
+        <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+          <h3 class="font-semibold text-slate-950">Add graph to dashboard</h3>
+          <Button variant="ghost" size="icon" type="button" @click="addToDashboardOpen = false">
+            <X class="h-4 w-4" />
+          </Button>
         </div>
-
-        <div class="grid gap-3 xl:grid-cols-[10rem_1fr_9rem_8rem_auto] xl:items-end">
+        <div class="grid gap-4 p-5">
+          <p
+            v-if="dashboardMessage"
+            class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+          >
+            {{ dashboardMessage }}
+          </p>
           <label class="grid gap-1 text-sm">
-            <span class="font-medium text-slate-700">Template</span>
+            <span class="font-medium text-slate-700">Dashboard</span>
             <select
-              v-model="queryMode"
-              class="h-10 rounded-md border border-slate-200 px-3 text-sm"
-              @change="buildQuery"
-            >
-              <option value="rate">Rate</option>
-              <option value="raw">Raw</option>
-              <option value="sum">Sum rate</option>
-              <option value="avg">Average</option>
-              <option value="max">Maximum</option>
-            </select>
-          </label>
-          <label class="grid gap-1 text-sm">
-            <span class="font-medium text-slate-700">Group by</span>
-            <Input v-model="groupBy" placeholder="instance_name, job" @input="buildQuery" />
-          </label>
-          <label class="grid gap-1 text-sm">
-            <span class="font-medium text-slate-700">Range</span>
-            <select
-              v-model="rangePreset"
+              v-model="selectedDashboardId"
+              :disabled="dashboardOptionsLoading"
               class="h-10 rounded-md border border-slate-200 px-3 text-sm"
             >
-              <option v-for="option in rangeOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
+              <option value="new">Create a new dashboard</option>
+              <option
+                v-for="dashboardOption in dashboardOptions"
+                :key="dashboardOption.id"
+                :value="`${dashboardOption.id}`"
+              >
+                {{ dashboardOption.name }}
               </option>
             </select>
           </label>
-          <label class="grid gap-1 text-sm">
-            <span class="font-medium text-slate-700">Step</span>
-            <Input v-model.number="stepSeconds" type="number" min="15" step="15" />
+          <label v-if="selectedDashboardId === 'new'" class="grid gap-1 text-sm">
+            <span class="font-medium text-slate-700">New dashboard name</span>
+            <Input v-model="newDashboardName" maxlength="120" />
           </label>
-          <Button type="button" :disabled="running" @click="void runQuery()">
-            <Play class="h-4 w-4" />
-            {{ running ? 'Running...' : 'Run' }}
+          <label class="grid gap-1 text-sm">
+            <span class="font-medium text-slate-700">Panel title</span>
+            <Input v-model="dashboardPanelTitle" maxlength="120" />
+          </label>
+          <div class="rounded-md bg-slate-50 p-3">
+            <p class="text-xs font-medium uppercase text-slate-500">PromQL</p>
+            <code
+              v-for="query in explorerPanel.queries"
+              :key="query.ref_id"
+              class="mt-1 block break-all text-xs text-slate-700"
+            >{{ query.ref_id }}: {{ query.query }}</code>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+          <Button variant="outline" type="button" @click="addToDashboardOpen = false">
+            Cancel
+          </Button>
+          <Button type="submit" :disabled="dashboardSaving || dashboardOptionsLoading">
+            {{ dashboardSaving ? 'Adding...' : 'Add graph' }}
           </Button>
         </div>
-
-        <div ref="promqlEditorRoot" class="mt-3" />
-      </div>
-
-      <div class="min-h-[30rem] rounded-lg border border-slate-200 bg-white p-4">
-        <VChart
-          v-if="result?.result?.length"
-          :option="chartOption"
-          autoresize
-          class="h-[34rem] w-full"
-        />
-        <div v-else class="flex h-[34rem] items-center justify-center text-sm text-slate-500">
-          Run a query to render metric series.
-        </div>
-      </div>
+      </form>
     </div>
   </section>
 </template>

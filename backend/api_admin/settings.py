@@ -27,7 +27,6 @@ from api_core.response import success_response
 User = get_user_model()
 logger = logging.getLogger("default")
 
-DEFAULT_CHAT_MODEL = "gpt-3.5-turbo"
 DEFAULT_QUERY_TEMPLATE = (
     "You are an engineer familiar with {{db_type}}. I will give you basic "
     "information and requirements. Generate one query for me. Do not return "
@@ -171,9 +170,6 @@ SYSTEM_SETTINGS_SCHEMA = (
     {"name": "tencent_sign_name", "kind": "string", "default": ""},
     {"name": "tencent_template_id", "kind": "string", "default": ""},
     {"name": "tencent_sdk_appid", "kind": "string", "default": ""},
-    {"name": "openai_base_url", "kind": "string", "default": ""},
-    {"name": "openai_api_key", "kind": "string", "default": ""},
-    {"name": "default_chat_model", "kind": "string", "default": DEFAULT_CHAT_MODEL},
     {
         "name": "default_query_template",
         "kind": "string",

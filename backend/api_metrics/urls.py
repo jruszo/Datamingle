@@ -3,6 +3,26 @@ from django.urls import path
 from api_metrics import views
 
 urlpatterns = [
+    path(
+        "v1/metrics/dashboards/",
+        views.MetricsDashboardListCreateView.as_view(),
+        name="metrics-dashboard-list",
+    ),
+    path(
+        "v1/metrics/dashboards/<int:dashboard_id>/",
+        views.MetricsDashboardDetailView.as_view(),
+        name="metrics-dashboard-detail",
+    ),
+    path(
+        "v1/metrics/ai/availability",
+        views.MetricsAIAssistantAvailabilityView.as_view(),
+        name="metrics-ai-availability",
+    ),
+    path(
+        "v1/metrics/ai/assist",
+        views.MetricsAIAssistantView.as_view(),
+        name="metrics-ai-assist",
+    ),
     path("v1/metrics/names", views.MetricsNamesView.as_view(), name="metrics-names"),
     path("v1/metrics/labels", views.MetricsLabelsView.as_view(), name="metrics-labels"),
     path(

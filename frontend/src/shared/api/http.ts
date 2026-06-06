@@ -11,10 +11,7 @@ export {
   parseResponseMessage,
   publicApiUrl,
 } from '@/shared/api/http-helpers'
-import {
-  buildUrl,
-  flattenErrorMessage,
-} from '@/shared/api/http-helpers'
+import { buildUrl, flattenErrorMessage } from '@/shared/api/http-helpers'
 
 type RequestOptions = {
   token?: string
@@ -23,6 +20,18 @@ type RequestOptions = {
 
 type InternalRequestOptions = RequestOptions & {
   skipAuthRetry?: boolean
+}
+
+export class ApiRequestError extends Error {
+  status: number
+  data: unknown
+
+  constructor(message: string, status: number, data: unknown = null) {
+    super(message)
+    this.name = 'ApiRequestError'
+    this.status = status
+    this.data = data
+  }
 }
 
 // Passing options.token enables authenticated request behavior because request()
@@ -79,9 +88,11 @@ async function request<T>(
   if (!response.ok) {
     const body = await response.text()
     let message = body
+    let responseData: unknown = null
 
     try {
-      message = flattenErrorMessage(JSON.parse(body)) || body
+      responseData = JSON.parse(body)
+      message = flattenErrorMessage(responseData) || body
     } catch {
       message = body
     }
@@ -108,7 +119,11 @@ async function request<T>(
       notifyUnauthorized(message)
     }
 
-    throw new Error(`${method} ${path} failed (${response.status}): ${message}`)
+    throw new ApiRequestError(
+      `${method} ${path} failed (${response.status}): ${message}`,
+      response.status,
+      responseData,
+    )
   }
 
   return response.json() as Promise<T>
