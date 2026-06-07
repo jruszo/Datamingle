@@ -40,6 +40,7 @@ const palettes = {
   warm: ['#dc2626', '#ea580c', '#d97706', '#ca8a04', '#db2777', '#e11d48'],
   status: ['#16a34a', '#eab308', '#dc2626', '#2563eb', '#9333ea'],
 }
+const chartUpdateOptions = { notMerge: true }
 
 type FlatSeries = {
   refId: string
@@ -266,6 +267,7 @@ const chartOption = computed(() => {
     <VChart
       v-else-if="flatSeries.length"
       :option="chartOption"
+      :update-options="chartUpdateOptions"
       autoresize
       class="h-full w-full"
     />

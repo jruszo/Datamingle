@@ -103,6 +103,7 @@ const aiSuggestion = ref<PromQLAssistantSuggestion | null>(null)
 let builderTimer: ReturnType<typeof window.setTimeout> | undefined
 let metricSearchTimer: ReturnType<typeof window.setTimeout> | undefined
 let metricSearchRequestId = 0
+let lastEmittedModel = ''
 
 const activeQuery = computed(
   () => draft.value.queries.find((query) => query.ref_id === activeRefId.value) ?? null,
@@ -121,7 +122,9 @@ const previewPanel = computed(() => {
 })
 
 function emitDraft() {
-  emit('update:modelValue', clonePanel(draft.value))
+  const panel = clonePanel(draft.value)
+  lastEmittedModel = JSON.stringify(panel)
+  emit('update:modelValue', panel)
 }
 
 function initializeBuilders() {
@@ -428,7 +431,10 @@ function updateVisualization<K extends keyof DashboardPanel['visualization']>(
   key: K,
   value: DashboardPanel['visualization'][K],
 ) {
-  draft.value.visualization[key] = value
+  draft.value.visualization = {
+    ...draft.value.visualization,
+    [key]: value,
+  }
   emitDraft()
 }
 
@@ -513,7 +519,13 @@ onBeforeUnmount(() => {
 watch(
   () => props.modelValue,
   (panel) => {
-    if (JSON.stringify(panel) !== JSON.stringify(draft.value)) {
+    const incomingModel = JSON.stringify(panel)
+    if (incomingModel === lastEmittedModel) {
+      lastEmittedModel = ''
+      return
+    }
+    lastEmittedModel = ''
+    if (incomingModel !== JSON.stringify(draft.value)) {
       draft.value = clonePanel(panel)
       initializeBuilders()
     }
