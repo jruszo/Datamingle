@@ -37,6 +37,11 @@ import {
 } from '@/features/graph-editor/model'
 import PromQLEditor from '@/features/graph-editor/PromQLEditor.vue'
 import {
+  effectiveQueryStep,
+  resolveTimeRange,
+  type TimeRangeValue,
+} from '@/features/time-range/model'
+import {
   fetchMetricLabelNames,
   fetchMetricMetadata,
   fetchMetricNames,
@@ -53,7 +58,7 @@ const props = withDefaults(
   defineProps<{
     modelValue: DashboardPanel
     token: string
-    rangeSeconds: number
+    timeRange: TimeRangeValue
     variableValues?: Record<string, string[]>
     contextMetric?: string
     showFooter?: boolean
@@ -362,14 +367,13 @@ async function runQueries(refIds = enabledQueries.value.map((query) => query.ref
     queries.map(async (query) => {
       const started = performance.now()
       try {
-        const end = new Date()
-        const start = new Date(end.getTime() - props.rangeSeconds * 1000)
+        const { start, end } = resolveTimeRange(props.timeRange)
         const resolvedQuery = substituteDashboardVariables(query.query, props.variableValues)
         const response = await queryMetricRange(
           resolvedQuery,
           start,
           end,
-          Math.max(15, draft.value.step_seconds),
+          effectiveQueryStep(start, end, draft.value.step_seconds),
           props.token,
         )
         results.value = { ...results.value, [query.ref_id]: response.result ?? [] }
@@ -512,6 +516,16 @@ watch(
     if (JSON.stringify(panel) !== JSON.stringify(draft.value)) {
       draft.value = clonePanel(panel)
       initializeBuilders()
+    }
+  },
+  { deep: true },
+)
+
+watch(
+  () => props.timeRange,
+  () => {
+    if (draft.value.queries.some((query) => query.query.trim())) {
+      void runQueries()
     }
   },
   { deep: true },

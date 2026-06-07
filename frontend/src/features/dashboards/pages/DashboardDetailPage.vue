@@ -9,6 +9,7 @@ import {
   Copy,
   Ellipsis,
   History,
+  ImagePlus,
   Maximize2,
   Pencil,
   Plus,
@@ -29,6 +30,8 @@ import {
   fetchMetricsDashboard,
   listDashboardRevisions,
   restoreDashboardRevision,
+  removeDashboardIcon,
+  uploadDashboardIcon,
   updateMetricsDashboard,
   type DashboardPanel,
   type DashboardRevision,
@@ -38,6 +41,7 @@ import {
   type MetricsDashboard,
 } from '@/features/dashboards/api'
 import DashboardLinePanel from '@/features/dashboards/components/DashboardLinePanel.vue'
+import DashboardIcon from '@/features/dashboards/components/DashboardIcon.vue'
 import DashboardRevisionPreview from '@/features/dashboards/components/DashboardRevisionPreview.vue'
 import { nextDashboardPanelY } from '@/features/dashboards/layout'
 import GraphEditor from '@/features/graph-editor/GraphEditor.vue'
@@ -48,6 +52,8 @@ import {
   createUuid,
 } from '@/features/graph-editor/model'
 import { fetchMetricLabelValues } from '@/features/metrics/api'
+import TimeRangePicker from '@/features/time-range/TimeRangePicker.vue'
+import { defaultTimeRange, type TimeRangeValue } from '@/features/time-range/model'
 import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
@@ -61,6 +67,8 @@ const saving = ref(false)
 const error = ref('')
 const editing = ref(false)
 const settingsOpen = ref(false)
+const iconUploading = ref(false)
+const dashboardIconInput = ref<HTMLInputElement | null>(null)
 const historyOpen = ref(false)
 const historyLoading = ref(false)
 const historyError = ref('')
@@ -78,12 +86,6 @@ const variableValues = ref<Record<string, string[]>>({})
 let grid: GridStack | null = null
 let refreshTimer: ReturnType<typeof window.setInterval> | undefined
 
-const timeRanges = [
-  { value: 3600, label: 'Last 1 hour' },
-  { value: 21600, label: 'Last 6 hours' },
-  { value: 86400, label: 'Last 24 hours' },
-  { value: 604800, label: 'Last 7 days' },
-]
 const refreshIntervals = [
   { value: 0, label: 'Refresh off' },
   { value: 30, label: 'Every 30 seconds' },
@@ -95,6 +97,24 @@ const isDirty = computed(() =>
   Boolean(draft.value && JSON.stringify(draft.value) !== baseline.value),
 )
 const panelRoute = computed(() => String(route.query.panel ?? ''))
+const dashboardTimeRange = computed<TimeRangeValue>({
+  get() {
+    if (!draft.value) return defaultTimeRange()
+    return {
+      mode: draft.value.time_range_mode,
+      seconds: draft.value.time_range_seconds,
+      start: draft.value.time_range_start,
+      end: draft.value.time_range_end,
+    }
+  },
+  set(value) {
+    if (!draft.value) return
+    draft.value.time_range_mode = value.mode
+    draft.value.time_range_seconds = value.seconds
+    draft.value.time_range_start = value.start
+    draft.value.time_range_end = value.end
+  },
+})
 
 function requireToken() {
   if (!authStore.accessToken) {
@@ -107,7 +127,10 @@ function toDraft(source: MetricsDashboard): DashboardWritePayload {
   return {
     name: source.name,
     description: source.description,
+    time_range_mode: source.time_range_mode,
     time_range_seconds: source.time_range_seconds,
+    time_range_start: source.time_range_start,
+    time_range_end: source.time_range_end,
     refresh_interval_seconds: source.refresh_interval_seconds,
     variables: cloneDashboardData(source.variables ?? []),
     panels: cloneDashboardData(source.panels),
@@ -388,6 +411,49 @@ async function saveDashboard() {
   }
 }
 
+async function updateDashboardIcon(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!dashboard.value || !file) return
+  if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) {
+    error.value = 'Use a PNG, JPEG, WebP, or GIF image.'
+    return
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    error.value = 'Dashboard icons must be 2 MB or smaller.'
+    return
+  }
+  iconUploading.value = true
+  error.value = ''
+  try {
+    dashboard.value = await uploadDashboardIcon(
+      dashboard.value.id,
+      file,
+      requireToken(),
+    )
+  } catch (uploadError) {
+    error.value =
+      uploadError instanceof Error ? uploadError.message : 'Failed to upload dashboard icon.'
+  } finally {
+    iconUploading.value = false
+  }
+}
+
+async function clearDashboardIcon() {
+  if (!dashboard.value || !window.confirm('Remove this dashboard icon?')) return
+  iconUploading.value = true
+  error.value = ''
+  try {
+    dashboard.value = await removeDashboardIcon(dashboard.value.id, requireToken())
+  } catch (removeError) {
+    error.value =
+      removeError instanceof Error ? removeError.message : 'Failed to remove dashboard icon.'
+  } finally {
+    iconUploading.value = false
+  }
+}
+
 async function loadHistory(preferredRevision?: number) {
   if (!dashboard.value) return
   historyLoading.value = true
@@ -546,17 +612,25 @@ watch(panelRoute, syncPanelRoute)
             <ArrowLeft class="h-4 w-4" />
           </Button>
           <div class="min-w-0">
-            <Input v-if="editing" v-model="draft.name" maxlength="120" class="max-w-xl font-semibold" />
-            <h2 v-else class="truncate text-lg font-semibold text-slate-950">{{ draft.name }}</h2>
-            <p class="text-xs text-slate-500">
-              {{ isDirty ? 'Unsaved changes' : `Revision ${dashboard.revision}` }}
-            </p>
+            <div class="flex items-center gap-3">
+              <DashboardIcon
+                :dashboard-id="dashboard.id"
+                :has-icon="dashboard.has_icon"
+                :name="draft.name"
+                :version="dashboard.update_time"
+              />
+              <div class="min-w-0">
+                <Input v-if="editing" v-model="draft.name" maxlength="120" class="max-w-xl font-semibold" />
+                <h2 v-else class="truncate text-lg font-semibold text-slate-950">{{ draft.name }}</h2>
+                <p class="text-xs text-slate-500">
+                  {{ isDirty ? 'Unsaved changes' : `Revision ${dashboard.revision}` }}
+                </p>
+              </div>
+            </div>
           </div>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <select v-model.number="draft.time_range_seconds" class="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm">
-            <option v-for="option in timeRanges" :key="option.value" :value="option.value">{{ option.label }}</option>
-          </select>
+          <TimeRangePicker v-model="dashboardTimeRange" @change="refreshTick += 1" />
           <select v-model.number="draft.refresh_interval_seconds" class="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm">
             <option v-for="option in refreshIntervals" :key="option.value" :value="option.value">{{ option.label }}</option>
           </select>
@@ -650,7 +724,7 @@ watch(panelRoute, syncPanelRoute)
               </div>
             </div>
             <div class="h-[calc(100%-2.75rem)] overflow-hidden">
-              <DashboardLinePanel :panel="panel" :range-seconds="draft.time_range_seconds" :refresh-tick="refreshTick" :variable-values="variableValues" />
+              <DashboardLinePanel :panel="panel" :time-range="dashboardTimeRange" :refresh-tick="refreshTick" :variable-values="variableValues" />
             </div>
           </div>
         </div>
@@ -674,7 +748,7 @@ watch(panelRoute, syncPanelRoute)
           <GraphEditor
             :model-value="panelDraft"
             :token="requireToken()"
-            :range-seconds="draft.time_range_seconds"
+            :time-range="dashboardTimeRange"
             :variable-values="variableValues"
             show-footer
             @update:model-value="panelDraft = $event"
@@ -786,13 +860,57 @@ watch(panelRoute, syncPanelRoute)
     </Teleport>
 
     <Teleport to="body">
-      <div v-if="settingsOpen && draft" key="dashboard-settings" class="fixed inset-0 z-50 flex justify-end bg-slate-950/35" @click.self="settingsOpen = false">
+      <div v-if="settingsOpen && draft && dashboard" key="dashboard-settings" class="fixed inset-0 z-50 flex justify-end bg-slate-950/35" @click.self="settingsOpen = false">
         <aside class="h-full w-full max-w-xl overflow-auto bg-white shadow-xl">
           <div class="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
             <h3 class="font-semibold text-slate-950">Dashboard settings</h3>
             <Button variant="ghost" size="icon" type="button" @click="settingsOpen = false"><X class="h-4 w-4" /></Button>
           </div>
           <div class="grid gap-5 p-5">
+            <div>
+              <p class="mb-2 text-sm font-medium text-slate-900">Icon</p>
+              <div class="flex items-center gap-3 rounded-md border border-slate-200 p-3">
+                <DashboardIcon
+                  :dashboard-id="dashboard.id"
+                  :has-icon="dashboard.has_icon"
+                  :name="draft.name"
+                  :version="dashboard.update_time"
+                  size="lg"
+                />
+                <div class="min-w-0 flex-1">
+                  <p class="text-sm text-slate-700">PNG, JPEG, WebP, or GIF. Maximum 2 MB.</p>
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      type="button"
+                      :disabled="iconUploading"
+                      @click="dashboardIconInput?.click()"
+                    >
+                      <ImagePlus class="h-4 w-4" />
+                      {{ dashboard.has_icon ? 'Change icon' : 'Upload icon' }}
+                    </Button>
+                    <Button
+                      v-if="dashboard.has_icon"
+                      variant="ghost"
+                      size="sm"
+                      type="button"
+                      :disabled="iconUploading"
+                      @click="void clearDashboardIcon()"
+                    >
+                      <Trash2 class="h-4 w-4" /> Remove
+                    </Button>
+                  </div>
+                  <input
+                    ref="dashboardIconInput"
+                    class="hidden"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    @change="void updateDashboardIcon($event)"
+                  />
+                </div>
+              </div>
+            </div>
             <label class="grid gap-1 text-sm"><span class="font-medium">Name</span><Input v-model="draft.name" maxlength="120" /></label>
             <label class="grid gap-1 text-sm"><span class="font-medium">Description</span><textarea v-model="draft.description" rows="3" class="rounded-md border border-slate-200 p-2" /></label>
             <div class="border-t border-slate-200 pt-5">
@@ -830,7 +948,7 @@ watch(panelRoute, syncPanelRoute)
             <Button variant="ghost" size="icon" type="button" @click="fullscreenPanel = null"><X class="h-5 w-5" /></Button>
           </div>
           <div class="min-h-0 flex-1 pt-4">
-            <DashboardLinePanel :panel="fullscreenPanel" :range-seconds="draft.time_range_seconds" :refresh-tick="refreshTick" :variable-values="variableValues" />
+            <DashboardLinePanel :panel="fullscreenPanel" :time-range="dashboardTimeRange" :refresh-tick="refreshTick" :variable-values="variableValues" />
           </div>
         </div>
       </div>

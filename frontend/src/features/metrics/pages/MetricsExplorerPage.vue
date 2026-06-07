@@ -38,6 +38,8 @@ import {
   type PrometheusSeries,
   type PrometheusSeriesSelector,
 } from '@/features/metrics/api'
+import TimeRangePicker from '@/features/time-range/TimeRangePicker.vue'
+import { defaultTimeRange } from '@/features/time-range/model'
 import { useAuthStore } from '@/stores/auth'
 
 type LabelSummary = {
@@ -63,7 +65,7 @@ const instantSamples = ref<PrometheusSeries[]>([])
 const instantLoadedAt = ref<Date | null>(null)
 const queryMode = ref<'raw' | 'rate' | 'sum' | 'avg' | 'max'>('rate')
 const groupBy = ref('')
-const rangePreset = ref('1h')
+const timeRange = ref(defaultTimeRange())
 const stepSeconds = ref(60)
 const promql = ref('')
 const legendLabels = ref<string[]>([])
@@ -95,20 +97,9 @@ const preferredLegendLabels = [
   'job',
 ]
 
-const rangeOptions = [
-  { value: '1h', label: '1 hour', seconds: 60 * 60 },
-  { value: '6h', label: '6 hours', seconds: 6 * 60 * 60 },
-  { value: '24h', label: '24 hours', seconds: 24 * 60 * 60 },
-  { value: '7d', label: '7 days', seconds: 7 * 24 * 60 * 60 },
-]
-
 const filteredMetricNames = computed(() => {
   return metricNames.value
 })
-
-const selectedRange = computed(
-  () => rangeOptions.find((item) => item.value === rangePreset.value) ?? rangeOptions[0]!,
-)
 
 const selector = computed(() => {
   if (!selectedMetric.value) {
@@ -437,6 +428,10 @@ async function addGraphToDashboard() {
         return
       }
       const payload = emptyDashboardPayload(newDashboardName.value.trim())
+      payload.time_range_mode = timeRange.value.mode
+      payload.time_range_seconds = timeRange.value.seconds
+      payload.time_range_start = timeRange.value.start
+      payload.time_range_end = timeRange.value.end
       payload.panels = [buildDashboardPanel(null)]
       await createMetricsDashboard(payload, requireToken())
     } else {
@@ -451,7 +446,10 @@ async function addGraphToDashboard() {
       const payload = {
         name: dashboard.name,
         description: dashboard.description,
+        time_range_mode: dashboard.time_range_mode,
         time_range_seconds: dashboard.time_range_seconds,
+        time_range_start: dashboard.time_range_start,
+        time_range_end: dashboard.time_range_end,
         refresh_interval_seconds: dashboard.refresh_interval_seconds,
         variables: dashboard.variables,
         panels: [...dashboard.panels, panel],
@@ -469,7 +467,10 @@ async function addGraphToDashboard() {
           {
             name: latest.name,
             description: latest.description,
+            time_range_mode: latest.time_range_mode,
             time_range_seconds: latest.time_range_seconds,
+            time_range_start: latest.time_range_start,
+            time_range_end: latest.time_range_end,
             refresh_interval_seconds: latest.refresh_interval_seconds,
             variables: latest.variables,
             panels: [...latest.panels, { ...panel, layout: buildDashboardPanel(latest).layout }],
@@ -765,6 +766,7 @@ watch(metricSearch, () => {
           <p class="truncate font-mono text-xs text-slate-500">{{ selectedMetric || 'Custom PromQL' }}</p>
         </div>
         <div class="flex flex-wrap gap-2">
+          <TimeRangePicker v-model="timeRange" />
           <Button
             variant="outline"
             type="button"
@@ -783,7 +785,7 @@ watch(metricSearch, () => {
       <GraphEditor
         v-model="explorerPanel"
         :token="requireToken()"
-        :range-seconds="selectedRange.seconds"
+        :time-range="timeRange"
         :context-metric="selectedMetric"
       />
     </div>

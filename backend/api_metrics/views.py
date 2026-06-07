@@ -1,17 +1,22 @@
 import logging
 import json
 import re
+import uuid
+from io import BytesIO
 from datetime import datetime, timezone
 from urllib.parse import quote
 
 import requests
+from PIL import Image, ImageOps, UnidentifiedImageError
 from django.conf import settings
+from django.core.files.base import ContentFile
 from django.db import transaction
-from django.http import QueryDict
+from django.http import FileResponse, QueryDict
 from django.shortcuts import get_object_or_404
 from django.utils import timezone as django_timezone
 from rest_framework import permissions, status, views
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
@@ -37,6 +42,10 @@ AI_METRIC_CONTEXT_LIMIT = 300
 AI_LABEL_CONTEXT_LIMIT = 200
 AI_METADATA_CONTEXT_LIMIT = 100
 DASHBOARD_HISTORY_LIMIT = 50
+DASHBOARD_ICON_MAX_BYTES = 2 * 1024 * 1024
+DASHBOARD_ICON_SIZE = 256
+DASHBOARD_ICON_MAX_PIXELS = 16_000_000
+DASHBOARD_ICON_FORMATS = {"JPEG", "PNG", "WEBP", "GIF"}
 
 PROMETHEUS_READ_BASE_PATH = "/prometheus/api/v1"
 TENANT_PARAM_NAMES = {
@@ -590,7 +599,10 @@ def _dashboard_revision_data(dashboard):
         "revision": dashboard.revision,
         "name": dashboard.name,
         "description": dashboard.description,
+        "time_range_mode": dashboard.time_range_mode,
         "time_range_seconds": dashboard.time_range_seconds,
+        "time_range_start": dashboard.time_range_start,
+        "time_range_end": dashboard.time_range_end,
         "refresh_interval_seconds": dashboard.refresh_interval_seconds,
         "variables": dashboard.variables,
         "panels": dashboard.panels,
@@ -716,8 +728,87 @@ class MetricsDashboardDetailView(views.APIView):
 
     def delete(self, request, dashboard_id):
         dashboard = self.get_object(request, dashboard_id)
+        if dashboard.icon:
+            dashboard.icon.delete(save=False)
         dashboard.delete()
         return success_response(detail="Dashboard deleted.")
+
+
+class MetricsDashboardIconView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get_object(self, request, dashboard_id):
+        from api_metrics.models import MetricsDashboard
+
+        return get_object_or_404(
+            MetricsDashboard,
+            pk=dashboard_id,
+            organization_id=_request_organization_id(request),
+        )
+
+    def get(self, request, dashboard_id):
+        dashboard = self.get_object(request, dashboard_id)
+        if not dashboard.icon:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return FileResponse(
+            dashboard.icon.open("rb"),
+            content_type="image/png",
+            filename=f"dashboard-{dashboard.id}-icon.png",
+        )
+
+    def post(self, request, dashboard_id):
+        dashboard = self.get_object(request, dashboard_id)
+        uploaded = request.FILES.get("icon")
+        if uploaded is None:
+            raise ValidationError({"icon": "Select an image to upload."})
+        if uploaded.size > DASHBOARD_ICON_MAX_BYTES:
+            raise ValidationError({"icon": "Dashboard icons must be 2 MB or smaller."})
+
+        try:
+            image = Image.open(uploaded)
+            if image.format not in DASHBOARD_ICON_FORMATS:
+                raise ValidationError({"icon": "Use a PNG, JPEG, WebP, or GIF image."})
+            if image.width * image.height > DASHBOARD_ICON_MAX_PIXELS:
+                raise ValidationError(
+                    {"icon": "Dashboard icon dimensions are too large."}
+                )
+            image = ImageOps.exif_transpose(image)
+            image.seek(0)
+            image = image.convert("RGBA")
+            image.thumbnail(
+                (DASHBOARD_ICON_SIZE, DASHBOARD_ICON_SIZE),
+                Image.Resampling.LANCZOS,
+            )
+            normalized = BytesIO()
+            image.save(normalized, format="PNG", optimize=True)
+        except (UnidentifiedImageError, OSError, ValueError) as exc:
+            raise ValidationError(
+                {"icon": "The uploaded file is not a valid image."}
+            ) from exc
+
+        old_name = dashboard.icon.name if dashboard.icon else ""
+        dashboard.icon.save(
+            f"{uuid.uuid4().hex}.png",
+            ContentFile(normalized.getvalue()),
+            save=True,
+        )
+        if old_name and old_name != dashboard.icon.name:
+            dashboard.icon.storage.delete(old_name)
+
+        return success_response(
+            data=_dashboard_serializer()(dashboard).data,
+            detail="Dashboard icon updated.",
+        )
+
+    def delete(self, request, dashboard_id):
+        dashboard = self.get_object(request, dashboard_id)
+        if dashboard.icon:
+            dashboard.icon.delete(save=True)
+        return success_response(
+            data=_dashboard_serializer()(dashboard).data,
+            detail="Dashboard icon removed.",
+        )
 
 
 class MetricsDashboardRevisionListView(views.APIView):
@@ -806,7 +897,10 @@ class MetricsDashboardRevisionRestoreView(views.APIView):
                 update_fields=(
                     "name",
                     "description",
+                    "time_range_mode",
                     "time_range_seconds",
+                    "time_range_start",
+                    "time_range_end",
                     "refresh_interval_seconds",
                     "variables",
                     "panels",

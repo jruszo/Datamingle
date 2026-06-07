@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from rest_framework import serializers
 
@@ -13,12 +14,8 @@ MAX_PANELS = 100
 MAX_LEGEND_LABELS = 10
 MAX_QUERIES_PER_PANEL = 10
 MAX_VARIABLES = 20
-TIME_RANGE_OPTIONS = {
-    60 * 60,
-    6 * 60 * 60,
-    24 * 60 * 60,
-    7 * 24 * 60 * 60,
-}
+MIN_TIME_RANGE_SECONDS = 60
+MAX_TIME_RANGE_SECONDS = 30 * 24 * 60 * 60
 REFRESH_INTERVAL_OPTIONS = {0, 30, 60, 5 * 60}
 
 
@@ -260,6 +257,7 @@ class MetricsDashboardSerializer(serializers.ModelSerializer):
     panels = DashboardPanelSerializer(many=True)
     variables = DashboardVariableSerializer(many=True, required=False, default=list)
     created_by = serializers.SerializerMethodField()
+    has_icon = serializers.SerializerMethodField()
 
     class Meta:
         model = MetricsDashboard
@@ -267,9 +265,13 @@ class MetricsDashboardSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "description",
+            "has_icon",
             "created_by",
             "revision",
+            "time_range_mode",
             "time_range_seconds",
+            "time_range_start",
+            "time_range_end",
             "refresh_interval_seconds",
             "variables",
             "panels",
@@ -279,6 +281,7 @@ class MetricsDashboardSerializer(serializers.ModelSerializer):
         read_only_fields = (
             "id",
             "created_by",
+            "has_icon",
             "revision",
             "create_time",
             "update_time",
@@ -293,6 +296,9 @@ class MetricsDashboardSerializer(serializers.ModelSerializer):
             "display": obj.created_by.display or obj.created_by.username,
         }
 
+    def get_has_icon(self, obj):
+        return bool(obj.icon)
+
     def validate_name(self, value):
         value = value.strip()
         if not value:
@@ -300,8 +306,10 @@ class MetricsDashboardSerializer(serializers.ModelSerializer):
         return value
 
     def validate_time_range_seconds(self, value):
-        if value not in TIME_RANGE_OPTIONS:
-            raise serializers.ValidationError("Unsupported dashboard time range.")
+        if value < MIN_TIME_RANGE_SECONDS or value > MAX_TIME_RANGE_SECONDS:
+            raise serializers.ValidationError(
+                "Relative dashboard time range must be between 1 minute and 30 days."
+            )
         return value
 
     def validate_refresh_interval_seconds(self, value):
@@ -324,6 +332,60 @@ class MetricsDashboardSerializer(serializers.ModelSerializer):
         if len(names) != len(set(names)):
             raise serializers.ValidationError("Variable names must be unique.")
         return value
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        instance = self.instance
+        mode = attrs.get(
+            "time_range_mode",
+            getattr(instance, "time_range_mode", "relative"),
+        )
+        start = attrs.get(
+            "time_range_start",
+            getattr(instance, "time_range_start", ""),
+        )
+        end = attrs.get(
+            "time_range_end",
+            getattr(instance, "time_range_end", ""),
+        )
+        if mode not in {"relative", "absolute"}:
+            raise serializers.ValidationError(
+                {"time_range_mode": "Must be relative or absolute."}
+            )
+        if mode == "relative":
+            attrs["time_range_start"] = ""
+            attrs["time_range_end"] = ""
+            return attrs
+        if not start or not end:
+            raise serializers.ValidationError(
+                {"time_range_start": "Absolute ranges require both start and end."}
+            )
+        try:
+            parsed_start = datetime.fromisoformat(start.replace("Z", "+00:00"))
+            parsed_end = datetime.fromisoformat(end.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise serializers.ValidationError(
+                {
+                    "time_range_start": "Absolute range timestamps must be valid ISO dates."
+                }
+            ) from exc
+        try:
+            duration_seconds = parsed_end.timestamp() - parsed_start.timestamp()
+        except (OverflowError, OSError, ValueError) as exc:
+            raise serializers.ValidationError(
+                {
+                    "time_range_start": "Absolute range timestamps are outside the supported range."
+                }
+            ) from exc
+        if duration_seconds <= 0:
+            raise serializers.ValidationError(
+                {"time_range_end": "End must be after start."}
+            )
+        if duration_seconds > MAX_TIME_RANGE_SECONDS:
+            raise serializers.ValidationError(
+                {"time_range_end": "Absolute ranges cannot exceed 30 days."}
+            )
+        return attrs
 
 
 class MetricsDashboardRevisionSummarySerializer(serializers.ModelSerializer):
@@ -356,7 +418,10 @@ class MetricsDashboardRevisionSerializer(MetricsDashboardRevisionSummarySerializ
         fields = MetricsDashboardRevisionSummarySerializer.Meta.fields + (
             "name",
             "description",
+            "time_range_mode",
             "time_range_seconds",
+            "time_range_start",
+            "time_range_end",
             "refresh_interval_seconds",
             "variables",
             "panels",

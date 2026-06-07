@@ -14,6 +14,11 @@ urlpatterns = [
         name="metrics-dashboard-detail",
     ),
     path(
+        "v1/metrics/dashboards/<int:dashboard_id>/icon/",
+        views.MetricsDashboardIconView.as_view(),
+        name="metrics-dashboard-icon",
+    ),
+    path(
         "v1/metrics/dashboards/<int:dashboard_id>/revisions/",
         views.MetricsDashboardRevisionListView.as_view(),
         name="metrics-dashboard-revision-list",

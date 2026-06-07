@@ -1,8 +1,12 @@
 import json
+import tempfile
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import requests
+from PIL import Image
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -242,6 +246,11 @@ class MetricsProxyTests(APITestCase):
 
 class MetricsDashboardTests(APITestCase):
     def setUp(self):
+        self.media_directory = tempfile.TemporaryDirectory()
+        self.media_override = override_settings(MEDIA_ROOT=self.media_directory.name)
+        self.media_override.enable()
+        self.addCleanup(self.media_override.disable)
+        self.addCleanup(self.media_directory.cleanup)
         self.user = Users.objects.create_user(
             username="dashboard-user",
             email="dashboard@example.com",
@@ -284,6 +293,18 @@ class MetricsDashboardTests(APITestCase):
             **overrides,
         }
         return self.client.post("/api/v1/metrics/dashboards/", payload, format="json")
+
+    def icon_file(self, name="icon.png", size=(640, 320), image_format="PNG"):
+        content = BytesIO()
+        Image.new("RGB", size, color=(37, 99, 235)).save(
+            content,
+            format=image_format,
+        )
+        return SimpleUploadedFile(
+            name,
+            content.getvalue(),
+            content_type=f"image/{image_format.lower()}",
+        )
 
     def test_create_and_list_dashboard(self):
         response = self.create_dashboard()
@@ -332,6 +353,145 @@ class MetricsDashboardTests(APITestCase):
         )
         self.assertEqual(snapshot.saved_by, self.other_user)
         self.assertEqual(snapshot.name, "Collaborative API overview")
+
+    def test_custom_relative_time_range_is_persisted(self):
+        response = self.create_dashboard(time_range_seconds=3 * 60 * 60)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["data"]["time_range_mode"], "relative")
+        self.assertEqual(response.data["data"]["time_range_seconds"], 10800)
+        self.assertEqual(response.data["data"]["time_range_start"], "")
+        self.assertEqual(response.data["data"]["time_range_end"], "")
+
+    def test_dashboard_icon_is_normalized_and_served_to_tenant(self):
+        dashboard_id = self.create_dashboard().data["data"]["id"]
+
+        upload_response = self.client.post(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/icon/",
+            {"icon": self.icon_file()},
+            format="multipart",
+        )
+        icon_response = self.client.get(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/icon/"
+        )
+
+        self.assertEqual(upload_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(upload_response.data["data"]["has_icon"])
+        self.assertEqual(icon_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(icon_response["Content-Type"], "image/png")
+        normalized = Image.open(BytesIO(b"".join(icon_response.streaming_content)))
+        self.assertEqual(normalized.format, "PNG")
+        self.assertLessEqual(normalized.width, 256)
+        self.assertLessEqual(normalized.height, 256)
+
+    def test_dashboard_icon_is_hidden_from_other_organization(self):
+        dashboard_id = self.create_dashboard().data["data"]["id"]
+        self.client.post(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/icon/",
+            {"icon": self.icon_file()},
+            format="multipart",
+        )
+        self.authenticate(self.other_user, "org_other")
+
+        response = self.client.get(f"/api/v1/metrics/dashboards/{dashboard_id}/icon/")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_invalid_dashboard_icon_is_rejected(self):
+        dashboard_id = self.create_dashboard().data["data"]["id"]
+
+        response = self.client.post(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/icon/",
+            {
+                "icon": SimpleUploadedFile(
+                    "icon.svg",
+                    b"<svg xmlns='http://www.w3.org/2000/svg'></svg>",
+                    content_type="image/svg+xml",
+                )
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("icon", response.data)
+
+    def test_dashboard_icon_can_be_replaced_and_removed(self):
+        dashboard_id = self.create_dashboard().data["data"]["id"]
+        first_response = self.client.post(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/icon/",
+            {"icon": self.icon_file()},
+            format="multipart",
+        )
+        first_name = MetricsDashboard.objects.get(pk=dashboard_id).icon.name
+        second_response = self.client.post(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/icon/",
+            {"icon": self.icon_file(name="replacement.jpg", image_format="JPEG")},
+            format="multipart",
+        )
+        dashboard = MetricsDashboard.objects.get(pk=dashboard_id)
+
+        self.assertEqual(first_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(second_response.status_code, status.HTTP_200_OK)
+        self.assertNotEqual(dashboard.icon.name, first_name)
+        self.assertFalse(dashboard.icon.storage.exists(first_name))
+
+        remove_response = self.client.delete(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/icon/"
+        )
+
+        self.assertEqual(remove_response.status_code, status.HTTP_200_OK)
+        self.assertFalse(remove_response.data["data"]["has_icon"])
+        self.assertFalse(MetricsDashboard.objects.get(pk=dashboard_id).icon)
+
+    def test_absolute_time_range_is_persisted_and_restored(self):
+        dashboard = self.create_dashboard(
+            time_range_mode="absolute",
+            time_range_start="2026-06-06T08:15:00.000Z",
+            time_range_end="2026-06-06T10:45:00.000Z",
+        ).data["data"]
+        update_response = self.client.patch(
+            f"/api/v1/metrics/dashboards/{dashboard['id']}/",
+            {
+                "expected_revision": 1,
+                "time_range_mode": "relative",
+                "time_range_seconds": 7200,
+            },
+            format="json",
+        )
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
+
+        restore_response = self.client.post(
+            f"/api/v1/metrics/dashboards/{dashboard['id']}/revisions/1/restore/",
+            {"expected_revision": 2},
+            format="json",
+        )
+
+        self.assertEqual(restore_response.status_code, status.HTTP_200_OK)
+        restored = restore_response.data["data"]
+        self.assertEqual(restored["time_range_mode"], "absolute")
+        self.assertEqual(restored["time_range_start"], "2026-06-06T08:15:00.000Z")
+        self.assertEqual(restored["time_range_end"], "2026-06-06T10:45:00.000Z")
+
+    def test_invalid_absolute_time_ranges_are_rejected(self):
+        missing_end = self.create_dashboard(
+            time_range_mode="absolute",
+            time_range_start="2026-06-06T08:15:00.000Z",
+        )
+        reversed_range = self.create_dashboard(
+            time_range_mode="absolute",
+            time_range_start="2026-06-06T10:45:00.000Z",
+            time_range_end="2026-06-06T08:15:00.000Z",
+        )
+
+        self.assertEqual(missing_end.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(reversed_range.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_relative_time_range_is_bounded(self):
+        too_short = self.create_dashboard(time_range_seconds=30)
+        too_long = self.create_dashboard(time_range_seconds=31 * 24 * 60 * 60)
+
+        self.assertEqual(too_short.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(too_long.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_first_save_of_legacy_dashboard_captures_previous_state(self):
         dashboard_id = self.create_dashboard().data["data"]["id"]

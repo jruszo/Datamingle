@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
+  apiDelete: vi.fn(),
   apiGet: vi.fn(),
+  apiGetBlob: vi.fn(),
   apiPatch: vi.fn(),
   apiPost: vi.fn(),
+  apiPostForm: vi.fn(),
 }))
 
 vi.mock('@/shared/api/http', () => {
@@ -20,10 +23,12 @@ vi.mock('@/shared/api/http', () => {
 
   return {
     ApiRequestError,
-    apiDelete: vi.fn(),
+    apiDelete: mocks.apiDelete,
     apiGet: mocks.apiGet,
+    apiGetBlob: mocks.apiGetBlob,
     apiPatch: mocks.apiPatch,
     apiPost: mocks.apiPost,
+    apiPostForm: mocks.apiPostForm,
     isRecord: (value: unknown) => typeof value === 'object' && value !== null,
   }
 })
@@ -31,9 +36,11 @@ vi.mock('@/shared/api/http', () => {
 import { ApiRequestError } from '@/shared/api/http'
 import {
   emptyDashboardPayload,
+  fetchDashboardIcon,
   fetchDashboardRevision,
   listDashboardRevisions,
   restoreDashboardRevision,
+  uploadDashboardIcon,
   updateMetricsDashboard,
   type MetricsDashboard,
 } from '@/features/dashboards/api'
@@ -43,20 +50,27 @@ const latest: MetricsDashboard = {
   name: 'Shared',
   description: '',
   created_by: null,
+  has_icon: false,
   revision: 3,
+  time_range_mode: 'relative',
   time_range_seconds: 3600,
-      refresh_interval_seconds: 0,
-      variables: [],
-      panels: [],
+  time_range_start: '',
+  time_range_end: '',
+  refresh_interval_seconds: 0,
+  variables: [],
+  panels: [],
   create_time: '2026-06-06T10:00:00Z',
   update_time: '2026-06-06T10:05:00Z',
 }
 
 describe('dashboard API', () => {
   beforeEach(() => {
+    mocks.apiDelete.mockReset()
     mocks.apiGet.mockReset()
+    mocks.apiGetBlob.mockReset()
     mocks.apiPatch.mockReset()
     mocks.apiPost.mockReset()
+    mocks.apiPostForm.mockReset()
   })
 
   it('exposes the latest dashboard when an update conflicts', async () => {
@@ -123,5 +137,27 @@ describe('dashboard API', () => {
       name: 'DashboardConflictError',
       latest,
     })
+  })
+
+  it('loads and uploads dashboard icons through authenticated endpoints', async () => {
+    const blob = new Blob(['image'], { type: 'image/png' })
+    mocks.apiGetBlob.mockResolvedValue(blob)
+    mocks.apiPostForm.mockResolvedValue({
+      detail: '',
+      data: { ...latest, has_icon: true },
+    })
+    const file = new File(['image'], 'icon.png', { type: 'image/png' })
+
+    await expect(fetchDashboardIcon(7, 'token')).resolves.toBe(blob)
+    await expect(uploadDashboardIcon(7, file, 'token')).resolves.toMatchObject({
+      has_icon: true,
+    })
+
+    expect(mocks.apiGetBlob).toHaveBeenCalledWith(
+      '/v1/metrics/dashboards/7/icon/',
+      { token: 'token' },
+    )
+    const form = mocks.apiPostForm.mock.calls[0]![1] as FormData
+    expect(form.get('icon')).toBe(file)
   })
 })

@@ -1,4 +1,4 @@
-import { LayoutGrid } from 'lucide-vue-next'
+import { House } from 'lucide-vue-next'
 
 import type { FeatureModule } from '@/app/feature-contract'
 import HomePage from '@/features/dashboard/pages/HomePage.vue'
@@ -6,14 +6,14 @@ import HomePage from '@/features/dashboard/pages/HomePage.vue'
 const dashboardModule: FeatureModule = {
   id: 'dashboard',
   routes: [
-    { path: '/', name: 'home', component: HomePage, meta: { title: 'Dashboard' } },
+    { path: '/', name: 'home', component: HomePage, meta: { title: 'Home' } },
   ],
   navigation: [
     {
       to: '/',
-      label: 'Dashboard',
+      label: 'Home',
       section: 'primary',
-      icon: LayoutGrid,
+      icon: House,
       order: 10,
       matchPrefix: '/',
     },

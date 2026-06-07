@@ -15,7 +15,6 @@ import { use } from 'echarts/core'
 import { Database, FileCheck2, Search, Users } from 'lucide-vue-next'
 import VChart from 'vue-echarts'
 
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -297,7 +296,7 @@ onMounted(() => {
   <section class="space-y-4">
     <div class="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 md:flex-row md:items-end md:justify-between">
       <div>
-        <h2 class="text-lg font-semibold text-slate-900">Dashboard</h2>
+        <h2 class="text-lg font-semibold text-slate-900">Home</h2>
         <p class="text-sm text-slate-500">
           Real-time overview based on backend dashboard metrics and workload statistics.
         </p>

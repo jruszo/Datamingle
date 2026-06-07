@@ -6,11 +6,16 @@ import GraphPreview from '@/features/graph-editor/GraphPreview.vue'
 import { substituteDashboardVariables } from '@/features/graph-editor/model'
 import { queryMetricRange, type PrometheusSeries } from '@/features/metrics/api'
 import { useAuthStore } from '@/stores/auth'
+import {
+  effectiveQueryStep,
+  resolveTimeRange,
+  type TimeRangeValue,
+} from '@/features/time-range/model'
 
 const props = withDefaults(
   defineProps<{
     panel: DashboardPanel
-    rangeSeconds: number
+    timeRange: TimeRangeValue
     refreshTick: number
     variableValues?: Record<string, string[]>
   }>(),
@@ -33,8 +38,7 @@ async function loadPanel() {
   loading.value = true
   const nextResults: Record<string, PrometheusSeries[]> = {}
   const nextErrors: Record<string, string> = {}
-  const end = new Date()
-  const start = new Date(end.getTime() - props.rangeSeconds * 1000)
+  const { start, end } = resolveTimeRange(props.timeRange)
 
   await Promise.all(
     props.panel.queries
@@ -45,7 +49,7 @@ async function loadPanel() {
             substituteDashboardVariables(query.query, props.variableValues),
             start,
             end,
-            Math.max(15, props.panel.step_seconds),
+            effectiveQueryStep(start, end, props.panel.step_seconds),
             authStore.accessToken!,
           )
           nextResults[query.ref_id] = response.result ?? []
@@ -66,7 +70,7 @@ async function loadPanel() {
 watch(
   () => [
     props.panel,
-    props.rangeSeconds,
+    props.timeRange,
     props.refreshTick,
     props.variableValues,
   ],

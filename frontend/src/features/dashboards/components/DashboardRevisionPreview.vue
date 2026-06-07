@@ -5,6 +5,7 @@ import type { DashboardRevision, DashboardVariable } from '@/features/dashboards
 import DashboardLinePanel from '@/features/dashboards/components/DashboardLinePanel.vue'
 import { fetchMetricLabelValues } from '@/features/metrics/api'
 import { useAuthStore } from '@/stores/auth'
+import { formatTimeRange, type TimeRangeValue } from '@/features/time-range/model'
 
 const props = defineProps<{
   revision: DashboardRevision
@@ -21,6 +22,12 @@ const previewHeight = computed(() => {
   )
   return Math.max(320, bottom * 82)
 })
+const timeRange = computed<TimeRangeValue>(() => ({
+  mode: props.revision.time_range_mode,
+  seconds: props.revision.time_range_seconds,
+  start: props.revision.time_range_start,
+  end: props.revision.time_range_end,
+}))
 
 async function loadVariables() {
   const token = authStore.accessToken
@@ -61,7 +68,7 @@ watch(() => props.revision, () => void loadVariables(), { immediate: true })
       This preview uses the saved dashboard configuration with current metric data.
     </div>
     <div class="flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-500">
-      <span>Time range: {{ revision.time_range_seconds / 3600 }} hour(s)</span>
+      <span>Time range: {{ formatTimeRange(timeRange) }}</span>
       <span>{{ revision.panels.length }} panel(s)</span>
       <span>{{ revision.variables.length }} variable(s)</span>
     </div>
@@ -115,7 +122,7 @@ watch(() => props.revision, () => void loadVariables(), { immediate: true })
         <div class="h-[calc(100%-2.75rem)] overflow-hidden">
           <DashboardLinePanel
             :panel="panel"
-            :range-seconds="revision.time_range_seconds"
+            :time-range="timeRange"
             :refresh-tick="refreshTick"
             :variable-values="variableValues"
           />

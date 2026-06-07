@@ -12,6 +12,7 @@ import {
   listMetricsDashboards,
   type MetricsDashboard,
 } from '@/features/dashboards/api'
+import DashboardIcon from '@/features/dashboards/components/DashboardIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
@@ -140,10 +141,21 @@ onMounted(() => {
             @click="void router.push(`/dashboards/${dashboard.id}`)"
           >
             <td class="px-4 py-3">
-              <p class="font-medium text-slate-950">{{ dashboard.name }}</p>
-              <p v-if="dashboard.description" class="mt-0.5 truncate text-xs text-slate-500">
-                {{ dashboard.description }}
-              </p>
+              <div class="flex items-center gap-3">
+                <DashboardIcon
+                  :dashboard-id="dashboard.id"
+                  :has-icon="dashboard.has_icon"
+                  :name="dashboard.name"
+                  :version="dashboard.update_time"
+                  size="sm"
+                />
+                <div class="min-w-0">
+                  <p class="font-medium text-slate-950">{{ dashboard.name }}</p>
+                  <p v-if="dashboard.description" class="mt-0.5 truncate text-xs text-slate-500">
+                    {{ dashboard.description }}
+                  </p>
+                </div>
+              </div>
             </td>
             <td class="px-4 py-3 text-slate-600">{{ dashboard.panels.length }}</td>
             <td class="px-4 py-3 text-slate-600">

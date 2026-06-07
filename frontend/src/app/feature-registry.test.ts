@@ -55,7 +55,7 @@ describe('feature registry', () => {
     const labels = getNavigationItems('primary').map((item) => item.label)
 
     expect(labels).toEqual([
-      'Dashboard',
+      'Home',
       'Dashboards',
       'Nodes',
       'Metrics Explorer',

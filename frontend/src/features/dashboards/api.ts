@@ -1,4 +1,13 @@
-import { ApiRequestError, apiDelete, apiGet, apiPatch, apiPost, isRecord } from '@/shared/api/http'
+import {
+  ApiRequestError,
+  apiDelete,
+  apiGet,
+  apiGetBlob,
+  apiPatch,
+  apiPost,
+  apiPostForm,
+  isRecord,
+} from '@/shared/api/http'
 
 export type DashboardPanelLayout = {
   x: number
@@ -65,8 +74,12 @@ export type MetricsDashboard = {
     username: string
     display: string
   } | null
+  has_icon: boolean
   revision: number
+  time_range_mode: 'relative' | 'absolute'
   time_range_seconds: number
+  time_range_start: string
+  time_range_end: string
   refresh_interval_seconds: number
   variables: DashboardVariable[]
   panels: DashboardPanel[]
@@ -87,7 +100,10 @@ export type DashboardWritePayload = Pick<
   MetricsDashboard,
   | 'name'
   | 'description'
+  | 'time_range_mode'
   | 'time_range_seconds'
+  | 'time_range_start'
+  | 'time_range_end'
   | 'refresh_interval_seconds'
   | 'variables'
   | 'panels'
@@ -122,6 +138,27 @@ export function fetchMetricsDashboard(dashboardId: number, token: string) {
   return apiGet<ApiEnvelope<MetricsDashboard>>(`/v1/metrics/dashboards/${dashboardId}/`, {
     token,
   }).then(extractData)
+}
+
+export function fetchDashboardIcon(dashboardId: number, token: string) {
+  return apiGetBlob(`/v1/metrics/dashboards/${dashboardId}/icon/`, { token })
+}
+
+export function uploadDashboardIcon(dashboardId: number, icon: File, token: string) {
+  const form = new FormData()
+  form.append('icon', icon)
+  return apiPostForm<ApiEnvelope<MetricsDashboard>>(
+    `/v1/metrics/dashboards/${dashboardId}/icon/`,
+    form,
+    { token },
+  ).then(extractData)
+}
+
+export function removeDashboardIcon(dashboardId: number, token: string) {
+  return apiDelete<ApiEnvelope<MetricsDashboard>>(
+    `/v1/metrics/dashboards/${dashboardId}/icon/`,
+    { token },
+  ).then(extractData)
 }
 
 export function listDashboardRevisions(dashboardId: number, token: string) {
@@ -208,7 +245,10 @@ export function emptyDashboardPayload(name: string): DashboardWritePayload {
   return {
     name,
     description: '',
+    time_range_mode: 'relative',
     time_range_seconds: 3600,
+    time_range_start: '',
+    time_range_end: '',
     refresh_interval_seconds: 0,
     variables: [],
     panels: [],
