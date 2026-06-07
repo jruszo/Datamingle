@@ -75,6 +75,7 @@ export type MetricsDashboard = {
     display: string
   } | null
   has_icon: boolean
+  is_favorite: boolean
   revision: number
   time_range_mode: 'relative' | 'absolute'
   time_range_seconds: number
@@ -128,10 +129,11 @@ export class DashboardConflictError extends Error {
   }
 }
 
-export function listMetricsDashboards(token: string) {
-  return apiGet<ApiEnvelope<MetricsDashboard[]>>('/v1/metrics/dashboards/', { token }).then(
-    extractData,
-  )
+export function listMetricsDashboards(token: string, favoritesOnly = false) {
+  const path = favoritesOnly
+    ? '/v1/metrics/dashboards/?favorite=true'
+    : '/v1/metrics/dashboards/'
+  return apiGet<ApiEnvelope<MetricsDashboard[]>>(path, { token }).then(extractData)
 }
 
 export function fetchMetricsDashboard(dashboardId: number, token: string) {
@@ -157,6 +159,14 @@ export function uploadDashboardIcon(dashboardId: number, icon: File, token: stri
 export function removeDashboardIcon(dashboardId: number, token: string) {
   return apiDelete<ApiEnvelope<MetricsDashboard>>(
     `/v1/metrics/dashboards/${dashboardId}/icon/`,
+    { token },
+  ).then(extractData)
+}
+
+export function setDashboardFavorite(dashboardId: number, favorite: boolean, token: string) {
+  return apiPatch<ApiEnvelope<MetricsDashboard>>(
+    `/v1/metrics/dashboards/${dashboardId}/favorite/`,
+    { favorite },
     { token },
   ).then(extractData)
 }

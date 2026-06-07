@@ -38,8 +38,10 @@ import {
   emptyDashboardPayload,
   fetchDashboardIcon,
   fetchDashboardRevision,
+  listMetricsDashboards,
   listDashboardRevisions,
   restoreDashboardRevision,
+  setDashboardFavorite,
   uploadDashboardIcon,
   updateMetricsDashboard,
   type MetricsDashboard,
@@ -51,6 +53,7 @@ const latest: MetricsDashboard = {
   description: '',
   created_by: null,
   has_icon: false,
+  is_favorite: false,
   revision: 3,
   time_range_mode: 'relative',
   time_range_seconds: 3600,
@@ -121,6 +124,32 @@ describe('dashboard API', () => {
     expect(mocks.apiGet).toHaveBeenNthCalledWith(
       1,
       '/v1/metrics/dashboards/7/revisions/',
+      { token: 'token' },
+    )
+  })
+
+  it('filters dashboard lists and updates favorites through authenticated endpoints', async () => {
+    mocks.apiGet.mockResolvedValue({
+      detail: '',
+      data: [{ ...latest, is_favorite: true }],
+    })
+    mocks.apiPatch.mockResolvedValue({
+      detail: '',
+      data: { ...latest, is_favorite: true },
+    })
+
+    await expect(listMetricsDashboards('token', true)).resolves.toHaveLength(1)
+    await expect(setDashboardFavorite(7, true, 'token')).resolves.toMatchObject({
+      is_favorite: true,
+    })
+
+    expect(mocks.apiGet).toHaveBeenCalledWith(
+      '/v1/metrics/dashboards/?favorite=true',
+      { token: 'token' },
+    )
+    expect(mocks.apiPatch).toHaveBeenCalledWith(
+      '/v1/metrics/dashboards/7/favorite/',
+      { favorite: true },
       { token: 'token' },
     )
   })

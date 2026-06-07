@@ -17,6 +17,7 @@ import {
   RotateCcw,
   Save,
   Settings,
+  Star,
   Trash2,
   X,
 } from 'lucide-vue-next'
@@ -31,6 +32,7 @@ import {
   listDashboardRevisions,
   restoreDashboardRevision,
   removeDashboardIcon,
+  setDashboardFavorite,
   uploadDashboardIcon,
   updateMetricsDashboard,
   type DashboardPanel,
@@ -68,6 +70,7 @@ const error = ref('')
 const editing = ref(false)
 const settingsOpen = ref(false)
 const iconUploading = ref(false)
+const favoriteSaving = ref(false)
 const dashboardIconInput = ref<HTMLInputElement | null>(null)
 const historyOpen = ref(false)
 const historyLoading = ref(false)
@@ -167,6 +170,31 @@ async function loadDashboard() {
     initializeGrid()
     configureRefreshTimer()
     syncPanelRoute()
+  }
+}
+
+async function toggleFavorite() {
+  if (!dashboard.value || favoriteSaving.value) return
+  const currentFavorite = dashboard.value.is_favorite
+  const nextFavorite = !currentFavorite
+  favoriteSaving.value = true
+  error.value = ''
+  dashboard.value.is_favorite = nextFavorite
+  try {
+    const updated = await setDashboardFavorite(
+      dashboard.value.id,
+      nextFavorite,
+      requireToken(),
+    )
+    dashboard.value.is_favorite = updated.is_favorite
+  } catch (favoriteError) {
+    if (dashboard.value) dashboard.value.is_favorite = currentFavorite
+    error.value =
+      favoriteError instanceof Error
+        ? favoriteError.message
+        : 'Failed to update dashboard favorite.'
+  } finally {
+    favoriteSaving.value = false
   }
 }
 
@@ -610,6 +638,24 @@ watch(panelRoute, syncPanelRoute)
         <div class="flex min-w-0 items-center gap-3">
           <Button variant="outline" size="icon" type="button" @click="void router.push('/dashboards')">
             <ArrowLeft class="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            type="button"
+            :disabled="favoriteSaving"
+            :title="dashboard.is_favorite ? 'Remove from favorites' : 'Add to favorites'"
+            :aria-label="dashboard.is_favorite ? 'Remove from favorites' : 'Add to favorites'"
+            @click="void toggleFavorite()"
+          >
+            <Star
+              :class="[
+                'h-5 w-5',
+                dashboard.is_favorite
+                  ? 'fill-amber-400 text-amber-500'
+                  : 'text-slate-500',
+              ]"
+            />
           </Button>
           <div class="min-w-0">
             <div class="flex items-center gap-3">

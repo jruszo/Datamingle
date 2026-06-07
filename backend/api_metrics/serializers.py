@@ -258,6 +258,7 @@ class MetricsDashboardSerializer(serializers.ModelSerializer):
     variables = DashboardVariableSerializer(many=True, required=False, default=list)
     created_by = serializers.SerializerMethodField()
     has_icon = serializers.SerializerMethodField()
+    is_favorite = serializers.SerializerMethodField()
 
     class Meta:
         model = MetricsDashboard
@@ -266,6 +267,7 @@ class MetricsDashboardSerializer(serializers.ModelSerializer):
             "name",
             "description",
             "has_icon",
+            "is_favorite",
             "created_by",
             "revision",
             "time_range_mode",
@@ -282,6 +284,7 @@ class MetricsDashboardSerializer(serializers.ModelSerializer):
             "id",
             "created_by",
             "has_icon",
+            "is_favorite",
             "revision",
             "create_time",
             "update_time",
@@ -298,6 +301,9 @@ class MetricsDashboardSerializer(serializers.ModelSerializer):
 
     def get_has_icon(self, obj):
         return bool(obj.icon)
+
+    def get_is_favorite(self, obj):
+        return bool(getattr(obj, "is_favorite", False))
 
     def validate_name(self, value):
         value = value.strip()

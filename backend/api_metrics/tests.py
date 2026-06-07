@@ -11,7 +11,11 @@ from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from api_metrics.models import MetricsDashboard, MetricsDashboardRevision
+from api_metrics.models import (
+    MetricsDashboard,
+    MetricsDashboardFavorite,
+    MetricsDashboardRevision,
+)
 from sql.models import Users
 
 
@@ -310,6 +314,7 @@ class MetricsDashboardTests(APITestCase):
         response = self.create_dashboard()
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertFalse(response.data["data"]["is_favorite"])
         self.assertEqual(response.data["data"]["revision"], 1)
         self.assertEqual(response.data["data"]["created_by"]["id"], self.user.id)
         panel = response.data["data"]["panels"][0]
@@ -330,6 +335,103 @@ class MetricsDashboardTests(APITestCase):
         )
         self.assertEqual(snapshot.name, "API overview")
         self.assertEqual(snapshot.saved_by, self.user)
+
+    def test_favorites_are_personal_and_favorites_sort_first(self):
+        alpha = self.create_dashboard(name="Alpha").data["data"]
+        zulu = self.create_dashboard(name="Zulu").data["data"]
+
+        favorite_response = self.client.patch(
+            f"/api/v1/metrics/dashboards/{zulu['id']}/favorite/",
+            {"favorite": True},
+            format="json",
+        )
+        list_response = self.client.get("/api/v1/metrics/dashboards/")
+
+        self.assertEqual(favorite_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(favorite_response.data["data"]["is_favorite"])
+        self.assertEqual(
+            [item["id"] for item in list_response.data["data"]],
+            [zulu["id"], alpha["id"]],
+        )
+        self.assertEqual(
+            [item["is_favorite"] for item in list_response.data["data"]],
+            [True, False],
+        )
+
+        self.authenticate(self.other_user, "org_test_123")
+        collaborator_detail = self.client.get(
+            f"/api/v1/metrics/dashboards/{zulu['id']}/"
+        )
+        self.assertEqual(collaborator_detail.status_code, status.HTTP_200_OK)
+        self.assertFalse(collaborator_detail.data["data"]["is_favorite"])
+
+    def test_favorite_filter_and_idempotent_toggle(self):
+        favorite = self.create_dashboard(name="Favorite").data["data"]
+        self.create_dashboard(name="Other")
+        revisions_before = MetricsDashboardRevision.objects.count()
+
+        for _ in range(2):
+            response = self.client.patch(
+                f"/api/v1/metrics/dashboards/{favorite['id']}/favorite/",
+                {"favorite": True},
+                format="json",
+            )
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        filtered_response = self.client.get("/api/v1/metrics/dashboards/?favorite=true")
+        dashboard = MetricsDashboard.objects.get(pk=favorite["id"])
+        self.assertEqual(
+            [item["id"] for item in filtered_response.data["data"]],
+            [favorite["id"]],
+        )
+        self.assertEqual(dashboard.revision, 1)
+        self.assertEqual(MetricsDashboardRevision.objects.count(), revisions_before)
+        self.assertEqual(MetricsDashboardFavorite.objects.count(), 1)
+
+        for _ in range(2):
+            response = self.client.patch(
+                f"/api/v1/metrics/dashboards/{favorite['id']}/favorite/",
+                {"favorite": False},
+                format="json",
+            )
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertFalse(response.data["data"]["is_favorite"])
+        self.assertFalse(MetricsDashboardFavorite.objects.exists())
+
+    def test_favorite_is_tenant_scoped_and_deleted_with_dashboard(self):
+        dashboard_id = self.create_dashboard().data["data"]["id"]
+        self.client.patch(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/favorite/",
+            {"favorite": True},
+            format="json",
+        )
+        self.authenticate(self.other_user, "org_other")
+
+        hidden_response = self.client.patch(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/favorite/",
+            {"favorite": True},
+            format="json",
+        )
+        self.assertEqual(hidden_response.status_code, status.HTTP_404_NOT_FOUND)
+
+        self.authenticate(self.user, "org_test_123")
+        delete_response = self.client.delete(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/"
+        )
+        self.assertEqual(delete_response.status_code, status.HTTP_200_OK)
+        self.assertFalse(MetricsDashboardFavorite.objects.exists())
+
+    def test_favorite_requires_boolean_value(self):
+        dashboard_id = self.create_dashboard().data["data"]["id"]
+
+        response = self.client.patch(
+            f"/api/v1/metrics/dashboards/{dashboard_id}/favorite/",
+            {"favorite": "true"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("favorite", response.data)
 
     def test_org_collaborator_can_update_dashboard(self):
         dashboard_id = self.create_dashboard().data["data"]["id"]

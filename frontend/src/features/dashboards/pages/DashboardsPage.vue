@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { LayoutDashboard, Plus, Trash2, X } from 'lucide-vue-next'
+import { LayoutDashboard, Plus, Star, Trash2, X } from 'lucide-vue-next'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -23,6 +23,7 @@ const saving = ref(false)
 const error = ref('')
 const createOpen = ref(false)
 const dashboardName = ref('')
+const favoritesOnly = ref(false)
 
 function requireToken() {
   if (!authStore.accessToken) {
@@ -35,7 +36,7 @@ async function loadDashboards() {
   loading.value = true
   error.value = ''
   try {
-    dashboards.value = await listMetricsDashboards(requireToken())
+    dashboards.value = await listMetricsDashboards(requireToken(), favoritesOnly.value)
   } catch (loadError) {
     error.value = loadError instanceof Error ? loadError.message : 'Failed to load dashboards.'
   } finally {
@@ -46,6 +47,11 @@ async function loadDashboards() {
 function openCreate() {
   dashboardName.value = ''
   createOpen.value = true
+}
+
+function toggleFavoritesFilter() {
+  favoritesOnly.value = !favoritesOnly.value
+  void loadDashboards()
 }
 
 async function createDashboard() {
@@ -96,10 +102,21 @@ onMounted(() => {
           Shared organization dashboards built from PromQL graph panels.
         </p>
       </div>
-      <Button type="button" @click="openCreate">
-        <Plus class="h-4 w-4" />
-        New dashboard
-      </Button>
+      <div class="flex items-center gap-2">
+        <Button
+          :variant="favoritesOnly ? 'default' : 'outline'"
+          type="button"
+          :disabled="loading"
+          @click="toggleFavoritesFilter"
+        >
+          <Star :class="['h-4 w-4', favoritesOnly ? 'fill-current' : '']" />
+          Favorites only
+        </Button>
+        <Button type="button" @click="openCreate">
+          <Plus class="h-4 w-4" />
+          New dashboard
+        </Button>
+      </div>
     </div>
 
     <p
@@ -116,10 +133,20 @@ onMounted(() => {
         class="flex min-h-64 items-center justify-center p-8 text-center"
       >
         <div>
-          <LayoutDashboard class="mx-auto mb-3 h-8 w-8 text-slate-400" />
-          <p class="font-medium text-slate-900">No dashboards yet.</p>
+          <Star
+            v-if="favoritesOnly"
+            class="mx-auto mb-3 h-8 w-8 text-slate-400"
+          />
+          <LayoutDashboard v-else class="mx-auto mb-3 h-8 w-8 text-slate-400" />
+          <p class="font-medium text-slate-900">
+            {{ favoritesOnly ? 'No favorite dashboards.' : 'No dashboards yet.' }}
+          </p>
           <p class="mt-1 text-sm text-slate-500">
-            Create one here or save a graph from Metrics Explorer.
+            {{
+              favoritesOnly
+                ? 'Star a dashboard from its detail page to see it here.'
+                : 'Create one here or save a graph from Metrics Explorer.'
+            }}
           </p>
         </div>
       </div>
@@ -150,7 +177,20 @@ onMounted(() => {
                   size="sm"
                 />
                 <div class="min-w-0">
-                  <p class="font-medium text-slate-950">{{ dashboard.name }}</p>
+                  <div class="flex items-center gap-1.5">
+                    <Star
+                      :class="[
+                        'h-3.5 w-3.5 shrink-0',
+                        dashboard.is_favorite
+                          ? 'fill-amber-400 text-amber-500'
+                          : 'text-slate-300',
+                      ]"
+                      :aria-label="
+                        dashboard.is_favorite ? 'Favorite dashboard' : 'Not a favorite dashboard'
+                      "
+                    />
+                    <p class="font-medium text-slate-950">{{ dashboard.name }}</p>
+                  </div>
                   <p v-if="dashboard.description" class="mt-0.5 truncate text-xs text-slate-500">
                     {{ dashboard.description }}
                   </p>

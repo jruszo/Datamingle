@@ -11,6 +11,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import transaction
+from django.db.models import Exists, OuterRef
 from django.http import FileResponse, QueryDict
 from django.shortcuts import get_object_or_404
 from django.utils import timezone as django_timezone
@@ -594,6 +595,25 @@ def _dashboard_serializer():
     return MetricsDashboardSerializer
 
 
+def _dashboard_queryset(request):
+    from api_metrics.models import MetricsDashboard, MetricsDashboardFavorite
+
+    return (
+        MetricsDashboard.objects.filter(
+            organization_id=_request_organization_id(request)
+        )
+        .select_related("created_by")
+        .annotate(
+            is_favorite=Exists(
+                MetricsDashboardFavorite.objects.filter(
+                    dashboard_id=OuterRef("pk"),
+                    user=request.user,
+                )
+            )
+        )
+    )
+
+
 def _dashboard_revision_data(dashboard):
     return {
         "revision": dashboard.revision,
@@ -642,12 +662,16 @@ class MetricsDashboardListCreateView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        from api_metrics.models import MetricsDashboard
-
-        organization_id = _request_organization_id(request)
-        dashboards = MetricsDashboard.objects.filter(
-            organization_id=organization_id
-        ).select_related("created_by")
+        dashboards = _dashboard_queryset(request)
+        favorite = request.query_params.get("favorite")
+        if favorite is not None:
+            normalized_favorite = favorite.strip().lower()
+            if normalized_favorite not in {"true", "false"}:
+                raise ValidationError(
+                    {"favorite": "Must be true or false when provided."}
+                )
+            dashboards = dashboards.filter(is_favorite=normalized_favorite == "true")
+        dashboards = dashboards.order_by("-is_favorite", "name", "id")
         return success_response(
             data=_dashboard_serializer()(dashboards, many=True).data
         )
@@ -660,6 +684,7 @@ class MetricsDashboardListCreateView(views.APIView):
                 organization_id=_request_organization_id(request),
                 created_by=request.user,
             )
+            dashboard.is_favorite = False
             _snapshot_dashboard(dashboard, request.user)
         return success_response(
             data=_dashboard_serializer()(dashboard).data,
@@ -672,15 +697,12 @@ class MetricsDashboardDetailView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_object(self, request, dashboard_id, for_update=False):
-        from api_metrics.models import MetricsDashboard
-
-        queryset = MetricsDashboard.objects.select_related("created_by")
+        queryset = _dashboard_queryset(request)
         if for_update:
             queryset = queryset.select_for_update()
         return get_object_or_404(
             queryset,
             pk=dashboard_id,
-            organization_id=_request_organization_id(request),
         )
 
     def get(self, request, dashboard_id):
@@ -734,17 +756,49 @@ class MetricsDashboardDetailView(views.APIView):
         return success_response(detail="Dashboard deleted.")
 
 
+class MetricsDashboardFavoriteView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, dashboard_id):
+        from api_metrics.models import MetricsDashboardFavorite
+
+        favorite = request.data.get("favorite")
+        if not isinstance(favorite, bool):
+            raise ValidationError({"favorite": "This field must be a boolean."})
+
+        dashboard = get_object_or_404(
+            _dashboard_queryset(request),
+            pk=dashboard_id,
+        )
+        if favorite:
+            MetricsDashboardFavorite.objects.get_or_create(
+                dashboard=dashboard,
+                user=request.user,
+            )
+        else:
+            MetricsDashboardFavorite.objects.filter(
+                dashboard=dashboard,
+                user=request.user,
+            ).delete()
+        dashboard.is_favorite = favorite
+        return success_response(
+            data=_dashboard_serializer()(dashboard).data,
+            detail=(
+                "Dashboard added to favorites."
+                if favorite
+                else "Dashboard removed from favorites."
+            ),
+        )
+
+
 class MetricsDashboardIconView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
 
     def get_object(self, request, dashboard_id):
-        from api_metrics.models import MetricsDashboard
-
         return get_object_or_404(
-            MetricsDashboard,
+            _dashboard_queryset(request),
             pk=dashboard_id,
-            organization_id=_request_organization_id(request),
         )
 
     def get(self, request, dashboard_id):
@@ -867,16 +921,12 @@ class MetricsDashboardRevisionRestoreView(views.APIView):
                 {"expected_revision": "This field is required and must be an integer."}
             )
 
-        from api_metrics.models import MetricsDashboard, MetricsDashboardRevision
+        from api_metrics.models import MetricsDashboardRevision
 
-        organization_id = _request_organization_id(request)
         with transaction.atomic():
             dashboard = get_object_or_404(
-                MetricsDashboard.objects.select_for_update().select_related(
-                    "created_by"
-                ),
+                _dashboard_queryset(request).select_for_update(),
                 pk=dashboard_id,
-                organization_id=organization_id,
             )
             if dashboard.revision != expected_revision:
                 return success_response(

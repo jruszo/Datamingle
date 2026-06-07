@@ -40,6 +40,32 @@ class MetricsDashboard(models.Model):
         return self.name
 
 
+class MetricsDashboardFavorite(models.Model):
+    dashboard = models.ForeignKey(
+        MetricsDashboard,
+        related_name="favorites",
+        on_delete=models.CASCADE,
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="favorite_metrics_dashboards",
+        on_delete=models.CASCADE,
+    )
+    create_time = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "metrics_dashboard_favorite"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("dashboard", "user"),
+                name="metrics_dash_favorite_unique",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} favorites dashboard {self.dashboard_id}"
+
+
 class MetricsDashboardRevision(models.Model):
     dashboard = models.ForeignKey(
         MetricsDashboard,
