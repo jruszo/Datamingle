@@ -27,6 +27,7 @@
     "clsx": "^2.1.1",
     "codemirror": "^6.0.2",
     "echarts": "^6.0.0",
+    "gridstack": "^12.6.0",
     "lucide-vue-next": "^1.0.0",
     "pinia": "^3.0.4",
     "reka-ui": "^2.9.3",

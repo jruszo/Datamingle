@@ -116,9 +116,14 @@ export function fetchMetricLabelNames(token: string) {
   return metricsGet<string[]>('/v1/metrics/labels', { token })
 }
 
-export function fetchMetricLabelValues(labelName: string, token: string) {
+export function fetchMetricLabelValues(labelName: string, token: string, matcher = '') {
+  const params = new URLSearchParams()
+  if (matcher.trim()) {
+    params.append('match[]', matcher.trim())
+  }
   return metricsGet<string[]>(`/v1/metrics/label/${encodeURIComponent(labelName)}/values`, {
     token,
+    params,
   })
 }
 

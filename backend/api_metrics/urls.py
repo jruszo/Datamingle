@@ -3,6 +3,51 @@ from django.urls import path
 from api_metrics import views
 
 urlpatterns = [
+    path(
+        "v1/metrics/dashboards/",
+        views.MetricsDashboardListCreateView.as_view(),
+        name="metrics-dashboard-list",
+    ),
+    path(
+        "v1/metrics/dashboards/<int:dashboard_id>/",
+        views.MetricsDashboardDetailView.as_view(),
+        name="metrics-dashboard-detail",
+    ),
+    path(
+        "v1/metrics/dashboards/<int:dashboard_id>/icon/",
+        views.MetricsDashboardIconView.as_view(),
+        name="metrics-dashboard-icon",
+    ),
+    path(
+        "v1/metrics/dashboards/<int:dashboard_id>/favorite/",
+        views.MetricsDashboardFavoriteView.as_view(),
+        name="metrics-dashboard-favorite",
+    ),
+    path(
+        "v1/metrics/dashboards/<int:dashboard_id>/revisions/",
+        views.MetricsDashboardRevisionListView.as_view(),
+        name="metrics-dashboard-revision-list",
+    ),
+    path(
+        "v1/metrics/dashboards/<int:dashboard_id>/revisions/<int:revision>/",
+        views.MetricsDashboardRevisionDetailView.as_view(),
+        name="metrics-dashboard-revision-detail",
+    ),
+    path(
+        "v1/metrics/dashboards/<int:dashboard_id>/revisions/<int:revision>/restore/",
+        views.MetricsDashboardRevisionRestoreView.as_view(),
+        name="metrics-dashboard-revision-restore",
+    ),
+    path(
+        "v1/metrics/ai/availability",
+        views.MetricsAIAssistantAvailabilityView.as_view(),
+        name="metrics-ai-availability",
+    ),
+    path(
+        "v1/metrics/ai/assist",
+        views.MetricsAIAssistantView.as_view(),
+        name="metrics-ai-assist",
+    ),
     path("v1/metrics/names", views.MetricsNamesView.as_view(), name="metrics-names"),
     path("v1/metrics/labels", views.MetricsLabelsView.as_view(), name="metrics-labels"),
     path(

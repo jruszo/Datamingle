@@ -355,6 +355,7 @@ REST_FRAMEWORK = {
         "metrics_metadata": "300/min",
         "metrics_query": "120/min",
         "metrics_query_range": "60/min",
+        "metrics_ai": "20/hour",
     },
     # Filtering
     "DEFAULT_FILTER_BACKENDS": ("django_filters.rest_framework.DjangoFilterBackend",),

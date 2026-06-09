@@ -1,25 +1,38 @@
-from openai import OpenAI
 import logging
-from common.config import SysConfig
+import os
+
+from openai import OpenAI
 from django.template import Context, Template
 
 logger = logging.getLogger("default")
 
+DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+
+
+def get_openai_config():
+    return {
+        "api_key": os.environ.get("OPENAI_KEY", "").strip(),
+        "base_url": os.environ.get("OPENAI_BASE_URL", "").strip(),
+        "model": os.environ.get("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip()
+        or DEFAULT_OPENAI_MODEL,
+    }
+
 
 class OpenaiClient:
     def __init__(self):
-        all_config = SysConfig()
-        self.base_url = all_config.get("openai_base_url", "")
-        self.api_key = all_config.get("openai_api_key", "")
-        self.default_chat_model = all_config.get("default_chat_model", "gpt-3.5-turbo")
-        self.default_query_template = all_config.get(
-            "default_query_template",
+        config = get_openai_config()
+        self.base_url = config["base_url"]
+        self.api_key = config["api_key"]
+        self.default_chat_model = config["model"]
+        self.default_query_template = os.environ.get(
+            "OPENAI_QUERY_TEMPLATE", ""
+        ).strip() or (
             "You are an engineer familiar with {{db_type}}. "
             "I will provide context and requirements. Generate a usable query only. "
             "Do not return comments or numbering. Return only the query statement: "
-            "{{table_schema}} \n {{user_input}}",
+            "{{table_schema}} \n {{user_input}}"
         )
-        self.client = OpenAI(base_url=self.base_url, api_key=self.api_key)
+        self.client = OpenAI(base_url=self.base_url or None, api_key=self.api_key)
 
     def request_chat_completion(self, messages, **kwargs):
         """chat_completion"""
@@ -45,8 +58,4 @@ class OpenaiClient:
 
 def check_openai_config():
     """Validate whether required OpenAI API config exists."""
-    all_config = SysConfig()
-    api_key = all_config.get("openai_api_key")
-    if api_key:
-        return True
-    return False
+    return bool(get_openai_config()["api_key"])

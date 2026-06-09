@@ -399,8 +399,8 @@ def check_openai(request):
                 {
                     "status": 1,
                     "msg": (
-                        "OpenAI config is missing. Required keys: "
-                        "[openai_base_url, openai_api_key, default_chat_model]"
+                        "OpenAI config is missing. Set OPENAI_KEY in the "
+                        "application environment."
                     ),
                     "data": False,
                 }

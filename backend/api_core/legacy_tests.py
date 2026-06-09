@@ -17,7 +17,6 @@ from sql.utils.workflow_audit import AuditException, AuditSetting
 from sql.engines import ReviewSet
 from sql.engines.models import ReviewResult, ResultSet
 from api_admin.settings import (
-    DEFAULT_CHAT_MODEL,
     INVENTORY_REFRESH_INTERVAL_OPTIONS,
     NOTIFY_PHASE_OPTIONS,
 )
@@ -4877,7 +4876,9 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         payload = response_data(response)
-        self.assertEqual(payload["settings"]["default_chat_model"], DEFAULT_CHAT_MODEL)
+        self.assertNotIn("openai_api_key", payload["settings"])
+        self.assertNotIn("openai_base_url", payload["settings"])
+        self.assertNotIn("default_chat_model", payload["settings"])
         self.assertEqual(
             payload["settings"]["notify_phase_control"],
             list(NOTIFY_PHASE_OPTIONS),
@@ -4922,7 +4923,6 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
                 "sftp_port": 2222,
                 "default_auth_group": [self.group.name],
                 "api_user_whitelist": [self.regular_user.id],
-                "openai_api_key": "sk-test",
                 "gh_ost": "/bin/echo",
                 "pt_osc": "/bin/echo",
             }
@@ -4948,7 +4948,6 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
         self.assertEqual(config.get("sftp_port"), "2222")
         self.assertEqual(config.get("default_auth_group"), self.group.name)
         self.assertEqual(config.get("api_user_whitelist"), str(self.regular_user.id))
-        self.assertEqual(config.get("openai_api_key"), "sk-test")
         self.assertEqual(config.get("gh_ost"), "/bin/echo")
         self.assertEqual(config.get("pt_osc"), "/bin/echo")
 

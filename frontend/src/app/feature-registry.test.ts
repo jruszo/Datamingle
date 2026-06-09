@@ -34,8 +34,10 @@ describe('feature registry', () => {
     expect(ids).toEqual([
       'auth',
       'dashboard',
+      'dashboards',
       'reports',
       'infrastructure',
+      'metrics',
       'inventory',
       'agents',
       'instance-operations',
@@ -53,8 +55,10 @@ describe('feature registry', () => {
     const labels = getNavigationItems('primary').map((item) => item.label)
 
     expect(labels).toEqual([
-      'Dashboard',
+      'Home',
+      'Dashboards',
       'Nodes',
+      'Metrics Explorer',
       'Instances',
       'Data Dictionary',
       'Databases',

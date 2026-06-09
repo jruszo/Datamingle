@@ -11,10 +11,7 @@ export {
   parseResponseMessage,
   publicApiUrl,
 } from '@/shared/api/http-helpers'
-import {
-  buildUrl,
-  flattenErrorMessage,
-} from '@/shared/api/http-helpers'
+import { buildUrl, flattenErrorMessage } from '@/shared/api/http-helpers'
 
 type RequestOptions = {
   token?: string
@@ -23,6 +20,19 @@ type RequestOptions = {
 
 type InternalRequestOptions = RequestOptions & {
   skipAuthRetry?: boolean
+  responseType?: 'json' | 'blob'
+}
+
+export class ApiRequestError extends Error {
+  status: number
+  data: unknown
+
+  constructor(message: string, status: number, data: unknown = null) {
+    super(message)
+    this.name = 'ApiRequestError'
+    this.status = status
+    this.data = data
+  }
 }
 
 // Passing options.token enables authenticated request behavior because request()
@@ -54,7 +64,9 @@ async function request<T>(
   }
 
   if (options.body !== undefined) {
-    headers['Content-Type'] = 'application/json'
+    if (!(options.body instanceof FormData)) {
+      headers['Content-Type'] = 'application/json'
+    }
   }
   if (authorizationToken) {
     headers.Authorization = `Bearer ${authorizationToken}`
@@ -71,7 +83,8 @@ async function request<T>(
     if (method === 'GET') {
       throw new Error(`GET ${path} cannot include a request body`)
     }
-    requestInit.body = JSON.stringify(options.body)
+    requestInit.body =
+      options.body instanceof FormData ? options.body : JSON.stringify(options.body)
   }
 
   const response = await fetch(buildUrl(path), requestInit)
@@ -79,9 +92,11 @@ async function request<T>(
   if (!response.ok) {
     const body = await response.text()
     let message = body
+    let responseData: unknown = null
 
     try {
-      message = flattenErrorMessage(JSON.parse(body)) || body
+      responseData = JSON.parse(body)
+      message = flattenErrorMessage(responseData) || body
     } catch {
       message = body
     }
@@ -108,9 +123,16 @@ async function request<T>(
       notifyUnauthorized(message)
     }
 
-    throw new Error(`${method} ${path} failed (${response.status}): ${message}`)
+    throw new ApiRequestError(
+      `${method} ${path} failed (${response.status}): ${message}`,
+      response.status,
+      responseData,
+    )
   }
 
+  if (options.responseType === 'blob') {
+    return response.blob() as Promise<T>
+  }
   return response.json() as Promise<T>
 }
 
@@ -118,7 +140,15 @@ export function apiGet<T>(path: string, options: RequestOptions = {}) {
   return request<T>('GET', path, options)
 }
 
+export function apiGetBlob(path: string, options: RequestOptions = {}) {
+  return request<Blob>('GET', path, { ...options, responseType: 'blob' })
+}
+
 export function apiPost<T>(path: string, body: unknown, options: RequestOptions = {}) {
+  return request<T>('POST', path, { ...options, body })
+}
+
+export function apiPostForm<T>(path: string, body: FormData, options: RequestOptions = {}) {
   return request<T>('POST', path, { ...options, body })
 }
 
