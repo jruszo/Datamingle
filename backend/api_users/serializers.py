@@ -2,30 +2,12 @@ from django.contrib.auth.models import Group
 from django.db import transaction
 from rest_framework import serializers
 
+from common.team_permissions import (
+    assignable_team_permissions,
+    normalize_permission_codes,
+)
 from sql.models import InfrastructureNode, Instance, Team, TeamMembership, Users
-from sql.utils.team import set_team_memberships, set_user_resource_memberships
-
-
-class UserManagementGroupSerializer(serializers.Serializer):
-    id = serializers.IntegerField()
-    name = serializers.CharField()
-
-
-class UserManagementTeamSerializer(serializers.Serializer):
-    team_id = serializers.IntegerField()
-    team_name = serializers.CharField()
-    permission_group_id = serializers.IntegerField()
-    permission_group_name = serializers.CharField()
-
-
-class ResourceAccessAssignmentSerializer(serializers.Serializer):
-    team_id = serializers.PrimaryKeyRelatedField(
-        source="team", queryset=Team.objects.filter(is_deleted=0)
-    )
-    permission_group_id = serializers.PrimaryKeyRelatedField(
-        source="permission_group",
-        queryset=Group.objects.exclude(name="superadmin"),
-    )
+from sql.utils.team import set_team_memberships
 
 
 class TeamUserAccessSerializer(serializers.Serializer):
@@ -34,24 +16,66 @@ class TeamUserAccessSerializer(serializers.Serializer):
     )
     username = serializers.CharField(required=False, read_only=True)
     display = serializers.CharField(required=False, read_only=True)
-    permission_group_id = serializers.PrimaryKeyRelatedField(
-        source="permission_group",
+    permission_level_id = serializers.PrimaryKeyRelatedField(
+        source="permission_level",
         queryset=Group.objects.exclude(name="superadmin"),
     )
-    permission_group_name = serializers.CharField(required=False, read_only=True)
+    permission_level_name = serializers.CharField(required=False, read_only=True)
 
 
-class PermissionGroupSerializer(serializers.Serializer):
+class PermissionLevelSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     name = serializers.CharField()
     permissions = serializers.ListField(child=serializers.CharField())
+    membership_count = serializers.IntegerField()
+
+
+class PermissionLevelWriteSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=150)
+    permission_codes = serializers.ListField(
+        child=serializers.CharField(), allow_empty=True
+    )
+
+    def validate_name(self, value):
+        name = value.strip()
+        if not name:
+            raise serializers.ValidationError("Permission level name cannot be blank.")
+        if name.lower() == "superadmin":
+            raise serializers.ValidationError("The superadmin group is protected.")
+        queryset = Group.objects.filter(name__iexact=name)
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError(
+                "A permission level with this name already exists."
+            )
+        return name
+
+    def validate_permission_codes(self, value):
+        try:
+            return sorted(normalize_permission_codes(value))
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+
+    def _save(self, group, validated_data):
+        group.name = validated_data["name"]
+        group.save()
+        group.permissions.set(
+            assignable_team_permissions().filter(
+                codename__in=validated_data["permission_codes"]
+            )
+        )
+        return group
+
+    def create(self, validated_data):
+        return self._save(Group(), validated_data)
+
+    def update(self, instance, validated_data):
+        return self._save(instance, validated_data)
 
 
 class UserManagementReadSerializer(serializers.ModelSerializer):
-    groups = serializers.SerializerMethodField()
-    group_ids = serializers.SerializerMethodField()
     teams = serializers.SerializerMethodField()
-    team_access = serializers.SerializerMethodField()
     team_ids = serializers.SerializerMethodField()
     is_workos_managed = serializers.SerializerMethodField()
 
@@ -64,30 +88,21 @@ class UserManagementReadSerializer(serializers.ModelSerializer):
                 if membership.team.is_deleted == 0
             ]
         return list(
-            obj.team_memberships.select_related("team", "permission_group")
+            obj.team_memberships.select_related("team", "permission_level")
             .filter(team__is_deleted=0)
             .order_by("team__team_name", "team_id")
         )
-
-    def get_groups(self, obj):
-        return list(obj.groups.order_by("id").values("id", "name"))
-
-    def get_group_ids(self, obj):
-        return list(obj.groups.order_by("id").values_list("id", flat=True))
 
     def get_teams(self, obj):
         return [
             {
                 "team_id": membership.team_id,
                 "team_name": membership.team.team_name,
-                "permission_group_id": membership.permission_group_id,
-                "permission_group_name": membership.permission_group.name,
+                "permission_level_id": membership.permission_level_id,
+                "permission_level_name": membership.permission_level.name,
             }
             for membership in self._memberships(obj)
         ]
-
-    def get_team_access(self, obj):
-        return self.get_teams(obj)
 
     def get_team_ids(self, obj):
         return [membership.team_id for membership in self._memberships(obj)]
@@ -106,39 +121,22 @@ class UserManagementReadSerializer(serializers.ModelSerializer):
             "is_active",
             "is_superuser",
             "is_staff",
-            "groups",
-            "group_ids",
             "teams",
-            "team_access",
             "team_ids",
         )
 
 
 class UserManagementUpdateSerializer(serializers.ModelSerializer):
-    group_ids = serializers.PrimaryKeyRelatedField(
-        source="groups",
-        queryset=Group.objects.filter(name="superadmin"),
-        many=True,
-        required=False,
-    )
-    team_access = ResourceAccessAssignmentSerializer(many=True, required=False)
-
     def update(self, instance, validated_data):
-        groups = validated_data.pop("groups", None)
-        team_access = validated_data.pop("team_access", None)
         with transaction.atomic():
             for attr, value in validated_data.items():
                 setattr(instance, attr, value)
             instance.save()
-            if groups is not None:
-                instance.groups.set(groups)
-            if team_access is not None:
-                set_user_resource_memberships(instance, team_access)
         return instance
 
     class Meta:
         model = Users
-        fields = ("group_ids", "team_access", "is_active")
+        fields = ("is_active",)
 
 
 class WorkOSUserInvitationSerializer(serializers.Serializer):
@@ -146,13 +144,6 @@ class WorkOSUserInvitationSerializer(serializers.Serializer):
     display = serializers.CharField(
         allow_blank=True, max_length=50, required=False, trim_whitespace=True
     )
-    group_ids = serializers.PrimaryKeyRelatedField(
-        source="groups",
-        queryset=Group.objects.filter(name="superadmin"),
-        many=True,
-        required=False,
-    )
-    team_access = ResourceAccessAssignmentSerializer(many=True, required=False)
 
     def validate_email(self, value):
         return value.strip().lower()
@@ -210,15 +201,15 @@ class TeamDetailSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         representation = super().to_representation(instance)
         memberships = instance.memberships.select_related(
-            "user", "permission_group"
+            "user", "permission_level"
         ).order_by("user__display", "user__username", "user_id")
         representation["user_access"] = [
             {
                 "user_id": membership.user_id,
                 "username": membership.user.username,
                 "display": membership.user.display,
-                "permission_group_id": membership.permission_group_id,
-                "permission_group_name": membership.permission_group.name,
+                "permission_level_id": membership.permission_level_id,
+                "permission_level_name": membership.permission_level.name,
             }
             for membership in memberships
         ]

@@ -95,37 +95,44 @@ export type SystemSettingsPayload = {
   options: SystemSettingsOptions
 }
 
-export type TeamPermissionGroupCode = number
+export type PermissionLevelId = number
 
-export type PermissionGroupRecord = {
+export type PermissionLevelRecord = {
   id: number
   name: string
   permissions: string[]
+  membership_count: number
 }
 
-export type ResourceAccessAssignmentRecord = {
-  team_id: number
-  permission_group_id: TeamPermissionGroupCode
+export type PermissionLevelPayload = {
+  name: string
+  permission_codes: string[]
+}
+
+export type AvailablePermissionRecord = {
+  code: string
+  codename: string
+  name: string
+}
+
+export type PermissionCategoryRecord = {
+  category: string
+  permissions: AvailablePermissionRecord[]
 }
 
 export type TeamUserAccessRecord = {
   user_id: number
   username?: string
   display?: string
-  permission_group_id: TeamPermissionGroupCode
-  permission_group_name: string
-}
-
-export type UserManagementGroupRecord = {
-  id: number
-  name: string
+  permission_level_id: PermissionLevelId
+  permission_level_name: string
 }
 
 export type UserManagementTeamRecord = {
   team_id: number
   team_name: string
-  permission_group_id: TeamPermissionGroupCode
-  permission_group_name: string
+  permission_level_id: PermissionLevelId
+  permission_level_name: string
 }
 
 export type UserManagementRecord = {
@@ -137,13 +144,10 @@ export type UserManagementRecord = {
   is_active: boolean
   is_superuser: boolean
   is_staff: boolean
-  groups: UserManagementGroupRecord[]
   teams: UserManagementTeamRecord[]
-  team_access: UserManagementTeamRecord[]
 }
 
 export type UserManagementDetailRecord = UserManagementRecord & {
-  group_ids: number[]
   team_ids: number[]
 }
 
@@ -155,18 +159,12 @@ export type UserManagementListOptions = {
 }
 
 export type UpdateUserPayload = {
-  group_ids?: number[]
-  team_ids?: number[]
-  team_access?: ResourceAccessAssignmentRecord[]
   is_active?: boolean
 }
 
 export type InviteWorkosUserPayload = {
   email: string
   display?: string
-  group_ids?: number[]
-  team_ids?: number[]
-  team_access?: ResourceAccessAssignmentRecord[]
 }
 
 export type WorkosInvitationRecord = {
@@ -460,7 +458,7 @@ export type TeamUpsertPayload = {
   team_name: string
   user_access?: Array<{
     user_id: number
-    permission_group_id: TeamPermissionGroupCode
+    permission_level_id: PermissionLevelId
   }>
   node_ids: number[]
   service_ids: number[]
@@ -722,9 +720,43 @@ export function updateInstanceTag(tagId: number, payload: UpdateInstanceTagPaylo
   )
 }
 
-export function fetchPermissionGroups(token: string) {
-  return apiGet<unknown>('/v1/user/access-roles/', { token }).then((payload) =>
-    extractData<PermissionGroupRecord[]>(payload),
+export function fetchPermissionLevels(token: string) {
+  return apiGet<unknown>('/v1/permission-levels/', { token }).then((payload) =>
+    extractData<PermissionLevelRecord[]>(payload),
+  )
+}
+
+export function fetchPermissionLevel(levelId: number, token: string) {
+  return apiGet<unknown>(`/v1/permission-levels/${levelId}/`, { token }).then((payload) =>
+    extractData<PermissionLevelRecord>(payload),
+  )
+}
+
+export function fetchAvailableTeamPermissions(token: string) {
+  return apiGet<unknown>('/v1/permission-levels/available-permissions/', { token }).then((payload) =>
+    extractData<PermissionCategoryRecord[]>(payload),
+  )
+}
+
+export function createPermissionLevel(payload: PermissionLevelPayload, token: string) {
+  return apiPost<unknown>('/v1/permission-levels/', payload, { token }).then((responsePayload) =>
+    extractData<PermissionLevelRecord>(responsePayload),
+  )
+}
+
+export function updatePermissionLevel(
+  levelId: number,
+  payload: PermissionLevelPayload,
+  token: string,
+) {
+  return apiPut<unknown>(`/v1/permission-levels/${levelId}/`, payload, { token }).then(
+    (responsePayload) => extractData<PermissionLevelRecord>(responsePayload),
+  )
+}
+
+export function deletePermissionLevel(levelId: number, token: string) {
+  return apiDelete<unknown>(`/v1/permission-levels/${levelId}/`, { token }).then(
+    (payload) => extractDetail(payload, 'Permission level deleted successfully.'),
   )
 }
 
@@ -2057,6 +2089,8 @@ export type PermissionRequestRecord = {
   target_type: PermissionRequestTarget
   team_id: number
   team_name: string
+  permission_level_id: number | null
+  permission_level_name: string | null
   instance_id: number | null
   instance_name: string
   access_level: PermissionInstanceAccessLevel | ''
@@ -2096,6 +2130,8 @@ export type PermissionGrantRecord = {
   user_display: string
   team_id: number
   team_name: string
+  permission_level_id: number | null
+  permission_level_name: string
   instance_id: number | null
   instance_name: string
   access_level: PermissionInstanceAccessLevel | ''
@@ -2124,7 +2160,7 @@ export type PermissionRequestCreatePayload = {
   subject_type?: PermissionRequestSubject
   access_duration?: PermissionRequestDuration
   team_id: number
-  permission_group_id?: number
+  permission_level_id?: number
   instance_id?: number
   access_level?: PermissionInstanceAccessLevel
   valid_date: string

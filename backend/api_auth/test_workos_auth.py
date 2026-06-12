@@ -210,7 +210,7 @@ class WorkOSAuthApiTests(APITestCase):
     def setUp(self):
         self.redis = FakeRedis()
         self.auth_group, _ = Group.objects.get_or_create(name=SUPERADMIN_GROUP_NAME)
-        self.permission_group, _ = Group.objects.get_or_create(name="QA")
+        self.permission_level, _ = Group.objects.get_or_create(name="QA")
         self.team = Team.objects.create(team_name="Primary Team")
         self.sys_config = SysConfig()
 
@@ -550,7 +550,7 @@ class WorkOSAuthApiTests(APITestCase):
 
         self.assertEqual(current_response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_superuser_can_change_global_group_but_identity_fields_are_ignored(self):
+    def test_superuser_can_change_status_but_identity_and_groups_are_ignored(self):
         superuser = Users.objects.create_user(
             username="superuser@datamingle.dev",
             email="superuser@datamingle.dev",
@@ -573,7 +573,6 @@ class WorkOSAuthApiTests(APITestCase):
             {
                 "display": "Updated Name",
                 "email": "updated@datamingle.dev",
-                "group_ids": [self.auth_group.id],
                 "is_active": True,
             },
             format="json",
@@ -582,15 +581,11 @@ class WorkOSAuthApiTests(APITestCase):
         workos_user.refresh_from_db()
         self.assertEqual(workos_user.display, "Managed User")
         self.assertEqual(workos_user.email, "managed@datamingle.dev")
-        self.assertEqual(
-            list(workos_user.groups.values_list("name", flat=True)),
-            [SUPERADMIN_GROUP_NAME],
-        )
+        self.assertFalse(workos_user.groups.exists())
 
         allow_response = self.client.put(
             f"/api/v1/user/{workos_user.id}/",
             {
-                "group_ids": [self.auth_group.id],
                 "is_active": False,
             },
             format="json",
@@ -598,10 +593,7 @@ class WorkOSAuthApiTests(APITestCase):
         self.assertEqual(allow_response.status_code, status.HTTP_200_OK)
         workos_user.refresh_from_db()
         self.assertFalse(workos_user.is_active)
-        self.assertEqual(
-            list(workos_user.groups.values_list("name", flat=True)),
-            [SUPERADMIN_GROUP_NAME],
-        )
+        self.assertFalse(workos_user.groups.exists())
 
     @patch("api_auth.views.get_redis_connection")
     @patch("api_auth.views.WorkOSAuthClient")
@@ -687,13 +679,6 @@ class WorkOSAuthApiTests(APITestCase):
             {
                 "email": "New.User@DataMingle.dev",
                 "display": "New User",
-                "group_ids": [self.auth_group.id],
-                "team_access": [
-                    {
-                        "team_id": self.team.team_id,
-                        "permission_group_id": self.permission_group.id,
-                    }
-                ],
             },
             format="json",
         )
@@ -711,11 +696,5 @@ class WorkOSAuthApiTests(APITestCase):
         self.assertEqual(invited_user.username, "new.user@datamingle.dev")
         self.assertEqual(invited_user.display, "New User")
         self.assertFalse(bool(invited_user.workos_user_id))
-        self.assertEqual(
-            list(invited_user.groups.values_list("id", flat=True)),
-            [self.auth_group.id],
-        )
-        self.assertEqual(
-            list(invited_user.team_memberships.values_list("team_id", flat=True)),
-            [self.team.team_id],
-        )
+        self.assertFalse(invited_user.groups.exists())
+        self.assertFalse(invited_user.team_memberships.exists())

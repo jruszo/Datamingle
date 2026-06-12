@@ -77,24 +77,24 @@ def authenticate_client(client, user):
 
 
 def assign_user_to_team(user, team):
-    permission_group = user.groups.exclude(name="superadmin").order_by("id").first()
-    if permission_group is None:
-        permission_group, _ = Group.objects.get_or_create(
+    permission_level = user.groups.exclude(name="superadmin").order_by("id").first()
+    if permission_level is None:
+        permission_level, _ = Group.objects.get_or_create(
             name=f"test-team-permissions-{user.pk}"
         )
-    permission_ids = set(permission_group.permissions.values_list("id", flat=True))
+    permission_ids = set(permission_level.permissions.values_list("id", flat=True))
     permission_ids.update(user.user_permissions.values_list("id", flat=True))
-    permission_group.permissions.set(permission_ids)
+    permission_level.permissions.set(permission_ids)
     return TeamMembership.objects.update_or_create(
         user=user,
         team=team,
-        defaults={"permission_group": permission_group},
+        defaults={"permission_level": permission_level},
     )[0]
 
 
 def remove_team_permission(user, team, codename):
     membership = TeamMembership.objects.get(user=user, team=team)
-    membership.permission_group.permissions.remove(
+    membership.permission_level.permissions.remove(
         Permission.objects.get(codename=codename)
     )
 
@@ -327,6 +327,10 @@ class TestUser(CacheIsolatedAPITestCase):
         )
         self.view_group_permission = Permission.objects.get(codename="view_group")
         self.menu_system_permission = Permission.objects.get(codename="menu_system")
+        self.change_team_permission = Permission.objects.get(
+            content_type__app_label="sql",
+            codename="change_team",
+        )
         self.token = authenticate_client(self.client, self.user)["access"]
 
     def tearDown(self):
@@ -356,12 +360,11 @@ class TestUser(CacheIsolatedAPITestCase):
                 "display",
                 "email",
                 "is_workos_managed",
-                "is_directory_managed",
                 "is_active",
                 "is_superuser",
                 "is_staff",
-                "groups",
-                "group_ids",
+                "teams",
+                "team_ids",
             },
         )
 
@@ -434,33 +437,37 @@ class TestUser(CacheIsolatedAPITestCase):
         User.objects.filter(id=self.user.id).update(is_superuser=0)
         self.user = User.objects.get(id=self.user.id)
         self.user.user_permissions.clear()
+        self.client.credentials()
+        authenticate_client(self.client, self.user)
 
         r1 = self.client.get("/api/v1/user/", format="json")
         self.assertEqual(r1.status_code, status.HTTP_403_FORBIDDEN)
 
         delegated_permission = Permission.objects.get(codename="view_users")
         self.user.user_permissions.add(delegated_permission)
+        self.client.credentials()
+        authenticate_client(self.client, self.user)
         r2 = self.client.get("/api/v1/user/", format="json")
         self.assertEqual(r2.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_get_user_detail(self):
         """Test getting a single managed user."""
-        self.member_user.groups.add(self.group)
+        assign_user_to_team(self.member_user, self.res_group)
         r = self.client.get(f"/api/v1/user/{self.member_user.id}/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         payload = response_data(r)
         self.assertEqual(payload["id"], self.member_user.id)
-        self.assertEqual(payload["group_ids"], [self.group.id])
-        self.assertEqual(payload["groups"][0]["name"], self.group.name)
+        self.assertEqual(payload["team_ids"], [self.res_group.team_id])
+        self.assertEqual(payload["teams"][0]["team_name"], self.res_group.team_name)
 
     def test_update_user(self):
-        """Superusers can update access fields but not identity fields."""
+        """Superusers can update status but not identity or membership fields."""
         self.member_user.set_password("member_password")
         self.member_user.save(update_fields=["password"])
         json_data = {
             "display": "Updated Display Name",
             "email": "updated@datamingle.test",
-            "group_ids": [self.group.id],
+            "team_ids": [self.res_group.team_id],
             "password": "",
         }
         r = self.client.put(
@@ -471,9 +478,7 @@ class TestUser(CacheIsolatedAPITestCase):
         self.assertEqual(user.display, "Group Member")
         self.assertEqual(user.email, "")
         self.assertTrue(user.check_password("member_password"))
-        self.assertEqual(
-            list(user.groups.values_list("id", flat=True)), [self.group.id]
-        )
+        self.assertFalse(user.team_memberships.exists())
 
     def test_deactivate_and_reactivate_user(self):
         """Managed users can be deactivated and reactivated."""
@@ -522,105 +527,100 @@ class TestUser(CacheIsolatedAPITestCase):
             "cannot deactivate your own account", json.dumps(r.json()).lower()
         )
 
-    def test_get_user_group_list(self):
-        """Test getting user group list."""
-        r = self.client.get("/api/v1/user/group/", format="json")
+    def test_get_permission_level_list(self):
+        """Test getting permission levels."""
+        r = self.client.get("/api/v1/permission-levels/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(response_data(r)["count"], 1)
+        self.assertIn("DBA", {level["name"] for level in response_data(r)})
 
-    def test_get_user_group_list_with_search(self):
-        """Test searching user groups by name."""
-        Group.objects.create(name="RD")
-        r = self.client.get("/api/v1/user/group/?search=rd", format="json")
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        payload = response_data(r)
-        self.assertEqual(payload["count"], 1)
-        self.assertEqual(payload["results"][0]["name"], "RD")
-
-    def test_get_user_group_list_with_ordering(self):
-        """Test ordering user groups by name descending."""
-        Group.objects.create(name="AAA")
-        r = self.client.get("/api/v1/user/group/?ordering=-name", format="json")
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        payload = response_data(r)
-        self.assertEqual(payload["results"][0]["name"], "DBA")
-
-    def test_create_user_group(self):
-        """Test creating user group."""
-        json_data = {"name": "RD", "permissions": [self.menu_system_permission.id]}
-        r = self.client.post("/api/v1/user/group/", json_data, format="json")
+    def test_create_permission_level(self):
+        """Test creating a permission level."""
+        json_data = {
+            "name": "Test Developer",
+            "permission_codes": ["sql.change_team"],
+        }
+        r = self.client.post("/api/v1/permission-levels/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response_data(r)["name"], "RD")
-        self.assertEqual(
-            response_data(r)["permissions"], [self.menu_system_permission.id]
-        )
+        self.assertEqual(response_data(r)["name"], "Test Developer")
+        self.assertEqual(response_data(r)["permissions"], ["sql.change_team"])
 
-    def test_get_user_group_detail(self):
-        """Test getting a single user group with permissions."""
-        self.group.permissions.add(self.menu_system_permission)
-        r = self.client.get(f"/api/v1/user/group/{self.group.id}/", format="json")
+    def test_get_permission_level_detail(self):
+        """Test getting a single permission level."""
+        self.group.permissions.add(self.change_team_permission)
+        r = self.client.get(
+            f"/api/v1/permission-levels/{self.group.id}/",
+            format="json",
+        )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(response_data(r)["id"], self.group.id)
-        self.assertEqual(
-            response_data(r)["permissions"], [self.menu_system_permission.id]
-        )
+        self.assertIn("sql.change_team", response_data(r)["permissions"])
 
-    def test_update_user_group(self):
-        """Test updating user group."""
+    def test_update_permission_level(self):
+        """Test updating a permission level."""
         json_data = {
             "name": "Updated Group Name",
-            "permissions": [self.menu_system_permission.id],
+            "permission_codes": ["sql.change_team"],
         }
         r = self.client.put(
-            f"/api/v1/user/group/{self.group.id}/", json_data, format="json"
+            f"/api/v1/permission-levels/{self.group.id}/",
+            json_data,
+            format="json",
         )
         group = Group.objects.get(pk=self.group.id)
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(group.name, "Updated Group Name")
         self.assertEqual(
             list(group.permissions.values_list("id", flat=True)),
-            [self.menu_system_permission.id],
+            [self.change_team_permission.id],
         )
 
-    def test_delete_user_group(self):
-        """Test deleting user group."""
-        r = self.client.delete(f"/api/v1/user/group/{self.group.id}/", format="json")
+    def test_delete_permission_level(self):
+        """Test deleting an unused permission level."""
+        level = Group.objects.create(name="Unused")
+        r = self.client.delete(
+            f"/api/v1/permission-levels/{level.id}/",
+            format="json",
+        )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(Group.objects.filter(name="DBA").count(), 0)
+        self.assertFalse(Group.objects.filter(pk=level.id).exists())
 
     def test_get_permission_catalog(self):
         """Test getting assignable permission catalog."""
-        r = self.client.get("/api/v1/user/permission/", format="json")
+        r = self.client.get(
+            "/api/v1/permission-levels/available-permissions/",
+            format="json",
+        )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        permissions = response_data(r)
-        self.assertGreater(len(permissions), 0)
+        permissions = [
+            permission
+            for category in response_data(r)
+            for permission in category["permissions"]
+        ]
         matching_permission = next(
             permission
             for permission in permissions
-            if permission["id"] == self.view_group_permission.id
+            if permission["code"] == "sql.change_team"
         )
-        self.assertEqual(matching_permission["codename"], "view_group")
-        self.assertEqual(matching_permission["app_label"], "auth")
-        self.assertEqual(matching_permission["model"], "group")
+        self.assertEqual(matching_permission["codename"], "change_team")
 
     def test_get_team_list(self):
         """Test getting team list."""
-        self.res_group.users_set.add(self.member_user)
+        assign_user_to_team(self.member_user, self.res_group)
         self.res_group.instance_set.add(self.instance)
-        r = self.client.get("/api/v1/user/team/", format="json")
+        r = self.client.get("/api/v1/teams/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         payload = response_data(r)
         self.assertEqual(payload["count"], 1)
         self.assertEqual(payload["results"][0]["team_name"], "test")
         self.assertEqual(payload["results"][0]["user_count"], 1)
-        self.assertEqual(payload["results"][0]["instance_count"], 1)
+        self.assertEqual(payload["results"][0]["service_count"], 1)
 
     def test_get_team_list_with_search_and_deleted_filter(self):
         """Search should match name or ID and skip deleted groups."""
         deleted_group = Team.objects.create(team_name="hidden", is_deleted=1)
         visible_group = Team.objects.create(team_name="analytics")
         r = self.client.get(
-            f"/api/v1/user/team/?search={visible_group.team_id}",
+            f"/api/v1/teams/?search={visible_group.team_id}",
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
@@ -632,12 +632,13 @@ class TestUser(CacheIsolatedAPITestCase):
     def test_get_team_list_with_ordering(self):
         """Ordering supports membership counts."""
         busy_group = Team.objects.create(team_name="busy")
-        busy_group.users_set.add(self.user, self.member_user)
+        assign_user_to_team(self.user, busy_group)
+        assign_user_to_team(self.member_user, busy_group)
         idle_group = Team.objects.create(team_name="idle")
         idle_group.instance_set.add(self.instance)
 
         r = self.client.get(
-            "/api/v1/user/team/?ordering=-user_count",
+            "/api/v1/teams/?ordering=-user_count",
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
@@ -646,43 +647,57 @@ class TestUser(CacheIsolatedAPITestCase):
 
     def test_get_team_detail(self):
         """Test getting a single team with memberships."""
-        self.res_group.users_set.add(self.member_user)
+        membership = assign_user_to_team(self.member_user, self.res_group)
         self.res_group.instance_set.add(self.instance)
 
-        r = self.client.get(
-            f"/api/v1/user/team/{self.res_group.team_id}/", format="json"
-        )
+        r = self.client.get(f"/api/v1/teams/{self.res_group.team_id}/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         payload = response_data(r)
         self.assertEqual(payload["team_id"], self.res_group.team_id)
-        self.assertEqual(payload["user_ids"], [self.member_user.id])
-        self.assertEqual(payload["instance_ids"], [self.instance.id])
+        self.assertEqual(payload["user_access"][0]["user_id"], self.member_user.id)
+        self.assertEqual(
+            payload["user_access"][0]["permission_level_id"],
+            membership.permission_level_id,
+        )
+        self.assertEqual(payload["service_ids"], [self.instance.id])
         self.assertEqual(payload["user_count"], 1)
-        self.assertEqual(payload["instance_count"], 1)
+        self.assertEqual(payload["service_count"], 1)
 
     def test_create_team(self):
         """Test creating team."""
         json_data = {
             "team_name": "prod",
-            "user_ids": [self.member_user.id],
-            "instance_ids": [self.instance.id],
+            "user_access": [
+                {
+                    "user_id": self.member_user.id,
+                    "permission_level_id": self.group.id,
+                }
+            ],
+            "node_ids": [],
+            "service_ids": [self.instance.id],
         }
-        r = self.client.post("/api/v1/user/team/", json_data, format="json")
+        r = self.client.post("/api/v1/teams/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         payload = response_data(r)
         self.assertEqual(payload["team_name"], "prod")
-        self.assertEqual(payload["user_ids"], [self.member_user.id])
-        self.assertEqual(payload["instance_ids"], [self.instance.id])
+        self.assertEqual(payload["user_access"][0]["user_id"], self.member_user.id)
+        self.assertEqual(payload["service_ids"], [self.instance.id])
 
     def test_update_team(self):
         """Test updating team."""
         json_data = {
             "team_name": "Updated Team Name",
-            "user_ids": [self.member_user.id],
-            "instance_ids": [self.instance.id],
+            "user_access": [
+                {
+                    "user_id": self.member_user.id,
+                    "permission_level_id": self.group.id,
+                }
+            ],
+            "node_ids": [],
+            "service_ids": [self.instance.id],
         }
         r = self.client.put(
-            f"/api/v1/user/team/{self.res_group.team_id}/",
+            f"/api/v1/teams/{self.res_group.team_id}/",
             json_data,
             format="json",
         )
@@ -690,7 +705,8 @@ class TestUser(CacheIsolatedAPITestCase):
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(group.team_name, "Updated Team Name")
         self.assertEqual(
-            list(group.users_set.values_list("id", flat=True)), [self.member_user.id]
+            list(group.memberships.values_list("user_id", flat=True)),
+            [self.member_user.id],
         )
         self.assertEqual(
             list(group.instance_set.values_list("id", flat=True)), [self.instance.id]
@@ -699,7 +715,7 @@ class TestUser(CacheIsolatedAPITestCase):
     def test_delete_team(self):
         """Test deleting team."""
         r = self.client.delete(
-            f"/api/v1/user/team/{self.res_group.team_id}/", format="json"
+            f"/api/v1/teams/{self.res_group.team_id}/", format="json"
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(Team.objects.filter(team_id=self.res_group.team_id).count(), 0)
@@ -707,7 +723,7 @@ class TestUser(CacheIsolatedAPITestCase):
     def test_team_user_lookup(self):
         """Lookup returns lightweight user records."""
         r = self.client.get(
-            "/api/v1/user/team/users/lookup/?search=group",
+            "/api/v1/teams/users/lookup/?search=group",
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
@@ -719,7 +735,7 @@ class TestUser(CacheIsolatedAPITestCase):
     def test_team_instance_lookup(self):
         """Lookup returns lightweight instance records."""
         r = self.client.get(
-            "/api/v1/user/team/instances/lookup/?search=test_instance",
+            "/api/v1/teams/services/lookup/?search=test_instance",
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
@@ -4618,6 +4634,7 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
         TemporaryTeamGrant.objects.create(
             user=temporary_reviewer,
             team=self.res_group,
+            permission_level=self.review_group,
             valid_date=datetime.now().date() + timedelta(days=1),
         )
 
@@ -4632,6 +4649,7 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
         TemporaryTeamGrant.objects.create(
             user=self.user,
             team=self.res_group,
+            permission_level=self.review_group,
             valid_date=datetime.now().date() + timedelta(days=1),
         )
         instance_grant = TemporaryInstanceGrant.objects.create(

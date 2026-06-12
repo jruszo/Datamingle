@@ -139,7 +139,7 @@ def reviewable_audit_ids(user, workflow_type=None):
     ):
         filters |= Q(
             team_id=membership.team_id,
-            current_audit__in=roles_at_or_below(membership.permission_group),
+            current_audit__in=roles_at_or_below(membership.permission_level),
         )
     if not filters:
         return []
@@ -487,7 +487,7 @@ class AuditV2:
             if not TeamMembership.objects.filter(
                 user=actor,
                 team_id=self.team_id,
-                permission_group_id=current_role,
+                permission_level_id=current_role,
                 team__is_deleted=0,
             ).exists():
                 raise AuditException(
@@ -808,7 +808,7 @@ class Audit(object):
                 and TeamMembership.objects.filter(
                     user=user,
                     team_id=team_id,
-                    permission_group_id=current_group_id,
+                    permission_level_id=current_group_id,
                     team__is_deleted=0,
                 ).exists()
             ):

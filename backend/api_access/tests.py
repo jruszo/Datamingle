@@ -28,7 +28,7 @@ class TeamPermissionRequestTests(TestCase):
             is_active=True,
         )
         self.team = Team.objects.create(team_name="Platform")
-        self.permission_group, _ = Group.objects.get_or_create(name="QA")
+        self.permission_level, _ = Group.objects.get_or_create(name="QA")
 
     def serializer(self, **overrides):
         data = {
@@ -38,7 +38,7 @@ class TeamPermissionRequestTests(TestCase):
             "subject_type": PermissionRequestSubject.USER,
             "access_duration": PermissionRequestDuration.PERMANENT,
             "team_id": self.team.team_id,
-            "permission_group_id": self.permission_group.id,
+            "permission_level_id": self.permission_level.id,
             "valid_date": datetime.date.today(),
         }
         data.update(overrides)
@@ -47,25 +47,25 @@ class TeamPermissionRequestTests(TestCase):
             context={"request": SimpleNamespace(user=self.user)},
         )
 
-    def test_team_request_requires_permission_group(self):
-        serializer = self.serializer(permission_group_id=None)
+    def test_team_request_requires_permission_level(self):
+        serializer = self.serializer(permission_level_id=None)
 
         self.assertFalse(serializer.is_valid())
-        self.assertIn("permission_group_id", serializer.errors)
+        self.assertIn("permission_level_id", serializer.errors)
 
-    def test_team_request_resolves_permission_group(self):
+    def test_team_request_resolves_permission_level(self):
         serializer = self.serializer()
 
         self.assertTrue(serializer.is_valid(), serializer.errors)
         self.assertEqual(
-            serializer.validated_data["permission_group"],
-            self.permission_group,
+            serializer.validated_data["permission_level"],
+            self.permission_level,
         )
 
     def test_permanent_approval_creates_team_membership_with_requested_group(self):
         permission_request = PermissionRequest.objects.create(
             team=self.team,
-            permission_group=self.permission_group,
+            permission_level=self.permission_level,
             target_type=PermissionRequestTarget.TEAM,
             instance=None,
             access_level="",
@@ -89,4 +89,4 @@ class TeamPermissionRequestTests(TestCase):
             user=self.user,
             team=self.team,
         )
-        self.assertEqual(membership.permission_group, self.permission_group)
+        self.assertEqual(membership.permission_level, self.permission_level)

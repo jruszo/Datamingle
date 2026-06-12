@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
-import { Database, Settings2, Tags } from 'lucide-vue-next'
+import { Database, KeyRound, Settings2, Tags } from 'lucide-vue-next'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -30,7 +30,7 @@ const canManageTeams = computed(() => {
   return (
     permissions.includes('sql.menu_system')
     || permissions.includes('sql.view_team')
-    || permissions.includes('sql.team_owner')
+    || permissions.includes('sql.change_team')
   )
 })
 
@@ -92,6 +92,25 @@ const canManageInstanceTags = computed(() => {
             </div>
           </div>
         </div>
+      </CardContent>
+    </Card>
+
+    <Card v-if="authStore.currentUser?.is_superuser" class="border-slate-200">
+      <CardHeader>
+        <div class="flex items-center gap-3">
+          <div class="rounded-xl bg-slate-900 p-3 text-white">
+            <KeyRound class="h-5 w-5" />
+          </div>
+          <div>
+            <CardTitle>Permission Levels</CardTitle>
+            <CardDescription>Define reusable permissions for team memberships.</CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <Button as-child>
+          <RouterLink to="/settings/permission-levels">Manage permission levels</RouterLink>
+        </Button>
       </CardContent>
     </Card>
 

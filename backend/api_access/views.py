@@ -20,6 +20,7 @@ from sql.models import (
     PermissionRequestTarget,
     Team,
     TeamMembership,
+    TeamPermissionGroup,
     TemporaryInstanceGrant,
     TemporaryTeamGrant,
     Users,
@@ -77,7 +78,11 @@ def _reviewable_request_ids(user):
 
 
 def _base_request_queryset():
-    return PermissionRequest.objects.select_related("team", "instance")
+    return PermissionRequest.objects.select_related(
+        "team",
+        "instance",
+        "permission_level",
+    )
 
 
 def _request_queryset_for_user(user):
@@ -95,6 +100,8 @@ def _request_queryset_for_user(user):
 
 def _grant_queryset_for_user(user, model):
     select_related_fields = ["user", "team"]
+    if model in {TemporaryTeamGrant, PermanentTeamGrant}:
+        select_related_fields.append("permission_level")
     if model in {TemporaryInstanceGrant, PermanentTeamGrant}:
         select_related_fields.append("instance")
     queryset = model.objects.select_related(*select_related_fields)
@@ -171,14 +178,14 @@ def _permission_request_audit_callback(request_id, workflow_status):
             TeamMembership.objects.update_or_create(
                 user=user,
                 team=permission_request.team,
-                defaults={"permission_group": permission_request.permission_group},
+                defaults={"permission_level": permission_request.permission_level},
             )
             PermanentTeamGrant.objects.get_or_create(
                 source_request=permission_request,
                 defaults={
                     "user": user,
                     "team": permission_request.team,
-                    "permission_group": permission_request.permission_group,
+                    "permission_level": permission_request.permission_level,
                 },
             )
             return
@@ -201,7 +208,7 @@ def _permission_request_audit_callback(request_id, workflow_status):
             TemporaryTeamGrant.objects.create(
                 **subject_filter,
                 team=permission_request.team,
-                permission_group=permission_request.permission_group,
+                permission_level=permission_request.permission_level,
                 source_request=permission_request,
                 valid_date=permission_request.valid_date,
             )
@@ -260,6 +267,11 @@ class PermissionInstanceLookupSerializer(serializers.ModelSerializer):
 class PermissionRequestListSerializer(serializers.ModelSerializer):
     team_id = serializers.IntegerField(source="team.team_id", read_only=True)
     team_name = serializers.CharField(source="team.team_name", read_only=True)
+    permission_level_name = serializers.CharField(
+        source="permission_level.name",
+        allow_null=True,
+        read_only=True,
+    )
     instance_id = serializers.SerializerMethodField()
     instance_name = serializers.SerializerMethodField()
 
@@ -278,6 +290,8 @@ class PermissionRequestListSerializer(serializers.ModelSerializer):
             "target_type",
             "team_id",
             "team_name",
+            "permission_level_id",
+            "permission_level_name",
             "instance_id",
             "instance_name",
             "access_level",
@@ -304,7 +318,7 @@ class PermissionRequestCreateSerializer(serializers.Serializer):
         default=PermissionRequestDuration.TEMPORARY,
     )
     team_id = serializers.IntegerField()
-    permission_group_id = serializers.IntegerField(required=False)
+    permission_level_id = serializers.IntegerField(required=False)
     instance_id = serializers.IntegerField(required=False)
     access_level = serializers.ChoiceField(
         choices=["query", "query_dml", "query_dml_ddl"],
@@ -345,17 +359,17 @@ class PermissionRequestCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError({"errors": "Team does not exist."})
         attrs["team"] = team
         if target_type == PermissionRequestTarget.TEAM:
-            permission_group_id = attrs.get("permission_group_id")
-            permission_group = (
+            permission_level_id = attrs.get("permission_level_id")
+            permission_level = (
                 Group.objects.exclude(name="superadmin")
-                .filter(id=permission_group_id)
+                .filter(id=permission_level_id)
                 .first()
             )
-            if permission_group is None:
+            if permission_level is None:
                 raise serializers.ValidationError(
-                    {"permission_group_id": "Select a valid permission group."}
+                    {"permission_level_id": "Select a valid permission level."}
                 )
-            attrs["permission_group"] = permission_group
+            attrs["permission_level"] = permission_level
         if (
             subject_type == PermissionRequestSubject.TEAM
             and not request_user.is_superuser
@@ -414,6 +428,8 @@ class ActiveGrantSerializer(serializers.Serializer):
     user_display = serializers.CharField()
     team_id = serializers.IntegerField()
     team_name = serializers.CharField()
+    permission_level_id = serializers.IntegerField(allow_null=True)
+    permission_level_name = serializers.CharField(allow_blank=True)
     instance_id = serializers.IntegerField(allow_null=True)
     instance_name = serializers.CharField(allow_blank=True)
     access_level = serializers.CharField(allow_blank=True)
@@ -488,6 +504,8 @@ def _serialize_active_grant(grant, grant_type, access_duration):
             **subject_payload,
             "team_id": grant.team.team_id,
             "team_name": grant.team.team_name,
+            "permission_level_id": grant.permission_level_id,
+            "permission_level_name": grant.permission_level.name,
             "instance_id": None,
             "instance_name": "",
             "access_level": "",
@@ -503,6 +521,8 @@ def _serialize_active_grant(grant, grant_type, access_duration):
         **subject_payload,
         "team_id": grant.team.team_id,
         "team_name": grant.team.team_name,
+        "permission_level_id": None,
+        "permission_level_name": "",
         "instance_id": grant.instance_id,
         "instance_name": grant.instance.instance_name,
         "access_level": getattr(grant, "access_level", ""),
@@ -625,7 +645,7 @@ class PermissionRequestListCreate(views.APIView):
 
         permission_request = PermissionRequest(
             team=data["team"],
-            permission_group=data.get("permission_group"),
+            permission_level=data.get("permission_level"),
             target_type=data["target_type"],
             instance=data["instance"],
             access_level=data.get("access_level", ""),

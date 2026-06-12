@@ -4,13 +4,15 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from drf_spectacular.utils import extend_schema
 from django.db import transaction
 from django.db.models import Count, Prefetch, Q
+from django.db.models.deletion import ProtectedError
 from django.contrib.auth.models import Group
 from django.http import Http404
 from api_users.serializers import (
     UserManagementReadSerializer,
     UserManagementUpdateSerializer,
     WorkOSUserInvitationSerializer,
-    PermissionGroupSerializer,
+    PermissionLevelSerializer,
+    PermissionLevelWriteSerializer,
     TeamListSerializer,
     TeamDetailSerializer,
     TeamUserLookupSerializer,
@@ -20,6 +22,7 @@ from api_users.serializers import (
 )
 from common.auth import init_user
 from common.authenticate.workos import WorkOSAuthClient
+from common.team_permissions import permission_catalog
 from api_core.pagination import CustomizedPagination
 from api_users.filters import UserFilter
 from api_core.response import success_response
@@ -30,12 +33,11 @@ from sql.models import (
     TeamMembership,
     TeamPermissionGroup,
     Users,
+    WorkflowAuditSetting,
 )
 from sql.utils.team import (
     active_instance_grants,
-    permission_group_catalog,
     teams_for_role,
-    set_user_resource_memberships,
     user_groups,
     user_has_resource_role,
 )
@@ -43,10 +45,9 @@ from sql.utils.team import (
 
 def _user_management_prefetches():
     return (
-        Prefetch("groups", queryset=Group.objects.order_by("id")),
         Prefetch(
             "team_memberships",
-            queryset=TeamMembership.objects.select_related("team", "permission_group")
+            queryset=TeamMembership.objects.select_related("team", "permission_level")
             .filter(team__is_deleted=0)
             .order_by("team__team_name", "team_id"),
         ),
@@ -133,10 +134,6 @@ def _validate_invited_local_user(email):
 def _create_or_update_invited_local_user(
     email,
     display_name,
-    groups,
-    groups_provided,
-    team_access=None,
-    team_access_provided=False,
 ):
     user = _validate_invited_local_user(email)
     with transaction.atomic():
@@ -151,11 +148,6 @@ def _create_or_update_invited_local_user(
         elif display_name and user.display != display_name:
             user.display = display_name
             user.save(update_fields=["display"])
-
-        if groups_provided:
-            user.groups.set(groups)
-        if team_access_provided:
-            set_user_resource_memberships(user, team_access)
 
     return user
 
@@ -186,33 +178,6 @@ class CurrentUser(views.APIView):
     def _serialize_user(user):
         permissions = set(user.get_all_permissions())
         active_instance_access = active_instance_grants(user)
-        if teams_for_role(user, TeamPermissionGroup.QUERY).exists():
-            permissions.update(
-                {"sql.menu_query", "sql.menu_sqlquery", "sql.query_submit"}
-            )
-        if teams_for_role(user, TeamPermissionGroup.WORKFLOW_REQUESTER).exists():
-            permissions.update(
-                {
-                    "sql.menu_sqlworkflow",
-                    "sql.sql_submit",
-                    "sql.menu_sqlexportworkflow",
-                    "sql.sqlexport_submit",
-                    "sql.menu_archive",
-                    "sql.archive_apply",
-                }
-            )
-        if teams_for_role(user, TeamPermissionGroup.WORKFLOW_APPROVER).exists():
-            permissions.update(
-                {"sql.sql_review", "sql.archive_review", "sql.query_review"}
-            )
-        if teams_for_role(user, TeamPermissionGroup.RESOURCE_OWNER).exists():
-            permissions.update(
-                {
-                    "sql.team_owner",
-                    "sql.view_team",
-                    "sql.change_team",
-                }
-            )
         if active_instance_access.exists():
             permissions.update(
                 {"sql.menu_query", "sql.menu_sqlquery", "sql.query_submit"}
@@ -221,7 +186,6 @@ class CurrentUser(views.APIView):
             access_level__in=["query_dml", "query_dml_ddl"]
         ).exists():
             permissions.update({"sql.menu_sqlworkflow", "sql.sql_submit"})
-
         payload = {
             "id": user.id,
             "username": user.username,
@@ -232,7 +196,11 @@ class CurrentUser(views.APIView):
             "is_superuser": user.is_superuser,
             "is_staff": user.is_staff,
             "is_active": user.is_active,
-            "groups": list(user.groups.values("id", "name").order_by("id")),
+            "groups": list(
+                user.groups.filter(name="superadmin")
+                .values("id", "name")
+                .order_by("id")
+            ),
             "teams": list(
                 Team.objects.filter(
                     team_id__in=[team.team_id for team in user_groups(user)]
@@ -328,11 +296,6 @@ class WorkOSUserInvitation(views.APIView):
 
         email = serializer.validated_data["email"]
         display = serializer.validated_data.get("display", "")
-        groups_provided = "groups" in serializer.validated_data
-        team_access_provided = "team_access" in serializer.validated_data
-        groups = serializer.validated_data.get("groups", [])
-        team_access = serializer.validated_data.get("team_access", [])
-
         _validate_invited_local_user(email)
         invitation = WorkOSAuthClient().send_invitation(
             email=email,
@@ -341,10 +304,6 @@ class WorkOSUserInvitation(views.APIView):
         local_user = _create_or_update_invited_local_user(
             email=email,
             display_name=display,
-            groups=groups,
-            groups_provided=groups_provided,
-            team_access=team_access,
-            team_access_provided=team_access_provided,
         )
 
         return success_response(
@@ -357,17 +316,112 @@ class WorkOSUserInvitation(views.APIView):
         )
 
 
-class PermissionGroupCatalog(views.APIView):
+def _serialize_permission_level(group):
+    permissions = sorted(
+        f"{permission.content_type.app_label}.{permission.codename}"
+        for permission in group.permissions.filter(
+            content_type__app_label="sql"
+        ).select_related("content_type")
+    )
+    return {
+        "id": group.id,
+        "name": group.name,
+        "permissions": permissions,
+        "membership_count": group.team_memberships.count(),
+    }
+
+
+def _approval_level_is_referenced(group):
+    group_id = str(group.id)
+    return any(
+        group_id
+        in {
+            token.strip()
+            for token in setting.audit_auth_groups.split(",")
+            if token.strip()
+        }
+        for setting in WorkflowAuditSetting.objects.exclude(audit_auth_groups="")
+    )
+
+
+class PermissionLevelList(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
-    serializer_class = PermissionGroupSerializer
+    serializer_class = PermissionLevelSerializer
 
     @extend_schema(
-        summary="Team Permission Group Catalog",
-        responses={200: PermissionGroupSerializer(many=True)},
-        description="List Django permission groups available for Team assignments.",
+        summary="Permission Levels",
+        responses={200: PermissionLevelSerializer(many=True)},
     )
     def get(self, request):
-        return success_response(data=permission_group_catalog())
+        levels = (
+            Group.objects.exclude(name="superadmin")
+            .prefetch_related("permissions__content_type")
+            .order_by("name", "id")
+        )
+        return success_response(
+            data=[_serialize_permission_level(level) for level in levels]
+        )
+
+    @extend_schema(request=PermissionLevelWriteSerializer)
+    def post(self, request):
+        _require_superuser(request)
+        serializer = PermissionLevelWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        level = serializer.save()
+        return success_response(
+            data=_serialize_permission_level(level),
+            status_code=status.HTTP_201_CREATED,
+        )
+
+
+class PermissionLevelDetail(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self, pk):
+        try:
+            return (
+                Group.objects.exclude(name="superadmin")
+                .prefetch_related("permissions__content_type")
+                .get(pk=pk)
+            )
+        except Group.DoesNotExist as exc:
+            raise Http404 from exc
+
+    def get(self, request, pk):
+        return success_response(data=_serialize_permission_level(self.get_object(pk)))
+
+    @extend_schema(request=PermissionLevelWriteSerializer)
+    def put(self, request, pk):
+        _require_superuser(request)
+        level = self.get_object(pk)
+        serializer = PermissionLevelWriteSerializer(
+            level, data=request.data, partial=False
+        )
+        serializer.is_valid(raise_exception=True)
+        return success_response(data=_serialize_permission_level(serializer.save()))
+
+    def delete(self, request, pk):
+        _require_superuser(request)
+        level = self.get_object(pk)
+        if _approval_level_is_referenced(level):
+            raise ValidationError(
+                "Reassign approval flows before deleting this permission level."
+            )
+        try:
+            level.delete()
+        except ProtectedError as exc:
+            raise ValidationError(
+                "Reassign memberships, requests, and grants before deleting this permission level."
+            ) from exc
+        return success_response()
+
+
+class AvailableTeamPermissions(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        _require_superuser(request)
+        return success_response(data=permission_catalog())
 
 
 class UserDetail(views.APIView):

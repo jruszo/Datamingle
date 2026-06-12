@@ -67,7 +67,7 @@ const canViewTeams = computed(
   () =>
     hasPermission('sql.menu_system')
     || hasPermission('sql.view_team')
-    || hasPermission('sql.team_owner'),
+    || hasPermission('sql.change_team'),
 )
 const canCreateTeams = computed(
   () => hasPermission('sql.menu_system') || hasPermission('sql.add_team'),
@@ -75,8 +75,7 @@ const canCreateTeams = computed(
 const canEditTeams = computed(
   () =>
     hasPermission('sql.menu_system')
-    || hasPermission('sql.change_team')
-    || hasPermission('sql.team_owner'),
+    || hasPermission('sql.change_team'),
 )
 const canDeleteTeams = computed(
   () => hasPermission('sql.menu_system') || hasPermission('sql.delete_team'),

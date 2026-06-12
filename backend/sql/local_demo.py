@@ -6,6 +6,7 @@ from django.utils import timezone
 
 from api_agents.models import Agent, AgentStatus, AgentToolArtifact
 from common.auth import ensure_superadmin_group
+from common.team_permissions import TEAM_PERMISSION_CODES
 from common.utils.const import WorkflowType
 from sql.models import (
     InfrastructureNode,
@@ -87,6 +88,8 @@ AUTH_GROUP_PERMISSION_CODES = OrderedDict(
             "archive_apply",
             "archive_review",
             "archive_mgt",
+            "view_team",
+            "change_team",
         ],
         "PM": [
             "menu_dashboard",
@@ -260,11 +263,17 @@ def _seed_auth_groups(log):
     log("Auth group updated: superadmin")
     for name, permission_codes in AUTH_GROUP_PERMISSION_CODES.items():
         group, created = Group.objects.get_or_create(name=name)
-        permissions = list(Permission.objects.filter(codename__in=permission_codes))
+        allowed_codes = set(permission_codes) & TEAM_PERMISSION_CODES
+        permissions = list(
+            Permission.objects.filter(
+                content_type__app_label="sql",
+                codename__in=allowed_codes,
+            )
+        )
         group.permissions.set(permissions)
         auth_groups[name] = group
         missing_permissions = sorted(
-            set(permission_codes) - {permission.codename for permission in permissions}
+            allowed_codes - {permission.codename for permission in permissions}
         )
         state = "created" if created else "updated"
         log(f"Auth group {state}: {name}")

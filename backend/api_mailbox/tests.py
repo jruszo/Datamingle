@@ -57,17 +57,17 @@ class MailboxApiTests(TestCase):
         TeamMembership.objects.create(
             user=self.requester,
             team=self.team,
-            permission_group=self.qa_group,
+            permission_level=self.qa_group,
         )
         TeamMembership.objects.create(
             user=self.reviewer,
             team=self.team,
-            permission_group=self.group,
+            permission_level=self.group,
         )
         TeamMembership.objects.create(
             user=self.executor,
             team=self.team,
-            permission_group=self.qa_group,
+            permission_level=self.qa_group,
         )
 
         self.instance = Instance.objects.create(
@@ -126,7 +126,7 @@ class MailboxApiTests(TestCase):
     def _create_permission_request(self):
         request = PermissionRequest.objects.create(
             team=self.team,
-            permission_group=self.qa_group,
+            permission_level=self.qa_group,
             target_type=PermissionRequestTarget.TEAM,
             title="Mailbox Permission Request",
             reason="Need access",

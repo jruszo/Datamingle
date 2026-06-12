@@ -25,14 +25,14 @@ import { Input } from '@/components/ui/input'
 import {
   createTeam,
   deleteTeam,
-  fetchPermissionGroups,
+  fetchPermissionLevels,
   fetchTeam,
   fetchTeamInstances,
   fetchTeamNodes,
   fetchTeamUsers,
   updateTeam,
-  type PermissionGroupRecord,
-  type TeamPermissionGroupCode,
+  type PermissionLevelId,
+  type PermissionLevelRecord,
   type TeamInstanceLookupRecord,
   type TeamNodeLookupRecord,
   type TeamUpsertPayload,
@@ -41,14 +41,14 @@ import {
 import { useAuthStore } from '@/stores/auth'
 
 type UserAccessState = {
-  permission_group_id: TeamPermissionGroupCode | ''
+  permission_level_id: PermissionLevelId | ''
 }
 
 const authStore = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 
-const accessRoles = ref<PermissionGroupRecord[]>([])
+const accessRoles = ref<PermissionLevelRecord[]>([])
 const users = ref<TeamUserLookupRecord[]>([])
 const instances = ref<TeamInstanceLookupRecord[]>([])
 const nodes = ref<TeamNodeLookupRecord[]>([])
@@ -58,6 +58,7 @@ const selectedNodeIds = ref<number[]>([])
 const groupName = ref('')
 
 const userFilter = ref('')
+const availableUserId = ref('')
 const availableInstanceFilter = ref('')
 const selectedInstanceFilter = ref('')
 
@@ -92,7 +93,7 @@ const canViewTeams = computed(
   () =>
     hasPermission('sql.menu_system')
     || hasPermission('sql.view_team')
-    || hasPermission('sql.team_owner'),
+    || hasPermission('sql.change_team'),
 )
 const canCreateTeams = computed(
   () => hasPermission('sql.menu_system') || hasPermission('sql.add_team'),
@@ -100,8 +101,7 @@ const canCreateTeams = computed(
 const canEditTeams = computed(
   () =>
     hasPermission('sql.menu_system')
-    || hasPermission('sql.change_team')
-    || hasPermission('sql.team_owner'),
+    || hasPermission('sql.change_team'),
 )
 const canDeleteTeams = computed(
   () => hasPermission('sql.menu_system') || hasPermission('sql.delete_team'),
@@ -113,7 +113,7 @@ const normalizedUserFilter = computed(() => userFilter.value.trim().toLowerCase(
 const normalizedAvailableInstanceFilter = computed(() => availableInstanceFilter.value.trim().toLowerCase())
 const normalizedSelectedInstanceFilter = computed(() => selectedInstanceFilter.value.trim().toLowerCase())
 const assignedUserCount = computed(
-  () => Object.values(userAccessById.value).filter((row) => row.permission_group_id).length,
+  () => Object.values(userAccessById.value).filter((row) => row.permission_level_id).length,
 )
 
 function toUserFacingMessage(errorValue: unknown, fallback: string) {
@@ -187,8 +187,16 @@ function instanceMatches(instance: TeamInstanceLookupRecord, filterValue: string
   return haystack.includes(filterValue)
 }
 
-const filteredUsers = computed(() =>
-  sortUsers(users.value.filter((user) => userMatches(user, normalizedUserFilter.value))),
+const assignedUsers = computed(() =>
+  sortUsers(
+    users.value
+      .filter((user) => userAccessById.value[user.id]?.permission_level_id)
+      .filter((user) => userMatches(user, normalizedUserFilter.value)),
+  ),
+)
+
+const availableUsers = computed(() =>
+  sortUsers(users.value.filter((user) => !userAccessById.value[user.id])),
 )
 
 const availableInstances = computed(() =>
@@ -211,25 +219,46 @@ function sortNumeric(values: number[]) {
   return [...new Set(values)].sort((left, right) => left - right)
 }
 
-function permissionGroupId(value: string | number | '') {
-  const groupId = Number(value)
-  return accessRoles.value.some((role) => role.id === groupId) ? groupId : null
+function permissionLevelId(value: string | number | '') {
+  const levelId = Number(value)
+  return accessRoles.value.some((level) => level.id === levelId) ? levelId : null
 }
 
 function roleForUser(userId: number) {
-  return userAccessById.value[userId]?.permission_group_id ?? ''
+  return userAccessById.value[userId]?.permission_level_id ?? ''
 }
 
 function updateUserRole(userId: number, event: Event) {
   const value = (event.target as HTMLSelectElement).value
-  const groupId = permissionGroupId(value)
+  const levelId = permissionLevelId(value)
 
   const nextAccess = { ...userAccessById.value }
   if (!value) {
     delete nextAccess[userId]
-  } else if (groupId !== null) {
-    nextAccess[userId] = { permission_group_id: groupId }
+  } else if (levelId !== null) {
+    nextAccess[userId] = { permission_level_id: levelId }
   }
+  userAccessById.value = nextAccess
+  formSuccess.value = ''
+}
+
+function addMember() {
+  const userId = Number(availableUserId.value)
+  const defaultLevel = accessRoles.value[0]?.id
+  if (!Number.isFinite(userId) || !defaultLevel) {
+    return
+  }
+  userAccessById.value = {
+    ...userAccessById.value,
+    [userId]: { permission_level_id: defaultLevel },
+  }
+  availableUserId.value = ''
+  formSuccess.value = ''
+}
+
+function removeMember(userId: number) {
+  const nextAccess = { ...userAccessById.value }
+  delete nextAccess[userId]
   userAccessById.value = nextAccess
   formSuccess.value = ''
 }
@@ -238,11 +267,11 @@ function userAccessRows() {
   return Object.entries(userAccessById.value)
     .map(([userId, row]) => ({
       user_id: Number(userId),
-      permission_group_id: row.permission_group_id,
+      permission_level_id: row.permission_level_id,
     }))
     .filter(
-      (row): row is { user_id: number; permission_group_id: TeamPermissionGroupCode } =>
-        Number.isFinite(row.user_id) && permissionGroupId(row.permission_group_id) !== null,
+      (row): row is { user_id: number; permission_level_id: PermissionLevelId } =>
+        Number.isFinite(row.user_id) && permissionLevelId(row.permission_level_id) !== null,
     )
     .sort((left, right) => left.user_id - right.user_id)
 }
@@ -333,7 +362,7 @@ async function loadPage() {
     }
 
     const [roles, userLookup, nodeLookup, instanceLookup] = await Promise.all([
-      fetchPermissionGroups(requireToken()),
+      fetchPermissionLevels(requireToken()),
       fetchTeamUsers(requireToken()),
       fetchTeamNodes(requireToken()),
       fetchTeamInstances(requireToken()),
@@ -360,7 +389,7 @@ async function loadPage() {
     const nextAccess: Record<number, UserAccessState> = {}
     for (const row of resourceGroup.user_access ?? []) {
       nextAccess[row.user_id] = {
-        permission_group_id: row.permission_group_id,
+        permission_level_id: row.permission_level_id,
       }
     }
     userAccessById.value = nextAccess
@@ -413,7 +442,7 @@ async function saveTeam() {
     const nextAccess: Record<number, UserAccessState> = {}
     for (const row of updatedGroup.user_access ?? []) {
       nextAccess[row.user_id] = {
-        permission_group_id: row.permission_group_id,
+        permission_level_id: row.permission_level_id,
       }
     }
     userAccessById.value = nextAccess
@@ -516,7 +545,10 @@ watch(
         <div class="space-y-4 rounded-lg border border-slate-200 p-5">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h3 class="text-base font-semibold text-slate-900">User Access</h3>
+              <h3 class="text-base font-semibold text-slate-900">Members</h3>
+              <p class="mt-1 text-sm text-slate-500">
+                Each member has one permission level in this team.
+              </p>
             </div>
             <div class="flex flex-wrap items-center gap-2">
               <Badge variant="secondary" class="bg-slate-100 text-slate-700">
@@ -526,6 +558,27 @@ watch(
                 {{ users.length }} users
               </Badge>
             </div>
+          </div>
+
+          <div class="flex flex-col gap-2 sm:flex-row">
+            <select
+              v-model="availableUserId"
+              class="h-10 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900"
+              :disabled="!canSave || availableUsers.length === 0"
+            >
+              <option value="">Select a user to add</option>
+              <option v-for="user in availableUsers" :key="user.id" :value="`${user.id}`">
+                {{ userLabel(user) }} ({{ user.username }})
+              </option>
+            </select>
+            <Button
+              type="button"
+              variant="outline"
+              :disabled="!canSave || !availableUserId"
+              @click="addMember"
+            >
+              Add member
+            </Button>
           </div>
 
           <Input
@@ -540,11 +593,12 @@ watch(
               <thead class="bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
                 <tr>
                   <th class="px-4 py-3">User</th>
-                  <th class="px-4 py-3">Permission group</th>
+                  <th class="px-4 py-3">Permission level</th>
+                  <th class="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-200 bg-white">
-                <tr v-for="user in filteredUsers" :key="user.id">
+                <tr v-for="user in assignedUsers" :key="user.id">
                   <td class="px-4 py-3">
                     <div class="font-medium text-slate-900">{{ userLabel(user) }}</div>
                     <div class="mt-1 text-xs text-slate-500">{{ user.username }}</div>
@@ -562,10 +616,21 @@ watch(
                       </option>
                     </select>
                   </td>
+                  <td class="px-4 py-3 text-right">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      :disabled="!canSave"
+                      @click="removeMember(user.id)"
+                    >
+                      Remove
+                    </Button>
+                  </td>
                 </tr>
-                <tr v-if="filteredUsers.length === 0">
-                  <td colspan="2" class="px-4 py-8 text-center text-sm text-slate-500">
-                    No users match the current filter.
+                <tr v-if="assignedUsers.length === 0">
+                  <td colspan="3" class="px-4 py-8 text-center text-sm text-slate-500">
+                    No assigned members match the current filter.
                   </td>
                 </tr>
               </tbody>

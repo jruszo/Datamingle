@@ -211,7 +211,7 @@ class TestAudit(TestCase):
         TeamMembership.objects.create(
             user=self.user,
             team=self.res_group,
-            permission_group=aug,
+            permission_level=aug,
         )
         _detail_by_workflow_id.return_value.current_audit = aug.id
         _auth_group_users.return_value.filter.exists = True
@@ -254,7 +254,7 @@ class TestAudit(TestCase):
         TeamMembership.objects.create(
             user=self.user,
             team=self.res_group,
-            permission_group=aug,
+            permission_level=aug,
         )
         _detail_by_workflow_id.return_value.current_audit = aug.id
         _auth_group_users.return_value.filter.exists = True

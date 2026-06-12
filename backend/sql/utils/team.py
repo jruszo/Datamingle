@@ -36,7 +36,7 @@ LEGACY_ROLE_GROUP_MAP = {
 }
 
 
-def permission_group_catalog():
+def permission_level_catalog():
     return [
         {
             "id": group.id,
@@ -52,7 +52,7 @@ def permission_group_catalog():
     ]
 
 
-def normalize_permission_group(value, default=None):
+def normalize_permission_level(value, default=None):
     if isinstance(value, Group):
         return value.id
     value = str(value or "").strip()
@@ -68,7 +68,7 @@ def normalize_permission_group(value, default=None):
     return group.id if group else default
 
 
-def normalize_permission_group_sequence(raw_value):
+def normalize_permission_level_sequence(raw_value):
     if raw_value in (None, ""):
         return []
     values = (
@@ -76,23 +76,23 @@ def normalize_permission_group_sequence(raw_value):
     )
     group_ids = []
     for value in values:
-        group_id = normalize_permission_group(value)
+        group_id = normalize_permission_level(value)
         if group_id and group_id not in group_ids:
             group_ids.append(group_id)
     return group_ids
 
 
-def permission_group_label(permission_group):
-    group_id = normalize_permission_group(permission_group)
+def permission_level_label(permission_level):
+    group_id = normalize_permission_level(permission_level)
     if not group_id:
-        return str(permission_group or "")
+        return str(permission_level or "")
     return (
         Group.objects.filter(id=group_id).values_list("name", flat=True).first() or ""
     )
 
 
-def roles_at_or_below(permission_group):
-    group_id = normalize_permission_group(permission_group)
+def roles_at_or_below(permission_level):
+    group_id = normalize_permission_level(permission_level)
     return [str(group_id)] if group_id else []
 
 
@@ -109,14 +109,25 @@ def user_has_resource_role(user, team, required_permission):
     if user.is_superuser:
         return True
     team_id = getattr(team, "team_id", team)
-    membership = TeamMembership.objects.filter(
-        user=user,
-        team_id=team_id,
-        team__is_deleted=0,
-    ).first()
-    return bool(
-        membership
-        and _group_has_permission(membership.permission_group_id, required_permission)
+    permission_level_ids = list(
+        TeamMembership.objects.filter(
+            user=user,
+            team_id=team_id,
+            team__is_deleted=0,
+        ).values_list("permission_level_id", flat=True)
+    )
+    permission_level_ids.extend(
+        TemporaryTeamGrant.objects.filter(
+            user=user,
+            team_id=team_id,
+            team__is_deleted=0,
+            is_revoked=False,
+            valid_date__gte=_today(),
+        ).values_list("permission_level_id", flat=True)
+    )
+    return any(
+        _group_has_permission(permission_level_id, required_permission)
+        for permission_level_id in permission_level_ids
     )
 
 
@@ -127,10 +138,10 @@ def user_has_any_resource_role(user, required_permission):
 def user_highest_resource_role(user, team):
     membership = (
         TeamMembership.objects.filter(user=user, team=team)
-        .select_related("permission_group")
+        .select_related("permission_level")
         .first()
     )
-    return membership.permission_group_id if membership else ""
+    return membership.permission_level_id if membership else ""
 
 
 def teams_for_role(user, required_permission=TeamPermissionGroup.QUERY):
@@ -138,21 +149,30 @@ def teams_for_role(user, required_permission=TeamPermissionGroup.QUERY):
         return Team.objects.filter(is_deleted=0)
     app_label, codename = required_permission.split(".", 1)
     return Team.objects.filter(
-        memberships__user=user,
-        memberships__permission_group__permissions__content_type__app_label=app_label,
-        memberships__permission_group__permissions__codename=codename,
+        Q(
+            memberships__user=user,
+            memberships__permission_level__permissions__content_type__app_label=app_label,
+            memberships__permission_level__permissions__codename=codename,
+        )
+        | Q(
+            temporaryteamgrant__user=user,
+            temporaryteamgrant__is_revoked=False,
+            temporaryteamgrant__valid_date__gte=_today(),
+            temporaryteamgrant__permission_level__permissions__content_type__app_label=app_label,
+            temporaryteamgrant__permission_level__permissions__codename=codename,
+        ),
         is_deleted=0,
     ).distinct()
 
 
-def resource_role_users(permission_groups, team_id):
-    group_ids = normalize_permission_group_sequence(permission_groups)
+def resource_role_users(permission_levels, team_id):
+    group_ids = normalize_permission_level_sequence(permission_levels)
     if not group_ids:
         return Users.objects.none()
     return (
         Users.objects.filter(
             team_memberships__team_id=team_id,
-            team_memberships__permission_group_id__in=group_ids,
+            team_memberships__permission_level_id__in=group_ids,
             is_active=1,
         )
         .distinct()
@@ -165,14 +185,14 @@ def set_user_resource_memberships(user, access_rows, membership_source=None):
     for row in access_rows:
         team = row.get("team")
         team_id = row.get("team_id") or getattr(team, "team_id", None)
-        permission_group_id = normalize_permission_group(
-            row.get("permission_group_id") or row.get("permission_group")
+        permission_level_id = normalize_permission_level(
+            row.get("permission_level_id") or row.get("permission_level")
         )
-        if team_id and permission_group_id:
+        if team_id and permission_level_id:
             TeamMembership.objects.update_or_create(
                 user=user,
                 team_id=team_id,
-                defaults={"permission_group_id": permission_group_id},
+                defaults={"permission_level_id": permission_level_id},
             )
 
 
@@ -181,14 +201,14 @@ def set_team_memberships(team, access_rows, membership_source=None):
     for row in access_rows:
         user = row.get("user")
         user_id = row.get("user_id") or getattr(user, "id", None)
-        permission_group_id = normalize_permission_group(
-            row.get("permission_group_id") or row.get("permission_group")
+        permission_level_id = normalize_permission_level(
+            row.get("permission_level_id") or row.get("permission_level")
         )
-        if user_id and permission_group_id:
+        if user_id and permission_level_id:
             TeamMembership.objects.update_or_create(
                 user_id=user_id,
                 team=team,
-                defaults={"permission_group_id": permission_group_id},
+                defaults={"permission_level_id": permission_level_id},
             )
 
 
@@ -207,7 +227,7 @@ def active_team_grants(user, on_date=None):
         is_revoked=False,
         valid_date__gte=active_on,
         team__is_deleted=0,
-    ).select_related("user", "team", "permission_group")
+    ).select_related("user", "team", "permission_level")
 
 
 def active_instance_grants(user, on_date=None):
@@ -357,3 +377,10 @@ def user_instances(user, type=None, db_type=None, tag_codes=None):
 
 def auth_group_users(auth_group_names, team_id):
     return resource_role_users(auth_group_names, team_id)
+
+
+# Approval-flow storage keeps historical auth-group field names. These aliases keep
+# that internal format isolated while active team APIs use permission-level terms.
+normalize_permission_group = normalize_permission_level
+normalize_permission_group_sequence = normalize_permission_level_sequence
+permission_group_label = permission_level_label

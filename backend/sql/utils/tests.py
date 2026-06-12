@@ -46,12 +46,12 @@ from sql.utils.data_masking import data_masking, brute_mask, simple_column_mask
 User = Users
 
 
-def assign_user_to_team(user, team, permission_group=None):
-    permission_group = permission_group or Group.objects.get_or_create(name="QA")[0]
+def assign_user_to_team(user, team, permission_level=None):
+    permission_level = permission_level or Group.objects.get_or_create(name="QA")[0]
     TeamMembership.objects.update_or_create(
         user=user,
         team=team,
-        defaults={"permission_group": permission_group},
+        defaults={"permission_level": permission_level},
     )
 
 
@@ -141,7 +141,7 @@ class TestTemporaryAccessHelpers(TestCase):
         TemporaryTeamGrant.objects.create(
             user=self.user,
             team=self.group,
-            permission_group=Group.objects.get_or_create(name="QA")[0],
+            permission_level=Group.objects.get_or_create(name="QA")[0],
             valid_date=datetime.date.today() + datetime.timedelta(days=1),
         )
 

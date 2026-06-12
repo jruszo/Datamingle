@@ -11,14 +11,9 @@ import { DataTable, type DataTableColumn } from '@/components/ui/data-table'
 import { Input } from '@/components/ui/input'
 import {
   deleteUser,
-  fetchPermissionGroups,
-  fetchTeams,
   fetchUsers,
   inviteWorkosUser,
   updateUser,
-  type PermissionGroupRecord,
-  type TeamPermissionGroupCode,
-  type TeamRecord,
   type UserManagementRecord,
 } from '../api'
 import { useAuthStore } from '@/stores/auth'
@@ -39,10 +34,6 @@ const latestRequestId = ref(0)
 const isInviteDialogOpen = ref(false)
 const inviteEmail = ref('')
 const inviteDisplay = ref('')
-const inviteResourceAccessById = ref<Record<number, TeamPermissionGroupCode | ''>>({})
-const inviteTeams = ref<TeamRecord[]>([])
-const invitePermissionGroups = ref<PermissionGroupRecord[]>([])
-const inviteTeamsLoading = ref(false)
 const inviteSubmitting = ref(false)
 const inviteError = ref('')
 
@@ -110,50 +101,8 @@ function groupSummary(user: UserManagementRecord) {
   }
 
   return user.teams
-    .map((group) => `${group.team_name}: ${group.permission_group_name ?? group.permission_group_id}`)
+    .map((team) => `${team.team_name}: ${team.permission_level_name}`)
     .join(', ')
-}
-
-function permissionGroupId(value: string | number | '') {
-  const groupId = Number(value)
-  return invitePermissionGroups.value.some((role) => role.id === groupId) ? groupId : null
-}
-
-function resourceAccessRowsForUser(user: UserManagementRecord) {
-  const rows = user.team_access?.length ? user.team_access : user.teams
-  return rows.map((group) => ({
-    team_id: group.team_id,
-    permission_group_id: group.permission_group_id,
-  }))
-}
-
-function inviteRoleForGroup(groupId: number) {
-  return inviteResourceAccessById.value[groupId] ?? ''
-}
-
-function updateInviteRole(groupId: number, event: Event) {
-  const value = (event.target as HTMLSelectElement).value
-  const permissionId = permissionGroupId(value)
-  const nextAccess = { ...inviteResourceAccessById.value }
-  if (!value) {
-    delete nextAccess[groupId]
-  } else if (permissionId !== null) {
-    nextAccess[groupId] = permissionId
-  }
-  inviteResourceAccessById.value = nextAccess
-}
-
-function inviteResourceAccessRows() {
-  return Object.entries(inviteResourceAccessById.value)
-    .map(([resourceGroupId, accessRole]) => ({
-      team_id: Number(resourceGroupId),
-      permission_group_id: accessRole,
-    }))
-    .filter(
-      (row): row is { team_id: number; permission_group_id: TeamPermissionGroupCode } =>
-        Number.isFinite(row.team_id) && permissionGroupId(row.permission_group_id) !== null,
-    )
-    .sort((left, right) => left.team_id - right.team_id)
 }
 
 async function loadUsers() {
@@ -217,15 +166,11 @@ async function toggleUserActiveState(user: UserManagementRecord) {
   }
 
   try {
-    const payload: {
-      team_access?: Array<{ team_id: number; permission_group_id: TeamPermissionGroupCode }>
-      is_active: boolean
-    } = {
-      is_active: nextIsActive,
-    }
-    payload.team_access = resourceAccessRowsForUser(user)
-
-    const updatedUser = await updateUser(user.id, payload, requireToken())
+    const updatedUser = await updateUser(
+      user.id,
+      { is_active: nextIsActive },
+      requireToken(),
+    )
     feedback.value = nextIsActive
       ? 'User reactivated successfully.'
       : 'User deactivated successfully.'
@@ -257,40 +202,6 @@ async function removeUser(user: UserManagementRecord) {
   }
 }
 
-async function loadInviteTeams() {
-  inviteTeamsLoading.value = true
-  inviteError.value = ''
-
-  try {
-    invitePermissionGroups.value = await fetchPermissionGroups(requireToken())
-    const collectedGroups: TeamRecord[] = []
-    let page = 1
-    let hasMore = true
-
-    while (hasMore) {
-      const response = await fetchTeams(requireToken(), {
-        page,
-        size: 100,
-        ordering: 'team_name',
-      })
-      collectedGroups.push(...response.results)
-      hasMore = response.next !== null
-      page += 1
-    }
-
-    inviteTeams.value = collectedGroups.sort((left, right) =>
-      left.team_name.localeCompare(right.team_name),
-    )
-  } catch (errorValue) {
-    inviteError.value = toUserFacingMessage(
-      errorValue,
-      'Failed to load teams for invitation.',
-    )
-  } finally {
-    inviteTeamsLoading.value = false
-  }
-}
-
 function openInviteDialog() {
   if (!canManageUsers.value) {
     return
@@ -298,10 +209,8 @@ function openInviteDialog() {
 
   inviteEmail.value = ''
   inviteDisplay.value = ''
-  inviteResourceAccessById.value = {}
   inviteError.value = ''
   isInviteDialogOpen.value = true
-  void loadInviteTeams()
 }
 
 function closeInviteDialog() {
@@ -331,7 +240,6 @@ async function submitInvite() {
       {
         email,
         display: inviteDisplay.value.trim(),
-        team_access: inviteResourceAccessRows(),
       },
       requireToken(),
     )
@@ -464,7 +372,7 @@ watch(searchQuery, () => {
                   variant="secondary"
                   class="bg-slate-100 text-slate-700"
                 >
-                  {{ group.team_name }} · {{ group.permission_group_name ?? group.permission_group_id }}
+                  {{ group.team_name }} · {{ group.permission_level_name }}
                 </Badge>
                 <Badge
                   v-if="(row as UserManagementRecord).teams.length > 2"
@@ -586,43 +494,6 @@ watch(searchQuery, () => {
             />
           </div>
 
-          <div class="grid gap-2">
-            <label class="text-sm font-medium text-slate-900">Initial resource access</label>
-            <div class="max-h-72 overflow-auto rounded-md border border-slate-200">
-              <table class="min-w-full divide-y divide-slate-200 text-sm">
-                <thead class="bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
-                  <tr>
-                    <th class="px-4 py-3">Team</th>
-                    <th class="px-4 py-3">Permission group</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-200 bg-white">
-                  <tr v-for="group in inviteTeams" :key="group.team_id">
-                    <td class="px-4 py-3 font-medium text-slate-900">{{ group.team_name }}</td>
-                    <td class="px-4 py-3">
-                      <select
-                        class="w-full min-w-48 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                        :value="inviteRoleForGroup(group.team_id)"
-                        :disabled="inviteSubmitting || inviteTeamsLoading"
-                        @change="updateInviteRole(group.team_id, $event)"
-                      >
-                        <option value="">No access</option>
-                        <option v-for="role in invitePermissionGroups" :key="role.id" :value="role.id">
-                          {{ role.name }}
-                        </option>
-                      </select>
-                    </td>
-                  </tr>
-                  <tr v-if="inviteTeams.length === 0">
-                    <td colspan="2" class="px-4 py-8 text-center text-sm text-slate-500">
-                      No teams are available.
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
           <div class="flex justify-end gap-3 border-t border-slate-200 pt-4">
             <Button
               variant="outline"
@@ -635,7 +506,7 @@ watch(searchQuery, () => {
             <Button
               type="submit"
               class="gap-2"
-              :disabled="inviteSubmitting || inviteTeamsLoading"
+              :disabled="inviteSubmitting"
             >
               <MailPlus class="h-4 w-4" />
               {{ inviteSubmitting ? 'Sending...' : 'Send invitation' }}

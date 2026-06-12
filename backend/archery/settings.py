@@ -236,7 +236,7 @@ STORAGES = {
 
 # Used to extend users field in Django admin, pointing to sql/models.py Users class
 AUTH_USER_MODEL = "sql.Users"
-AUTHENTICATION_BACKENDS = ("django.contrib.auth.backends.ModelBackend",)
+AUTHENTICATION_BACKENDS = ("common.auth_backends.TeamPermissionBackend",)
 LOGIN_REDIRECT_URL = "/"
 
 # Password validation

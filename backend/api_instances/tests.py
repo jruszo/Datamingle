@@ -22,11 +22,11 @@ from sql.models import (
 
 
 def assign_user_to_team(user, team):
-    permission_group, _ = Group.objects.get_or_create(name="QA")
+    permission_level, _ = Group.objects.get_or_create(name="QA")
     TeamMembership.objects.update_or_create(
         user=user,
         team=team,
-        defaults={"permission_group": permission_group},
+        defaults={"permission_level": permission_level},
     )
 
 

@@ -103,13 +103,13 @@ class Users(AbstractUser):
 
 
 class TeamMembership(models.Model):
-    """Permission-group-bearing membership of a user in a team."""
+    """Permission-level-bearing membership of a user in a team."""
 
     user = models.ForeignKey(
         Users, related_name="team_memberships", on_delete=models.CASCADE
     )
     team = models.ForeignKey(Team, related_name="memberships", on_delete=models.CASCADE)
-    permission_group = models.ForeignKey(
+    permission_level = models.ForeignKey(
         "auth.Group",
         related_name="team_memberships",
         on_delete=models.PROTECT,
@@ -118,7 +118,7 @@ class TeamMembership(models.Model):
     sys_time = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.user_id}:{self.team_id}:{self.permission_group_id}"
+        return f"{self.user_id}:{self.team_id}:{self.permission_level_id}"
 
     class Meta:
         managed = True
@@ -133,12 +133,12 @@ class TeamMembership(models.Model):
         ]
         indexes = [
             models.Index(
-                fields=("team", "permission_group"),
-                name="team_membership_team_group_idx",
+                fields=("team", "permission_level"),
+                name="team_membership_team_level_idx",
             ),
             models.Index(
-                fields=("user", "permission_group"),
-                name="team_membership_user_group_idx",
+                fields=("user", "permission_level"),
+                name="team_membership_user_level_idx",
             ),
         ]
 
@@ -1212,7 +1212,7 @@ class PermissionRequest(models.Model, WorkflowAuditMixin):
         blank=True,
         default="",
     )
-    permission_group = models.ForeignKey(
+    permission_level = models.ForeignKey(
         "auth.Group",
         related_name="permission_requests",
         on_delete=models.PROTECT,
@@ -1260,7 +1260,7 @@ class TemporaryTeamGrant(models.Model):
     grant_id = models.AutoField(primary_key=True)
     user = models.ForeignKey(Users, on_delete=models.CASCADE)
     team = models.ForeignKey(Team, on_delete=models.CASCADE)
-    permission_group = models.ForeignKey(
+    permission_level = models.ForeignKey(
         "auth.Group",
         related_name="temporary_team_grants",
         on_delete=models.PROTECT,
@@ -1317,7 +1317,7 @@ class PermanentTeamGrant(models.Model):
     grant_id = models.AutoField(primary_key=True)
     user = models.ForeignKey(Users, on_delete=models.CASCADE, null=True, blank=True)
     team = models.ForeignKey(Team, on_delete=models.CASCADE)
-    permission_group = models.ForeignKey(
+    permission_level = models.ForeignKey(
         "auth.Group",
         related_name="permanent_team_grants",
         on_delete=models.PROTECT,

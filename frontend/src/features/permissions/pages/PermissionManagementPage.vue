@@ -22,14 +22,14 @@ import {
   createPermissionRequest,
   fetchPermissionGrants,
   fetchPermissionInstancesLookup,
-  fetchPermissionGroups,
+  fetchPermissionLevels,
   fetchPermissionRequestDetail,
   fetchPermissionRequests,
   fetchPermissionTeamsLookup,
   reviewPermissionRequest,
   revokePermissionGrant,
   type PaginatedResponse,
-  type PermissionGroupRecord,
+  type PermissionLevelRecord,
   type PermissionGrantRecord,
   type PermissionInstanceAccessLevel,
   type PermissionInstanceLookupRecord,
@@ -75,7 +75,7 @@ const isDetailDialogOpen = ref(false)
 
 const resourceGroups = ref<PermissionTeamLookupRecord[]>([])
 const instances = ref<PermissionInstanceLookupRecord[]>([])
-const permissionGroups = ref<PermissionGroupRecord[]>([])
+const permissionLevels = ref<PermissionLevelRecord[]>([])
 
 const requestsPage = ref<PaginatedResponse<PermissionRequestRecord>>({
   count: 0,
@@ -105,7 +105,7 @@ const createForm = reactive({
   subject_type: 'user' as PermissionRequestSubject,
   access_duration: 'temporary' as PermissionRequestDuration,
   team_id: '',
-  permission_group_id: '',
+  permission_level_id: '',
   instance_id: '',
   access_level: 'query' as PermissionInstanceAccessLevel,
   valid_date: defaultValidDate(7),
@@ -257,7 +257,7 @@ function resetCreateForm() {
   createForm.subject_type = 'user'
   createForm.access_duration = 'temporary'
   createForm.team_id = ''
-  createForm.permission_group_id = ''
+  createForm.permission_level_id = ''
   createForm.instance_id = ''
   createForm.access_level = 'query'
   createForm.valid_date = defaultValidDate(7)
@@ -355,14 +355,14 @@ async function loadLookups() {
   lookupsError.value = ''
 
   try {
-    const [resourceGroupRows, instanceRows, permissionGroupRows] = await Promise.all([
+    const [resourceGroupRows, instanceRows, permissionLevelRows] = await Promise.all([
       fetchPermissionTeamsLookup(requireToken()),
       fetchPermissionInstancesLookup(requireToken()),
-      fetchPermissionGroups(requireToken()),
+      fetchPermissionLevels(requireToken()),
     ])
     resourceGroups.value = resourceGroupRows
     instances.value = instanceRows
-    permissionGroups.value = permissionGroupRows
+    permissionLevels.value = permissionLevelRows
   } catch (errorValue) {
     lookupsError.value = toUserFacingMessage(errorValue, 'Failed to load request form options.')
   } finally {
@@ -518,8 +518,8 @@ async function submitRequest() {
     formError.value = 'Team membership requests must be for yourself.'
     return
   }
-  if (createForm.target_type === 'team' && !Number(createForm.permission_group_id)) {
-    formError.value = 'Choose a permission group.'
+  if (createForm.target_type === 'team' && !Number(createForm.permission_level_id)) {
+    formError.value = 'Choose a permission level.'
     return
   }
   if (createForm.access_duration === 'temporary' && !createForm.valid_date) {
@@ -550,9 +550,9 @@ async function submitRequest() {
         subject_type: createForm.subject_type,
         access_duration: createForm.access_duration,
         team_id: resourceGroupId,
-        permission_group_id:
+        permission_level_id:
           createForm.target_type === 'team'
-            ? Number(createForm.permission_group_id)
+            ? Number(createForm.permission_level_id)
             : undefined,
         instance_id: createForm.target_type === 'instance' ? instanceId : undefined,
         access_level: createForm.target_type === 'instance' ? createForm.access_level : undefined,
@@ -867,6 +867,9 @@ onMounted(async () => {
                     <span v-if="requestItem.access_level">
                       / {{ accessLevelLabel(requestItem.access_level) }}</span
                     >
+                    <span v-if="requestItem.permission_level_name">
+                      / {{ requestItem.permission_level_name }}</span
+                    >
                     <span>
                       /
                       {{
@@ -993,6 +996,13 @@ onMounted(async () => {
                       class="border-sky-200 bg-sky-50 text-sky-700"
                     >
                       {{ accessLevelLabel(grant.access_level) }}
+                    </Badge>
+                    <Badge
+                      v-if="grant.permission_level_name"
+                      variant="outline"
+                      class="border-sky-200 bg-sky-50 text-sky-700"
+                    >
+                      {{ grant.permission_level_name }}
                     </Badge>
                   </div>
                   <p class="text-sm text-slate-500">
@@ -1220,18 +1230,18 @@ onMounted(async () => {
           </div>
 
           <div v-if="createForm.target_type === 'team'" class="space-y-2">
-            <label class="text-sm font-medium text-slate-700" for="request-permission-group">
-              Permission group
+            <label class="text-sm font-medium text-slate-700" for="request-permission-level">
+              Permission level
             </label>
             <select
-              id="request-permission-group"
-              v-model="createForm.permission_group_id"
+              id="request-permission-level"
+              v-model="createForm.permission_level_id"
               :class="selectClass"
               :disabled="createSubmitting || lookupsLoading"
             >
-              <option value="">Select a permission group</option>
-              <option v-for="group in permissionGroups" :key="group.id" :value="`${group.id}`">
-                {{ group.name }}
+              <option value="">Select a permission level</option>
+              <option v-for="level in permissionLevels" :key="level.id" :value="`${level.id}`">
+                {{ level.name }}
               </option>
             </select>
           </div>
@@ -1384,8 +1394,13 @@ onMounted(async () => {
                   <p>{{ selectedRequestSummary.instance_name || 'Not applicable' }}</p>
                 </div>
                 <div>
-                  <p class="text-slate-400">Access level</p>
-                  <p>{{ accessLevelLabel(selectedRequestSummary.access_level) }}</p>
+                  <p class="text-slate-400">Permission</p>
+                  <p>
+                    {{
+                      selectedRequestSummary.permission_level_name
+                      || accessLevelLabel(selectedRequestSummary.access_level)
+                    }}
+                  </p>
                 </div>
                 <div>
                   <p class="text-slate-400">Valid until</p>

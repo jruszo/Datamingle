@@ -2,6 +2,8 @@ import type { FeatureModule } from '@/app/feature-contract'
 import SettingsInstanceTagDetailPage from '@/features/settings/pages/SettingsInstanceTagDetailPage.vue'
 import SettingsInstanceTagsPage from '@/features/settings/pages/SettingsInstanceTagsPage.vue'
 import SettingsLandingPage from '@/features/settings/pages/SettingsLandingPage.vue'
+import SettingsPermissionLevelDetailPage from '@/features/settings/pages/SettingsPermissionLevelDetailPage.vue'
+import SettingsPermissionLevelsPage from '@/features/settings/pages/SettingsPermissionLevelsPage.vue'
 import SettingsTeamDetailPage from '@/features/settings/pages/SettingsTeamDetailPage.vue'
 import SettingsTeamsPage from '@/features/settings/pages/SettingsTeamsPage.vue'
 import SettingsSystemPage from '@/features/settings/pages/SettingsSystemPage.vue'
@@ -18,9 +20,12 @@ const settingsModule: FeatureModule = {
     { path: '/settings/instance-tags/:tagId', name: 'settings-instance-tags-detail', component: SettingsInstanceTagDetailPage, meta: { title: 'Instance Tags', access: { anyPermissions: ['sql.menu_instance'] } } },
     { path: '/settings/users', name: 'settings-users', component: SettingsUsersPage, meta: { title: 'User Management', access: { requiresSuperuser: true } } },
     { path: '/settings/users/:userId', name: 'settings-users-detail', component: SettingsUserDetailPage, meta: { title: 'User Management', access: { requiresSuperuser: true } } },
-    { path: '/settings/teams', name: 'settings-teams', component: SettingsTeamsPage, meta: { title: 'Teams', access: { anyPermissions: ['sql.menu_system', 'sql.view_team', 'sql.team_owner'] } } },
+    { path: '/settings/permission-levels', name: 'settings-permission-levels', component: SettingsPermissionLevelsPage, meta: { title: 'Permission Levels', access: { requiresSuperuser: true } } },
+    { path: '/settings/permission-levels/new', name: 'settings-permission-levels-new', component: SettingsPermissionLevelDetailPage, meta: { title: 'Permission Levels', access: { requiresSuperuser: true } } },
+    { path: '/settings/permission-levels/:levelId', name: 'settings-permission-levels-detail', component: SettingsPermissionLevelDetailPage, meta: { title: 'Permission Levels', access: { requiresSuperuser: true } } },
+    { path: '/settings/teams', name: 'settings-teams', component: SettingsTeamsPage, meta: { title: 'Teams', access: { anyPermissions: ['sql.menu_system', 'sql.view_team', 'sql.change_team'] } } },
     { path: '/settings/teams/new', name: 'settings-teams-new', component: SettingsTeamDetailPage, meta: { title: 'Teams', access: { anyPermissions: ['sql.menu_system', 'sql.add_team'] } } },
-    { path: '/settings/teams/:teamId', name: 'settings-teams-detail', component: SettingsTeamDetailPage, meta: { title: 'Teams', access: { anyPermissions: ['sql.menu_system', 'sql.view_team', 'sql.team_owner'] } } },
+    { path: '/settings/teams/:teamId', name: 'settings-teams-detail', component: SettingsTeamDetailPage, meta: { title: 'Teams', access: { anyPermissions: ['sql.menu_system', 'sql.view_team', 'sql.change_team'] } } },
   ],
   navigation: [
     {
@@ -45,11 +50,18 @@ const settingsModule: FeatureModule = {
       access: { requiresSuperuser: true },
     },
     {
+      to: '/settings/permission-levels',
+      label: 'Permission Levels',
+      section: 'settings',
+      order: 40,
+      access: { requiresSuperuser: true },
+    },
+    {
       to: '/settings/teams',
       label: 'Teams',
       section: 'settings',
       order: 50,
-      access: { anyPermissions: ['sql.menu_system', 'sql.view_team', 'sql.team_owner'] },
+      access: { anyPermissions: ['sql.menu_system', 'sql.view_team', 'sql.change_team'] },
     },
   ],
 }
