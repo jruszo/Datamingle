@@ -7,15 +7,16 @@ urlpatterns = [
     path("v1/user/invitations/", views.WorkOSUserInvitation.as_view()),
     path("v1/me/", views.CurrentUser.as_view()),
     path("v1/user/<int:pk>/", views.UserDetail.as_view()),
-    path("v1/user/access-roles/", views.AccessRoleCatalog.as_view()),
+    path("v1/teams/permission-groups/", views.PermissionGroupCatalog.as_view()),
     path(
-        "v1/user/resourcegroup/users/lookup/",
-        views.ResourceGroupUserLookup.as_view(),
+        "v1/teams/users/lookup/",
+        views.TeamUserLookup.as_view(),
     ),
     path(
-        "v1/user/resourcegroup/instances/lookup/",
-        views.ResourceGroupInstanceLookup.as_view(),
+        "v1/teams/nodes/lookup/",
+        views.TeamNodeLookup.as_view(),
     ),
-    path("v1/user/resourcegroup/", views.ResourceGroupList.as_view()),
-    path("v1/user/resourcegroup/<int:pk>/", views.ResourceGroupDetail.as_view()),
+    path("v1/teams/services/lookup/", views.TeamServiceLookup.as_view()),
+    path("v1/teams/", views.TeamList.as_view()),
+    path("v1/teams/<int:pk>/", views.TeamDetail.as_view()),
 ]

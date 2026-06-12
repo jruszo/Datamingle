@@ -11,12 +11,11 @@ function buildUser(overrides: Partial<CurrentUserContext> = {}): CurrentUserCont
     email: 'tester@example.com',
     avatar_url: '',
     is_workos_managed: false,
-    is_directory_managed: false,
     is_superuser: false,
     is_staff: false,
     is_active: true,
     groups: [],
-    resource_groups: [],
+    teams: [],
     permissions: [],
     ...overrides,
   }
@@ -49,13 +48,13 @@ describe('access helpers', () => {
     expect(
       canAccessRequirement(user, {
         requiredPermissions: ['sql.menu_system'],
-        anyPermissions: ['auth.view_group', 'sql.view_resourcegroup'],
+        anyPermissions: ['auth.view_group', 'sql.view_team'],
       }),
     ).toBe(true)
 
     expect(
       canAccessRequirement(user, {
-        requiredPermissions: ['sql.menu_system', 'sql.view_resourcegroup'],
+        requiredPermissions: ['sql.menu_system', 'sql.view_team'],
       }),
     ).toBe(false)
   })

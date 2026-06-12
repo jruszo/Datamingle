@@ -322,39 +322,3 @@ class WorkOSAuthClient:
             inviter_user_id=inviter_user_id or None,
             role_slug=role_slug or None,
         )
-
-    def _paginate_directory_list(self, list_method, **params):
-        items = []
-        after = ""
-        while True:
-            request_params = {**params, "limit": 100, "order": "asc"}
-            if after:
-                request_params["after"] = after
-
-            response = list_method(**request_params)
-            page_items = _list_response_items(response)
-            items.extend(page_items)
-
-            next_after = _list_response_next_after(response, page_items)
-            if not next_after or next_after == after:
-                break
-            after = next_after
-        return items
-
-    def list_directory_users(self, directory_id):
-        return self._paginate_directory_list(
-            self.client.directory_sync.list_users,
-            directory_id=directory_id,
-        )
-
-    def list_directory_groups(self, directory_id):
-        return self._paginate_directory_list(
-            self.client.directory_sync.list_groups,
-            directory_id=directory_id,
-        )
-
-    def list_directory_groups_for_user(self, directory_user_id):
-        return self._paginate_directory_list(
-            self.client.directory_sync.list_groups,
-            user_id=directory_user_id,
-        )

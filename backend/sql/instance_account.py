@@ -13,7 +13,7 @@ from sql.utils.instance_management import (
 )
 from common.utils.extend_json_encoder import ExtendJSONEncoder
 from sql.engines import get_engine, ResultSet
-from sql.utils.resource_group import user_instances
+from sql.utils.team import user_instances
 from .models import Instance, InstanceAccount
 
 

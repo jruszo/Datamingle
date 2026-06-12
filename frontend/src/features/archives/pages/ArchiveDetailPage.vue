@@ -429,7 +429,7 @@ onMounted(async () => {
               <p class="mt-2 text-sm font-medium text-slate-900">
                 {{ archiveDetail.user_display || archiveDetail.user_name }}
               </p>
-              <p class="text-sm text-slate-500">{{ archiveDetail.resource_group.group_name }}</p>
+              <p class="text-sm text-slate-500">{{ archiveDetail.team.team_name }}</p>
             </div>
             <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <p class="text-xs uppercase tracking-wide text-slate-500">Next run</p>
@@ -507,11 +507,11 @@ onMounted(async () => {
                       <div class="mt-3 flex flex-wrap gap-2">
                         <Badge
                           v-for="node in archiveDetail.review_info"
-                          :key="`${archiveDetail.id}-${node.group_name}-${node.is_current_node}`"
+                          :key="`${archiveDetail.id}-${node.team_name}-${node.is_current_node}`"
                           variant="outline"
                           :class="node.is_current_node ? 'border-amber-200 bg-amber-50 text-amber-700' : node.is_passed_node ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-700'"
                         >
-                          {{ node.group_name }}
+                          {{ node.team_name }}
                         </Badge>
                       </div>
                     </div>

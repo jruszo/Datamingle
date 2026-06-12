@@ -23,36 +23,38 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import {
-  createResourceGroup,
-  deleteResourceGroup,
-  fetchAccessRoles,
-  fetchResourceGroup,
-  fetchResourceGroupInstances,
-  fetchResourceGroupUsers,
-  updateResourceGroup,
-  type AccessRoleRecord,
-  type ResourceAccessRoleCode,
-  type ResourceGroupInstanceLookupRecord,
-  type ResourceGroupMembershipSource,
-  type ResourceGroupUpsertPayload,
-  type ResourceGroupUserLookupRecord,
+  createTeam,
+  deleteTeam,
+  fetchPermissionGroups,
+  fetchTeam,
+  fetchTeamInstances,
+  fetchTeamNodes,
+  fetchTeamUsers,
+  updateTeam,
+  type PermissionGroupRecord,
+  type TeamPermissionGroupCode,
+  type TeamInstanceLookupRecord,
+  type TeamNodeLookupRecord,
+  type TeamUpsertPayload,
+  type TeamUserLookupRecord,
 } from '../api'
 import { useAuthStore } from '@/stores/auth'
 
 type UserAccessState = {
-  access_role: ResourceAccessRoleCode | ''
-  membership_source?: ResourceGroupMembershipSource
+  permission_group_id: TeamPermissionGroupCode | ''
 }
 
 const authStore = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 
-const accessRoles = ref<AccessRoleRecord[]>([])
-const users = ref<ResourceGroupUserLookupRecord[]>([])
-const instances = ref<ResourceGroupInstanceLookupRecord[]>([])
+const accessRoles = ref<PermissionGroupRecord[]>([])
+const users = ref<TeamUserLookupRecord[]>([])
+const instances = ref<TeamInstanceLookupRecord[]>([])
+const nodes = ref<TeamNodeLookupRecord[]>([])
 const userAccessById = ref<Record<number, UserAccessState>>({})
 const selectedInstanceIds = ref<number[]>([])
+const selectedNodeIds = ref<number[]>([])
 const groupName = ref('')
 
 const userFilter = ref('')
@@ -70,12 +72,12 @@ const pageError = ref('')
 const formError = ref('')
 const formSuccess = ref('')
 
-const isCreateMode = computed(() => route.name === 'settings-resource-groups-new')
+const isCreateMode = computed(() => route.name === 'settings-teams-new')
 const groupId = computed(() => {
   if (isCreateMode.value) {
     return null
   }
-  const value = Number(route.params.groupId)
+  const value = Number(route.params.teamId)
   return Number.isFinite(value) ? value : null
 })
 
@@ -86,32 +88,32 @@ function hasPermission(permission: string) {
   return authStore.currentUser?.permissions?.includes(permission) ?? false
 }
 
-const canViewResourceGroups = computed(
+const canViewTeams = computed(
   () =>
     hasPermission('sql.menu_system')
-    || hasPermission('sql.view_resourcegroup')
-    || hasPermission('sql.resource_group_owner'),
+    || hasPermission('sql.view_team')
+    || hasPermission('sql.team_owner'),
 )
-const canCreateResourceGroups = computed(
-  () => hasPermission('sql.menu_system') || hasPermission('sql.add_resourcegroup'),
+const canCreateTeams = computed(
+  () => hasPermission('sql.menu_system') || hasPermission('sql.add_team'),
 )
-const canEditResourceGroups = computed(
+const canEditTeams = computed(
   () =>
     hasPermission('sql.menu_system')
-    || hasPermission('sql.change_resourcegroup')
-    || hasPermission('sql.resource_group_owner'),
+    || hasPermission('sql.change_team')
+    || hasPermission('sql.team_owner'),
 )
-const canDeleteResourceGroups = computed(
-  () => hasPermission('sql.menu_system') || hasPermission('sql.delete_resourcegroup'),
+const canDeleteTeams = computed(
+  () => hasPermission('sql.menu_system') || hasPermission('sql.delete_team'),
 )
-const canSave = computed(() => (isCreateMode.value ? canCreateResourceGroups.value : canEditResourceGroups.value))
+const canSave = computed(() => (isCreateMode.value ? canCreateTeams.value : canEditTeams.value))
 
 const selectedInstanceSet = computed(() => new Set(selectedInstanceIds.value))
 const normalizedUserFilter = computed(() => userFilter.value.trim().toLowerCase())
 const normalizedAvailableInstanceFilter = computed(() => availableInstanceFilter.value.trim().toLowerCase())
 const normalizedSelectedInstanceFilter = computed(() => selectedInstanceFilter.value.trim().toLowerCase())
 const assignedUserCount = computed(
-  () => Object.values(userAccessById.value).filter((row) => row.access_role).length,
+  () => Object.values(userAccessById.value).filter((row) => row.permission_group_id).length,
 )
 
 function toUserFacingMessage(errorValue: unknown, fallback: string) {
@@ -135,15 +137,19 @@ function requireToken() {
   return authStore.accessToken
 }
 
-function userLabel(user: ResourceGroupUserLookupRecord) {
+function userLabel(user: TeamUserLookupRecord) {
   return user.label || user.display || user.username
 }
 
-function serverLabel(instance: ResourceGroupInstanceLookupRecord) {
+function serverLabel(instance: TeamInstanceLookupRecord) {
   return instance.label || `${instance.instance_name} | ${instance.db_type} | ${instance.host}`
 }
 
-function sortUsers(values: ResourceGroupUserLookupRecord[]) {
+function nodeLabel(node: TeamNodeLookupRecord) {
+  return node.label || `${node.name} | ${node.address}`
+}
+
+function sortUsers(values: TeamUserLookupRecord[]) {
   return [...values].sort((left, right) =>
     userLabel(left).localeCompare(userLabel(right), undefined, {
       sensitivity: 'base',
@@ -152,7 +158,7 @@ function sortUsers(values: ResourceGroupUserLookupRecord[]) {
   )
 }
 
-function sortInstances(values: ResourceGroupInstanceLookupRecord[]) {
+function sortInstances(values: TeamInstanceLookupRecord[]) {
   return [...values].sort((left, right) =>
     serverLabel(left).localeCompare(serverLabel(right), undefined, {
       sensitivity: 'base',
@@ -161,7 +167,7 @@ function sortInstances(values: ResourceGroupInstanceLookupRecord[]) {
   )
 }
 
-function userMatches(user: ResourceGroupUserLookupRecord, filterValue: string) {
+function userMatches(user: TeamUserLookupRecord, filterValue: string) {
   if (!filterValue) {
     return true
   }
@@ -170,7 +176,7 @@ function userMatches(user: ResourceGroupUserLookupRecord, filterValue: string) {
   return haystack.includes(filterValue)
 }
 
-function instanceMatches(instance: ResourceGroupInstanceLookupRecord, filterValue: string) {
+function instanceMatches(instance: TeamInstanceLookupRecord, filterValue: string) {
   if (!filterValue) {
     return true
   }
@@ -205,32 +211,24 @@ function sortNumeric(values: number[]) {
   return [...new Set(values)].sort((left, right) => left - right)
 }
 
-function isAccessRoleCode(value: string): value is ResourceAccessRoleCode {
-  return accessRoles.value.some((role) => role.code === value)
+function permissionGroupId(value: string | number | '') {
+  const groupId = Number(value)
+  return accessRoles.value.some((role) => role.id === groupId) ? groupId : null
 }
 
 function roleForUser(userId: number) {
-  return userAccessById.value[userId]?.access_role ?? ''
-}
-
-function sourceForUser(userId: number) {
-  return userAccessById.value[userId]?.membership_source
+  return userAccessById.value[userId]?.permission_group_id ?? ''
 }
 
 function updateUserRole(userId: number, event: Event) {
   const value = (event.target as HTMLSelectElement).value
-  if (sourceForUser(userId) === 'workos_directory') {
-    return
-  }
+  const groupId = permissionGroupId(value)
 
   const nextAccess = { ...userAccessById.value }
   if (!value) {
     delete nextAccess[userId]
-  } else if (isAccessRoleCode(value)) {
-    nextAccess[userId] = {
-      access_role: value,
-      membership_source: nextAccess[userId]?.membership_source ?? 'datamingle',
-    }
+  } else if (groupId !== null) {
+    nextAccess[userId] = { permission_group_id: groupId }
   }
   userAccessById.value = nextAccess
   formSuccess.value = ''
@@ -240,11 +238,11 @@ function userAccessRows() {
   return Object.entries(userAccessById.value)
     .map(([userId, row]) => ({
       user_id: Number(userId),
-      access_role: row.access_role,
+      permission_group_id: row.permission_group_id,
     }))
     .filter(
-      (row): row is { user_id: number; access_role: ResourceAccessRoleCode } =>
-        Number.isFinite(row.user_id) && isAccessRoleCode(row.access_role),
+      (row): row is { user_id: number; permission_group_id: TeamPermissionGroupCode } =>
+        Number.isFinite(row.user_id) && permissionGroupId(row.permission_group_id) !== null,
     )
     .sort((left, right) => left.user_id - right.user_id)
 }
@@ -302,6 +300,13 @@ function updateInstanceSelection(event: Event, target: 'available-instances' | '
   selectedInstanceSelection.value = values
 }
 
+function updateNodeSelection(event: Event) {
+  selectedNodeIds.value = Array.from((event.target as HTMLSelectElement).selectedOptions)
+    .map((option) => Number(option.value))
+    .filter((value) => Number.isFinite(value))
+  formSuccess.value = ''
+}
+
 async function loadPage() {
   isLoading.value = true
   pageNotice.value = ''
@@ -311,29 +316,32 @@ async function loadPage() {
   groupName.value = ''
   userAccessById.value = {}
   selectedInstanceIds.value = []
+  selectedNodeIds.value = []
   availableInstanceSelection.value = []
   selectedInstanceSelection.value = []
 
   try {
     await authStore.loadCurrentUser()
 
-    if (isCreateMode.value && route.query.reason === 'inventory-requires-resource-group') {
-      pageNotice.value = 'A resource group is required before you can add an instance.'
+    if (isCreateMode.value && route.query.reason === 'inventory-requires-team') {
+      pageNotice.value = 'A team is required before you can add an instance.'
     }
 
-    if (!canViewResourceGroups.value && !canCreateResourceGroups.value && !canEditResourceGroups.value) {
-      pageError.value = 'You do not have permission to access Datamingle resource group management.'
+    if (!canViewTeams.value && !canCreateTeams.value && !canEditTeams.value) {
+      pageError.value = 'You do not have permission to access Datamingle team management.'
       return
     }
 
-    const [roles, userLookup, instanceLookup] = await Promise.all([
-      fetchAccessRoles(requireToken()),
-      fetchResourceGroupUsers(requireToken()),
-      fetchResourceGroupInstances(requireToken()),
+    const [roles, userLookup, nodeLookup, instanceLookup] = await Promise.all([
+      fetchPermissionGroups(requireToken()),
+      fetchTeamUsers(requireToken()),
+      fetchTeamNodes(requireToken()),
+      fetchTeamInstances(requireToken()),
     ])
 
     accessRoles.value = roles
     users.value = userLookup
+    nodes.value = nodeLookup
     instances.value = instanceLookup
 
     if (isCreateMode.value) {
@@ -341,37 +349,37 @@ async function loadPage() {
     }
 
     if (!groupId.value) {
-      pageError.value = 'Invalid resource group identifier.'
+      pageError.value = 'Invalid team identifier.'
       return
     }
 
-    const resourceGroup = await fetchResourceGroup(groupId.value, requireToken())
-    groupName.value = resourceGroup.group_name
-    selectedInstanceIds.value = sortNumeric(resourceGroup.instance_ids)
+    const resourceGroup = await fetchTeam(groupId.value, requireToken())
+    groupName.value = resourceGroup.team_name
+    selectedNodeIds.value = sortNumeric(resourceGroup.node_ids)
+    selectedInstanceIds.value = sortNumeric(resourceGroup.service_ids)
     const nextAccess: Record<number, UserAccessState> = {}
     for (const row of resourceGroup.user_access ?? []) {
       nextAccess[row.user_id] = {
-        access_role: row.access_role,
-        membership_source: row.membership_source ?? 'datamingle',
+        permission_group_id: row.permission_group_id,
       }
     }
     userAccessById.value = nextAccess
   } catch (errorValue) {
-    pageError.value = toUserFacingMessage(errorValue, 'Failed to load the resource group editor.')
+    pageError.value = toUserFacingMessage(errorValue, 'Failed to load the team editor.')
   } finally {
     isLoading.value = false
   }
 }
 
-async function saveResourceGroup() {
+async function saveTeam() {
   if (!canSave.value) {
-    formError.value = 'You do not have permission to save this resource group.'
+    formError.value = 'You do not have permission to save this team.'
     return
   }
 
   const trimmedName = groupName.value.trim()
   if (!trimmedName) {
-    formError.value = 'Group name cannot be blank.'
+    formError.value = 'Team name cannot be blank.'
     return
   }
 
@@ -380,53 +388,54 @@ async function saveResourceGroup() {
   formSuccess.value = ''
 
   try {
-    const payload: ResourceGroupUpsertPayload = {
-      group_name: trimmedName,
+    const payload: TeamUpsertPayload = {
+      team_name: trimmedName,
       user_access: userAccessRows(),
-      instance_ids: sortNumeric(selectedInstanceIds.value),
+      node_ids: sortNumeric(selectedNodeIds.value),
+      service_ids: sortNumeric(selectedInstanceIds.value),
     }
 
     if (isCreateMode.value) {
-      const createdGroup = await createResourceGroup(payload, requireToken())
-      formSuccess.value = 'Resource group created successfully.'
-      await router.replace(`/settings/resource-groups/${createdGroup.group_id}`)
+      const createdGroup = await createTeam(payload, requireToken())
+      formSuccess.value = 'Team created successfully.'
+      await router.replace(`/settings/teams/${createdGroup.team_id}`)
       return
     }
 
     if (!groupId.value) {
-      throw new Error('Missing resource group identifier.')
+      throw new Error('Missing team identifier.')
     }
 
-    const updatedGroup = await updateResourceGroup(groupId.value, payload, requireToken())
-    groupName.value = updatedGroup.group_name
-    selectedInstanceIds.value = sortNumeric(updatedGroup.instance_ids)
+    const updatedGroup = await updateTeam(groupId.value, payload, requireToken())
+    groupName.value = updatedGroup.team_name
+    selectedNodeIds.value = sortNumeric(updatedGroup.node_ids)
+    selectedInstanceIds.value = sortNumeric(updatedGroup.service_ids)
     const nextAccess: Record<number, UserAccessState> = {}
     for (const row of updatedGroup.user_access ?? []) {
       nextAccess[row.user_id] = {
-        access_role: row.access_role,
-        membership_source: row.membership_source ?? 'datamingle',
+        permission_group_id: row.permission_group_id,
       }
     }
     userAccessById.value = nextAccess
-    formSuccess.value = 'Resource group updated successfully.'
+    formSuccess.value = 'Team updated successfully.'
   } catch (errorValue) {
-    formError.value = toUserFacingMessage(errorValue, 'Failed to save the resource group.')
+    formError.value = toUserFacingMessage(errorValue, 'Failed to save the team.')
   } finally {
     isSaving.value = false
   }
 }
 
-async function removeResourceGroup() {
+async function removeTeam() {
   if (isCreateMode.value || !groupId.value) {
     return
   }
 
-  if (!canDeleteResourceGroups.value) {
-    formError.value = 'You do not have permission to delete this resource group.'
+  if (!canDeleteTeams.value) {
+    formError.value = 'You do not have permission to delete this team.'
     return
   }
 
-  if (!window.confirm(`Delete the "${groupName.value}" resource group from Datamingle?`)) {
+  if (!window.confirm(`Delete the "${groupName.value}" team from Datamingle?`)) {
     return
   }
 
@@ -435,10 +444,10 @@ async function removeResourceGroup() {
   formSuccess.value = ''
 
   try {
-    await deleteResourceGroup(groupId.value, requireToken())
-    await router.push('/settings/resource-groups')
+    await deleteTeam(groupId.value, requireToken())
+    await router.push('/settings/teams')
   } catch (errorValue) {
-    formError.value = toUserFacingMessage(errorValue, 'Failed to delete the resource group.')
+    formError.value = toUserFacingMessage(errorValue, 'Failed to delete the team.')
   } finally {
     isDeleting.value = false
   }
@@ -462,23 +471,23 @@ watch(
   <section class="grid gap-6">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <Button as-child variant="ghost">
-        <RouterLink to="/settings/resource-groups">
+        <RouterLink to="/settings/teams">
           <ArrowLeft class="h-4 w-4" />
-          Back to resource groups
+          Back to teams
         </RouterLink>
       </Button>
     </div>
 
     <Card class="border-slate-200">
       <CardHeader>
-        <CardTitle>{{ isCreateMode ? 'Create Resource Group' : 'Edit Resource Group' }}</CardTitle>
+        <CardTitle>{{ isCreateMode ? 'Create Team' : 'Edit Team' }}</CardTitle>
         <CardDescription>Manage scoped resource access and server membership.</CardDescription>
       </CardHeader>
       <CardContent class="space-y-6">
         <div class="space-y-2">
-          <label for="resource-group-name" class="text-sm font-medium text-slate-900">Name</label>
+          <label for="team-name" class="text-sm font-medium text-slate-900">Name</label>
           <Input
-            id="resource-group-name"
+            id="team-name"
             v-model="groupName"
             :disabled="!canSave || isLoading"
             placeholder="e.g. production"
@@ -531,8 +540,7 @@ watch(
               <thead class="bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
                 <tr>
                   <th class="px-4 py-3">User</th>
-                  <th class="px-4 py-3">Access role</th>
-                  <th class="px-4 py-3">Source</th>
+                  <th class="px-4 py-3">Permission group</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-200 bg-white">
@@ -545,31 +553,18 @@ watch(
                     <select
                       class="w-full min-w-52 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                       :value="roleForUser(user.id)"
-                      :disabled="!canSave || sourceForUser(user.id) === 'workos_directory'"
+                      :disabled="!canSave"
                       @change="updateUserRole(user.id, $event)"
                     >
                       <option value="">No access</option>
-                      <option v-for="role in accessRoles" :key="role.code" :value="role.code">
-                        {{ role.label }}
+                      <option v-for="role in accessRoles" :key="role.id" :value="role.id">
+                        {{ role.name }}
                       </option>
                     </select>
                   </td>
-                  <td class="px-4 py-3">
-                    <Badge
-                      v-if="sourceForUser(user.id) === 'workos_directory'"
-                      variant="secondary"
-                      class="bg-violet-100 text-violet-800"
-                    >
-                      WorkOS Directory
-                    </Badge>
-                    <span v-else-if="roleForUser(user.id)" class="text-xs text-slate-500">
-                      Datamingle
-                    </span>
-                    <span v-else class="text-xs text-slate-400">None</span>
-                  </td>
                 </tr>
                 <tr v-if="filteredUsers.length === 0">
-                  <td colspan="3" class="px-4 py-8 text-center text-sm text-slate-500">
+                  <td colspan="2" class="px-4 py-8 text-center text-sm text-slate-500">
                     No users match the current filter.
                   </td>
                 </tr>
@@ -579,9 +574,33 @@ watch(
         </div>
 
         <div class="space-y-4 rounded-lg border border-slate-200 p-5">
+          <div>
+            <h3 class="text-base font-semibold text-slate-900">Nodes</h3>
+            <p class="mt-1 text-sm text-slate-500">
+              Select every infrastructure node that belongs to this team.
+            </p>
+          </div>
+          <select
+            class="min-h-48 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            multiple
+            :disabled="!canSave"
+            @change="updateNodeSelection"
+          >
+            <option
+              v-for="node in nodes"
+              :key="node.id"
+              :value="node.id"
+              :selected="selectedNodeIds.includes(node.id)"
+            >
+              {{ nodeLabel(node) }}
+            </option>
+          </select>
+        </div>
+
+        <div class="space-y-4 rounded-lg border border-slate-200 p-5">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h3 class="text-base font-semibold text-slate-900">Servers</h3>
+              <h3 class="text-base font-semibold text-slate-900">Services</h3>
             </div>
             <div class="flex flex-wrap items-center gap-2">
               <Badge variant="secondary" class="bg-slate-100 text-slate-700">
@@ -673,8 +692,8 @@ watch(
         <Button
           v-if="!isCreateMode"
           variant="destructive"
-          :disabled="isDeleting || !canDeleteResourceGroups"
-          @click="removeResourceGroup"
+          :disabled="isDeleting || !canDeleteTeams"
+          @click="removeTeam"
         >
           <Trash2 class="h-4 w-4" />
           Delete
@@ -682,9 +701,9 @@ watch(
         <span v-else />
         <div class="flex flex-wrap justify-end gap-3">
           <Button as-child variant="outline">
-            <RouterLink to="/settings/resource-groups">Cancel</RouterLink>
+            <RouterLink to="/settings/teams">Cancel</RouterLink>
           </Button>
-          <Button :disabled="isLoading || isSaving || !canSave" @click="saveResourceGroup">
+          <Button :disabled="isLoading || isSaving || !canSave" @click="saveTeam">
             <Save class="h-4 w-4" />
             Save
           </Button>

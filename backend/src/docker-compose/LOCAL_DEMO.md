@@ -7,7 +7,7 @@ The local dev compose environment can seed a manual-testing setup for workflow U
 - Demo infrastructure services:
   - `datamingle-mysql-demo` on `localhost:3307`
   - `datamingle-postgres-demo` on `localhost:5433`
-- Auth groups, resource groups, workflow approval settings, instance tags, and inventory instances
+- Auth groups, teams, workflow approval settings, instance tags, and inventory instances
 - Demo database content for MySQL and PostgreSQL
 
 ## Triggering the seed
@@ -46,7 +46,7 @@ Manual testing should sign in through WorkOS. A WorkOS user with the built-in
 Admin role (`admin`) is refreshed into local Datamingle superuser access on
 every login.
 
-## Demo resource groups and approval chains
+## Demo teams and approval chains
 
 - `Demo Workflow Single Stage`
   - Approval chain: `DBA`
@@ -66,7 +66,7 @@ every login.
   - Port: `5432`
   - Visible databases: `workflow_pg`, `analytics_pg`
 
-Both instances are tagged with `can_read` and `can_write` and are associated with both demo resource groups for manual workflow/UI testing.
+Both instances are tagged with `can_read` and `can_write` and are associated with both demo teams for manual workflow/UI testing.
 
 ## Demo database credentials
 
@@ -90,8 +90,8 @@ docker exec -w /opt/datamingle/backend datamingle-app python manage.py smoke_loc
 This command verifies:
 
 - legacy seeded users have been removed
-- seeded resource groups/instances exist
-- approval preview works for both demo resource groups
+- seeded teams/instances exist
+- approval preview works for both demo teams
 - demo instances are reachable and expose the expected database names
 
 ## Resetting the demo databases

@@ -23,14 +23,14 @@ from sql.archiver import (
 )
 from sql.models import (
     Instance,
-    ResourceGroup,
+    Team,
     ArchiveConfig,
 )
 
 
 class ArchiveExecutionHelpersTest(TestCase):
     def setUp(self):
-        self.resource_group = ResourceGroup.objects.create(group_name="Archive Helpers")
+        self.team = Team.objects.create(team_name="Archive Helpers")
         self.instance = Instance.objects.create(
             instance_name="archive-helper-mysql",
             type="master",
@@ -42,7 +42,7 @@ class ArchiveExecutionHelpersTest(TestCase):
         )
         self.archive = ArchiveConfig.objects.create(
             title="Helper archive",
-            resource_group=self.resource_group,
+            team=self.team,
             audit_auth_groups="",
             src_instance=self.instance,
             src_db_name="demo_orders",

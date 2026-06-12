@@ -1,3 +1,5 @@
+import re
+
 from django.db import transaction
 from rest_framework import serializers
 
@@ -9,13 +11,56 @@ from sql.models import (
     InfrastructureNode,
     Instance,
     InstanceTag,
-    ResourceGroup,
+    Team,
     ServiceRecommendation,
     normalize_service_monitoring_collectors,
     service_exporter_collectors_for_engine,
 )
 
 NODE_EXPORTER_COLLECTOR_SET = set(DEFAULT_NODE_EXPORTER_COLLECTORS)
+MONITORING_LABEL_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+MAX_MONITORING_LABELS = 32
+MAX_MONITORING_LABEL_NAME_LENGTH = 64
+MAX_MONITORING_LABEL_VALUE_LENGTH = 256
+
+
+def normalize_monitoring_labels(value):
+    if value in (None, ""):
+        return {}
+    if not isinstance(value, dict):
+        raise serializers.ValidationError("Monitoring labels must be an object.")
+    if len(value) > MAX_MONITORING_LABELS:
+        raise serializers.ValidationError(
+            f"At most {MAX_MONITORING_LABELS} monitoring labels are allowed."
+        )
+
+    normalized = {}
+    for raw_name, raw_value in value.items():
+        name = str(raw_name).strip()
+        if not isinstance(raw_value, str):
+            raise serializers.ValidationError(
+                f'Monitoring label "{name}" requires a string value.'
+            )
+        label_value = raw_value.strip()
+        if (
+            not name
+            or len(name) > MAX_MONITORING_LABEL_NAME_LENGTH
+            or not MONITORING_LABEL_NAME_RE.fullmatch(name)
+        ):
+            raise serializers.ValidationError(
+                f'"{name}" is not a valid monitoring label name.'
+            )
+        if not label_value:
+            raise serializers.ValidationError(
+                f'Monitoring label "{name}" requires a value.'
+            )
+        if len(label_value) > MAX_MONITORING_LABEL_VALUE_LENGTH:
+            raise serializers.ValidationError(
+                f'Monitoring label "{name}" must be '
+                f"{MAX_MONITORING_LABEL_VALUE_LENGTH} characters or fewer."
+            )
+        normalized[name] = label_value
+    return normalized
 
 
 def normalize_node_exporter_collectors(value):
@@ -67,16 +112,17 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
     service_name = serializers.CharField(source="instance_name", read_only=True)
     role = serializers.CharField(source="type", read_only=True)
     engine = serializers.CharField(source="db_type", read_only=True)
-    resource_group_ids = serializers.SerializerMethodField()
+    team_ids = serializers.SerializerMethodField()
     service_tag_ids = serializers.SerializerMethodField()
     monitoring_collectors = serializers.SerializerMethodField()
+    effective_monitoring_labels = serializers.SerializerMethodField()
     inventory_last_refresh_at = serializers.DateTimeField(
         source="inventory_last_success_at", read_only=True
     )
 
-    def get_resource_group_ids(self, obj):
+    def get_team_ids(self, obj):
         return list(
-            obj.resource_group.values_list("group_id", flat=True).order_by("group_id")
+            obj.resource_group.values_list("team_id", flat=True).order_by("team_id")
         )
 
     def get_service_tag_ids(self, obj):
@@ -86,6 +132,11 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
         return normalize_service_monitoring_collectors(
             obj.db_type, obj.monitoring_collectors
         )
+
+    def get_effective_monitoring_labels(self, obj):
+        labels = dict(obj.node.monitoring_labels or {}) if obj.node_id else {}
+        labels.update(obj.monitoring_labels or {})
+        return labels
 
     class Meta:
         model = Instance
@@ -100,13 +151,15 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
             "user",
             "monitoring_enabled",
             "monitoring_collectors",
+            "monitoring_labels",
+            "effective_monitoring_labels",
             "is_ssl",
             "verify_ssl",
             "db_name",
             "show_db_name_regex",
             "denied_db_name_regex",
             "charset",
-            "resource_group_ids",
+            "team_ids",
             "service_tag_ids",
             "inventory_status",
             "inventory_detected_hostname",
@@ -137,7 +190,7 @@ class ServiceRecommendationSerializer(serializers.ModelSerializer):
 
 
 class InfrastructureNodeSerializer(serializers.ModelSerializer):
-    resource_group_ids = serializers.SerializerMethodField()
+    team_ids = serializers.SerializerMethodField()
     agent = serializers.SerializerMethodField()
     agent_id = serializers.SerializerMethodField()
     agent_status = serializers.SerializerMethodField()
@@ -146,9 +199,9 @@ class InfrastructureNodeSerializer(serializers.ModelSerializer):
     services = serializers.SerializerMethodField()
     recommendations = serializers.SerializerMethodField()
 
-    def get_resource_group_ids(self, obj):
+    def get_team_ids(self, obj):
         return list(
-            obj.resource_group.values_list("group_id", flat=True).order_by("group_id")
+            obj.resource_group.values_list("team_id", flat=True).order_by("team_id")
         )
 
     def get_agent_id(self, obj):
@@ -223,7 +276,8 @@ class InfrastructureNodeSerializer(serializers.ModelSerializer):
             "metadata",
             "monitoring_enabled",
             "monitoring_collectors",
-            "resource_group_ids",
+            "monitoring_labels",
+            "team_ids",
             "agent",
             "agent_id",
             "agent_status",
@@ -237,9 +291,9 @@ class InfrastructureNodeSerializer(serializers.ModelSerializer):
 
 
 class InfrastructureNodeWriteSerializer(serializers.ModelSerializer):
-    resource_group_ids = serializers.PrimaryKeyRelatedField(
+    team_ids = serializers.PrimaryKeyRelatedField(
         source="resource_group",
-        queryset=ResourceGroup.objects.filter(is_deleted=0),
+        queryset=Team.objects.filter(is_deleted=0),
         many=True,
         required=False,
     )
@@ -260,23 +314,27 @@ class InfrastructureNodeWriteSerializer(serializers.ModelSerializer):
     def validate_monitoring_collectors(self, value):
         return normalize_node_exporter_collectors(value)
 
+    def validate_monitoring_labels(self, value):
+        return normalize_monitoring_labels(value)
+
     def create(self, validated_data):
-        resource_groups = validated_data.pop("resource_group", [])
+        teams = validated_data.pop("resource_group", [])
         with transaction.atomic():
             node = InfrastructureNode.objects.create(**validated_data)
-            node.resource_group.set(resource_groups)
+            node.resource_group.set(teams)
         return node
 
     def update(self, instance, validated_data):
-        resource_groups = validated_data.pop("resource_group", None)
+        teams = validated_data.pop("resource_group", None)
         previous_monitoring_enabled = instance.monitoring_enabled
         previous_monitoring_collectors = list(instance.monitoring_collectors or [])
+        previous_monitoring_labels = dict(instance.monitoring_labels or {})
         with transaction.atomic():
             for field, value in validated_data.items():
                 setattr(instance, field, value)
             instance.save()
-            if resource_groups is not None:
-                instance.resource_group.set(resource_groups)
+            if teams is not None:
+                instance.resource_group.set(teams)
             monitoring_changed = (
                 "monitoring_enabled" in validated_data
                 and previous_monitoring_enabled != instance.monitoring_enabled
@@ -286,7 +344,11 @@ class InfrastructureNodeWriteSerializer(serializers.ModelSerializer):
                 and previous_monitoring_collectors
                 != list(instance.monitoring_collectors or [])
             )
-            if monitoring_changed or collectors_changed:
+            labels_changed = (
+                "monitoring_labels" in validated_data
+                and previous_monitoring_labels != dict(instance.monitoring_labels or {})
+            )
+            if monitoring_changed or collectors_changed or labels_changed:
                 notify_node_config_changed(
                     instance,
                     summary={
@@ -294,6 +356,7 @@ class InfrastructureNodeWriteSerializer(serializers.ModelSerializer):
                         "node_id": instance.id,
                         "monitoring_enabled": instance.monitoring_enabled,
                         "monitoring_collectors": instance.monitoring_collectors,
+                        "monitoring_labels": instance.monitoring_labels,
                     },
                     reason="node.monitoring_changed",
                 )
@@ -308,7 +371,8 @@ class InfrastructureNodeWriteSerializer(serializers.ModelSerializer):
             "metadata",
             "monitoring_enabled",
             "monitoring_collectors",
-            "resource_group_ids",
+            "monitoring_labels",
+            "team_ids",
         )
 
 
@@ -325,9 +389,9 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
         source="db_type",
         choices=(("mysql", "MySQL"), ("pgsql", "PostgreSQL")),
     )
-    resource_group_ids = serializers.PrimaryKeyRelatedField(
+    team_ids = serializers.PrimaryKeyRelatedField(
         source="resource_group",
-        queryset=ResourceGroup.objects.filter(is_deleted=0),
+        queryset=Team.objects.filter(is_deleted=0),
         many=True,
         required=False,
     )
@@ -379,6 +443,9 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
     def validate_charset(self, value):
         return value.strip()
 
+    def validate_monitoring_labels(self, value):
+        return normalize_monitoring_labels(value)
+
     def validate(self, attrs):
         attrs = super().validate(attrs)
         engine = attrs.get("db_type") or getattr(self.instance, "db_type", "")
@@ -415,12 +482,12 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        resource_groups = validated_data.pop("resource_group", [])
+        teams = validated_data.pop("resource_group", [])
         instance_tags = validated_data.pop("instance_tag", [])
         recommendation = validated_data.pop("recommendation", None)
         with transaction.atomic():
             instance = Instance.objects.create(**validated_data)
-            instance.resource_group.set(resource_groups)
+            instance.resource_group.set(teams)
             instance.instance_tag.set(instance_tags)
             if recommendation is not None:
                 recommendation.status = ServiceRecommendation.STATUS_ACCEPTED
@@ -428,7 +495,7 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
         return instance
 
     def update(self, instance, validated_data):
-        resource_groups = validated_data.pop("resource_group", None)
+        teams = validated_data.pop("resource_group", None)
         instance_tags = validated_data.pop("instance_tag", None)
         recommendation = validated_data.pop("recommendation", None)
         password = validated_data.pop("password", None)
@@ -438,8 +505,8 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
             if password not in (None, ""):
                 instance.password = password
             instance.save()
-            if resource_groups is not None:
-                instance.resource_group.set(resource_groups)
+            if teams is not None:
+                instance.resource_group.set(teams)
             if instance_tags is not None:
                 instance.instance_tag.set(instance_tags)
             if recommendation is not None:
@@ -460,13 +527,14 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
             "password",
             "monitoring_enabled",
             "monitoring_collectors",
+            "monitoring_labels",
             "is_ssl",
             "verify_ssl",
             "db_name",
             "show_db_name_regex",
             "denied_db_name_regex",
             "charset",
-            "resource_group_ids",
+            "team_ids",
             "service_tag_ids",
             "recommendation_id",
         )

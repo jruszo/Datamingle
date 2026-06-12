@@ -38,17 +38,16 @@ from sql.models import (
     ArchiveConfig,
     ArchiveLog,
     Instance,
-    ResourceAccessRole,
-    ResourceGroup,
+    Team,
     WorkflowLog,
 )
 from sql.notify import notify_for_audit
-from sql.utils.resource_group import (
+from sql.utils.team import (
     WRITE_ACCESS_LEVELS,
-    access_role_label,
+    permission_group_label,
     active_instance_grants,
-    normalize_access_role,
-    resource_groups_for_role,
+    normalize_permission_group,
+    teams_for_role,
     resource_role_users,
     user_groups,
     user_instances,
@@ -60,6 +59,9 @@ from api_core.response import success_response
 from common.task_queue import async_task
 
 logger = logging.getLogger("default")
+ARCHIVE_APPLY_PERMISSION = "sql.archive_apply"
+ARCHIVE_REVIEW_PERMISSION = "sql.archive_review"
+ARCHIVE_MANAGE_PERMISSION = "sql.archive_mgt"
 
 ARCHIVE_SUPPORTED_DB_TYPES = (
     "mysql",
@@ -111,9 +113,7 @@ def _require_archive_module_access(user):
     if (
         user.is_superuser
         or user.has_perm("sql.menu_archive")
-        or resource_groups_for_role(
-            user, ResourceAccessRole.WORKFLOW_REQUESTER
-        ).exists()
+        or teams_for_role(user, ARCHIVE_APPLY_PERMISSION).exists()
     ):
         return
     raise PermissionDenied("You do not have permission to access archive workflows.")
@@ -121,12 +121,7 @@ def _require_archive_module_access(user):
 
 def _require_archive_apply_access(user):
     _require_archive_module_access(user)
-    if (
-        user.is_superuser
-        or resource_groups_for_role(
-            user, ResourceAccessRole.WORKFLOW_REQUESTER
-        ).exists()
-    ):
+    if user.is_superuser or teams_for_role(user, ARCHIVE_APPLY_PERMISSION).exists():
         return
     raise PermissionDenied("You do not have permission to submit archive workflows.")
 
@@ -135,50 +130,44 @@ def _archive_can_view(user, archive_config):
     if user.is_superuser or archive_config.user_name == user.username:
         return True
 
-    if resource_groups_for_role(
-        user, ResourceAccessRole.WORKFLOW_APPROVER
-    ).exists() or user.has_perm("sql.archive_mgt"):
+    if teams_for_role(user, ARCHIVE_REVIEW_PERMISSION).exists() or user.has_perm(
+        ARCHIVE_MANAGE_PERMISSION
+    ):
         group_ids = [
-            group.group_id
-            for group in resource_groups_for_role(
-                user, ResourceAccessRole.WORKFLOW_APPROVER
-            )
+            group.team_id for group in teams_for_role(user, ARCHIVE_REVIEW_PERMISSION)
         ]
-        if user.has_perm("sql.archive_mgt"):
-            group_ids = [group.group_id for group in user_groups(user)]
-        return archive_config.resource_group_id in group_ids
+        if user.has_perm(ARCHIVE_MANAGE_PERMISSION):
+            group_ids = [group.team_id for group in user_groups(user)]
+        return archive_config.team_id in group_ids
     return False
 
 
 def _archive_can_manage(user, archive_config):
     if user.is_superuser:
         return True
-    if not resource_groups_for_role(user, ResourceAccessRole.RESOURCE_OWNER).exists():
+    if not teams_for_role(user, ARCHIVE_MANAGE_PERMISSION).exists():
         return False
     group_ids = [
-        group.group_id
-        for group in resource_groups_for_role(user, ResourceAccessRole.RESOURCE_OWNER)
+        group.team_id for group in teams_for_role(user, ARCHIVE_MANAGE_PERMISSION)
     ]
-    return archive_config.resource_group_id in group_ids
+    return archive_config.team_id in group_ids
 
 
 def _archive_queryset_for_user(user):
     queryset = ArchiveConfig.objects.select_related(
-        "resource_group",
+        "team",
         "src_instance",
     ).all()
     if user.is_superuser:
         return queryset
-    if resource_groups_for_role(
-        user, ResourceAccessRole.WORKFLOW_APPROVER
-    ).exists() or user.has_perm("sql.archive_mgt"):
-        scoped_groups = resource_groups_for_role(
-            user, ResourceAccessRole.WORKFLOW_APPROVER
-        )
-        if user.has_perm("sql.archive_mgt"):
+    if teams_for_role(user, ARCHIVE_REVIEW_PERMISSION).exists() or user.has_perm(
+        ARCHIVE_MANAGE_PERMISSION
+    ):
+        scoped_groups = teams_for_role(user, ARCHIVE_REVIEW_PERMISSION)
+        if user.has_perm(ARCHIVE_MANAGE_PERMISSION):
             scoped_groups = user_groups(user)
-        group_ids = [group.group_id for group in scoped_groups]
-        return queryset.filter(resource_group_id__in=group_ids)
+        group_ids = [group.team_id for group in scoped_groups]
+        return queryset.filter(team_id__in=group_ids)
     return queryset.filter(user_name=user.username)
 
 
@@ -193,18 +182,13 @@ def _archive_capable_instances(user):
 
 def _archive_submission_scope(user):
     can_submit_directly = (
-        user.is_superuser
-        or resource_groups_for_role(
-            user, ResourceAccessRole.WORKFLOW_REQUESTER
-        ).exists()
+        user.is_superuser or teams_for_role(user, ARCHIVE_APPLY_PERMISSION).exists()
     )
     instances = _archive_capable_instances(user)
     direct_group_ids = (
         {
-            group.group_id
-            for group in resource_groups_for_role(
-                user, ResourceAccessRole.WORKFLOW_REQUESTER
-            )
+            group.team_id
+            for group in teams_for_role(user, ARCHIVE_APPLY_PERMISSION)
             if group.is_deleted == 0
         }
         if can_submit_directly
@@ -216,14 +200,14 @@ def _archive_submission_scope(user):
         active_instance_grants(user)
         .filter(
             access_level__in=WRITE_ACCESS_LEVELS,
-            resource_group__is_deleted=0,
+            team__is_deleted=0,
         )
-        .select_related("resource_group")
+        .select_related("team")
     ):
         groups = temporary_groups_by_instance.setdefault(grant.instance_id, {})
-        groups[grant.resource_group_id] = grant.resource_group
+        groups[grant.team_id] = grant.team
 
-    resource_groups = {}
+    teams = {}
     instance_payload = []
     for instance in instances:
         allowed_groups = {}
@@ -233,17 +217,15 @@ def _archive_submission_scope(user):
             and instance.instance_tag.filter(tag_code="can_write", active=True).exists()
         ):
             direct_groups = {
-                group_id: group_name
-                for group_id, group_name in instance.resource_group.filter(
-                    is_deleted=0, group_id__in=direct_group_ids
-                ).values_list("group_id", "group_name")
+                team_id: team_name
+                for team_id, team_name in instance.resource_group.filter(
+                    is_deleted=0, team_id__in=direct_group_ids
+                ).values_list("team_id", "team_name")
             }
             allowed_groups.update(direct_groups)
 
-        for group_id, group in temporary_groups_by_instance.get(
-            instance.id, {}
-        ).items():
-            allowed_groups[group_id] = group.group_name
+        for team_id, group in temporary_groups_by_instance.get(instance.id, {}).items():
+            allowed_groups[team_id] = group.team_name
 
         if not allowed_groups:
             continue
@@ -251,8 +233,8 @@ def _archive_submission_scope(user):
         sorted_groups = sorted(
             allowed_groups.items(), key=lambda item: (item[1], item[0])
         )
-        for group_id, group_name in sorted_groups:
-            resource_groups[group_id] = group_name
+        for team_id, team_name in sorted_groups:
+            teams[team_id] = team_name
         instance_payload.append(
             {
                 "id": instance.id,
@@ -260,8 +242,8 @@ def _archive_submission_scope(user):
                 "db_type": instance.db_type,
                 "type": instance.type,
                 "label": f"{instance.instance_name} | {instance.db_type} | {instance.host}",
-                "group_ids": [group_id for group_id, _ in sorted_groups],
-                "group_names": [group_name for _, group_name in sorted_groups],
+                "team_ids": [team_id for team_id, _ in sorted_groups],
+                "team_names": [team_name for _, team_name in sorted_groups],
                 "available_archive_methods": (
                     [ARCHIVE_METHOD_DML, ARCHIVE_METHOD_PT_ARCHIVER]
                     if instance.db_type == "mysql"
@@ -271,22 +253,22 @@ def _archive_submission_scope(user):
         )
 
     return {
-        "resource_groups": [
+        "teams": [
             {
-                "group_id": group_id,
-                "group_name": group_name,
-                "label": group_name,
+                "team_id": team_id,
+                "team_name": team_name,
+                "label": team_name,
             }
-            for group_id, group_name in sorted(
-                resource_groups.items(), key=lambda item: (item[1], item[0])
+            for team_id, team_name in sorted(
+                teams.items(), key=lambda item: (item[1], item[0])
             )
         ],
         "instances": instance_payload,
     }
 
 
-def _archive_resource_groups(user):
-    return _archive_submission_scope(user)["resource_groups"]
+def _archive_teams(user):
+    return _archive_submission_scope(user)["teams"]
 
 
 def _serialize_archive_review_info(archive_config):
@@ -301,7 +283,7 @@ def _serialize_archive_review_info(archive_config):
         and current_status == WorkflowStatus.WAITING
         and str(audit.current_audit).strip()
     ):
-        current_role = normalize_access_role(audit.current_audit)
+        current_role = normalize_permission_group(audit.current_audit)
 
     review_info = []
     has_met_current_node = False
@@ -310,15 +292,15 @@ def _serialize_archive_review_info(archive_config):
         if not token:
             review_info.append(
                 {
-                    "group_name": "Auto",
+                    "team_name": "Auto",
                     "is_current_node": False,
                     "is_passed_node": current_status == WorkflowStatus.PASSED,
                 }
             )
             continue
 
-        role = normalize_access_role(token)
-        role_label = access_role_label(role)
+        role = normalize_permission_group(token)
+        role_label = permission_group_label(role)
         is_current_node = (
             current_status == WorkflowStatus.WAITING and current_role == role
         )
@@ -334,7 +316,7 @@ def _serialize_archive_review_info(archive_config):
 
         review_info.append(
             {
-                "group_name": role_label,
+                "team_name": role_label,
                 "is_current_node": is_current_node,
                 "is_passed_node": is_passed_node,
             }
@@ -351,11 +333,11 @@ def _serialize_archive_current_reviewers(archive_config):
     ):
         return []
 
-    current_role = normalize_access_role(audit.current_audit)
+    current_role = normalize_permission_group(audit.current_audit)
     reviewers = []
     seen_usernames = set()
 
-    for user in resource_role_users([current_role], archive_config.resource_group_id):
+    for user in resource_role_users([current_role], archive_config.team_id):
         if user.username in seen_usernames:
             continue
         seen_usernames.add(user.username)
@@ -479,9 +461,9 @@ def _serialize_archive_detail(archive_config, user):
         "next_run_at": schedule.next_run if schedule else archive_config.next_run_at,
         "last_archive_time": archive_config.last_archive_time,
         "state": archive_config.state,
-        "resource_group": {
-            "group_id": archive_config.resource_group.group_id,
-            "group_name": archive_config.resource_group.group_name,
+        "team": {
+            "team_id": archive_config.team.team_id,
+            "team_name": archive_config.team.team_name,
         },
         "src_instance": {
             "id": archive_config.src_instance.id,
@@ -509,7 +491,7 @@ def _serialize_archive_detail(archive_config, user):
 
 
 class ArchiveMetadataSerializer(serializers.Serializer):
-    resource_groups = serializers.ListField()
+    teams = serializers.ListField()
     instances = serializers.ListField()
     schedule_frequencies = serializers.ListField()
     weekdays = serializers.ListField()
@@ -517,7 +499,7 @@ class ArchiveMetadataSerializer(serializers.Serializer):
 
 class ArchiveCreateSerializer(serializers.Serializer):
     title = serializers.CharField(max_length=50)
-    group_id = serializers.IntegerField()
+    team_id = serializers.IntegerField()
     instance_id = serializers.IntegerField()
     db_name = serializers.CharField(max_length=64)
     table_name = serializers.CharField(max_length=64)
@@ -596,9 +578,7 @@ class ArchiveStateSerializer(serializers.Serializer):
 
 class ArchiveListSerializer(serializers.ModelSerializer):
     status_label = serializers.CharField(source="get_status_display", read_only=True)
-    resource_group_name = serializers.CharField(
-        source="resource_group.group_name", read_only=True
-    )
+    team_name = serializers.CharField(source="team.team_name", read_only=True)
     src_instance_name = serializers.CharField(
         source="src_instance.instance_name", read_only=True
     )
@@ -617,7 +597,7 @@ class ArchiveListSerializer(serializers.ModelSerializer):
             "src_instance_name",
             "src_db_name",
             "src_table_name",
-            "resource_group_name",
+            "team_name",
             "user_display",
             "create_time",
             "last_archive_time",
@@ -651,13 +631,13 @@ class ArchiveMetadata(views.APIView):
     @extend_schema(
         summary="Archive Metadata",
         responses={200: ArchiveMetadataSerializer},
-        description="Return resource groups, archive-capable instances, and scheduler options for the archive SPA.",
+        description="Return teams, archive-capable instances, and scheduler options for the archive SPA.",
     )
     def get(self, request):
         _require_archive_module_access(request.user)
         submission_scope = _archive_submission_scope(request.user)
         payload = {
-            "resource_groups": submission_scope["resource_groups"],
+            "teams": submission_scope["teams"],
             "instances": submission_scope["instances"],
             "schedule_frequencies": [
                 {"value": ARCHIVE_SCHEDULE_DAILY, "label": "Daily"},
@@ -679,7 +659,7 @@ class ArchiveApprovalPreview(views.APIView):
         summary="Archive Approval Preview",
         parameters=[
             OpenApiParameter(
-                name="group_id",
+                name="team_id",
                 type=OpenApiTypes.INT,
                 location=OpenApiParameter.QUERY,
                 required=True,
@@ -690,35 +670,33 @@ class ArchiveApprovalPreview(views.APIView):
     )
     def get(self, request):
         _require_archive_apply_access(request.user)
-        group_id = request.query_params.get("group_id")
-        if not group_id:
-            raise serializers.ValidationError({"errors": "group_id is required."})
+        team_id = request.query_params.get("team_id")
+        if not team_id:
+            raise serializers.ValidationError({"errors": "team_id is required."})
         try:
-            group_id = int(group_id)
+            team_id = int(team_id)
         except (TypeError, ValueError):
-            raise serializers.ValidationError(
-                {"errors": "group_id must be an integer."}
-            )
+            raise serializers.ValidationError({"errors": "team_id must be an integer."})
 
         allowed_group_ids = {
-            group["group_id"]
-            for group in _archive_submission_scope(request.user)["resource_groups"]
+            group["team_id"]
+            for group in _archive_submission_scope(request.user)["teams"]
         }
-        if not request.user.is_superuser and group_id not in allowed_group_ids:
-            raise PermissionDenied("You do not have access to this resource group.")
+        if not request.user.is_superuser and team_id not in allowed_group_ids:
+            raise PermissionDenied("You do not have access to this team.")
 
-        resource_group = get_object_or_404(ResourceGroup, pk=group_id, is_deleted=0)
-        audit_auth_groups = Audit.settings(group_id, WorkflowType.ARCHIVE)
+        team = get_object_or_404(Team, pk=team_id, is_deleted=0)
+        audit_auth_groups = Audit.settings(team_id, WorkflowType.ARCHIVE)
         if audit_auth_groups is None:
             raise serializers.ValidationError(
-                {"errors": "Approval flow is not configured for this resource group."}
+                {"errors": "Approval flow is not configured for this team."}
             )
 
         if audit_auth_groups == "":
             readable = "No approval required"
             review_info = [
                 {
-                    "group_name": "Auto",
+                    "team_name": "Auto",
                     "is_auto_pass": True,
                     "is_current_node": False,
                     "is_passed_node": True,
@@ -728,11 +706,11 @@ class ArchiveApprovalPreview(views.APIView):
             readable_groups = []
             review_info = []
             for role in audit_auth_groups.split(","):
-                role_label = access_role_label(role)
+                role_label = permission_group_label(role)
                 readable_groups.append(role_label)
                 review_info.append(
                     {
-                        "group_name": role_label,
+                        "team_name": role_label,
                         "is_auto_pass": False,
                         "is_current_node": False,
                         "is_passed_node": False,
@@ -742,8 +720,8 @@ class ArchiveApprovalPreview(views.APIView):
 
         return success_response(
             data={
-                "group_id": resource_group.group_id,
-                "group_name": resource_group.group_name,
+                "team_id": team.team_id,
+                "team_name": team.team_name,
                 "audit_auth_groups": audit_auth_groups,
                 "display": readable,
                 "review_info": review_info,
@@ -763,7 +741,7 @@ class ArchiveListCreate(generics.ListAPIView):
         status_filter = params.get("status", "").strip()
         execution_mode = params.get("execution_mode", "").strip()
         instance_id = params.get("instance_id", "").strip()
-        group_id = params.get("group_id", "").strip()
+        team_id = params.get("team_id", "").strip()
 
         if status_filter:
             queryset = queryset.filter(status=status_filter)
@@ -771,8 +749,8 @@ class ArchiveListCreate(generics.ListAPIView):
             queryset = queryset.filter(execution_mode=execution_mode)
         if instance_id:
             queryset = queryset.filter(src_instance_id=instance_id)
-        if group_id:
-            queryset = queryset.filter(resource_group_id=group_id)
+        if team_id:
+            queryset = queryset.filter(team_id=team_id)
         if search:
             queryset = queryset.filter(
                 Q(title__icontains=search)
@@ -780,7 +758,7 @@ class ArchiveListCreate(generics.ListAPIView):
                 | Q(src_db_name__icontains=search)
                 | Q(src_table_name__icontains=search)
                 | Q(src_instance__instance_name__icontains=search)
-                | Q(resource_group__group_name__icontains=search)
+                | Q(team__team_name__icontains=search)
             )
         return queryset.order_by("-create_time", "-id")
 
@@ -808,9 +786,7 @@ class ArchiveListCreate(generics.ListAPIView):
         scoped_instances = {
             instance["id"]: instance for instance in submission_scope["instances"]
         }
-        scoped_group_ids = {
-            group["group_id"] for group in submission_scope["resource_groups"]
-        }
+        scoped_group_ids = {group["team_id"] for group in submission_scope["teams"]}
 
         instance = data["instance"]
         instance_scope = scoped_instances.get(instance.id)
@@ -818,27 +794,20 @@ class ArchiveListCreate(generics.ListAPIView):
             raise PermissionDenied(
                 "The selected instance is not associated with your writable scope."
             )
-        if not request.user.is_superuser and data["group_id"] not in scoped_group_ids:
-            raise PermissionDenied("You do not have access to this resource group.")
+        if not request.user.is_superuser and data["team_id"] not in scoped_group_ids:
+            raise PermissionDenied("You do not have access to this team.")
 
-        resource_group = get_object_or_404(
-            ResourceGroup, pk=data["group_id"], is_deleted=0
-        )
-        instance_group_ids = set(instance_scope["group_ids"])
-        if (
-            resource_group.group_id not in instance_group_ids
-            and not request.user.is_superuser
-        ):
+        team = get_object_or_404(Team, pk=data["team_id"], is_deleted=0)
+        instance_group_ids = set(instance_scope["team_ids"])
+        if team.team_id not in instance_group_ids and not request.user.is_superuser:
             raise serializers.ValidationError(
-                {
-                    "errors": "The selected resource group is not available for this instance."
-                }
+                {"errors": "The selected team is not available for this instance."}
             )
 
         next_run_at = None
         archive_info = ArchiveConfig(
             title=data["title"],
-            resource_group=resource_group,
+            team=team,
             audit_auth_groups="",
             src_instance=instance,
             src_db_name=data["db_name"],
@@ -867,8 +836,8 @@ class ArchiveListCreate(generics.ListAPIView):
         with transaction.atomic():
             audit_handler = get_auditor(
                 workflow=archive_info,
-                resource_group=resource_group.group_name,
-                resource_group_id=resource_group.group_id,
+                team=team.team_name,
+                team_id=team.team_id,
             )
             try:
                 audit_handler.create_audit()
@@ -917,7 +886,7 @@ class ArchiveDetail(views.APIView):
     def get(self, request, archive_id):
         _require_archive_module_access(request.user)
         archive_config = get_object_or_404(
-            ArchiveConfig.objects.select_related("resource_group", "src_instance"),
+            ArchiveConfig.objects.select_related("team", "src_instance"),
             pk=archive_id,
         )
         return success_response(
@@ -942,8 +911,8 @@ class ArchiveReviewCreate(views.APIView):
         archive_config = get_object_or_404(ArchiveConfig, pk=archive_id)
         auditor = get_auditor(
             workflow=archive_config,
-            resource_group=archive_config.resource_group.group_name,
-            resource_group_id=archive_config.resource_group_id,
+            team=archive_config.team.team_name,
+            team_id=archive_config.team_id,
         )
 
         if data["audit_type"] == "pass":

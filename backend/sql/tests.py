@@ -57,8 +57,8 @@ class TestAsync(TestCase):
         )
         self.wf1 = SqlWorkflow.objects.create(
             workflow_name="some_name2",
-            group_id=1,
-            group_name="g1",
+            team_id=1,
+            team_name="g1",
             engineer=self.u1.username,
             engineer_display=self.u1.display,
             audit_auth_groups="some_group",

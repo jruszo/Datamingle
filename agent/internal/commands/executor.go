@@ -48,6 +48,8 @@ func (e *Executor) Execute(ctx context.Context, command client.AgentCommand, cfg
 	switch command.CommandType {
 	case "connection.test":
 		return e.connectionTest(ctx, assignment, started)
+	case "inventory.collect":
+		return e.inventoryCollect(ctx, assignment, started)
 	case "query.execute":
 		return e.queryExecute(ctx, assignment, command, started)
 	case "schema.change":
@@ -63,6 +65,28 @@ func (e *Executor) Execute(ctx context.Context, command client.AgentCommand, cfg
 	default:
 		return Result{}, fmt.Errorf("unsupported command type %q", command.CommandType)
 	}
+}
+
+func (e *Executor) inventoryCollect(ctx context.Context, assignment client.Assignment, started time.Time) (Result, error) {
+	db, err := openMySQL(assignment, assignment.Database)
+	if err != nil {
+		return Result{}, err
+	}
+	defer db.Close()
+
+	var hostname string
+	var version string
+	if err := db.QueryRowContext(ctx, "SELECT @@hostname, VERSION()").Scan(&hostname, &version); err != nil {
+		return Result{}, err
+	}
+	return Result{
+		Message: "inventory collected",
+		Payload: map[string]any{
+			"hostname":          hostname,
+			"version":           version,
+			"execution_seconds": e.now().Sub(started).Seconds(),
+		},
+	}, nil
 }
 
 func assignmentForCommand(command client.AgentCommand, cfg client.AgentConfig) (client.Assignment, bool) {

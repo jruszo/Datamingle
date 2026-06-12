@@ -12,7 +12,7 @@ from django.contrib.auth.models import Group
 from common.utils.const import WorkflowStatus
 from sql.models import (
     Instance,
-    ResourceGroup,
+    Team,
     SqlWorkflow,
     SqlWorkflowContent,
     QueryPrivilegesApply,
@@ -58,8 +58,8 @@ def db_instance(db):
 
 
 @pytest.fixture
-def resource_group(db) -> ResourceGroup:
-    res_group = ResourceGroup.objects.create(group_id=1, group_name="group_name")
+def team(db) -> Team:
+    res_group = Team.objects.create(team_id=1, team_name="team_name")
     yield res_group
     res_group.delete()
 
@@ -68,8 +68,8 @@ def resource_group(db) -> ResourceGroup:
 def sql_workflow(db_instance):
     wf = SqlWorkflow.objects.create(
         workflow_name="some_name",
-        group_id=1,
-        group_name="g1",
+        team_id=1,
+        team_name="g1",
         engineer_display="",
         audit_auth_groups="some_audit_group",
         create_time=datetime.datetime.now(),
@@ -91,8 +91,8 @@ def sql_workflow(db_instance):
 def sql_query_apply(db_instance):
     tomorrow = datetime.datetime.today() + datetime.timedelta(days=1)
     query_apply_1 = QueryPrivilegesApply.objects.create(
-        group_id=1,
-        group_name="some_name",
+        team_id=1,
+        team_name="some_name",
         title="some_title1",
         user_name="some_user",
         instance=db_instance,
@@ -108,10 +108,10 @@ def sql_query_apply(db_instance):
 
 
 @pytest.fixture
-def archive_apply(db_instance, resource_group):
+def archive_apply(db_instance, team):
     archive_apply_1 = ArchiveConfig.objects.create(
         title="title",
-        resource_group=resource_group,
+        team=team,
         audit_auth_groups="",
         src_instance=db_instance,
         src_db_name="src_db_name",
@@ -166,22 +166,22 @@ def instance_tag(db):
 
 
 @pytest.fixture
-def create_resource_group(db):
-    resource_group = ResourceGroup.objects.create(
-        group_name="group_name",
+def create_team(db):
+    team = Team.objects.create(
+        team_name="team_name",
         is_deleted=False,
         qywx_webhook="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx",
         feishu_webhook="https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
     )
-    yield resource_group
-    resource_group.delete()
+    yield team
+    team.delete()
 
 
 @pytest.fixture
-def create_audit_workflow(normal_user, create_resource_group):
+def create_audit_workflow(normal_user, create_team):
     audit_wf = WorkflowAudit.objects.create(
-        group_id=create_resource_group.group_id,
-        group_name=create_resource_group.group_name,
+        team_id=create_team.team_id,
+        team_name=create_team.team_name,
         workflow_id=1,
         workflow_type=2,
         workflow_title="Apply Title",

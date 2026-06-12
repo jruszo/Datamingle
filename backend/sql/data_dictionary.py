@@ -13,7 +13,7 @@ from django.contrib.auth.decorators import permission_required
 from django.http import HttpResponse, JsonResponse, FileResponse
 
 from common.utils.extend_json_encoder import ExtendJSONEncoder
-from sql.utils.resource_group import user_instances
+from sql.utils.team import user_instances
 from .models import Instance
 
 logger = logging.getLogger("default")

@@ -67,8 +67,8 @@ def create_instance(name="primary"):
 def create_sql_workflow(instance, status_value="workflow_review_pass", syntax_type=2):
     workflow = SqlWorkflow.objects.create(
         workflow_name="agent workflow",
-        group_id=1,
-        group_name="Default",
+        team_id=1,
+        team_name="Default",
         engineer="agent-admin",
         engineer_display="Agent Admin",
         audit_auth_groups="Default",
@@ -83,8 +83,8 @@ def create_sql_workflow(instance, status_value="workflow_review_pass", syntax_ty
         review_content="[]",
     )
     WorkflowAudit.objects.create(
-        group_id=1,
-        group_name="Default",
+        team_id=1,
+        team_name="Default",
         workflow_id=workflow.id,
         workflow_type=WorkflowType.SQL_REVIEW,
         workflow_title=workflow.workflow_name,
@@ -181,8 +181,6 @@ class AgentModelTests(APITestCase):
                 instance=instance,
             ).exists()
         )
-        agent.refresh_from_db()
-        self.assertEqual(agent.desired_config_revision, 2)
 
     def test_duplicate_command_assignment_is_rejected(self):
         instance = create_instance()
@@ -262,6 +260,36 @@ class AgentModelTests(APITestCase):
 
         with self.assertRaises(ValidationError):
             artifact.full_clean()
+
+
+class InstanceAssignmentSignalTransactionTests(TransactionTestCase):
+    @patch("api_agents.signals.sync_node_assignments_for_instance")
+    def test_inventory_only_save_does_not_resync_assignments(self, mock_sync):
+        instance = create_instance()
+        mock_sync.reset_mock()
+
+        instance.inventory_status = Instance.INVENTORY_STATUS_FAILED
+        instance.save(update_fields=["inventory_status", "inventory_last_attempt_at"])
+
+        mock_sync.assert_not_called()
+
+    def test_instance_save_can_sync_assignments_outside_request_transaction(self):
+        node = InfrastructureNode.objects.create(name="node-a")
+        agent = Agent.objects.create(name="agent-a", local_node=node)
+        instance = create_instance()
+
+        instance.node = node
+        instance.save(update_fields=["node", "update_time"])
+
+        self.assertTrue(
+            AgentInstanceAssignment.objects.filter(
+                agent=agent,
+                instance=instance,
+                local_node=node,
+            ).exists()
+        )
+        agent.refresh_from_db()
+        self.assertEqual(agent.desired_config_revision, 2)
 
 
 def mock_workos_api_key_response(mock_post, value="sk_agent_created_once"):

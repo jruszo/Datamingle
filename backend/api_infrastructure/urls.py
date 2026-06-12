@@ -9,6 +9,16 @@ urlpatterns = [
         name="infrastructure-node-list",
     ),
     path(
+        "v1/infrastructure/nodes/labels/",
+        views.InfrastructureNodeLabelNamesView.as_view(),
+        name="infrastructure-node-label-names",
+    ),
+    path(
+        "v1/infrastructure/nodes/label/<str:label_name>/values/",
+        views.InfrastructureNodeLabelValuesView.as_view(),
+        name="infrastructure-node-label-values",
+    ),
+    path(
         "v1/infrastructure/nodes/<int:node_id>/",
         views.InfrastructureNodeDetailView.as_view(),
         name="infrastructure-node-detail",

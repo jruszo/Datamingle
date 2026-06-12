@@ -8,8 +8,8 @@ class QueryPrivilegesApplySerializer(serializers.ModelSerializer):
         model = QueryPrivilegesApply
         fields = (
             "apply_id",
-            "group_id",
-            "group_name",
+            "team_id",
+            "team_name",
             "title",
             "user_name",
             "user_display",
@@ -124,14 +124,14 @@ class QueryPrivilegesApplyListSerializer(serializers.ModelSerializer):
             "user_display",
             "status",
             "create_time",
-            "group_name",
+            "team_name",
         ]
 
 
 class QueryPrivilegesApplyCreateSerializer(serializers.Serializer):
     title = serializers.CharField(label="Request title", max_length=50)
     instance_name = serializers.CharField(label="Instance name", max_length=50)
-    group_name = serializers.CharField(label="Resource group name", max_length=100)
+    team_name = serializers.CharField(label="Team name", max_length=100)
     priv_type = serializers.ChoiceField(choices=[1, 2], label="Privilege type")
     db_name = serializers.CharField(
         required=False, allow_blank=True, label="Database name", max_length=64

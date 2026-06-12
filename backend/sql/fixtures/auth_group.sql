@@ -8,31 +8,31 @@ VALUES (1, 'Default'),(2, 'RD'),(3, 'DBA'),(4, 'PM'),(5, 'QA');
 
 SET FOREIGN_KEY_CHECKS=0;
 -- Default
-insert into auth_group_permissions (group_id, permission_id)
+insert into auth_group_permissions (team_id, permission_id)
 select 1,id
 from auth_permission
 where codename in ('menu_sqlworkflow', 'menu_query', 'menu_sqlquery', 'menu_queryapplylist');
 
 -- RD
-insert into auth_group_permissions (group_id, permission_id)
+insert into auth_group_permissions (team_id, permission_id)
 select 2,id
 from auth_permission
 where codename in ('menu_dashboard','menu_sqlcheck','menu_sqlworkflow','menu_query','menu_sqlquery','menu_queryapplylist','menu_data_dictionary','menu_tools','menu_archive','sql_submit','sql_execute','query_applypriv','query_submit','archive_apply');
 
 -- DBA
-insert into auth_group_permissions (group_id, permission_id)
+insert into auth_group_permissions (team_id, permission_id)
 select 3,id
 from auth_permission
-where codename in ('menu_dashboard','menu_sqlcheck','menu_sqlworkflow','menu_query','menu_sqlquery','menu_queryapplylist','menu_instance','menu_instance_list','menu_dbdiagnostic','menu_database','menu_instance_account','menu_param','menu_data_dictionary','menu_tools','menu_archive','menu_system','menu_openapi','sql_submit','sql_review','sql_execute_for_resource_group','sql_execute','query_applypriv','query_mgtpriv','query_review','query_submit','query_all_instances','query_resource_group_instance','process_view','process_kill','tablespace_view','trx_view','trxandlocks_view','instance_account_manage','param_view','param_edit','data_dictionary_export','archive_apply','archive_review','archive_mgt');
+where codename in ('menu_dashboard','menu_sqlcheck','menu_sqlworkflow','menu_query','menu_sqlquery','menu_queryapplylist','menu_instance','menu_instance_list','menu_dbdiagnostic','menu_database','menu_instance_account','menu_param','menu_data_dictionary','menu_tools','menu_archive','menu_system','menu_openapi','sql_submit','sql_review','sql_execute_for_team','sql_execute','query_applypriv','query_mgtpriv','query_review','query_submit','query_all_instances','query_team_instance','process_view','process_kill','tablespace_view','trx_view','trxandlocks_view','instance_account_manage','param_view','param_edit','data_dictionary_export','archive_apply','archive_review','archive_mgt');
 
 -- PM
-insert into auth_group_permissions (group_id, permission_id)
+insert into auth_group_permissions (team_id, permission_id)
 select 4,id
 from auth_permission
-where codename in ('menu_dashboard','menu_sqlcheck','menu_sqlworkflow','menu_query','menu_sqlquery','menu_queryapplylist','menu_data_dictionary','menu_tools','menu_archive','sql_submit','sql_review','sql_execute_for_resource_group','sql_execute','query_applypriv','query_review','query_submit','archive_apply','archive_review');
+where codename in ('menu_dashboard','menu_sqlcheck','menu_sqlworkflow','menu_query','menu_sqlquery','menu_queryapplylist','menu_data_dictionary','menu_tools','menu_archive','sql_submit','sql_review','sql_execute_for_team','sql_execute','query_applypriv','query_review','query_submit','archive_apply','archive_review');
 
 -- QA
-insert into auth_group_permissions (group_id, permission_id)
+insert into auth_group_permissions (team_id, permission_id)
 select 5,id
 from auth_permission
 where codename in ('menu_dashboard','menu_sqlcheck','menu_sqlworkflow','menu_query','menu_sqlquery','menu_queryapplylist','menu_data_dictionary','sql_submit','sql_execute','query_applypriv','query_submit');

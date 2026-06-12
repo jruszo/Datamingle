@@ -27,13 +27,11 @@ except (ImportError, AttributeError) as e:
     PasswordMixin = DummyMixin
 
 
-class ResourceGroup(models.Model):
-    """
-    Resource group.
-    """
+class Team(models.Model):
+    """A permission and resource boundary for users, nodes, and services."""
 
-    group_id = models.AutoField("Group ID", primary_key=True)
-    group_name = models.CharField("Group Name", max_length=100, unique=True)
+    team_id = models.AutoField("Group ID", primary_key=True)
+    team_name = models.CharField("Group Name", max_length=100, unique=True)
     group_parent_id = models.BigIntegerField("Parent ID", default=0)
     group_sort = models.IntegerField("Sort Order", default=1)
     group_level = models.IntegerField("Level", default=1)
@@ -46,68 +44,23 @@ class ResourceGroup(models.Model):
     sys_time = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return self.group_name
-
-    def save(self, *args, **kwargs):
-        super().save(*args, **kwargs)
-        if self.is_deleted == 1:
-            WorkOSDirectoryGroup.objects.filter(
-                resource_group=self, is_deleted=False
-            ).update(is_deleted=True)
+        return self.team_name
 
     class Meta:
         managed = True
-        db_table = "resource_group"
-        verbose_name = "Resource Group Management"
-        verbose_name_plural = "Resource Group Management"
+        db_table = "team"
+        verbose_name = "Team Management"
+        verbose_name_plural = "Team Management"
 
 
-class ResourceAccessRole(models.TextChoices):
-    QUERY = "query", "Query"
-    WORKFLOW_REQUESTER = "workflow_requester", "Workflow Requester"
-    WORKFLOW_APPROVER = "workflow_approver", "Workflow Approver"
-    RESOURCE_OWNER = "resource_owner", "Resource Owner"
+class TeamPermissionGroup:
+    """Team-scoped capability constants used by authorization helpers."""
 
-
-RESOURCE_ACCESS_ROLE_RANKS = {
-    ResourceAccessRole.QUERY: 10,
-    ResourceAccessRole.WORKFLOW_REQUESTER: 20,
-    ResourceAccessRole.WORKFLOW_APPROVER: 30,
-    ResourceAccessRole.RESOURCE_OWNER: 40,
-}
-
-
-RESOURCE_ACCESS_ROLE_CATALOG = (
-    {
-        "code": ResourceAccessRole.QUERY,
-        "label": "Query",
-        "description": "Query allowed instances in the resource group.",
-        "rank": RESOURCE_ACCESS_ROLE_RANKS[ResourceAccessRole.QUERY],
-    },
-    {
-        "code": ResourceAccessRole.WORKFLOW_REQUESTER,
-        "label": "Workflow Requester",
-        "description": "Query plus submit workflow, export, and archive requests.",
-        "rank": RESOURCE_ACCESS_ROLE_RANKS[ResourceAccessRole.WORKFLOW_REQUESTER],
-    },
-    {
-        "code": ResourceAccessRole.WORKFLOW_APPROVER,
-        "label": "Workflow Approver",
-        "description": "Requester capabilities plus review and approve workflows.",
-        "rank": RESOURCE_ACCESS_ROLE_RANKS[ResourceAccessRole.WORKFLOW_APPROVER],
-    },
-    {
-        "code": ResourceAccessRole.RESOURCE_OWNER,
-        "label": "Resource Owner",
-        "description": "Approver capabilities plus manage resource group users, roles, and instances.",
-        "rank": RESOURCE_ACCESS_ROLE_RANKS[ResourceAccessRole.RESOURCE_OWNER],
-    },
-)
-
-
-class ResourceGroupMembershipSource(models.TextChoices):
-    DATAMINGLE = "datamingle", "Datamingle"
-    WORKOS_DIRECTORY = "workos_directory", "WorkOS Directory"
+    QUERY = "sql.query_submit"
+    WORKFLOW_REQUESTER = "sql.sql_submit"
+    EXPORT_WORKFLOW_REQUESTER = "sql.sqlexport_submit"
+    WORKFLOW_APPROVER = "sql.sql_review"
+    RESOURCE_OWNER = "sql.change_team"
 
 
 class Users(AbstractUser):
@@ -124,29 +77,12 @@ class Users(AbstractUser):
         unique=True,
         db_index=True,
     )
-    workos_directory_user_id = models.CharField(
-        "WorkOS Directory User ID",
-        max_length=64,
-        blank=True,
-        null=True,
-        unique=True,
-        db_index=True,
-    )
-    workos_directory_id = models.CharField(
-        "WorkOS Directory ID", max_length=64, blank=True, default="", db_index=True
-    )
-    workos_directory_managed = models.BooleanField(
-        "WorkOS Directory Managed", default=False, db_index=True
-    )
     avatar_url = models.URLField("Avatar URL", max_length=500, blank=True, default="")
     wx_user_id = models.CharField("WeCom User ID", max_length=64, blank=True)
     feishu_open_id = models.CharField("Feishu Open ID", max_length=64, blank=True)
     failed_login_count = models.IntegerField("Failed Login Count", default=0)
     last_login_failed_at = models.DateTimeField(
         "Last Failed Login Time", blank=True, null=True
-    )
-    resource_group = models.ManyToManyField(
-        ResourceGroup, verbose_name="Resource Group", blank=True
     )
 
     def save(self, *args, **kwargs):
@@ -166,131 +102,45 @@ class Users(AbstractUser):
         verbose_name_plural = "User Management"
 
 
-class ResourceGroupMembership(models.Model):
-    """Role-bearing membership of a user in a resource group."""
+class TeamMembership(models.Model):
+    """Permission-group-bearing membership of a user in a team."""
 
     user = models.ForeignKey(
-        Users, related_name="resource_group_memberships", on_delete=models.CASCADE
+        Users, related_name="team_memberships", on_delete=models.CASCADE
     )
-    resource_group = models.ForeignKey(
-        ResourceGroup, related_name="memberships", on_delete=models.CASCADE
-    )
-    access_role = models.CharField(
-        "Access Role",
-        max_length=32,
-        choices=ResourceAccessRole.choices,
-        default=ResourceAccessRole.QUERY,
-        db_index=True,
-    )
-    membership_source = models.CharField(
-        "Membership Source",
-        max_length=32,
-        choices=ResourceGroupMembershipSource.choices,
-        default=ResourceGroupMembershipSource.DATAMINGLE,
-        db_index=True,
+    team = models.ForeignKey(Team, related_name="memberships", on_delete=models.CASCADE)
+    permission_group = models.ForeignKey(
+        "auth.Group",
+        related_name="team_memberships",
+        on_delete=models.PROTECT,
     )
     create_time = models.DateTimeField(auto_now_add=True)
     sys_time = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.user_id}:{self.resource_group_id}:{self.access_role}"
+        return f"{self.user_id}:{self.team_id}:{self.permission_group_id}"
 
     class Meta:
         managed = True
-        db_table = "resource_group_membership"
-        verbose_name = "Resource Group Membership"
-        verbose_name_plural = "Resource Group Memberships"
+        db_table = "team_membership"
+        verbose_name = "Team Membership"
+        verbose_name_plural = "Team Memberships"
         constraints = [
             models.UniqueConstraint(
-                fields=("user", "resource_group"),
-                name="resource_group_membership_user_group_uniq",
+                fields=("user", "team"),
+                name="team_membership_user_team_uniq",
             )
         ]
         indexes = [
             models.Index(
-                fields=("resource_group", "access_role"),
-                name="rg_membership_group_role_idx",
+                fields=("team", "permission_group"),
+                name="team_membership_team_group_idx",
             ),
             models.Index(
-                fields=("user", "access_role"),
-                name="rg_membership_user_role_idx",
+                fields=("user", "permission_group"),
+                name="team_membership_user_group_idx",
             ),
         ]
-
-
-class WorkOSDirectoryGroup(models.Model):
-    """Mapping from a WorkOS Directory Sync group to a resource group."""
-
-    workos_group_id = models.CharField(
-        "WorkOS Directory Group ID", max_length=64, unique=True, db_index=True
-    )
-    directory_id = models.CharField("WorkOS Directory ID", max_length=64, db_index=True)
-    organization_id = models.CharField(
-        "WorkOS Organization ID", max_length=64, blank=True, default="", db_index=True
-    )
-    idp_id = models.CharField("Identity Provider Group ID", max_length=255, blank=True)
-    name = models.CharField("WorkOS Group Name", max_length=255)
-    resource_group = models.ForeignKey(
-        ResourceGroup,
-        verbose_name="Resource Group",
-        related_name="workos_directory_mappings",
-        on_delete=models.PROTECT,
-    )
-    is_deleted = models.BooleanField("Deleted in WorkOS", default=False, db_index=True)
-    workos_updated_at = models.DateTimeField(blank=True, null=True)
-    create_time = models.DateTimeField(auto_now_add=True)
-    sys_time = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return f"{self.name} ({self.workos_group_id})"
-
-    class Meta:
-        managed = True
-        db_table = "workos_directory_group"
-        verbose_name = "WorkOS Directory Group"
-        verbose_name_plural = "WorkOS Directory Groups"
-
-
-class WorkOSDirectoryGroupMembership(models.Model):
-    """WorkOS-owned group membership used to rebuild resource groups."""
-
-    user = models.ForeignKey(
-        Users, related_name="workos_directory_memberships", on_delete=models.CASCADE
-    )
-    directory_group = models.ForeignKey(
-        WorkOSDirectoryGroup,
-        related_name="memberships",
-        on_delete=models.CASCADE,
-    )
-    create_time = models.DateTimeField(auto_now_add=True)
-    sys_time = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return f"{self.user_id}:{self.directory_group_id}"
-
-    class Meta:
-        managed = True
-        db_table = "workos_directory_group_membership"
-        unique_together = ("user", "directory_group")
-        verbose_name = "WorkOS Directory Group Membership"
-        verbose_name_plural = "WorkOS Directory Group Memberships"
-
-
-class WorkOSDirectorySyncEvent(models.Model):
-    """Processed WorkOS event IDs for idempotent webhook handling."""
-
-    event_id = models.CharField("WorkOS Event ID", max_length=64, unique=True)
-    event_type = models.CharField("WorkOS Event Type", max_length=128)
-    create_time = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"{self.event_type}:{self.event_id}"
-
-    class Meta:
-        managed = True
-        db_table = "workos_directory_sync_event"
-        verbose_name = "WorkOS Directory Sync Event"
-        verbose_name_plural = "WorkOS Directory Sync Events"
 
 
 class TwoFactorAuthConfig(models.Model):
@@ -672,10 +522,9 @@ class InfrastructureNode(models.Model):
     monitoring_collectors = models.JSONField(
         "Monitoring Collectors", default=default_node_exporter_collectors, blank=True
     )
+    monitoring_labels = models.JSONField("Monitoring Labels", default=dict, blank=True)
     enabled = models.BooleanField("Enabled", default=True)
-    resource_group = models.ManyToManyField(
-        ResourceGroup, verbose_name="Resource Group", blank=True
-    )
+    resource_group = models.ManyToManyField(Team, verbose_name="Team", blank=True)
     create_time = models.DateTimeField("Created Time", auto_now_add=True)
     update_time = models.DateTimeField("Updated Time", auto_now=True)
 
@@ -820,6 +669,7 @@ class Instance(models.Model, PasswordMixin):
         blank=True,
         null=True,
     )
+    monitoring_labels = models.JSONField("Monitoring Labels", default=dict, blank=True)
     is_ssl = models.BooleanField("Enable SSL", default=False)
     verify_ssl = models.BooleanField("Verify Server SSL Certificate", default=True)
     db_name = models.CharField("Database", max_length=64, default="", blank=True)
@@ -843,9 +693,7 @@ class Instance(models.Model, PasswordMixin):
         "Oracle service name", max_length=50, null=True, blank=True
     )
     sid = models.CharField("Oracle sid", max_length=50, null=True, blank=True)
-    resource_group = models.ManyToManyField(
-        ResourceGroup, verbose_name="Resource Group", blank=True
-    )
+    resource_group = models.ManyToManyField(Team, verbose_name="Team", blank=True)
     instance_tag = models.ManyToManyField(
         InstanceTag, verbose_name="Instance Tag", blank=True
     )
@@ -902,13 +750,13 @@ class Instance(models.Model, PasswordMixin):
 
 
 class PermissionRequestTarget(models.TextChoices):
-    RESOURCE_GROUP = "resource_group", "Resource Group"
+    TEAM = "team", "Team"
     INSTANCE = "instance", "Instance"
 
 
 class PermissionRequestSubject(models.TextChoices):
     USER = "user", "User"
-    RESOURCE_GROUP = "resource_group", "Resource Group"
+    TEAM = "team", "Team"
 
 
 class PermissionRequestDuration(models.TextChoices):
@@ -987,8 +835,8 @@ class SqlWorkflow(models.Model, WorkflowAuditMixin):
 
     workflow_name = models.CharField("Workflow Name", max_length=50)
     demand_url = models.CharField("Demand URL", max_length=500, blank=True)
-    group_id = models.IntegerField("Group ID")
-    group_name = models.CharField("Group Name", max_length=100)
+    team_id = models.IntegerField("Group ID")
+    team_name = models.CharField("Group Name", max_length=100)
     instance = models.ForeignKey(Instance, on_delete=models.CASCADE)
     db_name = models.CharField("Database", max_length=64)
     schema_name = models.CharField("Schema", max_length=128, blank=True, default="")
@@ -1089,8 +937,8 @@ class WorkflowAudit(models.Model):
     """
 
     audit_id = models.AutoField(primary_key=True)
-    group_id = models.IntegerField("Group ID")
-    group_name = models.CharField("Group Name", max_length=100)
+    team_id = models.IntegerField("Group ID")
+    team_name = models.CharField("Group Name", max_length=100)
     workflow_id = models.BigIntegerField("Related Workflow ID")
     workflow_type = models.IntegerField("Request Type", choices=WorkflowType.choices)
     workflow_title = models.CharField("Request Title", max_length=50)
@@ -1162,8 +1010,8 @@ class WorkflowAuditSetting(models.Model):
     """
 
     audit_setting_id = models.AutoField(primary_key=True)
-    group_id = models.IntegerField("Group ID")
-    group_name = models.CharField("Group Name", max_length=100)
+    team_id = models.IntegerField("Group ID")
+    team_name = models.CharField("Group Name", max_length=100)
     workflow_type = models.IntegerField("Audit Type", choices=WorkflowType.choices)
     audit_auth_groups = models.CharField("Audit Authorization Groups", max_length=255)
     create_time = models.DateTimeField(auto_now_add=True)
@@ -1175,7 +1023,7 @@ class WorkflowAuditSetting(models.Model):
     class Meta:
         managed = True
         db_table = "workflow_audit_setting"
-        unique_together = ("group_id", "workflow_type")
+        unique_together = ("team_id", "workflow_type")
         verbose_name = "Audit Flow Configuration"
         verbose_name_plural = "Audit Flow Configuration"
 
@@ -1267,8 +1115,8 @@ class QueryPrivilegesApply(models.Model, WorkflowAuditMixin):
     """
 
     apply_id = models.AutoField(primary_key=True)
-    group_id = models.IntegerField("Group ID")
-    group_name = models.CharField("Group Name", max_length=100)
+    team_id = models.IntegerField("Group ID")
+    team_name = models.CharField("Group Name", max_length=100)
     title = models.CharField("Request Title", max_length=50)
     # TODO: Convert user_name and user_display to a foreign key.
     user_name = models.CharField("Requester", max_length=30)
@@ -1344,7 +1192,7 @@ class QueryPrivileges(models.Model):
 
 class PermissionRequest(models.Model, WorkflowAuditMixin):
     request_id = models.AutoField(primary_key=True)
-    resource_group = models.ForeignKey(ResourceGroup, on_delete=models.CASCADE)
+    team = models.ForeignKey(Team, on_delete=models.CASCADE)
     target_type = models.CharField(
         "Target Type",
         max_length=32,
@@ -1363,6 +1211,14 @@ class PermissionRequest(models.Model, WorkflowAuditMixin):
         choices=InstanceAccessLevel.choices,
         blank=True,
         default="",
+    )
+    permission_group = models.ForeignKey(
+        "auth.Group",
+        related_name="permission_requests",
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+        default=None,
     )
     title = models.CharField("Request Title", max_length=50)
     reason = models.CharField("Request Reason", max_length=255, blank=True, default="")
@@ -1387,12 +1243,8 @@ class PermissionRequest(models.Model, WorkflowAuditMixin):
     sys_time = models.DateTimeField(auto_now=True)
 
     @property
-    def group_id(self):
-        return self.resource_group_id
-
-    @property
-    def group_name(self):
-        return self.resource_group.group_name
+    def team_name(self):
+        return self.team.team_name
 
     def __int__(self):
         return self.request_id
@@ -1404,10 +1256,15 @@ class PermissionRequest(models.Model, WorkflowAuditMixin):
         verbose_name_plural = "Permission Requests"
 
 
-class TemporaryResourceGroupGrant(models.Model):
+class TemporaryTeamGrant(models.Model):
     grant_id = models.AutoField(primary_key=True)
     user = models.ForeignKey(Users, on_delete=models.CASCADE)
-    resource_group = models.ForeignKey(ResourceGroup, on_delete=models.CASCADE)
+    team = models.ForeignKey(Team, on_delete=models.CASCADE)
+    permission_group = models.ForeignKey(
+        "auth.Group",
+        related_name="temporary_team_grants",
+        on_delete=models.PROTECT,
+    )
     source_request = models.ForeignKey(
         PermissionRequest,
         on_delete=models.SET_NULL,
@@ -1422,15 +1279,15 @@ class TemporaryResourceGroupGrant(models.Model):
 
     class Meta:
         managed = True
-        db_table = "temporary_resource_group_grant"
-        verbose_name = "Temporary Resource Group Grant"
-        verbose_name_plural = "Temporary Resource Group Grants"
+        db_table = "temporary_team_grant"
+        verbose_name = "Temporary Team Grant"
+        verbose_name_plural = "Temporary Team Grants"
 
 
 class TemporaryInstanceGrant(models.Model):
     grant_id = models.AutoField(primary_key=True)
     user = models.ForeignKey(Users, on_delete=models.CASCADE, null=True, blank=True)
-    resource_group = models.ForeignKey(ResourceGroup, on_delete=models.CASCADE)
+    team = models.ForeignKey(Team, on_delete=models.CASCADE)
     instance = models.ForeignKey(Instance, on_delete=models.CASCADE)
     access_level = models.CharField(
         "Instance Access Level",
@@ -1456,10 +1313,18 @@ class TemporaryInstanceGrant(models.Model):
         verbose_name_plural = "Temporary Instance Grants"
 
 
-class PermanentResourceGroupGrant(models.Model):
+class PermanentTeamGrant(models.Model):
     grant_id = models.AutoField(primary_key=True)
     user = models.ForeignKey(Users, on_delete=models.CASCADE, null=True, blank=True)
-    resource_group = models.ForeignKey(ResourceGroup, on_delete=models.CASCADE)
+    team = models.ForeignKey(Team, on_delete=models.CASCADE)
+    permission_group = models.ForeignKey(
+        "auth.Group",
+        related_name="permanent_team_grants",
+        on_delete=models.PROTECT,
+        blank=True,
+        null=True,
+        default=None,
+    )
     instance = models.ForeignKey(
         Instance,
         on_delete=models.CASCADE,
@@ -1480,16 +1345,16 @@ class PermanentResourceGroupGrant(models.Model):
 
     class Meta:
         managed = True
-        db_table = "permanent_resource_group_grant"
+        db_table = "permanent_team_grant"
         constraints = [
             models.CheckConstraint(
                 condition=models.Q(user__isnull=False)
                 | models.Q(instance__isnull=False),
-                name="permanent_rg_grant_has_user_or_instance",
+                name="permanent_team_grant_has_user_or_instance",
             )
         ]
-        verbose_name = "Permanent Resource Group Grant"
-        verbose_name_plural = "Permanent Resource Group Grants"
+        verbose_name = "Permanent Team Grant"
+        verbose_name_plural = "Permanent Team Grants"
 
 
 class QueryLog(models.Model):
@@ -1732,7 +1597,7 @@ class ArchiveConfig(models.Model, WorkflowAuditMixin):
     )
 
     title = models.CharField("Archive Configuration Title", max_length=50)
-    resource_group = models.ForeignKey(ResourceGroup, on_delete=models.CASCADE)
+    team = models.ForeignKey(Team, on_delete=models.CASCADE)
     audit_auth_groups = models.CharField(
         "Audit Authorization Groups", max_length=255, blank=True
     )
@@ -1986,8 +1851,8 @@ class Permission(models.Model):
             ("sql_submit", "Submit SQL Deployment Workflow"),
             ("sql_review", "Review SQL Deployment Workflow"),
             (
-                "sql_execute_for_resource_group",
-                "Execute SQL Deployment Workflow (Resource Group Scope)",
+                "sql_execute_for_team",
+                "Execute SQL Deployment Workflow (Team Scope)",
             ),
             ("sql_execute", "Execute SQL Deployment Workflow (Own Submissions Only)"),
             ("query_applypriv", "Apply Query Privileges"),
@@ -1995,7 +1860,7 @@ class Permission(models.Model):
             ("query_review", "Review Query Privileges"),
             ("query_submit", "Submit SQL Query"),
             ("query_all_instances", "Query All Instances"),
-            ("query_resource_group_instance", "Query All Instances in Resource Group"),
+            ("query_team_instance", "Query All Instances in Team"),
             ("process_view", "View Sessions"),
             ("process_kill", "Kill Sessions"),
             ("tablespace_view", "View Tablespaces"),

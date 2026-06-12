@@ -20,7 +20,7 @@ from api_agents.services import dispatch_sql_workflow_to_agent
 from sql.engines import get_engine
 from sql.engines.models import ReviewResult, ReviewSet
 from sql.notify import notify_for_audit, EventType, notify_for_execute
-from sql.utils.resource_group import user_groups
+from sql.utils.team import user_groups
 from sql.utils.sql_review import (
     can_timingtask,
     can_cancel,
@@ -60,7 +60,7 @@ def _sql_workflow_list(request):
     """
     nav_status = request.POST.get("navStatus")
     instance_id = request.POST.get("instance_id")
-    resource_group_id = request.POST.get("group_id")
+    team_id = request.POST.get("team_id")
     start_date = request.POST.get("start_date")
     end_date = request.POST.get("end_date")
     limit = int(request.POST.get("limit", 0))
@@ -82,9 +82,9 @@ def _sql_workflow_list(request):
     # Instance
     if instance_id:
         filter_dict["instance_id"] = instance_id
-    # Resource group
-    if resource_group_id:
-        filter_dict["group_id"] = resource_group_id
+    # Team
+    if team_id:
+        filter_dict["team_id"] = team_id
     # Time range
     if start_date and end_date:
         end_date = datetime.datetime.strptime(
@@ -96,13 +96,11 @@ def _sql_workflow_list(request):
         pass
     # Non-admin users with review or group-execution permission
     # can view workflows in their groups.
-    elif user.has_perm("sql.sql_review") or user.has_perm(
-        "sql.sql_execute_for_resource_group"
-    ):
-        # Get user's resource groups first.
+    elif user.has_perm("sql.sql_review") or user.has_perm("sql.sql_execute_for_team"):
+        # Get user's teams first.
         group_list = user_groups(user)
-        group_ids = [group.group_id for group in group_list]
-        filter_dict["group_id__in"] = group_ids
+        group_ids = [group.team_id for group in group_list]
+        filter_dict["team_id__in"] = group_ids
     # Others can only view workflows they submitted.
     else:
         filter_dict["engineer"] = user.username
@@ -126,7 +124,7 @@ def _sql_workflow_list(request):
         "create_time",
         "instance__instance_name",
         "db_name",
-        "group_name",
+        "team_name",
         "syntax_type",
         "export_format",
     )
@@ -308,7 +306,7 @@ def execute(request):
     # Validate execute permissions.
     if not (
         request.user.has_perm("sql.sql_execute")
-        or request.user.has_perm("sql.sql_execute_for_resource_group")
+        or request.user.has_perm("sql.sql_execute_for_team")
     ):
         raise PermissionDenied
     workflow_id = int(request.POST.get("workflow_id", 0))
@@ -399,7 +397,7 @@ def timing_task(request):
     # Validate execute permissions.
     if not (
         request.user.has_perm("sql.sql_execute")
-        or request.user.has_perm("sql.sql_execute_for_resource_group")
+        or request.user.has_perm("sql.sql_execute_for_team")
     ):
         raise PermissionDenied
     workflow_id = request.POST.get("workflow_id")

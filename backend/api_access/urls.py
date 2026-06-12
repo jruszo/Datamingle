@@ -4,8 +4,8 @@ from api_access import views
 
 urlpatterns = [
     path(
-        "v1/access/resource-groups/lookup/",
-        views.PermissionResourceGroupLookup.as_view(),
+        "v1/access/teams/lookup/",
+        views.PermissionTeamLookup.as_view(),
     ),
     path("v1/access/instances/lookup/", views.PermissionInstanceLookup.as_view()),
     path("v1/access/request/", views.PermissionRequestListCreate.as_view()),

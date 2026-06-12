@@ -143,12 +143,12 @@ const eligibleInstances = computed(() => {
 const eligibleGroups = computed(() => {
   const eligibleGroupIds = new Set<number>()
   for (const instance of eligibleInstances.value) {
-    for (const groupId of instance.group_ids) {
+    for (const groupId of instance.team_ids) {
       eligibleGroupIds.add(groupId)
     }
   }
-  return (submissionMetadata.value?.resource_groups ?? []).filter((group) =>
-    eligibleGroupIds.has(group.group_id),
+  return (submissionMetadata.value?.teams ?? []).filter((group) =>
+    eligibleGroupIds.has(group.team_id),
   )
 })
 
@@ -162,7 +162,7 @@ const filteredInstances = computed(() => {
   if (!groupId) {
     return eligibleInstances.value
   }
-  return eligibleInstances.value.filter((instance) => instance.group_ids.includes(groupId))
+  return eligibleInstances.value.filter((instance) => instance.team_ids.includes(groupId))
 })
 
 const canCreateWorkflow = computed(() => eligibleInstances.value.length > 0)
@@ -437,7 +437,7 @@ async function submitWorkflow() {
         workflow: {
           workflow_name: form.workflowName.trim(),
           demand_url: form.demandUrl.trim() || undefined,
-          group_id: Number(form.groupId),
+          team_id: Number(form.groupId),
           db_name: form.dbName,
           instance: Number(form.instanceId),
           is_offline_export: 0,
@@ -675,7 +675,7 @@ onMounted(() => {
             <CardHeader>
               <CardTitle>Request context</CardTitle>
               <CardDescription>
-                Choose the resource group, instance, and database before running SQL check.
+                Choose the team, instance, and database before running SQL check.
               </CardDescription>
             </CardHeader>
             <CardContent class="space-y-4">
@@ -690,15 +690,15 @@ onMounted(() => {
               </div>
 
               <div class="space-y-2">
-                <label class="text-sm font-medium text-slate-700" for="workflow-group">Resource group</label>
+                <label class="text-sm font-medium text-slate-700" for="workflow-group">Team</label>
                 <select id="workflow-group" v-model="form.groupId" data-testid="workflow-group" :class="selectClass" :disabled="submitting">
-                  <option value="">Select a resource group</option>
+                  <option value="">Select a team</option>
                   <option
                     v-for="group in eligibleGroups"
-                    :key="group.group_id"
-                    :value="group.group_id"
+                    :key="group.team_id"
+                    :value="group.team_id"
                   >
-                    {{ group.group_name }}
+                    {{ group.team_name }}
                   </option>
                 </select>
               </div>
@@ -744,7 +744,7 @@ onMounted(() => {
           <Card class="border-slate-200">
             <CardHeader>
               <CardTitle>Approval flow</CardTitle>
-              <CardDescription>Preview the configured reviewers for this resource group.</CardDescription>
+              <CardDescription>Preview the configured reviewers for this team.</CardDescription>
             </CardHeader>
             <CardContent class="space-y-3">
               <p v-if="approvalError" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -760,17 +760,17 @@ onMounted(() => {
                 v-else-if="!approvalPreview"
                 class="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-sm text-slate-500"
               >
-                Select a resource group to preview its approval chain.
+                Select a team to preview its approval chain.
               </div>
               <template v-else>
                 <p data-testid="workflow-approval-preview" class="text-sm text-slate-600">{{ approvalPreview.display }}</p>
                 <div class="space-y-2">
                   <div
                     v-for="(node, index) in approvalPreview.review_info"
-                    :key="`${node.group_name}-${index}`"
+                    :key="`${node.team_name}-${index}`"
                     class="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3"
                   >
-                    <span class="text-sm font-medium text-slate-900">{{ node.group_name }}</span>
+                    <span class="text-sm font-medium text-slate-900">{{ node.team_name }}</span>
                     <Badge variant="outline" class="border-slate-200 bg-slate-50 text-slate-600">
                       {{ node.is_auto_pass ? 'Auto pass' : 'Approval step' }}
                     </Badge>

@@ -16,29 +16,27 @@ import {
 import { Input } from '@/components/ui/input'
 import {
   deleteUser,
-  fetchAccessRoles,
-  fetchResourceGroups,
+  fetchPermissionGroups,
+  fetchTeams,
   fetchUser,
   updateUser,
-  type AccessRoleRecord,
-  type ResourceAccessRoleCode,
-  type ResourceGroupMembershipSource,
-  type ResourceGroupRecord,
+  type PermissionGroupRecord,
+  type TeamPermissionGroupCode,
+  type TeamRecord,
   type UserManagementDetailRecord,
 } from '../api'
 import { useAuthStore } from '@/stores/auth'
 
 type GroupAccessState = {
-  access_role: ResourceAccessRoleCode | ''
-  membership_source?: ResourceGroupMembershipSource
+  permission_group_id: TeamPermissionGroupCode | ''
 }
 
 const authStore = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 
-const accessRoles = ref<AccessRoleRecord[]>([])
-const resourceGroups = ref<ResourceGroupRecord[]>([])
+const accessRoles = ref<PermissionGroupRecord[]>([])
+const resourceGroups = ref<TeamRecord[]>([])
 const loadedUser = ref<UserManagementDetailRecord | null>(null)
 const username = ref('')
 const displayName = ref('')
@@ -58,10 +56,9 @@ const userId = computed(() => {
   return Number.isFinite(value) ? value : null
 })
 const canManageUsers = computed(() => authStore.currentUser?.is_superuser ?? false)
-const isDirectoryManaged = computed(() => loadedUser.value?.is_directory_managed ?? false)
 const normalizedGroupFilter = computed(() => groupFilter.value.trim().toLowerCase())
 const assignedGroupCount = computed(
-  () => Object.values(groupAccessById.value).filter((row) => row.access_role).length,
+  () => Object.values(groupAccessById.value).filter((row) => row.permission_group_id).length,
 )
 
 function toUserFacingMessage(errorValue: unknown, fallback: string) {
@@ -85,8 +82,9 @@ function requireToken() {
   return authStore.accessToken
 }
 
-function isAccessRoleCode(value: string): value is ResourceAccessRoleCode {
-  return accessRoles.value.some((role) => role.code === value)
+function permissionGroupId(value: string | number | '') {
+  const groupId = Number(value)
+  return accessRoles.value.some((role) => role.id === groupId) ? groupId : null
 }
 
 function applyUser(user: UserManagementDetailRecord) {
@@ -96,62 +94,52 @@ function applyUser(user: UserManagementDetailRecord) {
   email.value = user.email
 
   const nextAccess: Record<number, GroupAccessState> = {}
-  const rows = user.resource_access?.length ? user.resource_access : user.resource_groups
+  const rows = user.team_access?.length ? user.team_access : user.teams
   for (const row of rows) {
-    nextAccess[row.group_id] = {
-      access_role: row.access_role,
-      membership_source: row.membership_source ?? 'datamingle',
+    nextAccess[row.team_id] = {
+      permission_group_id: row.permission_group_id,
     }
   }
   groupAccessById.value = nextAccess
 }
 
-function sortGroups(values: ResourceGroupRecord[]) {
+function sortGroups(values: TeamRecord[]) {
   return [...values].sort((left, right) =>
-    left.group_name.localeCompare(right.group_name, undefined, {
+    left.team_name.localeCompare(right.team_name, undefined, {
       sensitivity: 'base',
       numeric: true,
     }),
   )
 }
 
-function groupMatches(group: ResourceGroupRecord, filterValue: string) {
+function groupMatches(group: TeamRecord, filterValue: string) {
   if (!filterValue) {
     return true
   }
 
-  const haystack = `${group.group_name} ${group.group_id}`.toLowerCase()
+  const haystack = `${group.team_name} ${group.team_id}`.toLowerCase()
   return haystack.includes(filterValue)
 }
 
-const filteredResourceGroups = computed(() =>
+const filteredTeams = computed(() =>
   sortGroups(
     resourceGroups.value.filter((group) => groupMatches(group, normalizedGroupFilter.value)),
   ),
 )
 
 function roleForGroup(groupId: number) {
-  return groupAccessById.value[groupId]?.access_role ?? ''
-}
-
-function sourceForGroup(groupId: number) {
-  return groupAccessById.value[groupId]?.membership_source
+  return groupAccessById.value[groupId]?.permission_group_id ?? ''
 }
 
 function updateGroupRole(groupId: number, event: Event) {
   const value = (event.target as HTMLSelectElement).value
-  if (isDirectoryManaged.value || sourceForGroup(groupId) === 'workos_directory') {
-    return
-  }
+  const permissionId = permissionGroupId(value)
 
   const nextAccess = { ...groupAccessById.value }
   if (!value) {
     delete nextAccess[groupId]
-  } else if (isAccessRoleCode(value)) {
-    nextAccess[groupId] = {
-      access_role: value,
-      membership_source: nextAccess[groupId]?.membership_source ?? 'datamingle',
-    }
+  } else if (permissionId !== null) {
+    nextAccess[groupId] = { permission_group_id: permissionId }
   }
   groupAccessById.value = nextAccess
   formSuccess.value = ''
@@ -160,26 +148,26 @@ function updateGroupRole(groupId: number, event: Event) {
 function resourceAccessRows() {
   return Object.entries(groupAccessById.value)
     .map(([resourceGroupId, row]) => ({
-      resource_group_id: Number(resourceGroupId),
-      access_role: row.access_role,
+      team_id: Number(resourceGroupId),
+      permission_group_id: row.permission_group_id,
     }))
     .filter(
-      (row): row is { resource_group_id: number; access_role: ResourceAccessRoleCode } =>
-        Number.isFinite(row.resource_group_id) && isAccessRoleCode(row.access_role),
+      (row): row is { team_id: number; permission_group_id: TeamPermissionGroupCode } =>
+        Number.isFinite(row.team_id) && permissionGroupId(row.permission_group_id) !== null,
     )
-    .sort((left, right) => left.resource_group_id - right.resource_group_id)
+    .sort((left, right) => left.team_id - right.team_id)
 }
 
 async function loadAllGroups() {
-  const collectedGroups: ResourceGroupRecord[] = []
+  const collectedGroups: TeamRecord[] = []
   let page = 1
   let totalCount = 0
 
   while (page === 1 || collectedGroups.length < totalCount) {
-    const response = await fetchResourceGroups(requireToken(), {
+    const response = await fetchTeams(requireToken(), {
       page,
       size: 100,
-      ordering: 'group_name',
+      ordering: 'team_name',
     })
     collectedGroups.push(...response.results)
     totalCount = response.count
@@ -219,7 +207,7 @@ async function loadPage() {
     }
 
     const [roles, user] = await Promise.all([
-      fetchAccessRoles(requireToken()),
+      fetchPermissionGroups(requireToken()),
       fetchUser(userId.value, requireToken()),
       loadAllGroups(),
     ])
@@ -238,11 +226,6 @@ async function saveUser() {
     return
   }
 
-  if (isDirectoryManaged.value) {
-    formError.value = 'Resource group membership for this user is managed by WorkOS Directory Sync.'
-    return
-  }
-
   isSaving.value = true
   formError.value = ''
   formSuccess.value = ''
@@ -255,7 +238,7 @@ async function saveUser() {
     const updatedUser = await updateUser(
       userId.value,
       {
-        resource_access: resourceAccessRows(),
+        team_access: resourceAccessRows(),
         is_active: loadedUser.value?.is_active ?? true,
       },
       requireToken(),
@@ -373,13 +356,6 @@ watch(
         <Badge v-if="loadedUser.is_staff" variant="secondary" class="bg-sky-100 text-sky-800">
           Staff
         </Badge>
-        <Badge
-          v-if="loadedUser.is_directory_managed"
-          variant="secondary"
-          class="bg-violet-100 text-violet-800"
-        >
-          WorkOS Directory
-        </Badge>
       </div>
     </div>
 
@@ -389,13 +365,6 @@ watch(
         <CardDescription>Maintain the user account and resource access assignments.</CardDescription>
       </CardHeader>
       <CardContent class="space-y-6">
-        <div
-          v-if="isDirectoryManaged"
-          class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
-        >
-          Resource group membership for this user is managed by WorkOS Directory Sync.
-        </div>
-
         <div class="grid gap-4 md:grid-cols-2">
           <div class="space-y-2">
             <label for="user-username" class="text-sm font-medium text-slate-900">Username</label>
@@ -458,55 +427,41 @@ watch(
           <Input
             v-model="groupFilter"
             :disabled="isLoading"
-            placeholder="Filter resource groups"
-            aria-label="Filter resource groups"
+            placeholder="Filter teams"
+            aria-label="Filter teams"
           />
 
           <div class="overflow-x-auto rounded-md border border-slate-200">
             <table class="min-w-full divide-y divide-slate-200 text-sm">
               <thead class="bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
                 <tr>
-                  <th class="px-4 py-3">Resource group</th>
-                  <th class="px-4 py-3">Access role</th>
-                  <th class="px-4 py-3">Source</th>
+                  <th class="px-4 py-3">Team</th>
+                  <th class="px-4 py-3">Permission group</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-200 bg-white">
-                <tr v-for="group in filteredResourceGroups" :key="group.group_id">
+                <tr v-for="group in filteredTeams" :key="group.team_id">
                   <td class="px-4 py-3">
-                    <div class="font-medium text-slate-900">{{ group.group_name }}</div>
-                    <div class="mt-1 text-xs text-slate-500">Group ID {{ group.group_id }}</div>
+                    <div class="font-medium text-slate-900">{{ group.team_name }}</div>
+                    <div class="mt-1 text-xs text-slate-500">Group ID {{ group.team_id }}</div>
                   </td>
                   <td class="px-4 py-3">
                     <select
                       class="w-full min-w-52 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                      :value="roleForGroup(group.group_id)"
-                      :disabled="isDirectoryManaged || sourceForGroup(group.group_id) === 'workos_directory'"
-                      @change="updateGroupRole(group.group_id, $event)"
+                      :value="roleForGroup(group.team_id)"
+                      :disabled="!canManageUsers"
+                      @change="updateGroupRole(group.team_id, $event)"
                     >
                       <option value="">No access</option>
-                      <option v-for="role in accessRoles" :key="role.code" :value="role.code">
-                        {{ role.label }}
+                      <option v-for="role in accessRoles" :key="role.id" :value="role.id">
+                        {{ role.name }}
                       </option>
                     </select>
                   </td>
-                  <td class="px-4 py-3">
-                    <Badge
-                      v-if="sourceForGroup(group.group_id) === 'workos_directory'"
-                      variant="secondary"
-                      class="bg-violet-100 text-violet-800"
-                    >
-                      WorkOS Directory
-                    </Badge>
-                    <span v-else-if="roleForGroup(group.group_id)" class="text-xs text-slate-500">
-                      Datamingle
-                    </span>
-                    <span v-else class="text-xs text-slate-400">None</span>
-                  </td>
                 </tr>
-                <tr v-if="filteredResourceGroups.length === 0">
-                  <td colspan="3" class="px-4 py-8 text-center text-sm text-slate-500">
-                    No resource groups match the current filter.
+                <tr v-if="filteredTeams.length === 0">
+                  <td colspan="2" class="px-4 py-8 text-center text-sm text-slate-500">
+                    No teams match the current filter.
                   </td>
                 </tr>
               </tbody>
@@ -529,7 +484,7 @@ watch(
           </Button>
         </div>
         <Button
-          :disabled="isLoading || isSaving || !canManageUsers || isDirectoryManaged"
+          :disabled="isLoading || isSaving || !canManageUsers"
           @click="saveUser"
         >
           <Save class="h-4 w-4" />

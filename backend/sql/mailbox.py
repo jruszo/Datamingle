@@ -15,8 +15,8 @@ from sql.models import (
     Users,
     WorkflowLog,
 )
-from sql.utils.resource_group import (
-    normalize_access_role,
+from sql.utils.team import (
+    normalize_permission_group,
     resource_role_users,
     user_groups,
 )
@@ -88,7 +88,7 @@ def _base_metadata_for(source):
     elif isinstance(source, ArchiveConfig):
         metadata.update(
             {
-                "resource_group_name": source.resource_group.group_name,
+                "team_name": source.team.team_name,
                 "execution_mode": source.execution_mode,
                 "execution_state": source.execution_state,
                 "execution_state_label": source.get_execution_state_display(),
@@ -97,7 +97,7 @@ def _base_metadata_for(source):
     elif isinstance(source, PermissionRequest):
         metadata.update(
             {
-                "resource_group_name": source.resource_group.group_name,
+                "team_name": source.team.team_name,
                 "target_type": source.target_type,
                 "instance_name": (
                     source.instance.instance_name if source.instance_id else ""
@@ -147,17 +147,15 @@ def _current_reviewers(source):
     ):
         return []
 
-    current_role = normalize_access_role(audit.current_audit)
+    current_role = normalize_permission_group(audit.current_audit)
     if not current_role:
         return []
 
     ban_self_audit = SysConfig().get("ban_self_audit")
     reviewers = []
     seen_usernames = set()
-    group_id = (
-        source.group_id if isinstance(source, SqlWorkflow) else source.resource_group_id
-    )
-    for user in resource_role_users([current_role], group_id):
+    team_id = source.team_id if isinstance(source, SqlWorkflow) else source.team_id
+    for user in resource_role_users([current_role], team_id):
         if user.username in seen_usernames or _is_self_audit_blocked(
             user, source, ban_self_audit
         ):
@@ -184,8 +182,8 @@ def _archive_can_manage(user, source):
         return True
     if not user.has_perm("sql.archive_mgt"):
         return False
-    group_ids = {group.group_id for group in user_groups(user)}
-    return source.resource_group_id in group_ids
+    group_ids = {group.team_id for group in user_groups(user)}
+    return source.team_id in group_ids
 
 
 def _execution_needed_recipients(source):
@@ -199,7 +197,7 @@ def _execution_needed_recipients(source):
             return []
         candidates = _users_with_any_permission(
             "sql_execute",
-            "sql_execute_for_resource_group",
+            "sql_execute_for_team",
         )
         for user in candidates:
             if can_execute(user, source.id):
@@ -475,7 +473,7 @@ def backfill_mailbox_notifications():
     )
     _backfill_sources_in_batches(
         ArchiveConfig.objects.select_related(
-            "resource_group",
+            "team",
             "src_instance",
         ),
         sync_approval_notifications,
@@ -483,7 +481,7 @@ def backfill_mailbox_notifications():
     )
     _backfill_sources_in_batches(
         PermissionRequest.objects.select_related(
-            "resource_group",
+            "team",
             "instance",
         ),
         sync_approval_notifications,
@@ -495,12 +493,12 @@ def _reload_source(source):
         return SqlWorkflow.objects.select_related("instance").get(id=source.id)
     if isinstance(source, ArchiveConfig):
         return ArchiveConfig.objects.select_related(
-            "resource_group",
+            "team",
             "src_instance",
         ).get(id=source.id)
     if isinstance(source, PermissionRequest):
         return PermissionRequest.objects.select_related(
-            "resource_group",
+            "team",
             "instance",
         ).get(request_id=source.request_id)
     raise ValueError(f"Unsupported mailbox source: {type(source)!r}")

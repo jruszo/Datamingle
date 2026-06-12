@@ -3,6 +3,7 @@ import logging
 
 from django.db import DatabaseError, IntegrityError, transaction
 from django.db.models import Q
+from django.contrib.auth.models import Group
 from common.task_queue import async_task
 from drf_spectacular.utils import extend_schema
 from rest_framework import permissions, serializers, status, views
@@ -12,28 +13,26 @@ from common.utils.const import WorkflowAction, WorkflowStatus, WorkflowType
 from sql.mailbox import sync_approval_notifications
 from sql.models import (
     Instance,
-    PermanentResourceGroupGrant,
+    PermanentTeamGrant,
     PermissionRequest,
     PermissionRequestDuration,
     PermissionRequestSubject,
     PermissionRequestTarget,
-    ResourceGroup,
-    ResourceAccessRole,
-    ResourceGroupMembership,
+    Team,
+    TeamMembership,
     TemporaryInstanceGrant,
-    TemporaryResourceGroupGrant,
+    TemporaryTeamGrant,
     Users,
     WorkflowAudit,
     WorkflowLog,
 )
 from sql.notify import notify_for_audit
-from sql.utils.resource_group import (
-    resource_groups_for_role,
+from sql.utils.team import (
+    teams_for_role,
     user_groups,
     user_member_groups,
     user_has_instance_query_access,
     user_has_instance_workflow_access,
-    sync_user_legacy_resource_groups,
 )
 from sql.utils.workflow_audit import AuditException, get_auditor, reviewable_audit_ids
 
@@ -78,7 +77,7 @@ def _reviewable_request_ids(user):
 
 
 def _base_request_queryset():
-    return PermissionRequest.objects.select_related("resource_group", "instance")
+    return PermissionRequest.objects.select_related("team", "instance")
 
 
 def _request_queryset_for_user(user):
@@ -95,17 +94,17 @@ def _request_queryset_for_user(user):
 
 
 def _grant_queryset_for_user(user, model):
-    select_related_fields = ["user", "resource_group"]
-    if model in {TemporaryInstanceGrant, PermanentResourceGroupGrant}:
+    select_related_fields = ["user", "team"]
+    if model in {TemporaryInstanceGrant, PermanentTeamGrant}:
         select_related_fields.append("instance")
     queryset = model.objects.select_related(*select_related_fields)
     if user.is_superuser:
         return queryset
     if user.has_perm("sql.query_mgtpriv"):
-        group_ids = [group.group_id for group in user_member_groups(user)]
-        return queryset.filter(Q(resource_group_id__in=group_ids) | Q(user=user))
+        group_ids = [group.team_id for group in user_member_groups(user)]
+        return queryset.filter(Q(team_id__in=group_ids) | Q(user=user))
     return queryset.filter(
-        Q(user=user) | Q(user__isnull=True, resource_group__in=user_member_groups(user))
+        Q(user=user) | Q(user__isnull=True, team__in=user_member_groups(user))
     )
 
 
@@ -121,27 +120,22 @@ def _request_subject_is_self(permission_request):
     return permission_request.subject_type == PermissionRequestSubject.USER
 
 
-def _subject_has_resource_group_access(resource_group, user, access_duration):
+def _subject_has_team_access(team, user, access_duration):
     include_temporary = access_duration == PermissionRequestDuration.TEMPORARY
     if not include_temporary:
-        return any(
-            group.group_id == resource_group.group_id
-            for group in user_member_groups(user)
-        )
-    return any(group.group_id == resource_group.group_id for group in user_groups(user))
+        return any(group.team_id == team.team_id for group in user_member_groups(user))
+    return any(group.team_id == team.team_id for group in user_groups(user))
 
 
-def _subject_has_instance_access(
-    instance, access_level, subject_type, user, resource_group
-):
+def _subject_has_instance_access(instance, access_level, subject_type, user, team):
     if subject_type == PermissionRequestSubject.USER:
         return _request_grants_enough(user, instance, access_level)
 
-    if instance.resource_group.filter(group_id=resource_group.group_id).exists():
+    if instance.resource_group.filter(team_id=team.team_id).exists():
         return True
     return TemporaryInstanceGrant.objects.filter(
         user__isnull=True,
-        resource_group=resource_group,
+        team=team,
         instance=instance,
         access_level=access_level,
         is_revoked=False,
@@ -161,7 +155,7 @@ def _request_grants_enough(user, instance, access_level):
 
 def _permission_request_audit_callback(request_id, workflow_status):
     permission_request = PermissionRequest.objects.select_related(
-        "resource_group", "instance"
+        "team", "instance"
     ).get(request_id=request_id)
     permission_request.status = workflow_status
     permission_request.save(update_fields=["status"])
@@ -173,42 +167,41 @@ def _permission_request_audit_callback(request_id, workflow_status):
     subject_filter = _subject_filter(permission_request, user)
 
     if permission_request.access_duration == PermissionRequestDuration.PERMANENT:
-        if permission_request.target_type == PermissionRequestTarget.RESOURCE_GROUP:
-            ResourceGroupMembership.objects.get_or_create(
+        if permission_request.target_type == PermissionRequestTarget.TEAM:
+            TeamMembership.objects.update_or_create(
                 user=user,
-                resource_group=permission_request.resource_group,
-                defaults={"access_role": ResourceAccessRole.QUERY},
+                team=permission_request.team,
+                defaults={"permission_group": permission_request.permission_group},
             )
-            sync_user_legacy_resource_groups(user)
-            PermanentResourceGroupGrant.objects.get_or_create(
+            PermanentTeamGrant.objects.get_or_create(
                 source_request=permission_request,
                 defaults={
                     "user": user,
-                    "resource_group": permission_request.resource_group,
+                    "team": permission_request.team,
+                    "permission_group": permission_request.permission_group,
                 },
             )
             return
 
-        permission_request.instance.resource_group.add(
-            permission_request.resource_group
-        )
-        PermanentResourceGroupGrant.objects.get_or_create(
+        permission_request.instance.resource_group.add(permission_request.team)
+        PermanentTeamGrant.objects.get_or_create(
             source_request=permission_request,
             defaults={
                 "user": None,
-                "resource_group": permission_request.resource_group,
+                "team": permission_request.team,
                 "instance": permission_request.instance,
             },
         )
         return
 
-    if permission_request.target_type == PermissionRequestTarget.RESOURCE_GROUP:
-        if not TemporaryResourceGroupGrant.objects.filter(
+    if permission_request.target_type == PermissionRequestTarget.TEAM:
+        if not TemporaryTeamGrant.objects.filter(
             source_request=permission_request
         ).exists():
-            TemporaryResourceGroupGrant.objects.create(
+            TemporaryTeamGrant.objects.create(
                 **subject_filter,
-                resource_group=permission_request.resource_group,
+                team=permission_request.team,
+                permission_group=permission_request.permission_group,
                 source_request=permission_request,
                 valid_date=permission_request.valid_date,
             )
@@ -219,7 +212,7 @@ def _permission_request_audit_callback(request_id, workflow_status):
     ).exists():
         TemporaryInstanceGrant.objects.create(
             **subject_filter,
-            resource_group=permission_request.resource_group,
+            team=permission_request.team,
             instance=permission_request.instance,
             access_level=permission_request.access_level,
             source_request=permission_request,
@@ -227,27 +220,27 @@ def _permission_request_audit_callback(request_id, workflow_status):
         )
 
 
-class ResourceGroupLookupSerializer(serializers.ModelSerializer):
+class TeamLookupSerializer(serializers.ModelSerializer):
     label = serializers.SerializerMethodField()
 
     def get_label(self, obj):
-        return obj.group_name
+        return obj.team_name
 
     class Meta:
-        model = ResourceGroup
-        fields = ("group_id", "group_name", "label")
+        model = Team
+        fields = ("team_id", "team_name", "label")
 
 
 class PermissionInstanceLookupSerializer(serializers.ModelSerializer):
-    resource_groups = serializers.SerializerMethodField()
+    teams = serializers.SerializerMethodField()
     label = serializers.SerializerMethodField()
 
     def get_label(self, obj):
         return f"{obj.instance_name} | {obj.db_type} | {obj.host}"
 
-    def get_resource_groups(self, obj):
-        return ResourceGroupLookupSerializer(
-            obj.resource_group.filter(is_deleted=0).order_by("group_id"),
+    def get_teams(self, obj):
+        return TeamLookupSerializer(
+            obj.resource_group.filter(is_deleted=0).order_by("team_id"),
             many=True,
         ).data
 
@@ -260,17 +253,13 @@ class PermissionInstanceLookupSerializer(serializers.ModelSerializer):
             "type",
             "host",
             "label",
-            "resource_groups",
+            "teams",
         )
 
 
 class PermissionRequestListSerializer(serializers.ModelSerializer):
-    resource_group_id = serializers.IntegerField(
-        source="resource_group.group_id", read_only=True
-    )
-    resource_group_name = serializers.CharField(
-        source="resource_group.group_name", read_only=True
-    )
+    team_id = serializers.IntegerField(source="team.team_id", read_only=True)
+    team_name = serializers.CharField(source="team.team_name", read_only=True)
     instance_id = serializers.SerializerMethodField()
     instance_name = serializers.SerializerMethodField()
 
@@ -287,8 +276,8 @@ class PermissionRequestListSerializer(serializers.ModelSerializer):
             "title",
             "reason",
             "target_type",
-            "resource_group_id",
-            "resource_group_name",
+            "team_id",
+            "team_name",
             "instance_id",
             "instance_name",
             "access_level",
@@ -314,7 +303,8 @@ class PermissionRequestCreateSerializer(serializers.Serializer):
         choices=PermissionRequestDuration.choices,
         default=PermissionRequestDuration.TEMPORARY,
     )
-    resource_group_id = serializers.IntegerField()
+    team_id = serializers.IntegerField()
+    permission_group_id = serializers.IntegerField(required=False)
     instance_id = serializers.IntegerField(required=False)
     access_level = serializers.ChoiceField(
         choices=["query", "query_dml", "query_dml_ddl"],
@@ -339,41 +329,43 @@ class PermissionRequestCreateSerializer(serializers.Serializer):
             and subject_type == PermissionRequestSubject.USER
         ):
             raise serializers.ValidationError(
-                {
-                    "errors": (
-                        "Permanent instance requests must be made for a resource group."
-                    )
-                }
+                {"errors": ("Permanent instance requests must be made for a team.")}
             )
         if (
-            target_type == PermissionRequestTarget.RESOURCE_GROUP
+            target_type == PermissionRequestTarget.TEAM
             and subject_type != PermissionRequestSubject.USER
         ):
             raise serializers.ValidationError(
-                {"errors": "Resource group membership requests must be for yourself."}
+                {"errors": "Team membership requests must be for yourself."}
             )
 
         try:
-            resource_group = ResourceGroup.objects.get(
-                group_id=attrs["resource_group_id"], is_deleted=0
+            team = Team.objects.get(team_id=attrs["team_id"], is_deleted=0)
+        except Team.DoesNotExist:
+            raise serializers.ValidationError({"errors": "Team does not exist."})
+        attrs["team"] = team
+        if target_type == PermissionRequestTarget.TEAM:
+            permission_group_id = attrs.get("permission_group_id")
+            permission_group = (
+                Group.objects.exclude(name="superadmin")
+                .filter(id=permission_group_id)
+                .first()
             )
-        except ResourceGroup.DoesNotExist:
-            raise serializers.ValidationError(
-                {"errors": "Resource group does not exist."}
-            )
-        attrs["resource_group"] = resource_group
+            if permission_group is None:
+                raise serializers.ValidationError(
+                    {"permission_group_id": "Select a valid permission group."}
+                )
+            attrs["permission_group"] = permission_group
         if (
-            subject_type == PermissionRequestSubject.RESOURCE_GROUP
+            subject_type == PermissionRequestSubject.TEAM
             and not request_user.is_superuser
-            and not request_user.resource_group.filter(
-                group_id=resource_group.group_id
-            ).exists()
+            and team not in user_member_groups(request_user)
         ):
             raise serializers.ValidationError(
-                {"errors": "You can only request access for your own resource groups."}
+                {"errors": "You can only request access for your own teams."}
             )
 
-        if target_type == PermissionRequestTarget.RESOURCE_GROUP:
+        if target_type == PermissionRequestTarget.TEAM:
             attrs["instance"] = None
             attrs["access_level"] = ""
             return attrs
@@ -396,14 +388,12 @@ class PermissionRequestCreateSerializer(serializers.Serializer):
 
         if (
             subject_type == PermissionRequestSubject.USER
-            and not instance.resource_group.filter(
-                group_id=resource_group.group_id
-            ).exists()
+            and not instance.resource_group.filter(team_id=team.team_id).exists()
         ):
             raise serializers.ValidationError(
                 {
                     "errors": (
-                        "The selected instance is not associated with the selected resource group."
+                        "The selected instance is not associated with the selected team."
                     )
                 }
             )
@@ -422,8 +412,8 @@ class ActiveGrantSerializer(serializers.Serializer):
     subject_type = serializers.CharField()
     user_name = serializers.CharField()
     user_display = serializers.CharField()
-    resource_group_id = serializers.IntegerField()
-    resource_group_name = serializers.CharField()
+    team_id = serializers.IntegerField()
+    team_name = serializers.CharField()
     instance_id = serializers.IntegerField(allow_null=True)
     instance_name = serializers.CharField(allow_blank=True)
     access_level = serializers.CharField(allow_blank=True)
@@ -462,7 +452,7 @@ def _serialize_request_detail(permission_request, request_user):
     serializer_data = PermissionRequestListSerializer(permission_request).data
     serializer_data["review_info"] = [
         {
-            "group_name": node.group.name if node.group else "Auto",
+            "team_name": node.group.name if node.group else "Auto",
             "is_current_node": node.is_current_node,
             "is_passed_node": node.is_passed_node,
         }
@@ -481,7 +471,7 @@ def _grant_subject_payload(grant):
             "user_display": grant.user.display,
         }
     return {
-        "subject_type": PermissionRequestSubject.RESOURCE_GROUP.value,
+        "subject_type": PermissionRequestSubject.TEAM.value,
         "user_name": "",
         "user_display": "",
     }
@@ -489,15 +479,15 @@ def _grant_subject_payload(grant):
 
 def _serialize_active_grant(grant, grant_type, access_duration):
     subject_payload = _grant_subject_payload(grant)
-    if grant_type in {"resource_group", "permanent_resource_group"} and not getattr(
+    if grant_type in {"team", "permanent_team"} and not getattr(
         grant, "instance_id", None
     ):
         return {
             "grant_type": grant_type,
             "grant_id": grant.grant_id,
             **subject_payload,
-            "resource_group_id": grant.resource_group.group_id,
-            "resource_group_name": grant.resource_group.group_name,
+            "team_id": grant.team.team_id,
+            "team_name": grant.team.team_name,
             "instance_id": None,
             "instance_name": "",
             "access_level": "",
@@ -511,8 +501,8 @@ def _serialize_active_grant(grant, grant_type, access_duration):
         "grant_type": grant_type,
         "grant_id": grant.grant_id,
         **subject_payload,
-        "resource_group_id": grant.resource_group.group_id,
-        "resource_group_name": grant.resource_group.group_name,
+        "team_id": grant.team.team_id,
+        "team_name": grant.team.team_name,
         "instance_id": grant.instance_id,
         "instance_name": grant.instance.instance_name,
         "access_level": getattr(grant, "access_level", ""),
@@ -523,14 +513,14 @@ def _serialize_active_grant(grant, grant_type, access_duration):
     }
 
 
-class PermissionResourceGroupLookup(views.APIView):
+class PermissionTeamLookup(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    @extend_schema(responses={200: ResourceGroupLookupSerializer(many=True)})
+    @extend_schema(responses={200: TeamLookupSerializer(many=True)})
     def get(self, request):
         _require_permission(request, "sql.query_applypriv")
-        queryset = ResourceGroup.objects.filter(is_deleted=0).order_by("group_name")
-        serializer = ResourceGroupLookupSerializer(queryset, many=True)
+        queryset = Team.objects.filter(is_deleted=0).order_by("team_name")
+        serializer = TeamLookupSerializer(queryset, many=True)
         return success_response(data=serializer.data)
 
 
@@ -560,7 +550,7 @@ class PermissionRequestListCreate(views.APIView):
             queryset = queryset.filter(
                 Q(title__icontains=search)
                 | Q(user_display__icontains=search)
-                | Q(resource_group__group_name__icontains=search)
+                | Q(team__team_name__icontains=search)
                 | Q(instance__instance_name__icontains=search)
             )
         queryset = queryset.order_by("-request_id")
@@ -581,23 +571,23 @@ class PermissionRequestListCreate(views.APIView):
         subject_type = data["subject_type"]
         access_duration = data["access_duration"]
 
-        if data["target_type"] == PermissionRequestTarget.RESOURCE_GROUP:
-            if _subject_has_resource_group_access(
-                data["resource_group"],
+        if data["target_type"] == PermissionRequestTarget.TEAM:
+            if _subject_has_team_access(
+                data["team"],
                 user,
                 access_duration,
             ):
                 raise serializers.ValidationError(
                     {
                         "errors": (
-                            "The selected subject already has access to this resource group."
+                            "The selected subject already has access to this team."
                         )
                     }
                 )
             duplicate_qs = PermissionRequest.objects.filter(
                 user_name=user.username,
-                target_type=PermissionRequestTarget.RESOURCE_GROUP,
-                resource_group=data["resource_group"],
+                target_type=PermissionRequestTarget.TEAM,
+                team=data["team"],
                 subject_type=subject_type,
                 access_duration=access_duration,
                 status=WorkflowStatus.WAITING,
@@ -608,7 +598,7 @@ class PermissionRequestListCreate(views.APIView):
                 data["access_level"],
                 subject_type,
                 user,
-                data["resource_group"],
+                data["team"],
             ):
                 raise serializers.ValidationError(
                     {
@@ -620,7 +610,7 @@ class PermissionRequestListCreate(views.APIView):
             duplicate_qs = PermissionRequest.objects.filter(
                 user_name=user.username,
                 target_type=PermissionRequestTarget.INSTANCE,
-                resource_group=data["resource_group"],
+                team=data["team"],
                 instance=data["instance"],
                 access_level=data["access_level"],
                 subject_type=subject_type,
@@ -634,7 +624,8 @@ class PermissionRequestListCreate(views.APIView):
             )
 
         permission_request = PermissionRequest(
-            resource_group=data["resource_group"],
+            team=data["team"],
+            permission_group=data.get("permission_group"),
             target_type=data["target_type"],
             instance=data["instance"],
             access_level=data.get("access_level", ""),
@@ -720,8 +711,8 @@ class PermissionRequestReviewCreate(views.APIView):
     def post(self, request, request_id):
         if not (
             request.user.is_superuser
-            or resource_groups_for_role(
-                request.user, ResourceAccessRole.WORKFLOW_APPROVER
+            or teams_for_role(
+                request.user, TeamPermissionGroup.WORKFLOW_APPROVER
             ).exists()
             or request.user.has_perm("sql.query_review")
         ):
@@ -780,18 +771,18 @@ class ActiveGrantList(views.APIView):
         _require_permission(request, "sql.menu_queryapplylist")
         search = request.query_params.get("search", "").strip().lower()
         group_grants = _grant_queryset_for_user(
-            request.user, TemporaryResourceGroupGrant
+            request.user, TemporaryTeamGrant
         ).filter(is_revoked=False, valid_date__gte=_today())
         instance_grants = _grant_queryset_for_user(
             request.user, TemporaryInstanceGrant
         ).filter(is_revoked=False, valid_date__gte=_today())
         permanent_group_grants = _grant_queryset_for_user(
-            request.user, PermanentResourceGroupGrant
+            request.user, PermanentTeamGrant
         ).filter(is_revoked=False)
 
         rows = (
             [
-                _serialize_active_grant(grant, "resource_group", "temporary")
+                _serialize_active_grant(grant, "team", "temporary")
                 for grant in group_grants.order_by("-grant_id")
             ]
             + [
@@ -799,7 +790,7 @@ class ActiveGrantList(views.APIView):
                 for grant in instance_grants.order_by("-grant_id")
             ]
             + [
-                _serialize_active_grant(grant, "permanent_resource_group", "permanent")
+                _serialize_active_grant(grant, "permanent_team", "permanent")
                 for grant in permanent_group_grants.order_by("-grant_id")
             ]
         )
@@ -813,7 +804,7 @@ class ActiveGrantList(views.APIView):
                     [
                         row["user_display"],
                         row["user_name"],
-                        row["resource_group_name"],
+                        row["team_name"],
                         row["instance_name"],
                         row["access_level"],
                         row["access_duration"],
@@ -834,16 +825,12 @@ class ActiveGrantDetail(views.APIView):
     def delete(self, request, grant_type, grant_id):
         _require_permission(request, "sql.query_mgtpriv")
 
-        if grant_type == "resource_group":
-            queryset = _grant_queryset_for_user(
-                request.user, TemporaryResourceGroupGrant
-            )
+        if grant_type == "team":
+            queryset = _grant_queryset_for_user(request.user, TemporaryTeamGrant)
         elif grant_type == "instance":
             queryset = _grant_queryset_for_user(request.user, TemporaryInstanceGrant)
-        elif grant_type == "permanent_resource_group":
-            queryset = _grant_queryset_for_user(
-                request.user, PermanentResourceGroupGrant
-            )
+        elif grant_type == "permanent_team":
+            queryset = _grant_queryset_for_user(request.user, PermanentTeamGrant)
         else:
             raise serializers.ValidationError({"errors": "Unsupported grant type."})
 
@@ -854,9 +841,9 @@ class ActiveGrantDetail(views.APIView):
 
         grant.is_revoked = True
         grant.save(update_fields=["is_revoked"])
-        if grant_type == "permanent_resource_group":
+        if grant_type == "permanent_team":
             if grant.user_id:
-                grant.user.resource_group.remove(grant.resource_group)
+                TeamMembership.objects.filter(user=grant.user, team=grant.team).delete()
             elif grant.instance_id:
-                grant.instance.resource_group.remove(grant.resource_group)
+                grant.instance.resource_group.remove(grant.team)
         return success_response()

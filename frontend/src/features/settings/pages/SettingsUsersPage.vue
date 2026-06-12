@@ -11,14 +11,14 @@ import { DataTable, type DataTableColumn } from '@/components/ui/data-table'
 import { Input } from '@/components/ui/input'
 import {
   deleteUser,
-  fetchAccessRoles,
-  fetchResourceGroups,
+  fetchPermissionGroups,
+  fetchTeams,
   fetchUsers,
   inviteWorkosUser,
   updateUser,
-  type AccessRoleRecord,
-  type ResourceAccessRoleCode,
-  type ResourceGroupRecord,
+  type PermissionGroupRecord,
+  type TeamPermissionGroupCode,
+  type TeamRecord,
   type UserManagementRecord,
 } from '../api'
 import { useAuthStore } from '@/stores/auth'
@@ -39,10 +39,10 @@ const latestRequestId = ref(0)
 const isInviteDialogOpen = ref(false)
 const inviteEmail = ref('')
 const inviteDisplay = ref('')
-const inviteResourceAccessById = ref<Record<number, ResourceAccessRoleCode | ''>>({})
-const inviteResourceGroups = ref<ResourceGroupRecord[]>([])
-const inviteAccessRoles = ref<AccessRoleRecord[]>([])
-const inviteResourceGroupsLoading = ref(false)
+const inviteResourceAccessById = ref<Record<number, TeamPermissionGroupCode | ''>>({})
+const inviteTeams = ref<TeamRecord[]>([])
+const invitePermissionGroups = ref<PermissionGroupRecord[]>([])
+const inviteTeamsLoading = ref(false)
 const inviteSubmitting = ref(false)
 const inviteError = ref('')
 
@@ -64,8 +64,8 @@ const columns: DataTableColumn[] = [
     sortable: true,
   },
   {
-    key: 'resource_groups',
-    label: 'Resource groups',
+    key: 'teams',
+    label: 'Teams',
     sortable: false,
   },
   {
@@ -105,24 +105,25 @@ function requireToken() {
 }
 
 function groupSummary(user: UserManagementRecord) {
-  if (user.resource_groups.length === 0) {
-    return 'No resource groups assigned'
+  if (user.teams.length === 0) {
+    return 'No teams assigned'
   }
 
-  return user.resource_groups
-    .map((group) => `${group.group_name}: ${group.access_role_label ?? group.access_role}`)
+  return user.teams
+    .map((group) => `${group.team_name}: ${group.permission_group_name ?? group.permission_group_id}`)
     .join(', ')
 }
 
-function isAccessRoleCode(value: string): value is ResourceAccessRoleCode {
-  return inviteAccessRoles.value.some((role) => role.code === value)
+function permissionGroupId(value: string | number | '') {
+  const groupId = Number(value)
+  return invitePermissionGroups.value.some((role) => role.id === groupId) ? groupId : null
 }
 
 function resourceAccessRowsForUser(user: UserManagementRecord) {
-  const rows = user.resource_access?.length ? user.resource_access : user.resource_groups
+  const rows = user.team_access?.length ? user.team_access : user.teams
   return rows.map((group) => ({
-    resource_group_id: group.group_id,
-    access_role: group.access_role,
+    team_id: group.team_id,
+    permission_group_id: group.permission_group_id,
   }))
 }
 
@@ -132,11 +133,12 @@ function inviteRoleForGroup(groupId: number) {
 
 function updateInviteRole(groupId: number, event: Event) {
   const value = (event.target as HTMLSelectElement).value
+  const permissionId = permissionGroupId(value)
   const nextAccess = { ...inviteResourceAccessById.value }
   if (!value) {
     delete nextAccess[groupId]
-  } else if (isAccessRoleCode(value)) {
-    nextAccess[groupId] = value
+  } else if (permissionId !== null) {
+    nextAccess[groupId] = permissionId
   }
   inviteResourceAccessById.value = nextAccess
 }
@@ -144,14 +146,14 @@ function updateInviteRole(groupId: number, event: Event) {
 function inviteResourceAccessRows() {
   return Object.entries(inviteResourceAccessById.value)
     .map(([resourceGroupId, accessRole]) => ({
-      resource_group_id: Number(resourceGroupId),
-      access_role: accessRole,
+      team_id: Number(resourceGroupId),
+      permission_group_id: accessRole,
     }))
     .filter(
-      (row): row is { resource_group_id: number; access_role: ResourceAccessRoleCode } =>
-        Number.isFinite(row.resource_group_id) && isAccessRoleCode(row.access_role),
+      (row): row is { team_id: number; permission_group_id: TeamPermissionGroupCode } =>
+        Number.isFinite(row.team_id) && permissionGroupId(row.permission_group_id) !== null,
     )
-    .sort((left, right) => left.resource_group_id - right.resource_group_id)
+    .sort((left, right) => left.team_id - right.team_id)
 }
 
 async function loadUsers() {
@@ -216,14 +218,12 @@ async function toggleUserActiveState(user: UserManagementRecord) {
 
   try {
     const payload: {
-      resource_access?: Array<{ resource_group_id: number; access_role: ResourceAccessRoleCode }>
+      team_access?: Array<{ team_id: number; permission_group_id: TeamPermissionGroupCode }>
       is_active: boolean
     } = {
       is_active: nextIsActive,
     }
-    if (!user.is_directory_managed) {
-      payload.resource_access = resourceAccessRowsForUser(user)
-    }
+    payload.team_access = resourceAccessRowsForUser(user)
 
     const updatedUser = await updateUser(user.id, payload, requireToken())
     feedback.value = nextIsActive
@@ -257,37 +257,37 @@ async function removeUser(user: UserManagementRecord) {
   }
 }
 
-async function loadInviteResourceGroups() {
-  inviteResourceGroupsLoading.value = true
+async function loadInviteTeams() {
+  inviteTeamsLoading.value = true
   inviteError.value = ''
 
   try {
-    inviteAccessRoles.value = await fetchAccessRoles(requireToken())
-    const collectedGroups: ResourceGroupRecord[] = []
+    invitePermissionGroups.value = await fetchPermissionGroups(requireToken())
+    const collectedGroups: TeamRecord[] = []
     let page = 1
     let hasMore = true
 
     while (hasMore) {
-      const response = await fetchResourceGroups(requireToken(), {
+      const response = await fetchTeams(requireToken(), {
         page,
         size: 100,
-        ordering: 'group_name',
+        ordering: 'team_name',
       })
       collectedGroups.push(...response.results)
       hasMore = response.next !== null
       page += 1
     }
 
-    inviteResourceGroups.value = collectedGroups.sort((left, right) =>
-      left.group_name.localeCompare(right.group_name),
+    inviteTeams.value = collectedGroups.sort((left, right) =>
+      left.team_name.localeCompare(right.team_name),
     )
   } catch (errorValue) {
     inviteError.value = toUserFacingMessage(
       errorValue,
-      'Failed to load resource groups for invitation.',
+      'Failed to load teams for invitation.',
     )
   } finally {
-    inviteResourceGroupsLoading.value = false
+    inviteTeamsLoading.value = false
   }
 }
 
@@ -301,7 +301,7 @@ function openInviteDialog() {
   inviteResourceAccessById.value = {}
   inviteError.value = ''
   isInviteDialogOpen.value = true
-  void loadInviteResourceGroups()
+  void loadInviteTeams()
 }
 
 function closeInviteDialog() {
@@ -331,7 +331,7 @@ async function submitInvite() {
       {
         email,
         display: inviteDisplay.value.trim(),
-        resource_access: inviteResourceAccessRows(),
+        team_access: inviteResourceAccessRows(),
       },
       requireToken(),
     )
@@ -380,7 +380,7 @@ watch(searchQuery, () => {
     <div class="space-y-1">
       <h2 class="text-2xl font-semibold text-slate-900">User Management</h2>
       <p class="text-sm text-slate-600">
-        Superusers can invite users, manage fallback resource groups, and review WorkOS Directory
+        Superusers can invite users and manage team access.
         memberships.
       </p>
     </div>
@@ -422,7 +422,7 @@ watch(searchQuery, () => {
           :total-rows="totalCount"
           row-key="id"
           search-placeholder="Filter users by name, username, email, or ID"
-          :search-keys="['display', 'username', 'email', 'resource_groups']"
+          :search-keys="['display', 'username', 'email', 'teams']"
           @update:page="currentPage = $event"
           @update:page-size="handlePageSizeChange"
           @update:search-query="handleSearchQueryChange"
@@ -455,29 +455,29 @@ watch(searchQuery, () => {
             <span class="text-sm text-slate-700">{{ value || 'No email address' }}</span>
           </template>
 
-          <template #cell-resource_groups="{ row }">
+          <template #cell-teams="{ row }">
             <div class="space-y-2">
               <div class="flex flex-wrap gap-2">
                 <Badge
-                  v-for="group in (row as UserManagementRecord).resource_groups.slice(0, 2)"
-                  :key="group.group_id"
+                  v-for="group in (row as UserManagementRecord).teams.slice(0, 2)"
+                  :key="group.team_id"
                   variant="secondary"
                   class="bg-slate-100 text-slate-700"
                 >
-                  {{ group.group_name }} · {{ group.access_role_label ?? group.access_role }}
+                  {{ group.team_name }} · {{ group.permission_group_name ?? group.permission_group_id }}
                 </Badge>
                 <Badge
-                  v-if="(row as UserManagementRecord).resource_groups.length > 2"
+                  v-if="(row as UserManagementRecord).teams.length > 2"
                   variant="secondary"
                   class="bg-slate-100 text-slate-700"
                 >
-                  +{{ (row as UserManagementRecord).resource_groups.length - 2 }} more
+                  +{{ (row as UserManagementRecord).teams.length - 2 }} more
                 </Badge>
                 <span
-                  v-if="(row as UserManagementRecord).resource_groups.length === 0"
+                  v-if="(row as UserManagementRecord).teams.length === 0"
                   class="text-xs text-slate-500"
                 >
-                  No resource groups assigned
+                  No teams assigned
                 </span>
               </div>
               <p class="text-xs text-slate-500">{{ groupSummary(row as UserManagementRecord) }}</p>
@@ -503,18 +503,10 @@ watch(searchQuery, () => {
                 Staff
               </Badge>
               <Badge
-                v-if="row.is_directory_managed"
-                variant="secondary"
-                class="bg-violet-100 text-violet-800"
-              >
-                WorkOS directory
-              </Badge>
-              <Badge
-                v-else
                 :variant="row.is_workos_managed ? 'secondary' : 'outline'"
                 :class="row.is_workos_managed ? 'bg-slate-100 text-slate-700' : 'text-slate-600'"
               >
-                {{ row.is_workos_managed ? 'WorkOS linked' : 'Datamingle resource groups' }}
+                {{ row.is_workos_managed ? 'WorkOS linked' : 'Datamingle teams' }}
               </Badge>
             </div>
           </template>
@@ -554,8 +546,7 @@ watch(searchQuery, () => {
           <div>
             <h3 class="text-lg font-semibold text-slate-900">Invite WorkOS user</h3>
             <p class="mt-1 text-sm text-slate-600">
-              Send a WorkOS invitation and prepare fallback resource groups for customers without
-              Directory Sync.
+              Send a WorkOS invitation and assign initial team access.
             </p>
           </div>
           <Button variant="ghost" size="icon" type="button" @click="closeInviteDialog">
@@ -601,30 +592,30 @@ watch(searchQuery, () => {
               <table class="min-w-full divide-y divide-slate-200 text-sm">
                 <thead class="bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
                   <tr>
-                    <th class="px-4 py-3">Resource group</th>
-                    <th class="px-4 py-3">Access role</th>
+                    <th class="px-4 py-3">Team</th>
+                    <th class="px-4 py-3">Permission group</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-200 bg-white">
-                  <tr v-for="group in inviteResourceGroups" :key="group.group_id">
-                    <td class="px-4 py-3 font-medium text-slate-900">{{ group.group_name }}</td>
+                  <tr v-for="group in inviteTeams" :key="group.team_id">
+                    <td class="px-4 py-3 font-medium text-slate-900">{{ group.team_name }}</td>
                     <td class="px-4 py-3">
                       <select
                         class="w-full min-w-48 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                        :value="inviteRoleForGroup(group.group_id)"
-                        :disabled="inviteSubmitting || inviteResourceGroupsLoading"
-                        @change="updateInviteRole(group.group_id, $event)"
+                        :value="inviteRoleForGroup(group.team_id)"
+                        :disabled="inviteSubmitting || inviteTeamsLoading"
+                        @change="updateInviteRole(group.team_id, $event)"
                       >
                         <option value="">No access</option>
-                        <option v-for="role in inviteAccessRoles" :key="role.code" :value="role.code">
-                          {{ role.label }}
+                        <option v-for="role in invitePermissionGroups" :key="role.id" :value="role.id">
+                          {{ role.name }}
                         </option>
                       </select>
                     </td>
                   </tr>
-                  <tr v-if="inviteResourceGroups.length === 0">
+                  <tr v-if="inviteTeams.length === 0">
                     <td colspan="2" class="px-4 py-8 text-center text-sm text-slate-500">
-                      No resource groups are available.
+                      No teams are available.
                     </td>
                   </tr>
                 </tbody>
@@ -644,7 +635,7 @@ watch(searchQuery, () => {
             <Button
               type="submit"
               class="gap-2"
-              :disabled="inviteSubmitting || inviteResourceGroupsLoading"
+              :disabled="inviteSubmitting || inviteTeamsLoading"
             >
               <MailPlus class="h-4 w-4" />
               {{ inviteSubmitting ? 'Sending...' : 'Send invitation' }}

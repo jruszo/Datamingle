@@ -146,7 +146,7 @@ async function updateListRoute() {
 const canViewArchives = computed(() => hasPermission('sql.menu_archive'))
 const canCreateArchives = computed(() => hasPermission('sql.archive_apply'))
 
-const filterGroups = computed(() => metadata.value?.resource_groups ?? [])
+const filterGroups = computed(() => metadata.value?.teams ?? [])
 
 const filteredInstances = computed(() => {
   const instances = metadata.value?.instances ?? []
@@ -154,7 +154,7 @@ const filteredInstances = computed(() => {
   if (!groupId) {
     return instances
   }
-  return instances.filter((instance) => instance.group_ids.includes(groupId))
+  return instances.filter((instance) => instance.team_ids.includes(groupId))
 })
 
 const canMoveBackward = computed(() => archivesPage.value.previous !== null && filters.page > 1)
@@ -241,7 +241,7 @@ async function loadArchives() {
       search: filters.search,
       status: filters.status ? Number(filters.status) : undefined,
       execution_mode: filters.executionMode as 'one_time' | 'scheduled' | '',
-      group_id: filters.groupId ? Number(filters.groupId) : undefined,
+      team_id: filters.groupId ? Number(filters.groupId) : undefined,
       instance_id: filters.instanceId ? Number(filters.instanceId) : undefined,
     })
   } catch (errorValue) {
@@ -376,10 +376,10 @@ onMounted(async () => {
               <option value="">All groups</option>
               <option
                 v-for="group in filterGroups"
-                :key="group.group_id"
-                :value="`${group.group_id}`"
+                :key="group.team_id"
+                :value="`${group.team_id}`"
               >
-                {{ group.group_name }}
+                {{ group.team_name }}
               </option>
             </select>
             <select v-model="filters.instanceId" data-testid="archive-filter-instance" :class="selectClass" :disabled="metadataLoading">
@@ -448,7 +448,7 @@ onMounted(async () => {
                     </Badge>
                   </div>
                   <p class="text-sm text-slate-500">
-                    {{ archive.resource_group_name }} / {{ archive.src_instance_name }} / {{ archive.src_db_name }} / {{ archive.src_table_name }}
+                    {{ archive.team_name }} / {{ archive.src_instance_name }} / {{ archive.src_db_name }} / {{ archive.src_table_name }}
                   </p>
                   <p class="text-xs text-slate-500">
                     Next run: {{ formatDateTime(archive.next_run_at) }}

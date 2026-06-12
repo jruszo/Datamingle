@@ -137,6 +137,31 @@ func TestParseServiceMonitoringConfigUsesServiceScrapeProfiles(t *testing.T) {
 	}
 }
 
+func TestParseServiceMonitoringConfigUsesPerServiceLabels(t *testing.T) {
+	cfg, err := parseServiceMonitoringConfig(map[string]any{
+		"labels": map[string]any{"agent_name": "agent-a"},
+		"services": []any{
+			map[string]any{
+				"assignment_id": 1,
+				"db_type":       "mysql",
+				"labels": map[string]any{
+					"dm_environment": "prod",
+					"dm_team":        "payments",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Services[0].Labels["dm_environment"]; got != "prod" {
+		t.Fatalf("expected service label, got %q", got)
+	}
+	if got := cfg.Services[0].Labels["dm_team"]; got != "payments" {
+		t.Fatalf("expected service override label, got %q", got)
+	}
+}
+
 func contains(values []string, expected string) bool {
 	for _, value := range values {
 		if value == expected {

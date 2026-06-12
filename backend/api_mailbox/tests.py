@@ -20,7 +20,8 @@ from sql.models import (
     MailboxItem,
     PermissionRequest,
     PermissionRequestTarget,
-    ResourceGroup,
+    Team,
+    TeamMembership,
     SqlWorkflow,
     WorkflowAudit,
 )
@@ -50,12 +51,24 @@ class MailboxApiTests(TestCase):
             is_active=True,
         )
         self.group = Group.objects.create(name="Workflow Reviewers")
-        self.reviewer.groups.add(self.group)
+        self.qa_group, _ = Group.objects.get_or_create(name="QA")
 
-        self.resource_group = ResourceGroup.objects.create(group_name="RG Mailbox")
-        self.requester.resource_group.add(self.resource_group)
-        self.reviewer.resource_group.add(self.resource_group)
-        self.executor.resource_group.add(self.resource_group)
+        self.team = Team.objects.create(team_name="RG Mailbox")
+        TeamMembership.objects.create(
+            user=self.requester,
+            team=self.team,
+            permission_group=self.qa_group,
+        )
+        TeamMembership.objects.create(
+            user=self.reviewer,
+            team=self.team,
+            permission_group=self.group,
+        )
+        TeamMembership.objects.create(
+            user=self.executor,
+            team=self.team,
+            permission_group=self.qa_group,
+        )
 
         self.instance = Instance.objects.create(
             instance_name="mailbox-db",
@@ -66,13 +79,13 @@ class MailboxApiTests(TestCase):
             user="root",
             password="pwd",
         )
-        self.instance.resource_group.add(self.resource_group)
+        self.instance.resource_group.add(self.team)
 
         self.reviewer.user_permissions.add(
             Permission.objects.get(codename="sql_review")
         )
         self.executor.user_permissions.add(
-            Permission.objects.get(codename="sql_execute_for_resource_group")
+            Permission.objects.get(codename="sql_execute_for_team")
         )
         self.requester.user_permissions.add(
             Permission.objects.get(codename="sql_execute")
@@ -84,8 +97,8 @@ class MailboxApiTests(TestCase):
     def _create_sql_workflow(self, status="workflow_manreviewing"):
         workflow = SqlWorkflow.objects.create(
             workflow_name="Mailbox Workflow",
-            group_id=self.resource_group.group_id,
-            group_name=self.resource_group.group_name,
+            team_id=self.team.team_id,
+            team_name=self.team.team_name,
             instance=self.instance,
             db_name="archery",
             syntax_type=1,
@@ -95,8 +108,8 @@ class MailboxApiTests(TestCase):
             audit_auth_groups=str(self.group.id),
         )
         WorkflowAudit.objects.create(
-            group_id=self.resource_group.group_id,
-            group_name=self.resource_group.group_name,
+            team_id=self.team.team_id,
+            team_name=self.team.team_name,
             workflow_id=workflow.id,
             workflow_type=WorkflowType.SQL_REVIEW,
             workflow_title=workflow.workflow_name,
@@ -112,8 +125,9 @@ class MailboxApiTests(TestCase):
 
     def _create_permission_request(self):
         request = PermissionRequest.objects.create(
-            resource_group=self.resource_group,
-            target_type=PermissionRequestTarget.RESOURCE_GROUP,
+            team=self.team,
+            permission_group=self.qa_group,
+            target_type=PermissionRequestTarget.TEAM,
             title="Mailbox Permission Request",
             reason="Need access",
             user_name=self.requester.username,
@@ -123,8 +137,8 @@ class MailboxApiTests(TestCase):
             audit_auth_groups=str(self.group.id),
         )
         WorkflowAudit.objects.create(
-            group_id=self.resource_group.group_id,
-            group_name=self.resource_group.group_name,
+            team_id=self.team.team_id,
+            team_name=self.team.team_name,
             workflow_id=request.request_id,
             workflow_type=WorkflowType.ACCESS_REQUEST,
             workflow_title=request.title,
@@ -141,7 +155,7 @@ class MailboxApiTests(TestCase):
     def _create_archive(self):
         archive = ArchiveConfig.objects.create(
             title="Mailbox Archive",
-            resource_group=self.resource_group,
+            team=self.team,
             audit_auth_groups=str(self.group.id),
             src_instance=self.instance,
             src_db_name="archery",

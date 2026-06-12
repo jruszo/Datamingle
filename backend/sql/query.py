@@ -15,7 +15,7 @@ from common.utils.extend_json_encoder import ExtendJSONEncoder, ExtendJSONEncode
 from common.utils.openai import OpenaiClient, check_openai_config
 from common.utils.timer import FuncTimer
 from sql.query_privileges import query_priv_check
-from sql.utils.resource_group import user_instances
+from sql.utils.team import user_instances
 from sql.utils.tasks import add_kill_conn_schedule, del_schedule
 from .models import QueryLog, Instance
 from sql.engines import get_engine

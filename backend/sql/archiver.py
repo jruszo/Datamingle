@@ -35,8 +35,8 @@ from sql.engines.models import ReviewSet, ReviewResult
 from sql.mailbox import emit_execution_finished_notifications, resolve_mailbox_items
 from sql.notify import notify_for_audit
 from sql.plugins.pt_archiver import PtArchiver
-from sql.utils.resource_group import user_instances, user_groups
-from sql.models import ArchiveConfig, ArchiveLog, Instance, ResourceGroup
+from sql.utils.team import user_instances, user_groups
+from sql.models import ArchiveConfig, ArchiveLog, Instance, Team
 from sql.utils.workflow_audit import get_auditor, AuditException, Audit
 
 logger = logging.getLogger("default")
@@ -619,10 +619,10 @@ def archive_list(request):
         pass
     # Users with review permission can view all workflows in their groups.
     elif user.has_perm("sql.archive_review"):
-        # Get the user's resource groups first.
+        # Get the user's teams first.
         group_list = user_groups(user)
-        group_ids = [group.group_id for group in group_list]
-        filter_dict["resource_group__in"] = group_ids
+        group_ids = [group.team_id for group in group_list]
+        filter_dict["team__in"] = group_ids
     # Others can only view workflows they submitted.
     else:
         filter_dict["user_name"] = user.username
@@ -653,7 +653,7 @@ def archive_list(request):
         "state",
         "user_display",
         "create_time",
-        "resource_group__group_name",
+        "team__team_name",
     )
 
     # Serialize QuerySet.
@@ -672,7 +672,7 @@ def archive_apply(request):
     """Submit archive request for instance data."""
     user = request.user
     title = request.POST.get("title")
-    group_name = request.POST.get("group_name")
+    team_name = request.POST.get("team_name")
     src_instance_name = request.POST.get("src_instance_name")
     src_db_name = request.POST.get("src_db_name")
     src_table_name = request.POST.get("src_table_name")
@@ -690,7 +690,7 @@ def archive_apply(request):
         not all(
             [
                 title,
-                group_name,
+                team_name,
                 src_instance_name,
                 src_db_name,
                 src_table_name,
@@ -743,14 +743,14 @@ def archive_apply(request):
     else:
         d_ins = None
 
-    # Get resource group and audit settings.
-    res_group = ResourceGroup.objects.get(group_name=group_name)
+    # Get team and audit settings.
+    res_group = Team.objects.get(team_name=team_name)
     # Keep data consistent using a transaction.
     with transaction.atomic():
         # Save request into database.
         archive_info = ArchiveConfig(
             title=title,
-            resource_group=res_group,
+            team=res_group,
             audit_auth_groups="",
             src_instance=s_ins,
             src_db_name=src_db_name,
@@ -769,8 +769,8 @@ def archive_apply(request):
         )
         audit_handler = get_auditor(
             workflow=archive_info,
-            resource_group=res_group.group_name,
-            resource_group_id=res_group.group_id,
+            team=res_group.team_name,
+            team_id=res_group.team_id,
         )
 
         try:
@@ -838,8 +838,8 @@ def archive_audit(request):
     except ArchiveConfig.DoesNotExist:
         return render(request, "error.html", {"errMsg": "Workflow does not exist"})
 
-    resource_group = archive_workflow.resource_group
-    auditor = get_auditor(workflow=archive_workflow, resource_group=resource_group)
+    team = archive_workflow.team
+    auditor = get_auditor(workflow=archive_workflow, team=team)
 
     # Keep data consistent using a transaction.
     with transaction.atomic():

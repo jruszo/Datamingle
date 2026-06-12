@@ -8,7 +8,7 @@ from sql.models import (
     InstanceTag,
     ParamHistory,
     QueryPrivilegesApply,
-    ResourceGroup,
+    Team,
 )
 
 
@@ -277,16 +277,16 @@ class InstanceDiagnosticKillResultSerializer(serializers.Serializer):
 
 
 class InstanceListSerializer(serializers.ModelSerializer):
-    resource_group_ids = serializers.SerializerMethodField()
+    team_ids = serializers.SerializerMethodField()
     instance_tag_ids = serializers.SerializerMethodField()
     inventory_last_refresh_at = serializers.DateTimeField(
         source="inventory_last_success_at", read_only=True
     )
     node_name = serializers.CharField(source="node.name", read_only=True)
 
-    def get_resource_group_ids(self, obj):
+    def get_team_ids(self, obj):
         return list(
-            obj.resource_group.values_list("group_id", flat=True).order_by("group_id")
+            obj.resource_group.values_list("team_id", flat=True).order_by("team_id")
         )
 
     def get_instance_tag_ids(self, obj):
@@ -308,7 +308,7 @@ class InstanceListSerializer(serializers.ModelSerializer):
             "charset",
             "service_name",
             "sid",
-            "resource_group_ids",
+            "team_ids",
             "instance_tag_ids",
             "node",
             "node_name",
@@ -320,13 +320,13 @@ class InstanceListSerializer(serializers.ModelSerializer):
 
 
 class InstanceEditorSerializer(serializers.ModelSerializer):
-    resource_group_ids = serializers.SerializerMethodField()
+    team_ids = serializers.SerializerMethodField()
     instance_tag_ids = serializers.SerializerMethodField()
     node_name = serializers.CharField(source="node.name", read_only=True)
 
-    def get_resource_group_ids(self, obj):
+    def get_team_ids(self, obj):
         return list(
-            obj.resource_group.values_list("group_id", flat=True).order_by("group_id")
+            obj.resource_group.values_list("team_id", flat=True).order_by("team_id")
         )
 
     def get_instance_tag_ids(self, obj):
@@ -350,7 +350,7 @@ class InstanceEditorSerializer(serializers.ModelSerializer):
             "charset",
             "service_name",
             "sid",
-            "resource_group_ids",
+            "team_ids",
             "instance_tag_ids",
             "node",
             "node_name",
@@ -363,9 +363,9 @@ class InstanceCreateSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
-    resource_group_ids = serializers.PrimaryKeyRelatedField(
+    team_ids = serializers.PrimaryKeyRelatedField(
         source="resource_group",
-        queryset=ResourceGroup.objects.filter(is_deleted=0),
+        queryset=Team.objects.filter(is_deleted=0),
         many=True,
         required=False,
     )
@@ -414,11 +414,11 @@ class InstanceCreateSerializer(serializers.ModelSerializer):
         return value.strip()
 
     def create(self, validated_data):
-        resource_groups = validated_data.pop("resource_group", [])
+        teams = validated_data.pop("resource_group", [])
         instance_tags = validated_data.pop("instance_tag", [])
         with transaction.atomic():
             instance = Instance.objects.create(**validated_data)
-            instance.resource_group.set(resource_groups)
+            instance.resource_group.set(teams)
             instance.instance_tag.set(instance_tags)
         return instance
 
@@ -441,7 +441,7 @@ class InstanceCreateSerializer(serializers.ModelSerializer):
             "service_name",
             "sid",
             "node",
-            "resource_group_ids",
+            "team_ids",
             "instance_tag_ids",
         )
         extra_kwargs = {"password": {"write_only": True, "required": False}}
@@ -557,9 +557,9 @@ class InstanceDetailSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
-    resource_group_ids = serializers.PrimaryKeyRelatedField(
+    team_ids = serializers.PrimaryKeyRelatedField(
         source="resource_group",
-        queryset=ResourceGroup.objects.filter(is_deleted=0),
+        queryset=Team.objects.filter(is_deleted=0),
         many=True,
         required=False,
     )
@@ -614,7 +614,7 @@ class InstanceDetailSerializer(serializers.ModelSerializer):
         return value.strip()
 
     def update(self, instance, validated_data):
-        resource_groups = validated_data.pop("resource_group", None)
+        teams = validated_data.pop("resource_group", None)
         instance_tags = validated_data.pop("instance_tag", None)
         password = validated_data.pop("password", None)
 
@@ -627,8 +627,8 @@ class InstanceDetailSerializer(serializers.ModelSerializer):
 
             instance.save()
 
-            if resource_groups is not None:
-                instance.resource_group.set(resource_groups)
+            if teams is not None:
+                instance.resource_group.set(teams)
 
             if instance_tags is not None:
                 instance.instance_tag.set(instance_tags)
@@ -654,7 +654,7 @@ class InstanceDetailSerializer(serializers.ModelSerializer):
             "service_name",
             "sid",
             "node",
-            "resource_group_ids",
+            "team_ids",
             "instance_tag_ids",
         )
         extra_kwargs = {
@@ -734,15 +734,15 @@ class InstanceTagUpdateSerializer(serializers.ModelSerializer):
         fields = ("tag_name", "active")
 
 
-class ResourceGroupLookupSerializer(serializers.ModelSerializer):
+class TeamLookupSerializer(serializers.ModelSerializer):
     label = serializers.SerializerMethodField()
 
     def get_label(self, obj):
-        return obj.group_name
+        return obj.team_name
 
     class Meta:
-        model = ResourceGroup
-        fields = ("group_id", "group_name", "label")
+        model = Team
+        fields = ("team_id", "team_name", "label")
 
 
 class InfrastructureNodeLookupSerializer(serializers.ModelSerializer):
@@ -763,7 +763,7 @@ class InstanceMetadataSerializer(serializers.Serializer):
     db_types = ChoiceOptionSerializer(many=True)
     nodes = InfrastructureNodeLookupSerializer(many=True)
     tags = InstanceTagLookupSerializer(many=True)
-    resource_groups = ResourceGroupLookupSerializer(many=True)
+    teams = TeamLookupSerializer(many=True)
 
 
 class InstanceConnectionTestResultSerializer(serializers.Serializer):

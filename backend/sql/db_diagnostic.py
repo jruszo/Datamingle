@@ -10,7 +10,7 @@ from django.http import HttpResponse
 
 from sql.engines import get_engine
 from common.utils.extend_json_encoder import ExtendJSONEncoder, ExtendJSONEncoderBytes
-from sql.utils.resource_group import user_instances
+from sql.utils.team import user_instances
 from .models import Instance
 
 logger = logging.getLogger("default")

@@ -300,6 +300,7 @@ class AgentCommandType(models.TextChoices):
     QUERY_EXECUTE = "query.execute", "Query Execute"
     SCHEMA_CHANGE = "schema.change", "Schema Change"
     CONNECTION_TEST = "connection.test", "Connection Test"
+    INVENTORY_COLLECT = "inventory.collect", "Inventory Collect"
     WORKFLOW_CHECK = "workflow.check", "Workflow Check"
     WORKFLOW_EXECUTE = "workflow.execute", "Workflow Execute"
     EXPORT_CHECK = "export.check", "Export Check"

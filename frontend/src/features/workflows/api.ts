@@ -33,7 +33,7 @@ export {
   type WorkflowSchedulePayload,
   type WorkflowSubmissionMetadata,
   type WorkflowSubmitInstanceRecord,
-  type WorkflowSubmitResourceGroupRecord,
+  type WorkflowSubmitTeamRecord,
   type WorkflowSummaryRecord,
   type WorkflowSyntaxType,
   type WorkflowWindowPayload,

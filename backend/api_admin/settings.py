@@ -19,7 +19,7 @@ from sql.inventory import (
     ensure_inventory_refresh_schedule,
 )
 from sql.engines.mysql_ddl import validate_binary_path
-from sql.models import InstanceTag, ResourceGroup
+from sql.models import InstanceTag, Team
 
 from api_core.permissions import IsStaffOrSuperuser
 from api_core.response import success_response
@@ -176,7 +176,6 @@ SYSTEM_SETTINGS_SCHEMA = (
         "default": DEFAULT_QUERY_TEMPLATE,
     },
     {"name": "index_path_url", "kind": "string", "default": ""},
-    {"name": "default_auth_group", "kind": "list_string", "default": []},
     {"name": "api_user_whitelist", "kind": "list_int", "default": []},
     {"name": "lock_time_threshold", "kind": "int", "default": None},
     {"name": "lock_cnt_threshold", "kind": "int", "default": None},
@@ -260,9 +259,9 @@ def build_system_settings_options():
             {"value": group.name, "label": group.name}
             for group in Group.objects.order_by("name")
         ],
-        "resource_groups": [
-            {"value": group.group_name, "label": group.group_name}
-            for group in ResourceGroup.objects.order_by("group_name")
+        "teams": [
+            {"value": group.team_name, "label": group.team_name}
+            for group in Team.objects.order_by("team_name")
         ],
         "users": [
             {
@@ -357,9 +356,6 @@ class SystemSettingsSerializer(serializers.Serializer):
     def validate_ddl_notify_auth_group(self, value):
         return self._validate_group_names(value)
 
-    def validate_default_auth_group(self, value):
-        return self._validate_group_names(value)
-
     def validate_api_user_whitelist(self, value):
         valid_user_ids = set(User.objects.values_list("id", flat=True))
         invalid_user_ids = [
@@ -418,7 +414,7 @@ class SystemSettingsSerializer(serializers.Serializer):
     def _validate_group_names(value):
         valid_groups = set(Group.objects.values_list("name", flat=True))
         invalid_groups = [
-            group_name for group_name in value if group_name not in valid_groups
+            team_name for team_name in value if team_name not in valid_groups
         ]
         if invalid_groups:
             raise serializers.ValidationError(

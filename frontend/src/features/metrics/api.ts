@@ -104,10 +104,13 @@ async function metricsGet<T>(path: string, options: MetricsRequestOptions): Prom
   return payload.data
 }
 
-export function fetchMetricNames(token: string, search = '', limit = 300) {
+export function fetchMetricNames(token: string, search = '', limit = 300, matcher = '') {
   const params = new URLSearchParams({ limit: `${limit}` })
   if (search.trim()) {
     params.set('search', search.trim())
+  }
+  if (matcher.trim()) {
+    params.append('match[]', matcher.trim())
   }
   return metricsGet<string[]>('/v1/metrics/names', { token, params })
 }
@@ -132,8 +135,11 @@ export function fetchMetricMetadata(metricName: string, token: string) {
   return metricsGet<PrometheusMetadata>('/v1/metrics/metadata', { token, params })
 }
 
-export function fetchMetricSeries(metricName: string, token: string) {
-  const params = new URLSearchParams({ 'match[]': metricName })
+export function fetchMetricSeries(metricName: string, token: string, matcher = '') {
+  const selector = matcher.trim()
+    ? `${metricName}${matcher.trim()}`
+    : metricName
+  const params = new URLSearchParams({ 'match[]': selector })
   return metricsGet<PrometheusSeriesSelector[]>('/v1/metrics/series', { token, params })
 }
 

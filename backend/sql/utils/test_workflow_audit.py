@@ -11,7 +11,7 @@ from common.config import SysConfig
 from common.utils.const import WorkflowStatus, WorkflowType, WorkflowAction
 from sql.models import (
     Instance,
-    ResourceGroup,
+    Team,
     SqlWorkflow,
     SqlWorkflowContent,
     QueryPrivilegesApply,
@@ -20,6 +20,7 @@ from sql.models import (
     WorkflowLog,
     WorkflowAuditDetail,
     WorkflowAuditSetting,
+    TeamMembership,
 )
 from sql.utils.tests import User
 from sql.utils.workflow_audit import (
@@ -50,13 +51,17 @@ class TestAudit(TestCase):
             user="ins_user",
             password="some_str",
         )
-        self.res_group = ResourceGroup.objects.create(
-            group_id=1, group_name="group_name"
+        self.res_group = Team.objects.create(team_id=1, team_name="team_name")
+        self.audit_permission_groups = [
+            Group.objects.create(name=f"audit-group-{index}") for index in range(1, 4)
+        ]
+        self.audit_permission_group_ids = ",".join(
+            str(group.id) for group in self.audit_permission_groups
         )
         self.wf = SqlWorkflow.objects.create(
             workflow_name="some_name",
-            group_id=1,
-            group_name="g1",
+            team_id=1,
+            team_name="g1",
             engineer_display="",
             audit_auth_groups="some_audit_group",
             create_time=datetime.datetime.now(),
@@ -68,8 +73,8 @@ class TestAudit(TestCase):
         )
         self.own_wf = SqlWorkflow.objects.create(
             workflow_name="some_name",
-            group_id=1,
-            group_name="g1",
+            team_id=1,
+            team_name="g1",
             engineer=self.user.username,
             audit_auth_groups="some_audit_group",
             create_time=datetime.datetime.now(),
@@ -83,8 +88,8 @@ class TestAudit(TestCase):
             workflow=self.wf, sql_content="some_sql", execute_result=""
         )
         self.query_apply_1 = QueryPrivilegesApply.objects.create(
-            group_id=1,
-            group_name="some_name",
+            team_id=1,
+            team_name="some_name",
             title="some_title1",
             user_name="some_user",
             instance=self.ins,
@@ -97,7 +102,7 @@ class TestAudit(TestCase):
         )
         self.archive_apply_1 = ArchiveConfig.objects.create(
             title="title",
-            resource_group=self.res_group,
+            team=self.res_group,
             audit_auth_groups="some_audit_group",
             src_instance=self.ins,
             src_db_name="src_db_name",
@@ -115,8 +120,8 @@ class TestAudit(TestCase):
             user_display="display",
         )
         self.audit = WorkflowAudit.objects.create(
-            group_id=1,
-            group_name="some_group",
+            team_id=1,
+            team_name="some_group",
             workflow_id=1,
             workflow_type=1,
             workflow_title="request title",
@@ -140,11 +145,10 @@ class TestAudit(TestCase):
         WorkflowAuditSetting.objects.all().delete()
         QueryPrivilegesApply.objects.all().delete()
         WorkflowLog.objects.all().delete()
-        ResourceGroup.objects.all().delete()
+        Team.objects.all().delete()
         ArchiveConfig.objects.all().delete()
 
-    @patch("sql.utils.workflow_audit.user_groups", return_value=[])
-    def test_todo(self, _user_groups):
+    def test_todo(self):
         """TODO: test todo count, no assertion yet."""
         Audit.todo(self.user)
         Audit.todo(self.su)
@@ -169,46 +173,58 @@ class TestAudit(TestCase):
     def test_settings(self):
         """Test getting audit settings by group and workflow type."""
         WorkflowAuditSetting.objects.create(
-            workflow_type=1, group_id=1, audit_auth_groups="1,2,3"
+            workflow_type=1,
+            team_id=1,
+            audit_auth_groups=self.audit_permission_group_ids,
         )
-        result = Audit.settings(workflow_type=1, group_id=1)
-        self.assertEqual(result, "1,2,3")
+        result = Audit.settings(workflow_type=1, team_id=1)
+        self.assertEqual(result, self.audit_permission_group_ids)
         result = Audit.settings(0, 0)
         self.assertEqual(result, None)
 
     def test_change_settings_edit(self):
         """Edit settings."""
         ws = WorkflowAuditSetting.objects.create(
-            workflow_type=1, group_id=1, audit_auth_groups="1,2,3"
+            workflow_type=1,
+            team_id=1,
+            audit_auth_groups=self.audit_permission_group_ids,
         )
-        Audit.change_settings(workflow_type=1, group_id=1, audit_auth_groups="1,2")
+        expected = ",".join(str(group.id) for group in self.audit_permission_groups[:2])
+        Audit.change_settings(workflow_type=1, team_id=1, audit_auth_groups=expected)
         ws = WorkflowAuditSetting.objects.get(audit_setting_id=ws.audit_setting_id)
-        self.assertEqual(ws.audit_auth_groups, "1,2")
+        self.assertEqual(ws.audit_auth_groups, expected)
 
     def test_change_settings_add(self):
         """Add settings."""
-        Audit.change_settings(workflow_type=1, group_id=1, audit_auth_groups="1,2")
-        ws = WorkflowAuditSetting.objects.get(workflow_type=1, group_id=1)
-        self.assertEqual(ws.audit_auth_groups, "1,2")
+        expected = ",".join(str(group.id) for group in self.audit_permission_groups[:2])
+        Audit.change_settings(workflow_type=1, team_id=1, audit_auth_groups=expected)
+        ws = WorkflowAuditSetting.objects.get(workflow_type=1, team_id=1)
+        self.assertEqual(ws.audit_auth_groups, expected)
 
-    @patch("sql.utils.workflow_audit.auth_group_users")
+    @patch("sql.utils.workflow_audit.user_has_resource_role")
     @patch("sql.utils.workflow_audit.Audit.detail_by_workflow_id")
     def test_can_review_sql_review(self, _detail_by_workflow_id, _auth_group_users):
         """Test non-admin can review SQL workflows when properly authorized."""
         sql_review = Permission.objects.get(codename="sql_review")
         self.user.user_permissions.add(sql_review)
         aug = Group.objects.create(name="auth_group")
+        TeamMembership.objects.create(
+            user=self.user,
+            team=self.res_group,
+            permission_group=aug,
+        )
         _detail_by_workflow_id.return_value.current_audit = aug.id
         _auth_group_users.return_value.filter.exists = True
         self.audit.workflow_type = WorkflowType.SQL_REVIEW
         self.audit.workflow_id = self.wf.id
+        self.audit.current_audit = str(aug.id)
         self.audit.save()
         r = Audit.can_review(
             self.user, self.audit.workflow_id, self.audit.workflow_type
         )
         self.assertEqual(r, True)
 
-    @patch("sql.utils.workflow_audit.auth_group_users")
+    @patch("sql.utils.workflow_audit.user_has_resource_role")
     @patch("sql.utils.workflow_audit.Audit.detail_by_workflow_id")
     def test_cannot_review_self_sql_review(
         self, _detail_by_workflow_id, _auth_group_users
@@ -228,24 +244,30 @@ class TestAudit(TestCase):
         )
         self.assertEqual(r, False)
 
-    @patch("sql.utils.workflow_audit.auth_group_users")
+    @patch("sql.utils.workflow_audit.user_has_resource_role")
     @patch("sql.utils.workflow_audit.Audit.detail_by_workflow_id")
     def test_can_review_query_review(self, _detail_by_workflow_id, _auth_group_users):
         """Test non-admin can review query workflows when properly authorized."""
         query_review = Permission.objects.get(codename="query_review")
         self.user.user_permissions.add(query_review)
         aug = Group.objects.create(name="auth_group")
+        TeamMembership.objects.create(
+            user=self.user,
+            team=self.res_group,
+            permission_group=aug,
+        )
         _detail_by_workflow_id.return_value.current_audit = aug.id
         _auth_group_users.return_value.filter.exists = True
         self.audit.workflow_type = WorkflowType.QUERY
         self.audit.workflow_id = self.query_apply_1.apply_id
+        self.audit.current_audit = str(aug.id)
         self.audit.save()
         r = Audit.can_review(
             self.user, self.audit.workflow_id, self.audit.workflow_type
         )
         self.assertEqual(r, True)
 
-    @patch("sql.utils.workflow_audit.auth_group_users")
+    @patch("sql.utils.workflow_audit.user_has_resource_role")
     @patch("sql.utils.workflow_audit.Audit.detail_by_workflow_id")
     def test_can_review_sql_review_super(
         self, _detail_by_workflow_id, _auth_group_users
@@ -260,7 +282,7 @@ class TestAudit(TestCase):
         r = Audit.can_review(self.su, self.audit.workflow_id, self.audit.workflow_type)
         self.assertEqual(r, True)
 
-    @patch("sql.utils.workflow_audit.auth_group_users")
+    @patch("sql.utils.workflow_audit.user_has_resource_role")
     @patch("sql.utils.workflow_audit.Audit.detail_by_workflow_id")
     def test_can_review_wrong_status(self, _detail_by_workflow_id, _auth_group_users):
         """Test non-waiting workflow cannot be reviewed."""
@@ -276,13 +298,13 @@ class TestAudit(TestCase):
         )
         self.assertEqual(r, False)
 
-    @patch("sql.utils.workflow_audit.auth_group_users")
+    @patch("sql.utils.workflow_audit.user_has_resource_role")
     @patch("sql.utils.workflow_audit.Audit.detail_by_workflow_id")
     def test_can_review_no_prem(self, _detail_by_workflow_id, _auth_group_users):
         """Test normal user without permission cannot review."""
         aug = Group.objects.create(name="auth_group")
         _detail_by_workflow_id.return_value.current_audit = aug.id
-        _auth_group_users.return_value.filter.exists = True
+        _auth_group_users.return_value = False
         self.audit.workflow_type = WorkflowType.SQL_REVIEW
         self.audit.workflow_id = self.wf.id
         self.audit.save()
@@ -291,25 +313,22 @@ class TestAudit(TestCase):
         )
         self.assertEqual(r, False)
 
-    @patch("sql.utils.workflow_audit.auth_group_users")
+    @patch("sql.utils.workflow_audit.user_has_resource_role")
     @patch("sql.utils.workflow_audit.Audit.detail_by_workflow_id")
-    def test_can_review_no_prem_exception(
+    def test_can_review_missing_permission_group(
         self, _detail_by_workflow_id, _auth_group_users
     ):
-        """Test exception case when permission group is missing."""
-        Group.objects.create(name="auth_group")
-        _detail_by_workflow_id.side_effect = RuntimeError()
-        _auth_group_users.return_value.filter.exists = True
+        """A missing permission group does not grant review access."""
+        _auth_group_users.return_value = False
         self.audit.workflow_type = WorkflowType.SQL_REVIEW
         self.audit.workflow_id = self.wf.id
+        self.audit.current_audit = "999999"
         self.audit.save()
-        with self.assertRaisesMessage(
-            Exception,
-            "Current review auth_group_id does not exist, please check and clean historical data",
-        ):
+        self.assertFalse(
             Audit.can_review(
                 self.user, self.audit.workflow_id, self.audit.workflow_type
             )
+        )
 
     def test_logs(self):
         """Test getting workflow logs."""
@@ -319,7 +338,7 @@ class TestAudit(TestCase):
 
 # AuditV2 tests
 def test_create_audit(
-    sql_workflow, sql_query_apply, archive_apply, resource_group, mocker: MockFixture
+    sql_workflow, sql_query_apply, archive_apply, team, mocker: MockFixture
 ):
     """Test normal creation and retrieval of one audit_setting."""
     mock_generate_audit_setting = mocker.patch.object(AuditV2, "generate_audit_setting")
@@ -344,8 +363,8 @@ def test_create_audit(
 
     audit = AuditV2(
         workflow=archive_apply,
-        resource_group=resource_group.group_name,
-        resource_group_id=resource_group.group_id,
+        team=team.team_name,
+        team_id=team.team_id,
     )
     audit.create_audit()
     archive_apply.refresh_from_db()
@@ -358,11 +377,11 @@ def test_init_no_workflow_and_audit():
     assert "WorkflowAudit or workflow is required" in str(e.value)
 
 
-def test_archive_init_no_resource_group(archive_apply):
-    """Test archive init with missing resource group."""
+def test_archive_init_no_team(archive_apply):
+    """Test archive init with missing team."""
     with pytest.raises(AuditException) as e:
-        AuditV2(workflow=archive_apply, resource_group="not_exists_group")
-    assert "Invalid parameter: resource group" in str(e.value)
+        AuditV2(workflow=archive_apply, team="not_exists_group")
+    assert "Invalid parameter: team" in str(e.value)
 
 
 def test_duplicate_create(sql_query_apply, fake_generate_audit_setting):
@@ -450,7 +469,7 @@ def test_get_workflow(
     archive_apply,
     sql_query_apply,
     sql_workflow,
-    resource_group,
+    team,
     fake_generate_audit_setting,
 ):
     """Initialize with audit only and load workflow from it."""
@@ -461,7 +480,7 @@ def test_get_workflow(
         audit_init_with_audit = AuditV2(audit=a.audit)
         assert audit_init_with_audit.workflow_type == a.workflow_type
         assert audit_init_with_audit.workflow == a.workflow
-    a = AuditV2(workflow=archive_apply, resource_group=resource_group.group_name)
+    a = AuditV2(workflow=archive_apply, team=team.team_name)
     a.create_audit()
     audit_init_with_audit = AuditV2(audit=a.audit)
     assert audit_init_with_audit.workflow_type == a.workflow_type
@@ -553,7 +572,7 @@ def test_auto_review_with_default_regex(
 
 def test_get_review_info(
     sql_query_apply,
-    resource_group,
+    team,
     create_auth_group,
     fake_generate_audit_setting,
     clean_auth_group,

@@ -304,6 +304,9 @@ func (m *ServiceModule) scrapeServiceAndWrite(ctx context.Context, cfg serviceMo
 	}
 
 	labels := copyLabels(cfg.Labels)
+	for name, value := range service.Labels {
+		labels[name] = value
+	}
 	labels["assignment_id"] = strconv.FormatInt(service.AssignmentID, 10)
 	labels["instance_id"] = strconv.FormatInt(service.InstanceID, 10)
 	labels["instance_name"] = service.InstanceName
@@ -404,6 +407,7 @@ type monitoredService struct {
 	Username       string
 	Password       string
 	Database       string
+	Labels         map[string]string
 	Collectors     []string
 	ScrapeProfiles []scrapeProfile
 	SSL            serviceSSLConfig
@@ -445,6 +449,7 @@ func parseServiceMonitoringConfig(raw map[string]any) (serviceMonitoringConfig, 
 			Username:     stringValue(serviceRaw["username"]),
 			Password:     stringValue(serviceRaw["password"]),
 			Database:     stringValue(serviceRaw["database"]),
+			Labels:       stringMap(serviceRaw["labels"]),
 			Collectors:   stringList(serviceRaw["collectors"]),
 			ScrapeProfiles: parseScrapeProfiles(
 				serviceRaw["scrape_profiles"],

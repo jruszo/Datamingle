@@ -60,11 +60,11 @@ class ChartDao(object):
     def workflow_by_group(self, start_date, end_date):
         sql = """
         select
-          group_name,
+          team_name,
           count(*)
         from sql_workflow
         where create_time >= '{}' and create_time <= '{}'
-        group by group_id
+        group by team_id
         order by count(*) desc;""".format(start_date, end_date)
         return self.__query(sql)
 

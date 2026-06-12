@@ -37,7 +37,7 @@ class QuerySerializerTests(SimpleTestCase):
             data={
                 "title": "t" * 51,
                 "instance_name": "i" * 51,
-                "group_name": "g" * 101,
+                "team_name": "g" * 101,
                 "priv_type": 2,
                 "db_name": "d" * 65,
                 "table_list": ["t" * 65],
@@ -49,7 +49,7 @@ class QuerySerializerTests(SimpleTestCase):
         self.assertFalse(serializer.is_valid())
         self.assertIn("title", serializer.errors)
         self.assertIn("instance_name", serializer.errors)
-        self.assertIn("group_name", serializer.errors)
+        self.assertIn("team_name", serializer.errors)
         self.assertIn("db_name", serializer.errors)
         self.assertIn("table_list", serializer.errors)
 

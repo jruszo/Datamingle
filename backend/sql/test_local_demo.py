@@ -6,14 +6,14 @@ from common.utils.const import WorkflowType
 from sql.local_demo import (
     managed_demo_instance_names,
     managed_demo_node_names,
-    managed_demo_resource_group_names,
+    managed_demo_team_names,
     managed_demo_usernames,
 )
 from sql.models import (
     InfrastructureNode,
     Instance,
     InstanceTag,
-    ResourceGroup,
+    Team,
     Users,
     WorkflowAuditSetting,
 )
@@ -43,10 +43,10 @@ class TestLocalDemoSeed(TestCase):
             len(managed_demo_node_names()),
         )
         self.assertEqual(
-            ResourceGroup.objects.filter(
-                group_name__in=managed_demo_resource_group_names(), is_deleted=0
+            Team.objects.filter(
+                team_name__in=managed_demo_team_names(), is_deleted=0
             ).count(),
-            len(managed_demo_resource_group_names()),
+            len(managed_demo_team_names()),
         )
         self.assertEqual(InstanceTag.objects.filter(tag_code="can_read").count(), 1)
         self.assertEqual(InstanceTag.objects.filter(tag_code="can_write").count(), 1)
@@ -54,13 +54,13 @@ class TestLocalDemoSeed(TestCase):
             WorkflowAuditSetting.objects.filter(
                 workflow_type=WorkflowType.SQL_REVIEW
             ).count(),
-            len(managed_demo_resource_group_names()),
+            len(managed_demo_team_names()),
         )
         self.assertEqual(
             WorkflowAuditSetting.objects.filter(
                 workflow_type=WorkflowType.ARCHIVE
             ).count(),
-            len(managed_demo_resource_group_names()),
+            len(managed_demo_team_names()),
         )
         superadmin_group = Group.objects.get(name="superadmin")
         self.assertEqual(

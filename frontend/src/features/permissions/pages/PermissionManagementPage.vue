@@ -22,12 +22,14 @@ import {
   createPermissionRequest,
   fetchPermissionGrants,
   fetchPermissionInstancesLookup,
+  fetchPermissionGroups,
   fetchPermissionRequestDetail,
   fetchPermissionRequests,
-  fetchPermissionResourceGroupsLookup,
+  fetchPermissionTeamsLookup,
   reviewPermissionRequest,
   revokePermissionGrant,
   type PaginatedResponse,
+  type PermissionGroupRecord,
   type PermissionGrantRecord,
   type PermissionInstanceAccessLevel,
   type PermissionInstanceLookupRecord,
@@ -37,7 +39,7 @@ import {
   type PermissionRequestStatus,
   type PermissionRequestSubject,
   type PermissionRequestTarget,
-  type PermissionResourceGroupLookupRecord,
+  type PermissionTeamLookupRecord,
 } from '../api'
 import { useAuthStore } from '@/stores/auth'
 import { useMailboxStore } from '@/stores/mailbox'
@@ -71,8 +73,9 @@ const revokingGrantKey = ref('')
 const isCreateDialogOpen = ref(false)
 const isDetailDialogOpen = ref(false)
 
-const resourceGroups = ref<PermissionResourceGroupLookupRecord[]>([])
+const resourceGroups = ref<PermissionTeamLookupRecord[]>([])
 const instances = ref<PermissionInstanceLookupRecord[]>([])
+const permissionGroups = ref<PermissionGroupRecord[]>([])
 
 const requestsPage = ref<PaginatedResponse<PermissionRequestRecord>>({
   count: 0,
@@ -98,10 +101,11 @@ const selectedRequestDetail = ref<PermissionRequestDetailRecord | null>(null)
 const createForm = reactive({
   title: '',
   reason: '',
-  target_type: 'resource_group' as PermissionRequestTarget,
+  target_type: 'team' as PermissionRequestTarget,
   subject_type: 'user' as PermissionRequestSubject,
   access_duration: 'temporary' as PermissionRequestDuration,
-  resource_group_id: '',
+  team_id: '',
+  permission_group_id: '',
   instance_id: '',
   access_level: 'query' as PermissionInstanceAccessLevel,
   valid_date: defaultValidDate(7),
@@ -207,14 +211,14 @@ function statusClass(status: PermissionRequestStatus) {
 }
 
 function targetLabel(targetType: PermissionRequestTarget) {
-  return targetType === 'resource_group' ? 'Resource group' : 'Instance'
+  return targetType === 'team' ? 'Team' : 'Instance'
 }
 
 function grantTypeLabel(grantType: PermissionGrantRecord['grant_type']) {
-  if (grantType === 'permanent_resource_group') {
+  if (grantType === 'permanent_team') {
     return 'Group access'
   }
-  return grantType === 'resource_group' ? 'Group access' : 'Instance access'
+  return grantType === 'team' ? 'Group access' : 'Instance access'
 }
 
 function durationLabel(duration: PermissionRequestDuration) {
@@ -222,7 +226,7 @@ function durationLabel(duration: PermissionRequestDuration) {
 }
 
 function subjectLabel(subjectType: PermissionRequestSubject, groupName = '') {
-  return subjectType === 'resource_group' ? groupName || 'Resource group' : 'Myself'
+  return subjectType === 'team' ? groupName || 'Team' : 'Myself'
 }
 
 function accessLevelLabel(level: PermissionInstanceAccessLevel | '') {
@@ -249,10 +253,11 @@ function setUnlimitedValidDate() {
 function resetCreateForm() {
   createForm.title = ''
   createForm.reason = ''
-  createForm.target_type = 'resource_group'
+  createForm.target_type = 'team'
   createForm.subject_type = 'user'
   createForm.access_duration = 'temporary'
-  createForm.resource_group_id = ''
+  createForm.team_id = ''
+  createForm.permission_group_id = ''
   createForm.instance_id = ''
   createForm.access_level = 'query'
   createForm.valid_date = defaultValidDate(7)
@@ -288,16 +293,16 @@ const canReviewRequests = computed(() => hasPermission('sql.query_review'))
 const canManageGrants = computed(() => hasPermission('sql.query_mgtpriv'))
 
 const filteredInstances = computed(() => {
-  const resourceGroupId = Number(createForm.resource_group_id)
+  const resourceGroupId = Number(createForm.team_id)
   if (!resourceGroupId) {
     return instances.value
   }
-  if (createForm.subject_type === 'resource_group') {
+  if (createForm.subject_type === 'team') {
     return instances.value
   }
 
   return instances.value.filter((instance) =>
-    instance.resource_groups.some((group) => group.group_id === resourceGroupId),
+    instance.teams.some((group) => group.team_id === resourceGroupId),
   )
 })
 
@@ -316,7 +321,7 @@ const selectedRequestSummary = computed(() => {
 watch(
   () => createForm.target_type,
   (targetType) => {
-    if (targetType === 'resource_group') {
+    if (targetType === 'team') {
       createForm.subject_type = 'user'
       createForm.instance_id = ''
       createForm.access_level = 'query'
@@ -325,7 +330,7 @@ watch(
 )
 
 watch(
-  () => createForm.resource_group_id,
+  () => createForm.team_id,
   () => {
     if (createForm.target_type !== 'instance' || !createForm.instance_id) {
       return
@@ -350,12 +355,14 @@ async function loadLookups() {
   lookupsError.value = ''
 
   try {
-    const [resourceGroupRows, instanceRows] = await Promise.all([
-      fetchPermissionResourceGroupsLookup(requireToken()),
+    const [resourceGroupRows, instanceRows, permissionGroupRows] = await Promise.all([
+      fetchPermissionTeamsLookup(requireToken()),
       fetchPermissionInstancesLookup(requireToken()),
+      fetchPermissionGroups(requireToken()),
     ])
     resourceGroups.value = resourceGroupRows
     instances.value = instanceRows
+    permissionGroups.value = permissionGroupRows
   } catch (errorValue) {
     lookupsError.value = toUserFacingMessage(errorValue, 'Failed to load request form options.')
   } finally {
@@ -496,7 +503,7 @@ async function submitRequest() {
   feedback.value = ''
 
   const title = createForm.title.trim()
-  const resourceGroupId = Number(createForm.resource_group_id)
+  const resourceGroupId = Number(createForm.team_id)
   const instanceId = Number(createForm.instance_id)
 
   if (!title) {
@@ -504,11 +511,15 @@ async function submitRequest() {
     return
   }
   if (!resourceGroupId) {
-    formError.value = 'Choose a resource group first.'
+    formError.value = 'Choose a team first.'
     return
   }
-  if (createForm.target_type === 'resource_group' && createForm.subject_type !== 'user') {
-    formError.value = 'Resource group membership requests must be for yourself.'
+  if (createForm.target_type === 'team' && createForm.subject_type !== 'user') {
+    formError.value = 'Team membership requests must be for yourself.'
+    return
+  }
+  if (createForm.target_type === 'team' && !Number(createForm.permission_group_id)) {
+    formError.value = 'Choose a permission group.'
     return
   }
   if (createForm.access_duration === 'temporary' && !createForm.valid_date) {
@@ -524,7 +535,7 @@ async function submitRequest() {
     createForm.access_duration === 'permanent' &&
     createForm.subject_type === 'user'
   ) {
-    formError.value = 'Permanent instance access must be requested for a resource group.'
+    formError.value = 'Permanent instance access must be requested for a team.'
     return
   }
 
@@ -538,7 +549,11 @@ async function submitRequest() {
         target_type: createForm.target_type,
         subject_type: createForm.subject_type,
         access_duration: createForm.access_duration,
-        resource_group_id: resourceGroupId,
+        team_id: resourceGroupId,
+        permission_group_id:
+          createForm.target_type === 'team'
+            ? Number(createForm.permission_group_id)
+            : undefined,
         instance_id: createForm.target_type === 'instance' ? instanceId : undefined,
         access_level: createForm.target_type === 'instance' ? createForm.access_level : undefined,
         valid_date:
@@ -847,7 +862,7 @@ onMounted(async () => {
                     </Badge>
                   </div>
                   <p class="text-sm text-slate-500">
-                    {{ requestItem.resource_group_name }}
+                    {{ requestItem.team_name }}
                     <span v-if="requestItem.instance_name"> / {{ requestItem.instance_name }}</span>
                     <span v-if="requestItem.access_level">
                       / {{ accessLevelLabel(requestItem.access_level) }}</span
@@ -855,7 +870,7 @@ onMounted(async () => {
                     <span>
                       /
                       {{
-                        subjectLabel(requestItem.subject_type, requestItem.resource_group_name)
+                        subjectLabel(requestItem.subject_type, requestItem.team_name)
                       }}</span
                     >
                   </p>
@@ -964,7 +979,7 @@ onMounted(async () => {
                 <div class="space-y-2">
                   <div class="flex flex-wrap items-center gap-2">
                     <p class="font-medium text-slate-900">
-                      {{ subjectLabel(grant.subject_type, grant.resource_group_name) }}
+                      {{ subjectLabel(grant.subject_type, grant.team_name) }}
                     </p>
                     <Badge variant="outline" class="border-slate-200 bg-slate-50 text-slate-600">
                       {{ grantTypeLabel(grant.grant_type) }}
@@ -981,7 +996,7 @@ onMounted(async () => {
                     </Badge>
                   </div>
                   <p class="text-sm text-slate-500">
-                    {{ grant.resource_group_name }}
+                    {{ grant.team_name }}
                     <span v-if="grant.instance_name"> / {{ grant.instance_name }}</span>
                   </p>
                 </div>
@@ -1068,7 +1083,7 @@ onMounted(async () => {
           <div>
             <h2 class="text-xl font-semibold text-slate-900">Request permission</h2>
             <p class="mt-1 text-sm text-slate-500">
-              Create an access request for yourself or one of your resource groups.
+              Create an access request for yourself or one of your teams.
             </p>
           </div>
           <Button variant="ghost" size="icon" type="button" @click="closeCreateDialog">
@@ -1110,7 +1125,7 @@ onMounted(async () => {
                 :class="selectClass"
                 :disabled="createSubmitting || lookupsLoading"
               >
-                <option value="resource_group">Resource group</option>
+                <option value="team">Team</option>
                 <option value="instance">Instance</option>
               </select>
             </div>
@@ -1129,10 +1144,10 @@ onMounted(async () => {
               >
                 <option value="user">Myself</option>
                 <option
-                  value="resource_group"
-                  :disabled="createForm.target_type === 'resource_group'"
+                  value="team"
+                  :disabled="createForm.target_type === 'team'"
                 >
-                  My resource group
+                  My team
                 </option>
               </select>
             </div>
@@ -1154,22 +1169,22 @@ onMounted(async () => {
 
           <div class="grid gap-4 md:grid-cols-2">
             <div class="space-y-2">
-              <label class="text-sm font-medium text-slate-700" for="request-resource-group"
-                >Resource group</label
+              <label class="text-sm font-medium text-slate-700" for="request-team"
+                >Team</label
               >
               <select
-                id="request-resource-group"
-                v-model="createForm.resource_group_id"
+                id="request-team"
+                v-model="createForm.team_id"
                 :class="selectClass"
                 :disabled="createSubmitting || lookupsLoading"
               >
-                <option value="">Select a resource group</option>
+                <option value="">Select a team</option>
                 <option
                   v-for="resourceGroup in resourceGroups"
-                  :key="resourceGroup.group_id"
-                  :value="`${resourceGroup.group_id}`"
+                  :key="resourceGroup.team_id"
+                  :value="`${resourceGroup.team_id}`"
                 >
-                  {{ resourceGroup.group_name }}
+                  {{ resourceGroup.team_name }}
                 </option>
               </select>
             </div>
@@ -1202,6 +1217,23 @@ onMounted(async () => {
             <Button variant="outline" size="sm" type="button" @click="setUnlimitedValidDate()"
               >Unlimited</Button
             >
+          </div>
+
+          <div v-if="createForm.target_type === 'team'" class="space-y-2">
+            <label class="text-sm font-medium text-slate-700" for="request-permission-group">
+              Permission group
+            </label>
+            <select
+              id="request-permission-group"
+              v-model="createForm.permission_group_id"
+              :class="selectClass"
+              :disabled="createSubmitting || lookupsLoading"
+            >
+              <option value="">Select a permission group</option>
+              <option v-for="group in permissionGroups" :key="group.id" :value="`${group.id}`">
+                {{ group.name }}
+              </option>
+            </select>
           </div>
 
           <div v-if="createForm.target_type === 'instance'" class="grid gap-4 md:grid-cols-2">
@@ -1334,7 +1366,7 @@ onMounted(async () => {
                     {{
                       subjectLabel(
                         selectedRequestSummary.subject_type,
-                        selectedRequestSummary.resource_group_name,
+                        selectedRequestSummary.team_name,
                       )
                     }}
                   </p>
@@ -1344,8 +1376,8 @@ onMounted(async () => {
                   <p>{{ durationLabel(selectedRequestSummary.access_duration) }}</p>
                 </div>
                 <div>
-                  <p class="text-slate-400">Resource group</p>
-                  <p>{{ selectedRequestSummary.resource_group_name }}</p>
+                  <p class="text-slate-400">Team</p>
+                  <p>{{ selectedRequestSummary.team_name }}</p>
                 </div>
                 <div>
                   <p class="text-slate-400">Instance</p>
@@ -1374,7 +1406,7 @@ onMounted(async () => {
               <div class="space-y-3">
                 <div
                   v-for="(node, index) in selectedRequestDetail?.review_info ?? []"
-                  :key="`${node.group_name}-${index}`"
+                  :key="`${node.team_name}-${index}`"
                   class="rounded-2xl border p-4"
                   :class="
                     node.is_current_node
@@ -1385,7 +1417,7 @@ onMounted(async () => {
                   "
                 >
                   <div class="flex items-center justify-between gap-3">
-                    <p class="font-medium text-slate-900">{{ node.group_name }}</p>
+                    <p class="font-medium text-slate-900">{{ node.team_name }}</p>
                     <Badge
                       variant="outline"
                       :class="
