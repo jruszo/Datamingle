@@ -9,7 +9,7 @@ class ArchiveConfigSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "title",
-            "resource_group",
+            "team",
             "audit_auth_groups",
             "src_instance",
             "src_db_name",

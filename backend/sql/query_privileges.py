@@ -24,9 +24,9 @@ from common.utils.const import WorkflowStatus, WorkflowType, WorkflowAction
 from common.utils.extend_json_encoder import ExtendJSONEncoder
 from common.utils.spa import spa_path_for_workflow
 from sql.engines.goinception import GoInceptionEngine
-from sql.models import QueryPrivilegesApply, QueryPrivileges, Instance, ResourceGroup
+from sql.models import QueryPrivilegesApply, QueryPrivileges, Instance, Team
 from sql.notify import notify_for_audit
-from sql.utils.resource_group import user_groups, user_instances, user_member_groups
+from sql.utils.team import user_groups, user_instances, user_member_groups
 from sql.utils.workflow_audit import Audit, AuditException, get_auditor
 from sql.utils.sql_utils import extract_tables
 
@@ -161,10 +161,10 @@ def query_priv_apply_list(request):
         query_privs = query_privs
     # Users with review permission can view all workflows in their groups.
     elif user.has_perm("sql.query_review"):
-        # Get user's directly assigned resource groups first.
+        # Get user's directly assigned teams first.
         group_list = user_member_groups(user)
-        group_ids = [group.group_id for group in group_list]
-        query_privs = query_privs.filter(group_id__in=group_ids)
+        group_ids = [group.team_id for group in group_list]
+        query_privs = query_privs.filter(team_id__in=group_ids)
     # Others can only view workflows they submitted.
     else:
         query_privs = query_privs.filter(user_name=user.username)
@@ -182,7 +182,7 @@ def query_priv_apply_list(request):
         "user_display",
         "status",
         "create_time",
-        "group_name",
+        "team_name",
     )
 
     # Serialize QuerySet.
@@ -205,8 +205,8 @@ def query_priv_apply(request):
     """
     title = request.POST["title"]
     instance_name = request.POST.get("instance_name")
-    group_name = request.POST.get("group_name")
-    group_id = ResourceGroup.objects.get(group_name=group_name).group_id
+    team_name = request.POST.get("team_name")
+    team_id = Team.objects.get(team_name=team_name).team_id
     priv_type = request.POST.get("priv_type")
     db_name = request.POST.get("db_name")
     db_list = request.POST.getlist("db_list[]")
@@ -280,8 +280,8 @@ def query_priv_apply(request):
 
     apply_info = QueryPrivilegesApply(
         title=title,
-        group_id=group_id,
-        group_name=group_name,
+        team_id=team_id,
+        team_name=team_name,
         # audit_auth_groups is temporarily empty here.
         audit_auth_groups="",
         user_name=user.username,
@@ -353,11 +353,11 @@ def user_query_priv(request):
         user_query_privs = user_query_privs
     # Users with management permission can view workflows in their groups.
     elif user.has_perm("sql.query_mgtpriv"):
-        # Get user's directly assigned resource groups first.
+        # Get user's directly assigned teams first.
         group_list = user_member_groups(user)
-        group_ids = [group.group_id for group in group_list]
+        group_ids = [group.team_id for group in group_list]
         user_query_privs = user_query_privs.filter(
-            instance__queryprivilegesapply__group_id__in=group_ids
+            instance__queryprivilegesapply__team_id__in=group_ids
         )
     # Others can only view workflows they submitted.
     else:

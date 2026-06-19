@@ -6,16 +6,17 @@ from django.utils import timezone
 
 from api_agents.models import Agent, AgentStatus, AgentToolArtifact
 from common.auth import ensure_superadmin_group
+from common.team_permissions import TEAM_PERMISSION_CODES
 from common.utils.const import WorkflowType
 from sql.models import (
     InfrastructureNode,
     Instance,
     InstanceTag,
-    ResourceGroup,
+    Team,
     Users,
     WorkflowAuditSetting,
 )
-from sql.utils.resource_group import normalize_access_role_sequence
+from sql.utils.team import normalize_permission_group_sequence
 
 DEMO_DB_PASSWORD = "demo123"
 
@@ -66,14 +67,14 @@ AUTH_GROUP_PERMISSION_CODES = OrderedDict(
             "menu_openapi",
             "sql_submit",
             "sql_review",
-            "sql_execute_for_resource_group",
+            "sql_execute_for_team",
             "sql_execute",
             "query_applypriv",
             "query_mgtpriv",
             "query_review",
             "query_submit",
             "query_all_instances",
-            "query_resource_group_instance",
+            "query_team_instance",
             "process_view",
             "process_kill",
             "tablespace_view",
@@ -87,6 +88,8 @@ AUTH_GROUP_PERMISSION_CODES = OrderedDict(
             "archive_apply",
             "archive_review",
             "archive_mgt",
+            "view_team",
+            "change_team",
         ],
         "PM": [
             "menu_dashboard",
@@ -100,7 +103,7 @@ AUTH_GROUP_PERMISSION_CODES = OrderedDict(
             "menu_archive",
             "sql_submit",
             "sql_review",
-            "sql_execute_for_resource_group",
+            "sql_execute_for_team",
             "sql_execute",
             "query_applypriv",
             "query_review",
@@ -124,14 +127,14 @@ AUTH_GROUP_PERMISSION_CODES = OrderedDict(
     }
 )
 
-DEMO_RESOURCE_GROUPS = OrderedDict(
+DEMO_TEAMS = OrderedDict(
     {
         "single_stage": {
-            "group_name": "Demo Workflow Single Stage",
+            "team_name": "Demo Workflow Single Stage",
             "approval_groups": ["DBA"],
         },
         "multi_stage": {
-            "group_name": "Demo Workflow Multi Stage",
+            "team_name": "Demo Workflow Multi Stage",
             "approval_groups": ["PM", "DBA"],
         },
     }
@@ -158,7 +161,7 @@ DEMO_INSTANCES = OrderedDict(
             "charset": "utf8mb4",
             "show_db_name_regex": "^(demo_orders|demo_billing)$",
             "denied_db_name_regex": "",
-            "resource_groups": ["single_stage", "multi_stage"],
+            "teams": ["single_stage", "multi_stage"],
             "tags": ["can_read", "can_write"],
             "databases": ["demo_orders", "demo_billing"],
         },
@@ -174,7 +177,7 @@ DEMO_INSTANCES = OrderedDict(
             "charset": "UTF8",
             "show_db_name_regex": "^(workflow_pg|analytics_pg)$",
             "denied_db_name_regex": "",
-            "resource_groups": ["single_stage", "multi_stage"],
+            "teams": ["single_stage", "multi_stage"],
             "tags": ["can_read", "can_write"],
             "databases": ["workflow_pg", "analytics_pg"],
         },
@@ -188,7 +191,7 @@ DEMO_INFRASTRUCTURE_NODES = OrderedDict(
             "address": "mysql_demo",
             "description": "Local demo MySQL database host.",
             "metadata": {"environment": "demo", "provider": "docker-compose"},
-            "resource_groups": ["single_stage", "multi_stage"],
+            "teams": ["single_stage", "multi_stage"],
             "services": ["mysql"],
             "agent": {
                 "name": "demo-mysql-node-agent",
@@ -205,7 +208,7 @@ DEMO_INFRASTRUCTURE_NODES = OrderedDict(
             "address": "postgres_demo",
             "description": "Local demo PostgreSQL database host.",
             "metadata": {"environment": "demo", "provider": "docker-compose"},
-            "resource_groups": ["single_stage", "multi_stage"],
+            "teams": ["single_stage", "multi_stage"],
             "services": ["pgsql"],
             "agent": None,
         },
@@ -225,8 +228,8 @@ def managed_demo_node_names():
     return [item["name"] for item in DEMO_INFRASTRUCTURE_NODES.values()]
 
 
-def managed_demo_resource_group_names():
-    return [item["group_name"] for item in DEMO_RESOURCE_GROUPS.values()]
+def managed_demo_team_names():
+    return [item["team_name"] for item in DEMO_TEAMS.values()]
 
 
 def seed_local_demo(write_line=None):
@@ -236,17 +239,17 @@ def seed_local_demo(write_line=None):
 
     with transaction.atomic():
         auth_groups = _seed_auth_groups(log)
-        resource_groups = _seed_resource_groups(log)
+        teams = _seed_teams(log)
         tags = _seed_instance_tags(log)
         _remove_legacy_seeded_users(log)
-        instances = _seed_instances(resource_groups, tags, log)
-        nodes = _seed_infrastructure_nodes(resource_groups, instances, log)
+        instances = _seed_instances(teams, tags, log)
+        nodes = _seed_infrastructure_nodes(teams, instances, log)
         _seed_agent_tool_artifacts(log)
-        _seed_workflow_settings(auth_groups, resource_groups, log)
+        _seed_workflow_settings(auth_groups, teams, log)
 
     return {
         "auth_groups": list(auth_groups.keys()),
-        "resource_groups": [group.group_name for group in resource_groups.values()],
+        "teams": [group.team_name for group in teams.values()],
         "users": [],
         "removed_users": managed_demo_usernames(),
         "instances": [instance.instance_name for instance in instances.values()],
@@ -260,11 +263,17 @@ def _seed_auth_groups(log):
     log("Auth group updated: superadmin")
     for name, permission_codes in AUTH_GROUP_PERMISSION_CODES.items():
         group, created = Group.objects.get_or_create(name=name)
-        permissions = list(Permission.objects.filter(codename__in=permission_codes))
+        allowed_codes = set(permission_codes) & TEAM_PERMISSION_CODES
+        permissions = list(
+            Permission.objects.filter(
+                content_type__app_label="sql",
+                codename__in=allowed_codes,
+            )
+        )
         group.permissions.set(permissions)
         auth_groups[name] = group
         missing_permissions = sorted(
-            set(permission_codes) - {permission.codename for permission in permissions}
+            allowed_codes - {permission.codename for permission in permissions}
         )
         state = "created" if created else "updated"
         log(f"Auth group {state}: {name}")
@@ -277,11 +286,11 @@ def _seed_auth_groups(log):
     return auth_groups
 
 
-def _seed_resource_groups(log):
-    resource_groups = {}
-    for index, (key, config) in enumerate(DEMO_RESOURCE_GROUPS.items(), start=1):
-        resource_group, created = ResourceGroup.objects.update_or_create(
-            group_name=config["group_name"],
+def _seed_teams(log):
+    teams = {}
+    for index, (key, config) in enumerate(DEMO_TEAMS.items(), start=1):
+        team, created = Team.objects.update_or_create(
+            team_name=config["team_name"],
             defaults={
                 "group_parent_id": 0,
                 "group_sort": index,
@@ -291,13 +300,9 @@ def _seed_resource_groups(log):
                 "qywx_webhook": "",
             },
         )
-        resource_groups[key] = resource_group
-        log(
-            "Resource group {}: {}".format(
-                "created" if created else "updated", resource_group.group_name
-            )
-        )
-    return resource_groups
+        teams[key] = team
+        log("Team {}: {}".format("created" if created else "updated", team.team_name))
+    return teams
 
 
 def _seed_instance_tags(log):
@@ -325,7 +330,7 @@ def _remove_legacy_seeded_users(log):
         log("No legacy seeded demo users to remove")
 
 
-def _seed_instances(resource_groups, tags, log):
+def _seed_instances(teams, tags, log):
     instances = {}
     for key, config in DEMO_INSTANCES.items():
         instance, created = Instance.objects.update_or_create(
@@ -348,9 +353,7 @@ def _seed_instances(resource_groups, tags, log):
                 "sid": None,
             },
         )
-        instance.resource_group.set(
-            [resource_groups[name] for name in config["resource_groups"]]
-        )
+        instance.resource_group.set([teams[name] for name in config["teams"]])
         instance.instance_tag.set([tags[name] for name in config["tags"]])
         instances[key] = instance
         log(
@@ -361,7 +364,7 @@ def _seed_instances(resource_groups, tags, log):
     return instances
 
 
-def _seed_infrastructure_nodes(resource_groups, instances, log):
+def _seed_infrastructure_nodes(teams, instances, log):
     nodes = {}
     for key, config in DEMO_INFRASTRUCTURE_NODES.items():
         node, created = InfrastructureNode.objects.update_or_create(
@@ -373,9 +376,7 @@ def _seed_infrastructure_nodes(resource_groups, instances, log):
                 "enabled": True,
             },
         )
-        node.resource_group.set(
-            [resource_groups[name] for name in config["resource_groups"]]
-        )
+        node.resource_group.set([teams[name] for name in config["teams"]])
         for service_key in config["services"]:
             instance = instances[service_key]
             if instance.node_id != node.id:
@@ -458,39 +459,42 @@ def _seed_agent_tool_artifacts(log):
         )
 
 
-def _seed_workflow_settings(auth_groups, resource_groups, log):
-    for key, config in DEMO_RESOURCE_GROUPS.items():
-        resource_group = resource_groups[key]
+def _seed_workflow_settings(auth_groups, teams, log):
+    for key, config in DEMO_TEAMS.items():
+        team = teams[key]
         audit_auth_groups = ",".join(
-            normalize_access_role_sequence(config["approval_groups"])
+            str(group_id)
+            for group_id in normalize_permission_group_sequence(
+                config["approval_groups"]
+            )
         )
         _, created = WorkflowAuditSetting.objects.update_or_create(
-            group_id=resource_group.group_id,
+            team_id=team.team_id,
             workflow_type=WorkflowType.SQL_REVIEW,
             defaults={
-                "group_name": resource_group.group_name,
+                "team_name": team.team_name,
                 "audit_auth_groups": audit_auth_groups,
             },
         )
         log(
             "Workflow setting {}: {} -> {}".format(
                 "created" if created else "updated",
-                resource_group.group_name,
+                team.team_name,
                 " -> ".join(config["approval_groups"]),
             )
         )
         _, archive_created = WorkflowAuditSetting.objects.update_or_create(
-            group_id=resource_group.group_id,
+            team_id=team.team_id,
             workflow_type=WorkflowType.ARCHIVE,
             defaults={
-                "group_name": resource_group.group_name,
+                "team_name": team.team_name,
                 "audit_auth_groups": audit_auth_groups,
             },
         )
         log(
             "Archive setting {}: {} -> {}".format(
                 "created" if archive_created else "updated",
-                resource_group.group_name,
+                team.team_name,
                 " -> ".join(config["approval_groups"]),
             )
         )

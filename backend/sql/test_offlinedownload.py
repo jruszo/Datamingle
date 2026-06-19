@@ -51,8 +51,8 @@ class TestOfflineDownload(TestCase):
         # Create test workflow.
         self.workflow = SqlWorkflow.objects.create(
             workflow_name="test_workflow",
-            group_id=1,
-            group_name="test_group",
+            team_id=1,
+            team_name="test_group",
             engineer_display="test_user",
             audit_auth_groups="test_group",
             status="workflow_finish",

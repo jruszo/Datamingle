@@ -10,15 +10,15 @@ from common.config import SysConfig
 from common.utils.const import WorkflowStatus, WorkflowType
 from sql.models import (
     Instance,
-    ResourceAccessRole,
-    ResourceGroup,
+    TeamPermissionGroup,
+    Team,
     SqlWorkflow,
     SqlWorkflowContent,
     WorkflowAudit,
     WorkflowLog,
     Users,
 )
-from sql.utils.resource_group import (
+from sql.utils.team import (
     user_has_instance_query_access,
     user_has_instance_workflow_access,
     user_has_resource_role,
@@ -71,8 +71,10 @@ def _detected_workflow_syntax_types(sql_text, db_type="mysql"):
 def _authorize_workflow_check_dispatch(actor, instance, sql_text):
     if actor.is_superuser:
         return
-    syntax_types = _detected_workflow_syntax_types(sql_text, db_type=instance.db_type)
-    if syntax_types and all(
+    syntax_types = _detected_workflow_syntax_types(
+        sql_text, db_type=instance.db_type
+    ) or {2}
+    if all(
         user_has_instance_workflow_access(actor, instance, syntax_type)
         for syntax_type in syntax_types
     ):
@@ -160,14 +162,14 @@ class WorkflowSerializer(serializers.ModelSerializer):
         return super().to_internal_value(data)
 
     @staticmethod
-    def validate_group_id(group_id):
+    def validate_group_id(team_id):
         try:
-            ResourceGroup.objects.get(pk=group_id)
-        except ResourceGroup.DoesNotExist:
+            Team.objects.get(pk=team_id)
+        except Team.DoesNotExist:
             raise serializers.ValidationError(
-                {"errors": f"Resource group does not exist: {group_id}"}
+                {"errors": f"Team does not exist: {team_id}"}
             )
-        return group_id
+        return team_id
 
     class Meta:
         model = SqlWorkflow
@@ -177,7 +179,7 @@ class WorkflowSerializer(serializers.ModelSerializer):
             "syntax_type",
             "audit_auth_groups",
             "engineer_display",
-            "group_name",
+            "team_name",
             "finish_time",
             "is_manual",
         ]
@@ -191,17 +193,17 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
     workflow = WorkflowSerializer()
 
     @staticmethod
-    def _validate_group_for_instance(instance, group_id):
+    def _validate_group_for_instance(instance, team_id):
         try:
-            group = ResourceGroup.objects.get(pk=group_id)
-        except ResourceGroup.DoesNotExist:
+            group = Team.objects.get(pk=team_id)
+        except Team.DoesNotExist:
             raise serializers.ValidationError(
-                {"errors": f"Resource group does not exist: {group_id}"}
+                {"errors": f"Team does not exist: {team_id}"}
             )
 
         if not instance.resource_group.filter(pk=group.pk).exists():
             raise serializers.ValidationError(
-                {"errors": "Selected resource group does not belong to this instance."}
+                {"errors": "Selected team does not belong to this instance."}
             )
 
         return group
@@ -221,7 +223,7 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                         )
                     }
                 )
-        group = self._validate_group_for_instance(instance, workflow_data["group_id"])
+        group = self._validate_group_for_instance(instance, workflow_data["team_id"])
         engineer = workflow_data.get("engineer")
 
         if actor.is_superuser and engineer:
@@ -234,8 +236,13 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
         else:
             user = self.context["request"].user
 
+        required_permission = (
+            TeamPermissionGroup.EXPORT_WORKFLOW_REQUESTER
+            if is_offline_export
+            else TeamPermissionGroup.WORKFLOW_REQUESTER
+        )
         has_group_request_access = user_has_resource_role(
-            actor, group, ResourceAccessRole.WORKFLOW_REQUESTER
+            actor, group, required_permission
         )
         has_temporary_read_access = user_has_instance_query_access(actor, instance)
 
@@ -355,7 +362,7 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
             syntax_type=check_result.syntax_type,
             engineer=user.username,
             engineer_display=user.display,
-            group_name=group.group_name,
+            team_name=group.team_name,
             audit_auth_groups="",
         )
         try:
@@ -450,7 +457,7 @@ class WorkflowAuditListSerializer(serializers.ModelSerializer):
     class Meta:
         model = WorkflowAudit
         exclude = [
-            "group_id",
+            "team_id",
             "workflow_id",
             "workflow_remark",
             "next_audit",

@@ -39,12 +39,11 @@ export type CurrentUserContext = {
   email: string
   avatar_url: string
   is_workos_managed: boolean
-  is_directory_managed: boolean
   is_superuser: boolean
   is_staff: boolean
   is_active: boolean
   groups: Array<{ id: number; name: string }>
-  resource_groups: Array<{ group_id: number; group_name: string }>
+  teams: Array<{ team_id: number; team_name: string }>
   permissions: string[]
 }
 
@@ -82,7 +81,7 @@ export type SystemSettingsOption = {
 export type SystemSettingsOptions = {
   instance_tags: SystemSettingsOption[]
   auth_groups: SystemSettingsOption[]
-  resource_groups: SystemSettingsOption[]
+  teams: SystemSettingsOption[]
   users: SystemSettingsOption[]
   notify_phases: SystemSettingsOption[]
   auto_review_db_types: SystemSettingsOption[]
@@ -96,47 +95,44 @@ export type SystemSettingsPayload = {
   options: SystemSettingsOptions
 }
 
-export type ResourceAccessRoleCode =
-  | 'query'
-  | 'workflow_requester'
-  | 'workflow_approver'
-  | 'resource_owner'
+export type PermissionLevelId = number
 
-export type ResourceGroupMembershipSource = 'datamingle' | 'workos_directory'
-
-export type AccessRoleRecord = {
-  code: ResourceAccessRoleCode
-  label: string
-  description: string
-  rank: number
+export type PermissionLevelRecord = {
+  id: number
+  name: string
+  permissions: string[]
+  membership_count: number
 }
 
-export type ResourceAccessAssignmentRecord = {
-  resource_group_id: number
-  access_role: ResourceAccessRoleCode
+export type PermissionLevelPayload = {
+  name: string
+  permission_codes: string[]
 }
 
-export type ResourceGroupUserAccessRecord = {
+export type AvailablePermissionRecord = {
+  code: string
+  codename: string
+  name: string
+}
+
+export type PermissionCategoryRecord = {
+  category: string
+  permissions: AvailablePermissionRecord[]
+}
+
+export type TeamUserAccessRecord = {
   user_id: number
   username?: string
   display?: string
-  access_role: ResourceAccessRoleCode
-  access_role_label?: string
-  membership_source?: ResourceGroupMembershipSource
+  permission_level_id: PermissionLevelId
+  permission_level_name: string
 }
 
-export type UserManagementGroupRecord = {
-  id: number
-  name: string
-  membership_source?: ResourceGroupMembershipSource
-}
-
-export type UserManagementResourceGroupRecord = {
-  group_id: number
-  group_name: string
-  access_role: ResourceAccessRoleCode
-  access_role_label?: string
-  membership_source?: ResourceGroupMembershipSource
+export type UserManagementTeamRecord = {
+  team_id: number
+  team_name: string
+  permission_level_id: PermissionLevelId
+  permission_level_name: string
 }
 
 export type UserManagementRecord = {
@@ -145,18 +141,14 @@ export type UserManagementRecord = {
   display: string
   email: string
   is_workos_managed: boolean
-  is_directory_managed: boolean
   is_active: boolean
   is_superuser: boolean
   is_staff: boolean
-  groups: UserManagementGroupRecord[]
-  resource_groups: UserManagementResourceGroupRecord[]
-  resource_access: UserManagementResourceGroupRecord[]
+  teams: UserManagementTeamRecord[]
 }
 
 export type UserManagementDetailRecord = UserManagementRecord & {
-  group_ids: number[]
-  resource_group_ids: number[]
+  team_ids: number[]
 }
 
 export type UserManagementListOptions = {
@@ -167,18 +159,12 @@ export type UserManagementListOptions = {
 }
 
 export type UpdateUserPayload = {
-  group_ids?: number[]
-  resource_group_ids?: number[]
-  resource_access?: ResourceAccessAssignmentRecord[]
   is_active?: boolean
 }
 
 export type InviteWorkosUserPayload = {
   email: string
   display?: string
-  group_ids?: number[]
-  resource_group_ids?: number[]
-  resource_access?: ResourceAccessAssignmentRecord[]
 }
 
 export type WorkosInvitationRecord = {
@@ -220,31 +206,39 @@ export type UpdateInstanceTagPayload = {
   active: boolean
 }
 
-export type ResourceGroupRecord = {
-  group_id: number
-  group_name: string
+export type TeamRecord = {
+  team_id: number
+  team_name: string
   user_count: number
-  instance_count: number
+  node_count: number
+  service_count: number
 }
 
-export type ResourceGroupDetailRecord = ResourceGroupRecord & {
-  user_ids: number[]
-  user_access: ResourceGroupUserAccessRecord[]
-  instance_ids: number[]
+export type TeamDetailRecord = TeamRecord & {
+  user_access: TeamUserAccessRecord[]
+  node_ids: number[]
+  service_ids: number[]
 }
 
-export type ResourceGroupUserLookupRecord = {
+export type TeamUserLookupRecord = {
   id: number
   username: string
   display: string
   label: string
 }
 
-export type ResourceGroupInstanceLookupRecord = {
+export type TeamInstanceLookupRecord = {
   id: number
   instance_name: string
   db_type: string
   host: string
+  label: string
+}
+
+export type TeamNodeLookupRecord = {
+  id: number
+  name: string
+  address: string
   label: string
 }
 
@@ -262,7 +256,7 @@ export type InstanceInventoryRecord = {
   charset: string
   service_name: string | null
   sid: string | null
-  resource_group_ids: number[]
+  team_ids: number[]
   instance_tag_ids: number[]
   inventory_status: 'never' | 'ok' | 'stale' | 'failed'
   inventory_detected_hostname: string
@@ -282,9 +276,9 @@ export type InstanceTagOptionRecord = {
   label: string
 }
 
-export type ResourceGroupOptionRecord = {
-  group_id: number
-  group_name: string
+export type TeamOptionRecord = {
+  team_id: number
+  team_name: string
   label: string
 }
 
@@ -292,7 +286,7 @@ export type InstanceInventoryMetadata = {
   instance_types: InstanceOptionRecord[]
   db_types: InstanceOptionRecord[]
   tags: InstanceTagOptionRecord[]
-  resource_groups: ResourceGroupOptionRecord[]
+  teams: TeamOptionRecord[]
 }
 
 export type InstanceInventoryFilters = {
@@ -452,7 +446,7 @@ export type InstanceCreatePayload = {
   charset: string
   service_name: string
   sid: string
-  resource_group_ids: number[]
+  team_ids: number[]
   instance_tag_ids: number[]
 }
 
@@ -460,14 +454,14 @@ export type InstanceEditorRecord = InstanceCreatePayload & {
   id: number
 }
 
-export type ResourceGroupUpsertPayload = {
-  group_name: string
-  user_ids?: number[]
+export type TeamUpsertPayload = {
+  team_name: string
   user_access?: Array<{
     user_id: number
-    access_role: ResourceAccessRoleCode
+    permission_level_id: PermissionLevelId
   }>
-  instance_ids: number[]
+  node_ids: number[]
+  service_ids: number[]
 }
 
 type DashboardNamedSeries = {
@@ -546,8 +540,29 @@ function extractTokenPair(payload: unknown): TokenPair {
   throw new Error('Token response did not include access/refresh fields')
 }
 
+let activeWorkosExchange:
+  | {
+      code: string
+      request: Promise<TokenPair>
+    }
+  | undefined
+
 export function exchangeWorkosCode(code: string) {
-  return apiPost<unknown>('/auth/workos/exchange/', { code }).then(extractTokenPair)
+  if (activeWorkosExchange?.code === code) {
+    return activeWorkosExchange.request
+  }
+
+  const request = apiPost<unknown>('/auth/workos/exchange/', { code })
+    .then(extractTokenPair)
+    .catch((error: unknown) => {
+      if (activeWorkosExchange?.code === code) {
+        activeWorkosExchange = undefined
+      }
+      throw error
+    })
+
+  activeWorkosExchange = { code, request }
+  return request
 }
 
 export function fetchWorkosProfile(token: string) {
@@ -578,9 +593,15 @@ export function revokeWorkosSession(sessionId: string, token: string) {
 }
 
 export function fetchCurrentUserContext(token: string) {
-  return apiGet<unknown>('/v1/me/', { token }).then((payload) =>
-    extractData<CurrentUserContext>(payload),
-  )
+  return apiGet<unknown>('/v1/me/', { token }).then((payload) => {
+    const user = extractData<CurrentUserContext>(payload)
+    return {
+      ...user,
+      groups: Array.isArray(user.groups) ? user.groups : [],
+      teams: Array.isArray(user.teams) ? user.teams : [],
+      permissions: Array.isArray(user.permissions) ? user.permissions : [],
+    }
+  })
 }
 
 export function fetchSystemSettings(token: string) {
@@ -699,13 +720,47 @@ export function updateInstanceTag(tagId: number, payload: UpdateInstanceTagPaylo
   )
 }
 
-export function fetchAccessRoles(token: string) {
-  return apiGet<unknown>('/v1/user/access-roles/', { token }).then((payload) =>
-    extractData<AccessRoleRecord[]>(payload),
+export function fetchPermissionLevels(token: string) {
+  return apiGet<unknown>('/v1/permission-levels/', { token }).then((payload) =>
+    extractData<PermissionLevelRecord[]>(payload),
   )
 }
 
-export function fetchResourceGroups(
+export function fetchPermissionLevel(levelId: number, token: string) {
+  return apiGet<unknown>(`/v1/permission-levels/${levelId}/`, { token }).then((payload) =>
+    extractData<PermissionLevelRecord>(payload),
+  )
+}
+
+export function fetchAvailableTeamPermissions(token: string) {
+  return apiGet<unknown>('/v1/permission-levels/available-permissions/', { token }).then((payload) =>
+    extractData<PermissionCategoryRecord[]>(payload),
+  )
+}
+
+export function createPermissionLevel(payload: PermissionLevelPayload, token: string) {
+  return apiPost<unknown>('/v1/permission-levels/', payload, { token }).then((responsePayload) =>
+    extractData<PermissionLevelRecord>(responsePayload),
+  )
+}
+
+export function updatePermissionLevel(
+  levelId: number,
+  payload: PermissionLevelPayload,
+  token: string,
+) {
+  return apiPut<unknown>(`/v1/permission-levels/${levelId}/`, payload, { token }).then(
+    (responsePayload) => extractData<PermissionLevelRecord>(responsePayload),
+  )
+}
+
+export function deletePermissionLevel(levelId: number, token: string) {
+  return apiDelete<unknown>(`/v1/permission-levels/${levelId}/`, { token }).then(
+    (payload) => extractDetail(payload, 'Permission level deleted successfully.'),
+  )
+}
+
+export function fetchTeams(
   token: string,
   options: {
     page?: number
@@ -728,49 +783,55 @@ export function fetchResourceGroups(
     params.set('ordering', options.ordering.trim())
   }
   const queryString = params.toString()
-  const path = queryString ? `/v1/user/resourcegroup/?${queryString}` : '/v1/user/resourcegroup/'
+  const path = queryString ? `/v1/teams/?${queryString}` : '/v1/teams/'
   return apiGet<unknown>(path, { token }).then((payload) =>
-    extractData<PaginatedResponse<ResourceGroupRecord>>(payload),
+    extractData<PaginatedResponse<TeamRecord>>(payload),
   )
 }
 
-export function fetchResourceGroup(resourceGroupId: number, token: string) {
-  return apiGet<unknown>(`/v1/user/resourcegroup/${resourceGroupId}/`, { token }).then((payload) =>
-    extractData<ResourceGroupDetailRecord>(payload),
+export function fetchTeam(teamId: number, token: string) {
+  return apiGet<unknown>(`/v1/teams/${teamId}/`, { token }).then((payload) =>
+    extractData<TeamDetailRecord>(payload),
   )
 }
 
-export function createResourceGroup(payload: ResourceGroupUpsertPayload, token: string) {
-  return apiPost<unknown>('/v1/user/resourcegroup/', payload, { token }).then((responsePayload) =>
-    extractData<ResourceGroupDetailRecord>(responsePayload),
+export function createTeam(payload: TeamUpsertPayload, token: string) {
+  return apiPost<unknown>('/v1/teams/', payload, { token }).then((responsePayload) =>
+    extractData<TeamDetailRecord>(responsePayload),
   )
 }
 
-export function updateResourceGroup(
-  resourceGroupId: number,
-  payload: ResourceGroupUpsertPayload,
+export function updateTeam(
+  teamId: number,
+  payload: TeamUpsertPayload,
   token: string,
 ) {
-  return apiPut<unknown>(`/v1/user/resourcegroup/${resourceGroupId}/`, payload, { token }).then(
-    (responsePayload) => extractData<ResourceGroupDetailRecord>(responsePayload),
+  return apiPut<unknown>(`/v1/teams/${teamId}/`, payload, { token }).then(
+    (responsePayload) => extractData<TeamDetailRecord>(responsePayload),
   )
 }
 
-export function deleteResourceGroup(resourceGroupId: number, token: string) {
-  return apiDelete<unknown>(`/v1/user/resourcegroup/${resourceGroupId}/`, { token }).then(
-    (payload) => extractDetail(payload, 'Resource group deleted successfully.'),
+export function deleteTeam(teamId: number, token: string) {
+  return apiDelete<unknown>(`/v1/teams/${teamId}/`, { token }).then(
+    (payload) => extractDetail(payload, 'Team deleted successfully.'),
   )
 }
 
-export function fetchResourceGroupUsers(token: string) {
-  return apiGet<unknown>('/v1/user/resourcegroup/users/lookup/', { token }).then((payload) =>
-    extractData<ResourceGroupUserLookupRecord[]>(payload),
+export function fetchTeamUsers(token: string) {
+  return apiGet<unknown>('/v1/teams/users/lookup/', { token }).then((payload) =>
+    extractData<TeamUserLookupRecord[]>(payload),
   )
 }
 
-export function fetchResourceGroupInstances(token: string) {
-  return apiGet<unknown>('/v1/user/resourcegroup/instances/lookup/', { token }).then((payload) =>
-    extractData<ResourceGroupInstanceLookupRecord[]>(payload),
+export function fetchTeamNodes(token: string) {
+  return apiGet<unknown>('/v1/teams/nodes/lookup/', { token }).then((payload) =>
+    extractData<TeamNodeLookupRecord[]>(payload),
+  )
+}
+
+export function fetchTeamInstances(token: string) {
+  return apiGet<unknown>('/v1/teams/services/lookup/', { token }).then((payload) =>
+    extractData<TeamInstanceLookupRecord[]>(payload),
   )
 }
 
@@ -1002,9 +1063,9 @@ export type MailboxListFilters = {
 
 export type WorkflowSyntaxType = 0 | 1 | 2 | 3
 
-export type WorkflowResourceGroupLookupRecord = {
-  group_id: number
-  group_name: string
+export type WorkflowTeamLookupRecord = {
+  team_id: number
+  team_name: string
 }
 
 export type WorkflowInstanceLookupRecord = {
@@ -1014,12 +1075,12 @@ export type WorkflowInstanceLookupRecord = {
   type: string
   host: string
   label: string
-  resource_groups: WorkflowResourceGroupLookupRecord[]
+  teams: WorkflowTeamLookupRecord[]
 }
 
 export type WorkflowMetadataRecord = {
   manual_execution_enabled: boolean
-  resource_groups: WorkflowResourceGroupLookupRecord[]
+  teams: WorkflowTeamLookupRecord[]
   instances: WorkflowInstanceLookupRecord[]
 }
 
@@ -1027,8 +1088,8 @@ export type WorkflowSummaryRecord = {
   id: number
   workflow_name: string
   demand_url: string
-  group_id: number
-  group_name: string
+  team_id: number
+  team_name: string
   instance_id: number
   instance_name: string
   instance_db_type: string
@@ -1051,7 +1112,7 @@ export type WorkflowSummaryRecord = {
 }
 
 export type WorkflowReviewNode = {
-  group_name: string
+  team_name: string
   is_current_node: boolean
   is_passed_node: boolean
 }
@@ -1174,7 +1235,7 @@ export type AuditListFilters = {
   action?: string
   status?: string
   syntax_type?: string
-  group_id?: string
+  team_id?: string
   instance_id?: string
   instance_name?: string
   username?: string
@@ -1211,8 +1272,8 @@ export type SqlWorkflowAuditLogRecord = {
   id: number
   workflow_name: string
   demand_url: string
-  group_id: number
-  group_name: string
+  team_id: number
+  team_name: string
   instance_id: number
   instance_name: string
   db_name: string
@@ -1998,16 +2059,16 @@ export function fetchQueryLogs(filters: QueryLogFilters, token: string) {
   )
 }
 
-export type PermissionRequestTarget = 'resource_group' | 'instance'
+export type PermissionRequestTarget = 'team' | 'instance'
 export type PermissionRequestStatus = 0 | 1 | 2 | 3
 export type PermissionInstanceAccessLevel = 'query' | 'query_dml' | 'query_dml_ddl'
-export type PermissionRequestSubject = 'user' | 'resource_group'
+export type PermissionRequestSubject = 'user' | 'team'
 export type PermissionRequestDuration = 'temporary' | 'permanent'
-export type PermissionGrantType = 'resource_group' | 'instance' | 'permanent_resource_group'
+export type PermissionGrantType = 'team' | 'instance' | 'permanent_team'
 
-export type PermissionResourceGroupLookupRecord = {
-  group_id: number
-  group_name: string
+export type PermissionTeamLookupRecord = {
+  team_id: number
+  team_name: string
   label: string
 }
 
@@ -2018,7 +2079,7 @@ export type PermissionInstanceLookupRecord = {
   type: string
   host: string
   label: string
-  resource_groups: PermissionResourceGroupLookupRecord[]
+  teams: PermissionTeamLookupRecord[]
 }
 
 export type PermissionRequestRecord = {
@@ -2026,8 +2087,10 @@ export type PermissionRequestRecord = {
   title: string
   reason: string
   target_type: PermissionRequestTarget
-  resource_group_id: number
-  resource_group_name: string
+  team_id: number
+  team_name: string
+  permission_level_id: number | null
+  permission_level_name: string | null
   instance_id: number | null
   instance_name: string
   access_level: PermissionInstanceAccessLevel | ''
@@ -2041,7 +2104,7 @@ export type PermissionRequestRecord = {
 }
 
 export type PermissionRequestReviewNode = {
-  group_name: string
+  team_name: string
   is_current_node: boolean
   is_passed_node: boolean
 }
@@ -2065,8 +2128,10 @@ export type PermissionGrantRecord = {
   subject_type: PermissionRequestSubject
   user_name: string
   user_display: string
-  resource_group_id: number
-  resource_group_name: string
+  team_id: number
+  team_name: string
+  permission_level_id: number | null
+  permission_level_name: string
   instance_id: number | null
   instance_name: string
   access_level: PermissionInstanceAccessLevel | ''
@@ -2094,7 +2159,8 @@ export type PermissionRequestCreatePayload = {
   target_type: PermissionRequestTarget
   subject_type?: PermissionRequestSubject
   access_duration?: PermissionRequestDuration
-  resource_group_id: number
+  team_id: number
+  permission_level_id?: number
   instance_id?: number
   access_level?: PermissionInstanceAccessLevel
   valid_date: string
@@ -2173,9 +2239,9 @@ export function markAllMailboxItemsRead(token: string) {
   )
 }
 
-export function fetchPermissionResourceGroupsLookup(token: string) {
-  return apiGet<unknown>('/v1/access/resource-groups/lookup/', { token }).then((payload) =>
-    extractData<PermissionResourceGroupLookupRecord[]>(payload),
+export function fetchPermissionTeamsLookup(token: string) {
+  return apiGet<unknown>('/v1/access/teams/lookup/', { token }).then((payload) =>
+    extractData<PermissionTeamLookupRecord[]>(payload),
   )
 }
 
@@ -2242,9 +2308,9 @@ export function revokePermissionGrant(
 export type WorkflowScope = 'all' | 'mine' | 'pending_review'
 export type WorkflowExecutionMode = 'auto' | 'manual'
 
-export type WorkflowSubmitResourceGroupRecord = {
-  group_id: number
-  group_name: string
+export type WorkflowSubmitTeamRecord = {
+  team_id: number
+  team_name: string
   label: string
 }
 
@@ -2253,24 +2319,24 @@ export type WorkflowSubmitInstanceRecord = {
   instance_name: string
   db_type: string
   type: string
-  group_ids: number[]
-  group_names: string[]
+  team_ids: number[]
+  team_names: string[]
   allowed_syntax_types: WorkflowSyntaxType[]
 }
 
 export type WorkflowSubmissionMetadata = {
-  resource_groups: WorkflowSubmitResourceGroupRecord[]
+  teams: WorkflowSubmitTeamRecord[]
   instances: WorkflowSubmitInstanceRecord[]
   manual_execution_enabled: boolean
 }
 
 export type WorkflowApprovalPreview = {
-  group_id: number
-  group_name: string
+  team_id: number
+  team_name: string
   audit_auth_groups: string
   display: string
   review_info: Array<{
-    group_name: string
+    team_name: string
     is_auto_pass: boolean
     is_current_node: boolean
     is_passed_node: boolean
@@ -2326,7 +2392,7 @@ export type WorkflowCreatePayload = {
   workflow: {
     workflow_name: string
     demand_url?: string
-    group_id: number
+    team_id: number
     db_name: string
     schema_name?: string | null
     instance: number
@@ -2368,7 +2434,7 @@ export type WorkflowListFilters = {
   status?: string
   syntax_type?: WorkflowSyntaxType | ''
   instance_id?: number | ''
-  group_id?: number | ''
+  team_id?: number | ''
   start_date?: string
   end_date?: string
 }
@@ -2400,9 +2466,9 @@ export type ArchiveExecutionMode = 'one_time' | 'scheduled'
 export type ArchiveScheduleFrequency = 'daily' | 'weekly'
 export type ArchiveWeekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
 
-export type ArchiveResourceGroupRecord = {
-  group_id: number
-  group_name: string
+export type ArchiveTeamRecord = {
+  team_id: number
+  team_name: string
   label: string
 }
 
@@ -2412,25 +2478,25 @@ export type ArchiveInstanceRecord = {
   db_type: string
   type: string
   label: string
-  group_ids: number[]
-  group_names: string[]
+  team_ids: number[]
+  team_names: string[]
   available_archive_methods: ArchiveMethod[]
 }
 
 export type ArchiveMetadataRecord = {
-  resource_groups: ArchiveResourceGroupRecord[]
+  teams: ArchiveTeamRecord[]
   instances: ArchiveInstanceRecord[]
   schedule_frequencies: Array<{ value: ArchiveScheduleFrequency; label: string }>
   weekdays: Array<{ value: ArchiveWeekday; label: string }>
 }
 
 export type ArchiveApprovalPreview = {
-  group_id: number
-  group_name: string
+  team_id: number
+  team_name: string
   audit_auth_groups: string
   display: string
   review_info: Array<{
-    group_name: string
+    team_name: string
     is_auto_pass: boolean
     is_current_node: boolean
     is_passed_node: boolean
@@ -2449,7 +2515,7 @@ export type ArchiveListRecord = {
   src_instance_name: string
   src_db_name: string
   src_table_name: string
-  resource_group_name: string
+  team_name: string
   user_display: string
   create_time: string
   last_archive_time: string | null
@@ -2486,9 +2552,9 @@ export type ArchiveDetailRecord = {
   next_run_at: string | null
   last_archive_time: string | null
   state: boolean
-  resource_group: {
-    group_id: number
-    group_name: string
+  team: {
+    team_id: number
+    team_name: string
   }
   src_instance: {
     id: number
@@ -2503,7 +2569,7 @@ export type ArchiveDetailRecord = {
   user_name: string
   user_display: string
   review_info: Array<{
-    group_name: string
+    team_name: string
     is_current_node: boolean
     is_passed_node: boolean
   }>
@@ -2520,7 +2586,7 @@ export type ArchiveDetailRecord = {
 
 export type ArchiveCreatePayload = {
   title: string
-  group_id: number
+  team_id: number
   instance_id: number
   db_name: string
   table_name: string
@@ -2549,7 +2615,7 @@ export type ArchiveListFilters = {
   status?: number | ''
   execution_mode?: ArchiveExecutionMode | ''
   instance_id?: number | ''
-  group_id?: number | ''
+  team_id?: number | ''
 }
 
 function buildWorkflowListQueryString(filters: WorkflowListFilters) {
@@ -2576,8 +2642,8 @@ function buildWorkflowListQueryString(filters: WorkflowListFilters) {
   if (filters.instance_id) {
     params.set('instance_id', `${filters.instance_id}`)
   }
-  if (filters.group_id) {
-    params.set('group_id', `${filters.group_id}`)
+  if (filters.team_id) {
+    params.set('team_id', `${filters.team_id}`)
   }
   if (filters.start_date?.trim()) {
     params.set('start_date', filters.start_date.trim())
@@ -2610,8 +2676,8 @@ function buildArchiveListQueryString(filters: ArchiveListFilters) {
   if (filters.instance_id) {
     params.set('instance_id', `${filters.instance_id}`)
   }
-  if (filters.group_id) {
-    params.set('group_id', `${filters.group_id}`)
+  if (filters.team_id) {
+    params.set('team_id', `${filters.team_id}`)
   }
 
   return params.toString()
@@ -2629,7 +2695,7 @@ export function fetchWorkflowExportSubmissionMetadata(token: string) {
 }
 
 export function fetchWorkflowApprovalPreview(groupId: number, token: string) {
-  return apiGet<unknown>(`/v1/workflow/approval-preview/?group_id=${groupId}`, { token }).then(
+  return apiGet<unknown>(`/v1/workflow/approval-preview/?team_id=${groupId}`, { token }).then(
     (payload) => extractData<WorkflowApprovalPreview>(payload),
   )
 }
@@ -2800,7 +2866,7 @@ export function fetchArchiveMetadata(token: string) {
 }
 
 export function fetchArchiveApprovalPreview(groupId: number, token: string) {
-  return apiGet<unknown>(`/v1/archive/approval-preview/?group_id=${groupId}`, { token }).then(
+  return apiGet<unknown>(`/v1/archive/approval-preview/?team_id=${groupId}`, { token }).then(
     (payload) => extractData<ArchiveApprovalPreview>(payload),
   )
 }

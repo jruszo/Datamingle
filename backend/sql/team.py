@@ -8,10 +8,10 @@ from django.http import HttpResponse
 from common.utils.extend_json_encoder import ExtendJSONEncoder
 from common.utils.permission import superuser_required
 from common.utils.convert import Convert
-from sql.models import ResourceGroup, Users, Instance
-from sql.utils.resource_group import (
-    access_role_label,
-    normalize_access_role_sequence,
+from sql.models import Team, Users, Instance
+from sql.utils.team import (
+    permission_group_label,
+    normalize_permission_group_sequence,
     user_instances,
 )
 from sql.utils.workflow_audit import Audit
@@ -21,16 +21,16 @@ logger = logging.getLogger("default")
 
 @superuser_required
 def group(request):
-    """Get resource group list."""
+    """Get team list."""
     limit = int(request.POST.get("limit"))
     offset = int(request.POST.get("offset"))
     limit = offset + limit
     search = request.POST.get("search", "")
 
     # Filter search conditions.
-    group_obj = ResourceGroup.objects.filter(group_name__icontains=search, is_deleted=0)
+    group_obj = Team.objects.filter(team_name__icontains=search, is_deleted=0)
     group_count = group_obj.count()
-    group_list = group_obj[offset:limit].values("group_id", "group_name")
+    group_list = group_obj[offset:limit].values("team_id", "team_name")
 
     # Serialize QuerySet.
     rows = [row for row in group_list]
@@ -45,10 +45,10 @@ def group(request):
 
 def associated_objects(request):
     """
-    Get objects associated with the resource group.
+    Get objects associated with the team.
     type: (0, 'User'), (1, 'Instance')
     """
-    group_id = int(request.POST.get("group_id"))
+    team_id = int(request.POST.get("team_id"))
     object_type = request.POST.get("type")
     limit = int(request.POST.get("limit"))
     offset = int(request.POST.get("offset"))
@@ -56,9 +56,9 @@ def associated_objects(request):
     search = request.POST.get("search")
 
     # Get associated data.
-    resource_group = ResourceGroup.objects.get(group_id=group_id)
-    rows_users = resource_group.users_set.all()
-    rows_instances = resource_group.instance_set.all()
+    team = Team.objects.get(team_id=team_id)
+    rows_users = team.users_set.all()
+    rows_instances = team.instance_set.all()
     # Apply search filter.
     if search:
         rows_users = rows_users.filter(display__contains=search)
@@ -67,16 +67,16 @@ def associated_objects(request):
         object_id=F("id"),
         object_type=Value(0, output_field=IntegerField()),
         object_name=F("display"),
-        group_id=F("resource_group__group_id"),
-        group_name=F("resource_group__group_name"),
-    ).values("object_type", "object_id", "object_name", "group_id", "group_name")
+        team_id=F("team__team_id"),
+        team_name=F("team__team_name"),
+    ).values("object_type", "object_id", "object_name", "team_id", "team_name")
     rows_instances = rows_instances.annotate(
         object_id=F("id"),
         object_type=Value(1, output_field=IntegerField()),
         object_name=F("instance_name"),
-        group_id=F("resource_group__group_id"),
-        group_name=F("resource_group__group_name"),
-    ).values("object_type", "object_id", "object_name", "group_id", "group_name")
+        team_id=F("team__team_id"),
+        team_name=F("team__team_name"),
+    ).values("object_type", "object_id", "object_name", "team_id", "team_name")
     # Filter by object type.
     if object_type == "0":
         rows_obj = rows_users
@@ -98,22 +98,22 @@ def associated_objects(request):
 
 def unassociated_objects(request):
     """
-    Get objects not associated with the resource group.
+    Get objects not associated with the team.
     type: (0, 'User'), (1, 'Instance')
     """
-    group_id = int(request.POST.get("group_id"))
+    team_id = int(request.POST.get("team_id"))
     object_type = int(request.POST.get("object_type"))
     # Get associated data.
-    resource_group = ResourceGroup.objects.get(group_id=group_id)
+    team = Team.objects.get(team_id=team_id)
     if object_type == 0:
-        associated_user_ids = [user.id for user in resource_group.users_set.all()]
+        associated_user_ids = [user.id for user in team.users_set.all()]
         rows = (
             Users.objects.exclude(pk__in=associated_user_ids)
             .annotate(object_id=F("pk"), object_name=F("display"))
             .values("object_id", "object_name")
         )
     elif object_type == 1:
-        associated_instance_ids = [ins.id for ins in resource_group.instance_set.all()]
+        associated_instance_ids = [ins.id for ins in team.instance_set.all()]
         rows = (
             Instance.objects.exclude(pk__in=associated_instance_ids)
             .annotate(object_id=F("pk"), object_name=F("instance_name"))
@@ -128,14 +128,14 @@ def unassociated_objects(request):
 
 
 def instances(request):
-    """Get instances associated with a resource group."""
-    group_name = request.POST.get("group_name")
-    group_id = ResourceGroup.objects.get(group_name=group_name).group_id
+    """Get instances associated with a team."""
+    team_name = request.POST.get("team_name")
+    team_id = Team.objects.get(team_name=team_name).team_id
     tag_code = request.POST.get("tag_code")
     db_type = request.POST.get("db_type")
 
-    # First get all instances associated with the resource group.
-    ins = ResourceGroup.objects.get(group_id=group_id).instance_set.all()
+    # First get all instances associated with the team.
+    ins = Team.objects.get(team_id=team_id).instance_set.all()
 
     # Filters
     filter_dict = dict()
@@ -156,7 +156,7 @@ def instances(request):
 
 
 def user_all_instances(request):
-    """Get all instances accessible by the user via resource groups."""
+    """Get all instances accessible by the user via teams."""
     user = request.user
     type = request.GET.get("type")
     db_type = request.GET.getlist("db_type[]")
@@ -174,40 +174,38 @@ def user_all_instances(request):
 @superuser_required
 def addrelation(request):
     """
-    Add objects to a resource group.
+    Add objects to a team.
     type: (0, 'User'), (1, 'Instance')
     """
-    group_id = int(request.POST.get("group_id"))
+    team_id = int(request.POST.get("team_id"))
     object_type = request.POST.get("object_type")
     object_list = json.loads(request.POST.get("object_info"))
     try:
-        resource_group = ResourceGroup.objects.get(group_id=group_id)
+        team = Team.objects.get(team_id=team_id)
         obj_ids = [int(obj.split(",")[0]) for obj in object_list]
         if object_type == "0":  # User
-            resource_group.users_set.add(*Users.objects.filter(pk__in=obj_ids))
+            team.users_set.add(*Users.objects.filter(pk__in=obj_ids))
         elif object_type == "1":  # Instance
-            resource_group.instance_set.add(*Instance.objects.filter(pk__in=obj_ids))
+            team.instance_set.add(*Instance.objects.filter(pk__in=obj_ids))
         result = {"status": 0, "msg": "ok"}
     except Exception as e:
-        logger.exception("Failed to save resource group objects")
-        result = {"status": 1, "msg": "Failed to save resource group objects."}
+        logger.exception("Failed to save team objects")
+        result = {"status": 1, "msg": "Failed to save team objects."}
     return HttpResponse(json.dumps(result), content_type="application/json")
 
 
 def auditors(request):
-    """Get the approval flow configured for the resource group."""
-    group_name = request.POST.get("group_name")
+    """Get the approval flow configured for the team."""
+    team_name = request.POST.get("team_name")
     workflow_type = request.POST["workflow_type"]
     result = {
         "status": 0,
         "msg": "ok",
         "data": {"auditors": "", "auditors_display": ""},
     }
-    if group_name:
-        group_id = ResourceGroup.objects.get(group_name=group_name).group_id
-        audit_auth_groups = Audit.settings(
-            group_id=group_id, workflow_type=workflow_type
-        )
+    if team_name:
+        team_id = Team.objects.get(team_name=team_name).team_id
+        audit_auth_groups = Audit.settings(team_id=team_id, workflow_type=workflow_type)
     else:
         result["status"] = 1
         result["msg"] = "Invalid parameters"
@@ -215,8 +213,8 @@ def auditors(request):
 
     if audit_auth_groups:
         audit_auth_groups_name = "->".join(
-            access_role_label(role)
-            for role in normalize_access_role_sequence(audit_auth_groups)
+            permission_group_label(role)
+            for role in normalize_permission_group_sequence(audit_auth_groups)
         )
         result["data"]["auditors"] = audit_auth_groups
         result["data"]["auditors_display"] = audit_auth_groups_name
@@ -226,20 +224,20 @@ def auditors(request):
 
 @superuser_required
 def changeauditors(request):
-    """Set the approval flow for the resource group."""
+    """Set the approval flow for the team."""
     auth_groups = request.POST.get("audit_auth_groups")
-    group_name = request.POST.get("group_name")
+    team_name = request.POST.get("team_name")
     workflow_type = request.POST.get("workflow_type")
     result = {"status": 0, "msg": "ok", "data": []}
 
     # Update workflow approval settings.
-    group_id = ResourceGroup.objects.get(group_name=group_name).group_id
-    audit_auth_groups = normalize_access_role_sequence(auth_groups)
+    team_id = Team.objects.get(team_name=team_name).team_id
+    audit_auth_groups = normalize_permission_group_sequence(auth_groups)
     try:
-        Audit.change_settings(group_id, workflow_type, ",".join(audit_auth_groups))
+        Audit.change_settings(team_id, workflow_type, ",".join(audit_auth_groups))
     except Exception as msg:
-        logger.exception("Failed to update resource group audit settings")
-        result["msg"] = "Failed to update resource group audit settings."
+        logger.exception("Failed to update team audit settings")
+        result["msg"] = "Failed to update team audit settings."
         result["status"] = 1
 
     # Return result.

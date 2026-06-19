@@ -16,12 +16,11 @@ function buildUser(overrides: Partial<CurrentUserContext> = {}): CurrentUserCont
     email: 'tester@example.com',
     avatar_url: '',
     is_workos_managed: false,
-    is_directory_managed: false,
     is_superuser: false,
     is_staff: false,
     is_active: true,
     groups: [],
-    resource_groups: [],
+    teams: [],
     permissions: [],
     ...overrides,
   }
@@ -94,7 +93,7 @@ describe('feature registry', () => {
       getFirstVisibleSettingsItem(
         buildUser({ permissions: ['sql.menu_system', 'auth.view_group'] }),
       )?.to,
-    ).toBe('/settings/resource-groups')
+    ).toBe('/settings/teams')
 
     expect(getFirstVisibleSettingsItem(buildUser({ permissions: ['sql.menu_instance'] }))?.to).toBe(
       '/settings/instance-tags',

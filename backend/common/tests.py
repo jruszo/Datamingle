@@ -3,6 +3,7 @@ import smtplib
 import psycopg2
 from unittest.mock import patch, ANY, Mock
 import datetime
+from types import SimpleNamespace
 from dateutil.relativedelta import relativedelta
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -204,6 +205,20 @@ class InventoryRefreshTests(TestCase):
         self.assertEqual(self.instance.inventory_detected_version, "8.0.36")
         self.assertIsNotNone(self.instance.inventory_last_attempt_at)
         self.assertIsNotNone(self.instance.inventory_last_success_at)
+
+    @patch("api_agents.services.run_agent_command_sync")
+    def test_collect_inventory_snapshot_uses_agent_command(self, run_command):
+        run_command.return_value = SimpleNamespace(
+            result={"hostname": "agent-host", "version": "8.0.36"}
+        )
+
+        details = inventory.collect_inventory_snapshot(self.instance)
+
+        self.assertEqual(details, {"hostname": "agent-host", "version": "8.0.36"})
+        self.assertEqual(run_command.call_args.kwargs["instance"], self.instance)
+        self.assertEqual(
+            run_command.call_args.kwargs["command_type"], "inventory.collect"
+        )
 
     @patch(
         "sql.inventory.collect_inventory_snapshot",
@@ -446,8 +461,8 @@ class ChartTest(TestCase):
         ddl_workflow = [
             SqlWorkflow(
                 workflow_name="ddl %s" % i,
-                group_id=1,
-                group_name="g1",
+                team_id=1,
+                team_name="g1",
                 engineer=cls.u1.username,
                 engineer_display=cls.u1.display,
                 audit_auth_groups="some_group",
@@ -464,8 +479,8 @@ class ChartTest(TestCase):
         dml_workflow = [
             SqlWorkflow(
                 workflow_name="Test %s" % i,
-                group_id=2,
-                group_name="g2",
+                team_id=2,
+                team_name="g2",
                 engineer=cls.u2.username,
                 engineer_display=cls.u2.display,
                 audit_auth_groups="some_group",
@@ -581,12 +596,8 @@ class AuthTest(TestCase):
 
     def test_init_user(self):
         """User initialization test."""
-        sys_config = SysConfig()
-        sys_config.set("default_auth_group", self.auth_group.name)
         init_user(self.u1)
-        self.assertIn(self.auth_group, self.u1.groups.all())
-        init_user(self.u1)
-        self.assertIn(self.auth_group, self.u1.groups.all())
+        self.assertEqual(list(self.u1.groups.all()), [])
 
 
 class TestTwoFactorAuth(TestCase):

@@ -573,7 +573,7 @@ onMounted(async () => {
               <p class="mt-2 text-sm font-medium text-slate-900">
                 {{ selectedWorkflow.engineer_display }}
               </p>
-              <p class="text-sm text-slate-500">{{ selectedWorkflow.group_name }}</p>
+              <p class="text-sm text-slate-500">{{ selectedWorkflow.team_name }}</p>
             </div>
             <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <p class="text-xs uppercase tracking-wide text-slate-500">Created</p>
@@ -613,7 +613,7 @@ onMounted(async () => {
                   <h2 class="text-base font-semibold text-slate-900">Approval flow</h2>
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
-                  <template v-for="(node, index) in selectedWorkflow.review_info" :key="`${node.group_name}-${index}`">
+                  <template v-for="(node, index) in selectedWorkflow.review_info" :key="`${node.team_name}-${index}`">
                     <Badge
                       variant="outline"
                       :class="node.is_current_node
@@ -622,7 +622,7 @@ onMounted(async () => {
                           ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                           : 'border-slate-200 bg-slate-100 text-slate-600'"
                     >
-                      {{ node.group_name }}
+                      {{ node.team_name }}
                     </Badge>
                     <span
                       v-if="index < selectedWorkflow.review_info.length - 1"

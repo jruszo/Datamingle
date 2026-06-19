@@ -57,21 +57,24 @@ const accountFacts = computed(() => {
     return []
   }
 
+  const groups = currentUser.value.groups ?? []
+  const teams = currentUser.value.teams ?? []
+
   return [
     { label: 'Username', value: currentUser.value.username },
     { label: 'Email', value: workosProfile.value?.email || currentUser.value.email || '-' },
     {
       label: 'Groups',
       value:
-        currentUser.value.groups.length > 0
-          ? currentUser.value.groups.map((group) => group.name).join(', ')
+        groups.length > 0
+          ? groups.map((group) => group.name).join(', ')
           : '-',
     },
     {
-      label: 'Resource Groups',
+      label: 'Teams',
       value:
-        currentUser.value.resource_groups.length > 0
-          ? currentUser.value.resource_groups.map((group) => group.group_name).join(', ')
+        teams.length > 0
+          ? teams.map((team) => team.team_name).join(', ')
           : '-',
     },
   ]

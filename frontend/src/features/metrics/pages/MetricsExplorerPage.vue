@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   Activity,
   ArrowLeft,
@@ -41,6 +42,12 @@ import {
 import TimeRangePicker from '@/features/time-range/TimeRangePicker.vue'
 import { defaultTimeRange } from '@/features/time-range/model'
 import { useAuthStore } from '@/stores/auth'
+import MetricsFilterBar from '@/features/metrics/MetricsFilterBar.vue'
+import {
+  metricsFiltersSelector,
+  parseMetricsFilters,
+  writeMetricsFilters,
+} from '@/features/metrics/filters'
 
 type LabelSummary = {
   label: string
@@ -49,6 +56,8 @@ type LabelSummary = {
 }
 
 const authStore = useAuthStore()
+const route = useRoute()
+const router = useRouter()
 const loading = ref(false)
 const metricSearchLoading = ref(false)
 const detailLoading = ref(false)
@@ -81,6 +90,12 @@ const explorerPanel = ref<DashboardPanel>(createGraphPanel('', 'Metrics graph'))
 let detailRequestId = 0
 let metricSearchRequestId = 0
 let metricSearchTimer: ReturnType<typeof window.setTimeout> | undefined
+const metricsFilters = computed({
+  get: () => parseMetricsFilters(route.query),
+  set: (filters) => {
+    void router.replace({ query: writeMetricsFilters(route.query, filters) })
+  },
+})
 
 const noisyLegendLabels = new Set(['agent_id', 'node_id', '__name__'])
 const preferredLegendLabels = [
@@ -105,7 +120,7 @@ const selector = computed(() => {
   if (!selectedMetric.value) {
     return ''
   }
-  return selectedMetric.value
+  return `${selectedMetric.value}${metricsFiltersSelector(metricsFilters.value)}`
 })
 
 const metadataEntries = computed(() => {
@@ -256,7 +271,12 @@ async function loadCatalog() {
   try {
     const token = requireToken()
     const [names, labels] = await Promise.all([
-      fetchMetricNames(token, metricSearch.value.trim()),
+      fetchMetricNames(
+        token,
+        metricSearch.value.trim(),
+        300,
+        metricsFiltersSelector(metricsFilters.value),
+      ),
       fetchMetricLabelNames(token),
     ])
     if (searchRequestId === metricSearchRequestId) {
@@ -276,7 +296,12 @@ async function loadCatalog() {
 
 async function searchMetricNames(search: string, requestId: number) {
   try {
-    const names = await fetchMetricNames(requireToken(), search)
+    const names = await fetchMetricNames(
+      requireToken(),
+      search,
+      300,
+      metricsFiltersSelector(metricsFilters.value),
+    )
     if (requestId !== metricSearchRequestId) {
       return
     }
@@ -320,7 +345,7 @@ async function selectMetric(metricName: string) {
   try {
     const token = requireToken()
     const [series, metadata] = await Promise.all([
-      fetchMetricSeries(metricName, token),
+      fetchMetricSeries(metricName, token, metricsFiltersSelector(metricsFilters.value)),
       fetchMetricMetadata(metricName, token),
     ])
     if (requestId !== detailRequestId) {
@@ -502,6 +527,14 @@ onBeforeUnmount(() => {
 watch(metricSearch, () => {
   scheduleMetricSearch()
 })
+watch(
+  metricsFilters,
+  () => {
+    void loadCatalog()
+    if (selectedMetric.value) void selectMetric(selectedMetric.value)
+  },
+  { deep: true },
+)
 
 </script>
 
@@ -543,6 +576,8 @@ watch(metricSearch, () => {
     >
       {{ error }}
     </p>
+
+    <MetricsFilterBar v-model="metricsFilters" :token="requireToken()" />
 
     <div
       v-if="viewMode === 'explore'"
@@ -787,6 +822,7 @@ watch(metricSearch, () => {
         :token="requireToken()"
         :time-range="timeRange"
         :context-metric="selectedMetric"
+        :metrics-filters="metricsFilters"
       />
     </div>
 

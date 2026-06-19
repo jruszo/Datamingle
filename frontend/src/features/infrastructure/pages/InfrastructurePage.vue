@@ -5,12 +5,17 @@ import { Check, Database, Plus, RefreshCw, Search, ServerCog, Wand2, X } from 'l
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import LabelFilterBar from '@/components/LabelFilterBar.vue'
+import type { LabelFilter } from '@/shared/filters/labelFilters'
 import { useAuthStore } from '@/stores/auth'
+import MonitoringLabelsEditor from '../components/MonitoringLabelsEditor.vue'
 import {
   createAgent,
   createDatabaseService,
   discoverInfrastructureNodeServices,
   fetchInfrastructureNode,
+  fetchInfrastructureNodeLabelNames,
+  fetchInfrastructureNodeLabelValues,
   fetchInfrastructureNodes,
   fetchInstanceInventoryMetadata,
   issueAgentInstallKey,
@@ -180,6 +185,8 @@ const totalCount = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const searchQuery = ref('')
+const nodeLabelFilters = ref<LabelFilter[]>([])
+const nodeLabelNames = ref<string[]>([])
 const error = ref('')
 const feedback = ref('')
 const nowMs = ref(Date.now())
@@ -200,6 +207,7 @@ const nodeForm = reactive<InfrastructureNodePayload>({
   metadata: {},
   monitoring_enabled: true,
   monitoring_collectors: [...DEFAULT_NODE_EXPORTER_COLLECTORS],
+  monitoring_labels: {},
 })
 
 const isServiceDialogOpen = ref(false)
@@ -217,13 +225,14 @@ const serviceForm = reactive<DatabaseServicePayload>({
   password: '',
   monitoring_enabled: true,
   monitoring_collectors: [...DEFAULT_MYSQLD_EXPORTER_COLLECTORS],
+  monitoring_labels: {},
   is_ssl: false,
   verify_ssl: true,
   db_name: '',
   show_db_name_regex: '',
   denied_db_name_regex: '',
   charset: '',
-  resource_group_ids: [],
+  team_ids: [],
   service_tag_ids: [],
 })
 
@@ -390,6 +399,26 @@ function serviceStatusClass(status: DatabaseServiceRecord['inventory_status']) {
   }
 }
 
+function inventoryStatusLabel(status: DatabaseServiceRecord['inventory_status']) {
+  switch (status) {
+    case 'ok':
+      return 'Current'
+    case 'failed':
+      return 'Refresh failed'
+    case 'stale':
+      return 'Stale'
+    default:
+      return 'Not collected'
+  }
+}
+
+function inventoryStatusTitle(service: DatabaseServiceRecord) {
+  const lastRefresh = service.inventory_last_refresh_at
+    ? ` Last successful refresh: ${formatDateTime(service.inventory_last_refresh_at)}.`
+    : ''
+  return `Inventory is collected by the server. Test and monitoring check connectivity from the node agent.${lastRefresh}`
+}
+
 function formatDateTime(value: string | null) {
   if (!value) {
     return 'Never'
@@ -445,7 +474,7 @@ function updateNumericSelections(event: Event, target: 'service_groups' | 'servi
     .map((option) => Number(option.value))
     .filter((value) => Number.isFinite(value))
   if (target === 'service_groups') {
-    serviceForm.resource_group_ids = values
+    serviceForm.team_ids = values
   } else {
     serviceForm.service_tag_ids = values
   }
@@ -453,6 +482,14 @@ function updateNumericSelections(event: Event, target: 'service_groups' | 'servi
 
 async function loadMetadata() {
   metadata.value = await fetchInstanceInventoryMetadata(requireToken())
+}
+
+async function loadNodeLabelNames() {
+  nodeLabelNames.value = await fetchInfrastructureNodeLabelNames(requireToken())
+}
+
+function loadNodeLabelValues(labelName: string, filters: LabelFilter[]) {
+  return fetchInfrastructureNodeLabelValues(labelName, requireToken(), filters)
 }
 
 async function loadNodes() {
@@ -470,6 +507,7 @@ async function loadNodes() {
       page: currentPage.value,
       size: pageSize.value,
       search: searchQuery.value,
+      labelFilters: nodeLabelFilters.value,
     })
     nodes.value = response.results
     totalCount.value = response.count
@@ -528,6 +566,7 @@ function resetNodeForm() {
   nodeForm.description = ''
   nodeForm.metadata = {}
   nodeForm.monitoring_enabled = true
+  nodeForm.monitoring_labels = {}
   setMonitoringCollectors(nodeForm)
   nodeFormError.value = ''
 }
@@ -541,6 +580,7 @@ function openNodeDialog(node?: InfrastructureNodeRecord) {
     nodeForm.description = node.description
     nodeForm.metadata = node.metadata
     nodeForm.monitoring_enabled = node.monitoring_enabled
+    nodeForm.monitoring_labels = { ...node.monitoring_labels }
     setMonitoringCollectors(nodeForm, node.monitoring_collectors)
   }
   isNodeDialogOpen.value = true
@@ -570,6 +610,7 @@ async function submitNode() {
       metadata: nodeForm.metadata,
       monitoring_enabled: nodeForm.monitoring_enabled,
       monitoring_collectors: [...nodeForm.monitoring_collectors],
+      monitoring_labels: { ...nodeForm.monitoring_labels },
     }
     const detail = await updateInfrastructureNode(editingNodeId.value, payload, requireToken())
     selectedNode.value = detail
@@ -595,6 +636,7 @@ function resetServiceForm() {
   serviceForm.user = ''
   serviceForm.password = ''
   serviceForm.monitoring_enabled = true
+  serviceForm.monitoring_labels = {}
   setServiceMonitoringCollectors(serviceForm)
   serviceForm.is_ssl = false
   serviceForm.verify_ssl = true
@@ -602,7 +644,7 @@ function resetServiceForm() {
   serviceForm.show_db_name_regex = ''
   serviceForm.denied_db_name_regex = ''
   serviceForm.charset = ''
-  serviceForm.resource_group_ids = []
+  serviceForm.team_ids = []
   serviceForm.service_tag_ids = []
   delete serviceForm.recommendation_id
   serviceFormError.value = ''
@@ -623,6 +665,7 @@ function openServiceDialog(
     serviceForm.port = service.port
     serviceForm.user = service.user
     serviceForm.monitoring_enabled = service.monitoring_enabled
+    serviceForm.monitoring_labels = { ...service.monitoring_labels }
     setServiceMonitoringCollectors(serviceForm, service.monitoring_collectors)
     serviceForm.is_ssl = service.is_ssl
     serviceForm.verify_ssl = service.verify_ssl
@@ -630,7 +673,7 @@ function openServiceDialog(
     serviceForm.show_db_name_regex = service.show_db_name_regex
     serviceForm.denied_db_name_regex = service.denied_db_name_regex
     serviceForm.charset = service.charset
-    serviceForm.resource_group_ids = [...service.resource_group_ids]
+    serviceForm.team_ids = [...service.team_ids]
     serviceForm.service_tag_ids = [...service.service_tag_ids]
   }
   if (recommendation) {
@@ -826,7 +869,7 @@ onMounted(async () => {
     error.value = 'You do not have permission to access infrastructure.'
     return
   }
-  await Promise.all([loadMetadata(), loadNodes()])
+  await Promise.all([loadMetadata(), loadNodeLabelNames(), loadNodes()])
   refreshTimer = setInterval(() => {
     if (
       !isLoading.value &&
@@ -851,6 +894,17 @@ onUnmounted(() => {
 watch([currentPage, pageSize], () => {
   void loadNodes()
 })
+watch(
+  nodeLabelFilters,
+  () => {
+    if (currentPage.value !== 1) {
+      currentPage.value = 1
+      return
+    }
+    void loadNodes()
+  },
+  { deep: true },
+)
 </script>
 
 <template>
@@ -885,19 +939,27 @@ watch([currentPage, pageSize], () => {
     </p>
 
     <div class="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-      <div class="flex flex-col gap-3 border-b border-slate-200 p-4 lg:flex-row lg:items-center">
-        <div class="relative flex-1">
-          <Search class="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-          <Input
-            v-model="searchQuery"
-            class="h-10 pl-9 font-mono text-sm"
-            placeholder="name:prod-db service:mysql status:online"
-            @keyup.enter="searchNodes"
-          />
+      <div class="grid gap-3 border-b border-slate-200 p-4">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
+          <div class="relative flex-1">
+            <Search class="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+            <Input
+              v-model="searchQuery"
+              class="h-10 pl-9 text-sm"
+              placeholder="Search node name, address, service, or agent"
+              @keyup.enter="searchNodes"
+            />
+          </div>
+          <Button variant="outline" type="button" :disabled="isLoading" @click="searchNodes">
+            Search
+          </Button>
         </div>
-        <Button variant="outline" type="button" :disabled="isLoading" @click="searchNodes">
-          Search
-        </Button>
+        <LabelFilterBar
+          v-model="nodeLabelFilters"
+          :label-names="nodeLabelNames"
+          :load-values="loadNodeLabelValues"
+          placeholder="Filter nodes with environment:prod or -team:legacy"
+        />
       </div>
 
       <div
@@ -956,6 +1018,19 @@ watch([currentPage, pageSize], () => {
                   <span class="font-mono text-xs text-slate-500">
                     {{ displayNodeAddress(node.address) }}
                   </span>
+                  <div
+                    v-if="Object.keys(node.monitoring_labels).length"
+                    class="flex flex-wrap gap-1"
+                  >
+                    <Badge
+                      v-for="(value, label) in node.monitoring_labels"
+                      :key="label"
+                      variant="outline"
+                      class="font-mono text-[11px] font-normal"
+                    >
+                      {{ label }}:{{ value }}
+                    </Badge>
+                  </div>
                 </div>
               </td>
               <td class="px-4 py-3">
@@ -1166,7 +1241,7 @@ watch([currentPage, pageSize], () => {
                       <th class="px-4 py-3">Engine</th>
                       <th class="px-4 py-3">Endpoint</th>
                       <th class="px-4 py-3">Monitoring</th>
-                      <th class="px-4 py-3">Status</th>
+                      <th class="px-4 py-3">Inventory</th>
                       <th class="px-4 py-3 text-right">Actions</th>
                     </tr>
                   </thead>
@@ -1191,12 +1266,12 @@ watch([currentPage, pageSize], () => {
                           {{ service.monitoring_enabled ? 'Enabled' : 'Disabled' }}
                         </Badge>
                       </td>
-                      <td class="px-4 py-3">
+                      <td class="px-4 py-3" :title="inventoryStatusTitle(service)">
                         <Badge
                           variant="secondary"
                           :class="serviceStatusClass(service.inventory_status)"
                         >
-                          {{ service.inventory_status }}
+                          {{ inventoryStatusLabel(service.inventory_status) }}
                         </Badge>
                       </td>
                       <td class="px-4 py-3">
@@ -1300,7 +1375,7 @@ watch([currentPage, pageSize], () => {
     >
       <form
         class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white shadow-xl"
-        @submit.prevent="void submitNode()"
+        @submit.stop.prevent="submitNode"
       >
         <div class="flex items-start justify-between border-b border-slate-200 px-6 py-4">
           <h3 class="text-lg font-semibold text-slate-900">Edit Node</h3>
@@ -1335,6 +1410,7 @@ watch([currentPage, pageSize], () => {
             />
             Enable monitoring
           </label>
+          <MonitoringLabelsEditor v-model="nodeForm.monitoring_labels" />
           <details
             class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3"
             :class="{ 'opacity-60': !nodeForm.monitoring_enabled }"
@@ -1387,7 +1463,15 @@ watch([currentPage, pageSize], () => {
         </div>
         <div class="flex justify-end gap-2 border-t border-slate-200 px-6 py-4">
           <Button variant="outline" type="button" @click="closeNodeDialog">Cancel</Button>
-          <Button type="submit" :disabled="nodeSaving">Save</Button>
+          <button
+            data-testid="node-save"
+            type="button"
+            class="inline-flex h-9 items-center justify-center rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow hover:bg-slate-800 disabled:pointer-events-none disabled:opacity-50"
+            :disabled="nodeSaving"
+            @click.stop.prevent="submitNode"
+          >
+            {{ nodeSaving ? 'Saving...' : 'Save' }}
+          </button>
         </div>
       </form>
     </div>
@@ -1399,7 +1483,7 @@ watch([currentPage, pageSize], () => {
     >
       <form
         class="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-lg bg-white shadow-xl"
-        @submit.prevent="void submitService()"
+        @submit.stop.prevent="submitService"
       >
         <div class="flex items-start justify-between border-b border-slate-200 px-6 py-4">
           <h3 class="text-lg font-semibold text-slate-900">
@@ -1455,6 +1539,11 @@ watch([currentPage, pageSize], () => {
             />
             Enable monitoring
           </label>
+          <MonitoringLabelsEditor
+            v-model="serviceForm.monitoring_labels"
+            class="md:col-span-2"
+            :inherited="selectedNode?.monitoring_labels ?? {}"
+          />
           <details
             class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 md:col-span-2"
             :class="{ 'opacity-60': !serviceForm.monitoring_enabled }"
@@ -1529,19 +1618,19 @@ watch([currentPage, pageSize], () => {
             Verify SSL
           </label>
           <label class="grid gap-2 md:col-span-2">
-            <span class="text-sm font-medium text-slate-700">Resource Groups</span>
+            <span class="text-sm font-medium text-slate-700">Teams</span>
             <select
               :class="multiSelectClass"
               multiple
-              :value="serviceForm.resource_group_ids.map(String)"
+              :value="serviceForm.team_ids.map(String)"
               @change="updateNumericSelections($event, 'service_groups')"
             >
               <option
-                v-for="group in metadata?.resource_groups ?? []"
-                :key="group.group_id"
-                :value="group.group_id"
+                v-for="group in metadata?.teams ?? []"
+                :key="group.team_id"
+                :value="group.team_id"
               >
-                {{ group.group_name }}
+                {{ group.team_name }}
               </option>
             </select>
           </label>
@@ -1561,10 +1650,16 @@ watch([currentPage, pageSize], () => {
         </div>
         <div class="flex justify-end gap-2 border-t border-slate-200 px-6 py-4">
           <Button variant="outline" type="button" @click="closeServiceDialog">Cancel</Button>
-          <Button type="submit" :disabled="serviceSaving">
+          <button
+            data-testid="service-save"
+            type="button"
+            class="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow hover:bg-slate-800 disabled:pointer-events-none disabled:opacity-50"
+            :disabled="serviceSaving"
+            @click.stop.prevent="submitService"
+          >
             <Database class="h-4 w-4" />
-            Save
-          </Button>
+            {{ serviceSaving ? 'Saving...' : 'Save' }}
+          </button>
         </div>
       </form>
     </div>

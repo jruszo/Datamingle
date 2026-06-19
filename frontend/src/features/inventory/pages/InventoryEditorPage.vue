@@ -36,7 +36,7 @@ const metadata = ref<InstanceInventoryMetadata | null>(null)
 const isLoading = ref(false)
 const isSaving = ref(false)
 const isTestingConnection = ref(false)
-const needsResourceGroupDialog = ref(false)
+const needsTeamDialog = ref(false)
 const pageError = ref('')
 const formError = ref('')
 const connectionTestMessage = ref('')
@@ -67,7 +67,7 @@ const form = reactive({
   charset: '',
   service_name: '',
   sid: '',
-  resource_group_ids: [] as number[],
+  team_ids: [] as number[],
   instance_tag_ids: [] as number[],
 })
 
@@ -87,7 +87,7 @@ function resetForm() {
   form.charset = ''
   form.service_name = ''
   form.sid = ''
-  form.resource_group_ids = []
+  form.team_ids = []
   form.instance_tag_ids = []
 }
 
@@ -107,7 +107,7 @@ function applyInstance(instance: InstanceEditorRecord) {
   form.charset = instance.charset
   form.service_name = instance.service_name ?? ''
   form.sid = instance.sid ?? ''
-  form.resource_group_ids = [...instance.resource_group_ids]
+  form.team_ids = [...instance.team_ids]
   form.instance_tag_ids = [...instance.instance_tag_ids]
 }
 
@@ -153,7 +153,7 @@ function requireToken() {
 
 function updateNumericSelections(
   event: Event,
-  target: 'resource_group_ids' | 'instance_tag_ids',
+  target: 'team_ids' | 'instance_tag_ids',
 ) {
   const element = event.target as HTMLSelectElement
   form[target] = Array.from(element.selectedOptions)
@@ -166,10 +166,10 @@ function resetConnectionTestResult() {
   connectionTestTone.value = ''
 }
 
-async function goToResourceGroupCreation() {
+async function goToTeamCreation() {
   await router.push({
-    name: 'settings-resource-groups-new',
-    query: { reason: 'inventory-requires-resource-group' },
+    name: 'settings-teams-new',
+    query: { reason: 'inventory-requires-team' },
   })
 }
 
@@ -179,7 +179,7 @@ async function goBackToInventory() {
 
 async function loadPage() {
   isLoading.value = true
-  needsResourceGroupDialog.value = false
+  needsTeamDialog.value = false
   pageError.value = ''
   formError.value = ''
   resetConnectionTestResult()
@@ -194,8 +194,8 @@ async function loadPage() {
     }
 
     metadata.value = await fetchInstanceInventoryMetadata(requireToken())
-    if (metadata.value.resource_groups.length === 0) {
-      needsResourceGroupDialog.value = true
+    if (metadata.value.teams.length === 0) {
+      needsTeamDialog.value = true
       return
     }
 
@@ -256,7 +256,7 @@ function buildInstancePayload(): InstanceCreatePayload | null {
     charset: form.charset.trim(),
     service_name: form.service_name.trim(),
     sid: form.sid.trim(),
-    resource_group_ids: [...form.resource_group_ids],
+    team_ids: [...form.team_ids],
     instance_tag_ids: [...form.instance_tag_ids],
   }
 }
@@ -348,17 +348,17 @@ watch(form, () => {
 
 <template>
   <section class="grid gap-6">
-    <AlertDialog :open="needsResourceGroupDialog">
+    <AlertDialog :open="needsTeamDialog">
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Resource group required</AlertDialogTitle>
+          <AlertDialogTitle>Team required</AlertDialogTitle>
           <AlertDialogDescription>
-            You need at least one resource group before creating an instance. Create the resource group first, then come back to inventory and add the instance.
+            You need at least one team before creating an instance. Create the team first, then come back to inventory and add the instance.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel @click="void goBackToInventory()">Back to inventory</AlertDialogCancel>
-          <AlertDialogAction @click="void goToResourceGroupCreation()">Create resource group</AlertDialogAction>
+          <AlertDialogAction @click="void goToTeamCreation()">Create team</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -388,8 +388,8 @@ watch(form, () => {
         <CardDescription>
           {{
             isCreateMode
-              ? 'Fill in the core connection details first, then optionally attach tags and resource groups.'
-              : 'Update the core connection details, then optionally adjust tags and resource groups.'
+              ? 'Fill in the core connection details first, then optionally attach tags and teams.'
+              : 'Update the core connection details, then optionally adjust tags and teams.'
           }}
         </CardDescription>
       </CardHeader>
@@ -410,7 +410,7 @@ watch(form, () => {
         </p>
 
         <div
-          v-if="!pageError && !needsResourceGroupDialog"
+          v-if="!pageError && !needsTeamDialog"
           class="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]"
         >
           <div class="space-y-6">
@@ -530,18 +530,18 @@ watch(form, () => {
 
           <div class="space-y-6">
             <div class="grid min-w-0 gap-2">
-              <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Resource Groups</span>
-              <select :class="multiSelectClass" multiple @change="updateNumericSelections($event, 'resource_group_ids')">
+              <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Teams</span>
+              <select :class="multiSelectClass" multiple @change="updateNumericSelections($event, 'team_ids')">
                 <option
-                  v-for="item in metadata?.resource_groups ?? []"
-                  :key="item.group_id"
-                  :selected="form.resource_group_ids.includes(item.group_id)"
-                  :value="item.group_id"
+                  v-for="item in metadata?.teams ?? []"
+                  :key="item.team_id"
+                  :selected="form.team_ids.includes(item.team_id)"
+                  :value="item.team_id"
                 >
-                  {{ item.group_name }}
+                  {{ item.team_name }}
                 </option>
               </select>
-              <span class="text-xs text-slate-500">Hold Command/Ctrl to select multiple resource groups.</span>
+              <span class="text-xs text-slate-500">Hold Command/Ctrl to select multiple teams.</span>
             </div>
 
             <div class="grid min-w-0 gap-2">

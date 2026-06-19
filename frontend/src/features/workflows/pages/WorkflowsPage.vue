@@ -212,14 +212,14 @@ const canCreateDml = computed(() => {
 const canCreateExport = computed(() => (exportMetadata.value?.instances ?? []).length > 0)
 
 const filterGroups = computed(() => {
-  const groups = new Map<number, WorkflowSubmissionMetadata['resource_groups'][number]>()
-  for (const group of metadata.value?.resource_groups ?? []) {
-    groups.set(group.group_id, group)
+  const groups = new Map<number, WorkflowSubmissionMetadata['teams'][number]>()
+  for (const group of metadata.value?.teams ?? []) {
+    groups.set(group.team_id, group)
   }
-  for (const group of exportMetadata.value?.resource_groups ?? []) {
-    groups.set(group.group_id, group)
+  for (const group of exportMetadata.value?.teams ?? []) {
+    groups.set(group.team_id, group)
   }
-  return Array.from(groups.values()).sort((left, right) => left.group_name.localeCompare(right.group_name))
+  return Array.from(groups.values()).sort((left, right) => left.team_name.localeCompare(right.team_name))
 })
 
 const allFilterInstances = computed(() => {
@@ -234,15 +234,15 @@ const allFilterInstances = computed(() => {
       continue
     }
 
-    const mergedGroupIds = Array.from(new Set([...current.group_ids, ...instance.group_ids]))
-    const mergedGroupNames = Array.from(new Set([...current.group_names, ...instance.group_names]))
+    const mergedGroupIds = Array.from(new Set([...current.team_ids, ...instance.team_ids]))
+    const mergedGroupNames = Array.from(new Set([...current.team_names, ...instance.team_names]))
     const mergedSyntaxTypes = Array.from(
       new Set([...current.allowed_syntax_types, ...instance.allowed_syntax_types]),
     ).sort((left, right) => left - right)
     instances.set(instance.id, {
       ...current,
-      group_ids: mergedGroupIds,
-      group_names: mergedGroupNames,
+      team_ids: mergedGroupIds,
+      team_names: mergedGroupNames,
       allowed_syntax_types: mergedSyntaxTypes,
     })
   }
@@ -259,7 +259,7 @@ const filteredInstances = computed(() => {
     return instances
   }
   return instances.filter((instance) =>
-    instance.group_ids.includes(groupId),
+    instance.team_ids.includes(groupId),
   )
 })
 
@@ -341,7 +341,7 @@ async function loadWorkflows() {
       search: filters.search,
       status: filters.status || undefined,
       syntax_type: filters.syntaxType ? Number(filters.syntaxType) as 1 | 2 | 3 : undefined,
-      group_id: filters.groupId ? Number(filters.groupId) : undefined,
+      team_id: filters.groupId ? Number(filters.groupId) : undefined,
       instance_id: filters.instanceId ? Number(filters.instanceId) : undefined,
       start_date: filters.startDate || undefined,
       end_date: filters.endDate || undefined,
@@ -516,10 +516,10 @@ onMounted(async () => {
               <option value="">All groups</option>
               <option
                 v-for="group in filterGroups"
-                :key="group.group_id"
-                :value="`${group.group_id}`"
+                :key="group.team_id"
+                :value="`${group.team_id}`"
               >
-                {{ group.group_name }}
+                {{ group.team_name }}
               </option>
             </select>
             <select v-model="filters.instanceId" data-testid="workflow-filter-instance" :class="selectClass" :disabled="metadataLoading">
@@ -608,7 +608,7 @@ onMounted(async () => {
                     </a>
                   </div>
                   <p class="text-sm text-slate-500">
-                    {{ workflow.group_name }} / {{ workflow.instance_name }} / {{ workflow.db_name }}
+                    {{ workflow.team_name }} / {{ workflow.instance_name }} / {{ workflow.db_name }}
                   </p>
                 </div>
                 <div class="text-sm text-slate-500">

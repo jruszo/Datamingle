@@ -1,82 +1,30 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Save, Trash2 } from 'lucide-vue-next'
+import { ArrowLeft, Trash2 } from 'lucide-vue-next'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import {
-  deleteUser,
-  fetchAccessRoles,
-  fetchResourceGroups,
-  fetchUser,
-  updateUser,
-  type AccessRoleRecord,
-  type ResourceAccessRoleCode,
-  type ResourceGroupMembershipSource,
-  type ResourceGroupRecord,
-  type UserManagementDetailRecord,
-} from '../api'
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { deleteUser, fetchUser, updateUser, type UserManagementDetailRecord } from '../api'
 import { useAuthStore } from '@/stores/auth'
-
-type GroupAccessState = {
-  access_role: ResourceAccessRoleCode | ''
-  membership_source?: ResourceGroupMembershipSource
-}
 
 const authStore = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 
-const accessRoles = ref<AccessRoleRecord[]>([])
-const resourceGroups = ref<ResourceGroupRecord[]>([])
-const loadedUser = ref<UserManagementDetailRecord | null>(null)
-const username = ref('')
-const displayName = ref('')
-const email = ref('')
-const groupAccessById = ref<Record<number, GroupAccessState>>({})
-const groupFilter = ref('')
+const user = ref<UserManagementDetailRecord | null>(null)
 const isLoading = ref(false)
-const isSaving = ref(false)
 const isDeleting = ref(false)
 const isTogglingStatus = ref(false)
 const pageError = ref('')
-const formError = ref('')
-const formSuccess = ref('')
+const feedback = ref('')
 
 const userId = computed(() => {
   const value = Number(route.params.userId)
   return Number.isFinite(value) ? value : null
 })
 const canManageUsers = computed(() => authStore.currentUser?.is_superuser ?? false)
-const isDirectoryManaged = computed(() => loadedUser.value?.is_directory_managed ?? false)
-const normalizedGroupFilter = computed(() => groupFilter.value.trim().toLowerCase())
-const assignedGroupCount = computed(
-  () => Object.values(groupAccessById.value).filter((row) => row.access_role).length,
-)
-
-function toUserFacingMessage(errorValue: unknown, fallback: string) {
-  if (!(errorValue instanceof Error)) {
-    return fallback
-  }
-
-  const separator = '): '
-  const separatorIndex = errorValue.message.indexOf(separator)
-  if (separatorIndex === -1) {
-    return errorValue.message
-  }
-
-  return errorValue.message.slice(separatorIndex + separator.length)
-}
 
 function requireToken() {
   if (!authStore.accessToken) {
@@ -85,455 +33,135 @@ function requireToken() {
   return authStore.accessToken
 }
 
-function isAccessRoleCode(value: string): value is ResourceAccessRoleCode {
-  return accessRoles.value.some((role) => role.code === value)
-}
-
-function applyUser(user: UserManagementDetailRecord) {
-  loadedUser.value = user
-  username.value = user.username
-  displayName.value = user.display
-  email.value = user.email
-
-  const nextAccess: Record<number, GroupAccessState> = {}
-  const rows = user.resource_access?.length ? user.resource_access : user.resource_groups
-  for (const row of rows) {
-    nextAccess[row.group_id] = {
-      access_role: row.access_role,
-      membership_source: row.membership_source ?? 'datamingle',
-    }
-  }
-  groupAccessById.value = nextAccess
-}
-
-function sortGroups(values: ResourceGroupRecord[]) {
-  return [...values].sort((left, right) =>
-    left.group_name.localeCompare(right.group_name, undefined, {
-      sensitivity: 'base',
-      numeric: true,
-    }),
-  )
-}
-
-function groupMatches(group: ResourceGroupRecord, filterValue: string) {
-  if (!filterValue) {
-    return true
-  }
-
-  const haystack = `${group.group_name} ${group.group_id}`.toLowerCase()
-  return haystack.includes(filterValue)
-}
-
-const filteredResourceGroups = computed(() =>
-  sortGroups(
-    resourceGroups.value.filter((group) => groupMatches(group, normalizedGroupFilter.value)),
-  ),
-)
-
-function roleForGroup(groupId: number) {
-  return groupAccessById.value[groupId]?.access_role ?? ''
-}
-
-function sourceForGroup(groupId: number) {
-  return groupAccessById.value[groupId]?.membership_source
-}
-
-function updateGroupRole(groupId: number, event: Event) {
-  const value = (event.target as HTMLSelectElement).value
-  if (isDirectoryManaged.value || sourceForGroup(groupId) === 'workos_directory') {
-    return
-  }
-
-  const nextAccess = { ...groupAccessById.value }
-  if (!value) {
-    delete nextAccess[groupId]
-  } else if (isAccessRoleCode(value)) {
-    nextAccess[groupId] = {
-      access_role: value,
-      membership_source: nextAccess[groupId]?.membership_source ?? 'datamingle',
-    }
-  }
-  groupAccessById.value = nextAccess
-  formSuccess.value = ''
-}
-
-function resourceAccessRows() {
-  return Object.entries(groupAccessById.value)
-    .map(([resourceGroupId, row]) => ({
-      resource_group_id: Number(resourceGroupId),
-      access_role: row.access_role,
-    }))
-    .filter(
-      (row): row is { resource_group_id: number; access_role: ResourceAccessRoleCode } =>
-        Number.isFinite(row.resource_group_id) && isAccessRoleCode(row.access_role),
-    )
-    .sort((left, right) => left.resource_group_id - right.resource_group_id)
-}
-
-async function loadAllGroups() {
-  const collectedGroups: ResourceGroupRecord[] = []
-  let page = 1
-  let totalCount = 0
-
-  while (page === 1 || collectedGroups.length < totalCount) {
-    const response = await fetchResourceGroups(requireToken(), {
-      page,
-      size: 100,
-      ordering: 'group_name',
-    })
-    collectedGroups.push(...response.results)
-    totalCount = response.count
-
-    if (!response.next || response.results.length === 0) {
-      break
-    }
-
-    page += 1
-  }
-
-  resourceGroups.value = sortGroups(collectedGroups)
+function message(errorValue: unknown, fallback: string) {
+  return errorValue instanceof Error ? errorValue.message : fallback
 }
 
 async function loadPage() {
   isLoading.value = true
   pageError.value = ''
-  formError.value = ''
-  formSuccess.value = ''
-  loadedUser.value = null
-  username.value = ''
-  displayName.value = ''
-  email.value = ''
-  groupAccessById.value = {}
-
+  feedback.value = ''
   try {
     await authStore.loadCurrentUser()
-
-    if (!canManageUsers.value) {
+    if (!canManageUsers.value || !userId.value) {
       pageError.value = 'Only superusers can access Datamingle user management.'
       return
     }
-
-    if (!userId.value) {
-      pageError.value = 'Invalid user identifier.'
-      return
-    }
-
-    const [roles, user] = await Promise.all([
-      fetchAccessRoles(requireToken()),
-      fetchUser(userId.value, requireToken()),
-      loadAllGroups(),
-    ])
-    accessRoles.value = roles
-    applyUser(user)
+    user.value = await fetchUser(userId.value, requireToken())
   } catch (errorValue) {
-    pageError.value = toUserFacingMessage(errorValue, 'Failed to load the user editor.')
+    pageError.value = message(errorValue, 'Failed to load the user.')
   } finally {
     isLoading.value = false
   }
 }
 
-async function saveUser() {
-  if (!canManageUsers.value) {
-    formError.value = 'Only superusers can save Datamingle users.'
-    return
-  }
-
-  if (isDirectoryManaged.value) {
-    formError.value = 'Resource group membership for this user is managed by WorkOS Directory Sync.'
-    return
-  }
-
-  isSaving.value = true
-  formError.value = ''
-  formSuccess.value = ''
-
-  try {
-    if (!userId.value) {
-      throw new Error('Missing user identifier.')
-    }
-
-    const updatedUser = await updateUser(
-      userId.value,
-      {
-        resource_access: resourceAccessRows(),
-        is_active: loadedUser.value?.is_active ?? true,
-      },
-      requireToken(),
-    )
-    applyUser(updatedUser)
-    formSuccess.value = 'User updated successfully.'
-  } catch (errorValue) {
-    formError.value = toUserFacingMessage(errorValue, 'Failed to save the user.')
-  } finally {
-    isSaving.value = false
-  }
-}
-
 async function toggleUserStatus() {
-  if (!userId.value || !loadedUser.value) {
+  if (!user.value || !userId.value) {
     return
   }
-
-  const nextIsActive = !loadedUser.value.is_active
-  const actionLabel = nextIsActive ? 'reactivate' : 'deactivate'
-
-  if (
-    !window.confirm(
-      `${actionLabel[0]?.toUpperCase() ?? ''}${actionLabel.slice(1)} "${loadedUser.value.display || loadedUser.value.username}"?`,
-    )
-  ) {
+  const nextActive = !user.value.is_active
+  if (!window.confirm(`${nextActive ? 'Reactivate' : 'Deactivate'} "${user.value.display || user.value.username}"?`)) {
     return
   }
-
   isTogglingStatus.value = true
-  formError.value = ''
-  formSuccess.value = ''
-
+  pageError.value = ''
   try {
-    const updatedUser = await updateUser(
-      userId.value,
-      { is_active: nextIsActive },
-      requireToken(),
-    )
-    applyUser(updatedUser)
-    formSuccess.value = nextIsActive
-      ? 'User reactivated successfully.'
-      : 'User deactivated successfully.'
+    user.value = await updateUser(userId.value, { is_active: nextActive }, requireToken())
+    feedback.value = nextActive ? 'User reactivated successfully.' : 'User deactivated successfully.'
   } catch (errorValue) {
-    formError.value = toUserFacingMessage(errorValue, `Failed to ${actionLabel} the user.`)
+    pageError.value = message(errorValue, 'Failed to update the user.')
   } finally {
     isTogglingStatus.value = false
   }
 }
 
-async function removeUserAccount() {
-  if (!userId.value || !loadedUser.value) {
+async function removeUser() {
+  if (!user.value || !userId.value) {
     return
   }
-
-  if (
-    !window.confirm(
-      `Delete "${loadedUser.value.display || loadedUser.value.username}" from Datamingle? This cannot be undone.`,
-    )
-  ) {
+  if (!window.confirm(`Delete "${user.value.display || user.value.username}" from Datamingle? This cannot be undone.`)) {
     return
   }
-
   isDeleting.value = true
-  formError.value = ''
-  formSuccess.value = ''
-
+  pageError.value = ''
   try {
     await deleteUser(userId.value, requireToken())
     await router.push('/settings/users')
   } catch (errorValue) {
-    formError.value = toUserFacingMessage(errorValue, 'Failed to delete the user.')
+    pageError.value = message(errorValue, 'Failed to delete the user.')
   } finally {
     isDeleting.value = false
   }
 }
 
-onMounted(() => {
-  void loadPage()
-})
-
-watch(
-  () => route.fullPath,
-  (currentPath, previousPath) => {
-    if (currentPath !== previousPath) {
-      void loadPage()
-    }
-  },
-)
+onMounted(() => void loadPage())
+watch(() => route.fullPath, () => void loadPage())
 </script>
 
 <template>
   <section class="grid gap-6">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <Button as-child variant="ghost">
-        <RouterLink to="/settings/users">
-          <ArrowLeft class="h-4 w-4" />
-          Back to users
-        </RouterLink>
-      </Button>
-      <div v-if="loadedUser" class="flex flex-wrap gap-2">
-        <Badge
-          :variant="loadedUser.is_active ? 'secondary' : 'outline'"
-          :class="loadedUser.is_active ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600'"
-        >
-          {{ loadedUser.is_active ? 'Active' : 'Inactive' }}
-        </Badge>
-        <Badge
-          v-if="loadedUser.is_superuser"
-          variant="secondary"
-          class="bg-amber-100 text-amber-800"
-        >
-          Superuser
-        </Badge>
-        <Badge v-if="loadedUser.is_staff" variant="secondary" class="bg-sky-100 text-sky-800">
-          Staff
-        </Badge>
-        <Badge
-          v-if="loadedUser.is_directory_managed"
-          variant="secondary"
-          class="bg-violet-100 text-violet-800"
-        >
-          WorkOS Directory
-        </Badge>
-      </div>
-    </div>
+    <Button as-child variant="ghost" class="w-fit">
+      <RouterLink to="/settings/users">
+        <ArrowLeft class="h-4 w-4" />
+        Back to users
+      </RouterLink>
+    </Button>
 
     <Card class="border-slate-200">
       <CardHeader>
-        <CardTitle>Edit User</CardTitle>
-        <CardDescription>Maintain the user account and resource access assignments.</CardDescription>
+        <CardTitle>{{ user?.display || user?.username || 'User' }}</CardTitle>
       </CardHeader>
       <CardContent class="space-y-6">
-        <div
-          v-if="isDirectoryManaged"
-          class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
-        >
-          Resource group membership for this user is managed by WorkOS Directory Sync.
-        </div>
-
-        <div class="grid gap-4 md:grid-cols-2">
-          <div class="space-y-2">
-            <label for="user-username" class="text-sm font-medium text-slate-900">Username</label>
-            <Input id="user-username" v-model="username" :disabled="true" placeholder="e.g. jdoe" />
-          </div>
-
-          <div class="space-y-2">
-            <label for="user-display" class="text-sm font-medium text-slate-900">Display name</label>
-            <Input
-              id="user-display"
-              v-model="displayName"
-              :disabled="true"
-              placeholder="e.g. Jane Doe"
-            />
-          </div>
-
-          <div class="space-y-2">
-            <label for="user-email" class="text-sm font-medium text-slate-900">Email</label>
-            <Input
-              id="user-email"
-              v-model="email"
-              :disabled="true"
-              placeholder="jane.doe@example.com"
-            />
-          </div>
-        </div>
-
-        <p
-          v-if="pageError"
-          class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
-        >
+        <p v-if="pageError" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {{ pageError }}
         </p>
-        <p
-          v-else-if="formError"
-          class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
-        >
-          {{ formError }}
-        </p>
-        <p
-          v-else-if="formSuccess"
-          class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"
-        >
-          {{ formSuccess }}
+        <p v-else-if="feedback" class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          {{ feedback }}
         </p>
 
-        <div class="space-y-4 rounded-lg border border-slate-200 p-5">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <h3 class="text-base font-semibold text-slate-900">Resource Access</h3>
-            <div class="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary" class="bg-slate-100 text-slate-700">
-                {{ assignedGroupCount }} assigned
-              </Badge>
-              <Badge variant="secondary" class="bg-slate-100 text-slate-700">
-                {{ resourceGroups.length }} groups
-              </Badge>
-            </div>
+        <div v-if="user" class="grid gap-4 md:grid-cols-3">
+          <div>
+            <p class="text-xs font-medium uppercase text-slate-500">Username</p>
+            <p class="mt-1 text-sm text-slate-900">{{ user.username }}</p>
           </div>
-
-          <Input
-            v-model="groupFilter"
-            :disabled="isLoading"
-            placeholder="Filter resource groups"
-            aria-label="Filter resource groups"
-          />
-
-          <div class="overflow-x-auto rounded-md border border-slate-200">
-            <table class="min-w-full divide-y divide-slate-200 text-sm">
-              <thead class="bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
-                <tr>
-                  <th class="px-4 py-3">Resource group</th>
-                  <th class="px-4 py-3">Access role</th>
-                  <th class="px-4 py-3">Source</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-slate-200 bg-white">
-                <tr v-for="group in filteredResourceGroups" :key="group.group_id">
-                  <td class="px-4 py-3">
-                    <div class="font-medium text-slate-900">{{ group.group_name }}</div>
-                    <div class="mt-1 text-xs text-slate-500">Group ID {{ group.group_id }}</div>
-                  </td>
-                  <td class="px-4 py-3">
-                    <select
-                      class="w-full min-w-52 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                      :value="roleForGroup(group.group_id)"
-                      :disabled="isDirectoryManaged || sourceForGroup(group.group_id) === 'workos_directory'"
-                      @change="updateGroupRole(group.group_id, $event)"
-                    >
-                      <option value="">No access</option>
-                      <option v-for="role in accessRoles" :key="role.code" :value="role.code">
-                        {{ role.label }}
-                      </option>
-                    </select>
-                  </td>
-                  <td class="px-4 py-3">
-                    <Badge
-                      v-if="sourceForGroup(group.group_id) === 'workos_directory'"
-                      variant="secondary"
-                      class="bg-violet-100 text-violet-800"
-                    >
-                      WorkOS Directory
-                    </Badge>
-                    <span v-else-if="roleForGroup(group.group_id)" class="text-xs text-slate-500">
-                      Datamingle
-                    </span>
-                    <span v-else class="text-xs text-slate-400">None</span>
-                  </td>
-                </tr>
-                <tr v-if="filteredResourceGroups.length === 0">
-                  <td colspan="3" class="px-4 py-8 text-center text-sm text-slate-500">
-                    No resource groups match the current filter.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+          <div>
+            <p class="text-xs font-medium uppercase text-slate-500">Email</p>
+            <p class="mt-1 text-sm text-slate-900">{{ user.email || 'No email address' }}</p>
           </div>
+          <div>
+            <p class="text-xs font-medium uppercase text-slate-500">Status</p>
+            <Badge class="mt-1" :variant="user.is_active ? 'secondary' : 'outline'">
+              {{ user.is_active ? 'Active' : 'Inactive' }}
+            </Badge>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-slate-200 p-5">
+          <h3 class="font-semibold text-slate-900">Team memberships</h3>
+          <p class="mt-1 text-sm text-slate-500">
+            Membership and permission levels are managed from each team.
+          </p>
+          <div v-if="user?.teams.length" class="mt-4 divide-y divide-slate-200 rounded-md border border-slate-200">
+            <RouterLink
+              v-for="team in user.teams"
+              :key="team.team_id"
+              :to="`/settings/teams/${team.team_id}`"
+              class="flex items-center justify-between gap-4 px-4 py-3 hover:bg-slate-50"
+            >
+              <span class="font-medium text-slate-900">{{ team.team_name }}</span>
+              <Badge variant="secondary">{{ team.permission_level_name }}</Badge>
+            </RouterLink>
+          </div>
+          <p v-else class="mt-4 text-sm text-slate-500">No teams assigned.</p>
         </div>
       </CardContent>
-      <CardFooter class="justify-between border-t border-slate-200 pt-6">
-        <div class="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            :disabled="isTogglingStatus || !loadedUser"
-            @click="toggleUserStatus"
-          >
-            {{ loadedUser?.is_active ? 'Deactivate user' : 'Reactivate user' }}
-          </Button>
-          <Button variant="destructive" :disabled="isDeleting" @click="removeUserAccount">
-            <Trash2 class="h-4 w-4" />
-            Delete user
-          </Button>
-        </div>
-        <Button
-          :disabled="isLoading || isSaving || !canManageUsers || isDirectoryManaged"
-          @click="saveUser"
-        >
-          <Save class="h-4 w-4" />
-          Save
+      <CardFooter v-if="user" class="justify-between border-t border-slate-200 pt-6">
+        <Button variant="outline" :disabled="isTogglingStatus || isLoading" @click="toggleUserStatus">
+          {{ user.is_active ? 'Deactivate user' : 'Reactivate user' }}
+        </Button>
+        <Button variant="destructive" :disabled="isDeleting || isLoading" @click="removeUser">
+          <Trash2 class="h-4 w-4" />
+          Delete user
         </Button>
       </CardFooter>
     </Card>

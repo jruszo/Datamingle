@@ -158,8 +158,8 @@ class TestEngineBase(TestCase):
         cls.ins1.save()
         cls.wf1 = SqlWorkflow.objects.create(
             workflow_name="some_name",
-            group_id=1,
-            group_name="g1",
+            team_id=1,
+            team_name="g1",
             engineer=cls.u1.username,
             engineer_display=cls.u1.display,
             audit_auth_groups="some_group",
@@ -442,8 +442,8 @@ class TestRedis(TestCase):
         )
         wf = SqlWorkflow.objects.create(
             workflow_name="some_name",
-            group_id=1,
-            group_name="g1",
+            team_id=1,
+            team_name="g1",
             engineer_display="",
             audit_auth_groups="some_group",
             create_time=datetime.now() - timedelta(days=1),
@@ -815,8 +815,8 @@ class TestPgSQL(TestCase):
         )
         wf = SqlWorkflow.objects.create(
             workflow_name="some_name",
-            group_id=1,
-            group_name="g1",
+            team_id=1,
+            team_name="g1",
             engineer_display="",
             audit_auth_groups="some_group",
             create_time=datetime.now() - timedelta(days=1),
@@ -848,8 +848,8 @@ class TestPgSQL(TestCase):
         )
         wf = SqlWorkflow.objects.create(
             workflow_name="some_name",
-            group_id=1,
-            group_name="g1",
+            team_id=1,
+            team_name="g1",
             engineer_display="",
             audit_auth_groups="some_group",
             create_time=datetime.now() - timedelta(days=1),
@@ -946,8 +946,8 @@ class TestGoInception(TestCase):
         )
         self.wf = SqlWorkflow.objects.create(
             workflow_name="some_name",
-            group_id=1,
-            group_name="g1",
+            team_id=1,
+            team_name="g1",
             engineer_display="",
             audit_auth_groups="some_group",
             create_time=datetime.now() - timedelta(days=1),
@@ -1164,8 +1164,8 @@ class TestOracle(TestCase):
         )
         self.wf = SqlWorkflow.objects.create(
             workflow_name="some_name",
-            group_id=1,
-            group_name="g1",
+            team_id=1,
+            team_name="g1",
             engineer_display="",
             audit_auth_groups="some_group",
             create_time=datetime.now() - timedelta(days=1),
@@ -1562,8 +1562,8 @@ end;"""
         )
         wf = SqlWorkflow.objects.create(
             workflow_name="some_name",
-            group_id=1,
-            group_name="g1",
+            team_id=1,
+            team_name="g1",
             engineer_display="",
             audit_auth_groups="some_group",
             create_time=datetime.now() - timedelta(days=1),
@@ -1605,8 +1605,8 @@ end;"""
         )
         wf = SqlWorkflow.objects.create(
             workflow_name="some_name",
-            group_id=1,
-            group_name="g1",
+            team_id=1,
+            team_name="g1",
             engineer_display="",
             audit_auth_groups="some_group",
             create_time=datetime.now() - timedelta(days=1),
@@ -2196,8 +2196,8 @@ class TestClickHouse(TestCase):
         self.sys_config = SysConfig()
         self.wf = SqlWorkflow.objects.create(
             workflow_name="some_name",
-            group_id=1,
-            group_name="g1",
+            team_id=1,
+            team_name="g1",
             engineer_display="",
             audit_auth_groups="some_group",
             create_time=datetime.now() - timedelta(days=1),
@@ -2492,8 +2492,8 @@ class TestClickHouse(TestCase):
         )
         wf = SqlWorkflow.objects.create(
             workflow_name="some_name",
-            group_id=1,
-            group_name="g1",
+            team_id=1,
+            team_name="g1",
             engineer_display="",
             audit_auth_groups="some_group",
             create_time=datetime.now() - timedelta(days=1),

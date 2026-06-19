@@ -2,15 +2,15 @@ from django.core.management.base import BaseCommand, CommandError
 from sql.engines import get_engine
 from sql.local_demo import (
     DEMO_INSTANCES,
-    DEMO_RESOURCE_GROUPS,
+    DEMO_TEAMS,
     managed_demo_instance_names,
-    managed_demo_resource_group_names,
+    managed_demo_team_names,
     managed_demo_usernames,
 )
 from common.utils.const import WorkflowType
 from sql.utils.sql_utils import filter_db_list
-from sql.models import Instance, ResourceGroup, Users, WorkflowAuditSetting
-from sql.utils.resource_group import access_role_label, normalize_access_role_sequence
+from sql.models import Instance, Team, Users, WorkflowAuditSetting
+from sql.utils.team import permission_group_label, normalize_permission_group_sequence
 
 
 class Command(BaseCommand):
@@ -28,18 +28,16 @@ class Command(BaseCommand):
             )
         self.stdout.write("Legacy demo users removed")
 
-        resource_groups = {
-            group.group_name: group
-            for group in ResourceGroup.objects.filter(
-                group_name__in=managed_demo_resource_group_names(), is_deleted=0
+        teams = {
+            group.team_name: group
+            for group in Team.objects.filter(
+                team_name__in=managed_demo_team_names(), is_deleted=0
             )
         }
-        missing_groups = sorted(
-            set(managed_demo_resource_group_names()) - set(resource_groups.keys())
-        )
+        missing_groups = sorted(set(managed_demo_team_names()) - set(teams.keys()))
         if missing_groups:
             raise CommandError(
-                "Missing demo resource groups: {}".format(", ".join(missing_groups))
+                "Missing demo teams: {}".format(", ".join(missing_groups))
             )
 
         instances = {
@@ -56,35 +54,35 @@ class Command(BaseCommand):
                 "Missing demo instances: {}".format(", ".join(missing_instances))
             )
 
-        for resource_group_config in DEMO_RESOURCE_GROUPS.values():
-            resource_group = resource_groups[resource_group_config["group_name"]]
+        for team_config in DEMO_TEAMS.values():
+            team = teams[team_config["team_name"]]
             expected_display = " -> ".join(
-                access_role_label(role)
-                for role in normalize_access_role_sequence(
-                    resource_group_config["approval_groups"]
+                permission_group_label(role)
+                for role in normalize_permission_group_sequence(
+                    team_config["approval_groups"]
                 )
             )
             audit_setting = WorkflowAuditSetting.objects.filter(
-                group_id=resource_group.group_id,
+                team_id=team.team_id,
                 workflow_type=WorkflowType.SQL_REVIEW,
             ).first()
             actual_display = ""
             if audit_setting:
                 actual_display = " -> ".join(
-                    access_role_label(role)
-                    for role in normalize_access_role_sequence(
+                    permission_group_label(role)
+                    for role in normalize_permission_group_sequence(
                         audit_setting.audit_auth_groups
                     )
                 )
             if actual_display != expected_display:
                 raise CommandError(
                     "Unexpected approval preview for {}: expected '{}', got '{}'".format(
-                        resource_group.group_name,
+                        team.team_name,
                         expected_display,
                         actual_display,
                     )
                 )
-            self.stdout.write(f"Approval preview OK: {resource_group.group_name}")
+            self.stdout.write(f"Approval preview OK: {team.team_name}")
 
         for instance_config in DEMO_INSTANCES.values():
             instance = instances[instance_config["instance_name"]]

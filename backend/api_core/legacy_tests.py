@@ -26,7 +26,7 @@ from api_agents.dispatch import (
 )
 from api_agents.models import Agent, AgentInstanceAssignment, AgentStatus
 from sql.models import (
-    ResourceGroup,
+    Team,
     Instance,
     InstanceAccessLevel,
     SqlWorkflow,
@@ -38,15 +38,16 @@ from sql.models import (
     QueryLog,
     QueryPrivileges,
     QueryPrivilegesApply,
-    PermanentResourceGroupGrant,
+    PermanentTeamGrant,
     PermissionRequest,
     TemporaryInstanceGrant,
-    TemporaryResourceGroupGrant,
+    TemporaryTeamGrant,
+    TeamMembership,
     ArchiveConfig,
     ArchiveLog,
 )
 from common.utils.const import WorkflowAction, WorkflowStatus, WorkflowType
-from sql.utils.resource_group import user_groups, user_instances
+from sql.utils.team import user_groups, user_instances
 import json
 
 User = get_user_model()
@@ -71,8 +72,31 @@ def token_pair_for_user(user):
 
 def authenticate_client(client, user):
     token_pair = token_pair_for_user(user)
-    client.credentials(HTTP_AUTHORIZATION="Bearer " + token_pair["access"])
+    client.force_authenticate(user=user)
     return token_pair
+
+
+def assign_user_to_team(user, team):
+    permission_level = user.groups.exclude(name="superadmin").order_by("id").first()
+    if permission_level is None:
+        permission_level, _ = Group.objects.get_or_create(
+            name=f"test-team-permissions-{user.pk}"
+        )
+    permission_ids = set(permission_level.permissions.values_list("id", flat=True))
+    permission_ids.update(user.user_permissions.values_list("id", flat=True))
+    permission_level.permissions.set(permission_ids)
+    return TeamMembership.objects.update_or_create(
+        user=user,
+        team=team,
+        defaults={"permission_level": permission_level},
+    )[0]
+
+
+def remove_team_permission(user, team, codename):
+    membership = TeamMembership.objects.get(user=user, team=team)
+    membership.permission_level.permissions.remove(
+        Permission.objects.get(codename=codename)
+    )
 
 
 class CacheIsolatedAPITestCase(APITestCase):
@@ -290,8 +314,8 @@ class TestUser(CacheIsolatedAPITestCase):
         self.member_user = User.objects.create(
             username="group_member", display="Group Member", is_active=True
         )
-        self.group = Group.objects.create(id=1, name="DBA")
-        self.res_group = ResourceGroup.objects.create(group_id=1, group_name="test")
+        self.group = Group.objects.get(name="DBA")
+        self.res_group = Team.objects.create(team_id=1, team_name="test")
         self.instance = Instance.objects.create(
             instance_name="test_instance",
             type="master",
@@ -303,11 +327,15 @@ class TestUser(CacheIsolatedAPITestCase):
         )
         self.view_group_permission = Permission.objects.get(codename="view_group")
         self.menu_system_permission = Permission.objects.get(codename="menu_system")
+        self.change_team_permission = Permission.objects.get(
+            content_type__app_label="sql",
+            codename="change_team",
+        )
         self.token = authenticate_client(self.client, self.user)["access"]
 
     def tearDown(self):
         Instance.objects.all().delete()
-        ResourceGroup.objects.all().delete()
+        Team.objects.all().delete()
         Group.objects.all().delete()
         User.objects.all().delete()
         SysConfig().purge()
@@ -332,12 +360,11 @@ class TestUser(CacheIsolatedAPITestCase):
                 "display",
                 "email",
                 "is_workos_managed",
-                "is_directory_managed",
                 "is_active",
                 "is_superuser",
                 "is_staff",
-                "groups",
-                "group_ids",
+                "teams",
+                "team_ids",
             },
         )
 
@@ -369,14 +396,14 @@ class TestUser(CacheIsolatedAPITestCase):
         self.assertEqual(r_data["username"], self.user.username)
         self.assertIn("permissions", r_data)
         self.assertIn("groups", r_data)
-        self.assertIn("resource_groups", r_data)
+        self.assertIn("teams", r_data)
 
     def test_get_current_user_context_includes_workflow_menu_for_temporary_write_access(
         self,
     ):
         TemporaryInstanceGrant.objects.create(
             user=self.member_user,
-            resource_group=self.res_group,
+            team=self.res_group,
             instance=self.instance,
             access_level="query_dml_ddl",
             valid_date=datetime.now().date() + timedelta(days=30),
@@ -410,33 +437,37 @@ class TestUser(CacheIsolatedAPITestCase):
         User.objects.filter(id=self.user.id).update(is_superuser=0)
         self.user = User.objects.get(id=self.user.id)
         self.user.user_permissions.clear()
+        self.client.credentials()
+        authenticate_client(self.client, self.user)
 
         r1 = self.client.get("/api/v1/user/", format="json")
         self.assertEqual(r1.status_code, status.HTTP_403_FORBIDDEN)
 
         delegated_permission = Permission.objects.get(codename="view_users")
         self.user.user_permissions.add(delegated_permission)
+        self.client.credentials()
+        authenticate_client(self.client, self.user)
         r2 = self.client.get("/api/v1/user/", format="json")
         self.assertEqual(r2.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_get_user_detail(self):
         """Test getting a single managed user."""
-        self.member_user.groups.add(self.group)
+        assign_user_to_team(self.member_user, self.res_group)
         r = self.client.get(f"/api/v1/user/{self.member_user.id}/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         payload = response_data(r)
         self.assertEqual(payload["id"], self.member_user.id)
-        self.assertEqual(payload["group_ids"], [self.group.id])
-        self.assertEqual(payload["groups"][0]["name"], self.group.name)
+        self.assertEqual(payload["team_ids"], [self.res_group.team_id])
+        self.assertEqual(payload["teams"][0]["team_name"], self.res_group.team_name)
 
     def test_update_user(self):
-        """Superusers can update access fields but not identity fields."""
+        """Superusers can update status but not identity or membership fields."""
         self.member_user.set_password("member_password")
         self.member_user.save(update_fields=["password"])
         json_data = {
             "display": "Updated Display Name",
             "email": "updated@datamingle.test",
-            "group_ids": [self.group.id],
+            "team_ids": [self.res_group.team_id],
             "password": "",
         }
         r = self.client.put(
@@ -447,9 +478,7 @@ class TestUser(CacheIsolatedAPITestCase):
         self.assertEqual(user.display, "Group Member")
         self.assertEqual(user.email, "")
         self.assertTrue(user.check_password("member_password"))
-        self.assertEqual(
-            list(user.groups.values_list("id", flat=True)), [self.group.id]
-        )
+        self.assertFalse(user.team_memberships.exists())
 
     def test_deactivate_and_reactivate_user(self):
         """Managed users can be deactivated and reactivated."""
@@ -498,196 +527,203 @@ class TestUser(CacheIsolatedAPITestCase):
             "cannot deactivate your own account", json.dumps(r.json()).lower()
         )
 
-    def test_get_user_group_list(self):
-        """Test getting user group list."""
-        r = self.client.get("/api/v1/user/group/", format="json")
+    def test_get_permission_level_list(self):
+        """Test getting permission levels."""
+        r = self.client.get("/api/v1/permission-levels/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(response_data(r)["count"], 1)
+        self.assertIn("DBA", {level["name"] for level in response_data(r)})
 
-    def test_get_user_group_list_with_search(self):
-        """Test searching user groups by name."""
-        Group.objects.create(name="RD")
-        r = self.client.get("/api/v1/user/group/?search=rd", format="json")
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        payload = response_data(r)
-        self.assertEqual(payload["count"], 1)
-        self.assertEqual(payload["results"][0]["name"], "RD")
-
-    def test_get_user_group_list_with_ordering(self):
-        """Test ordering user groups by name descending."""
-        Group.objects.create(name="AAA")
-        r = self.client.get("/api/v1/user/group/?ordering=-name", format="json")
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        payload = response_data(r)
-        self.assertEqual(payload["results"][0]["name"], "DBA")
-
-    def test_create_user_group(self):
-        """Test creating user group."""
-        json_data = {"name": "RD", "permissions": [self.menu_system_permission.id]}
-        r = self.client.post("/api/v1/user/group/", json_data, format="json")
+    def test_create_permission_level(self):
+        """Test creating a permission level."""
+        json_data = {
+            "name": "Test Developer",
+            "permission_codes": ["sql.change_team"],
+        }
+        r = self.client.post("/api/v1/permission-levels/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response_data(r)["name"], "RD")
-        self.assertEqual(
-            response_data(r)["permissions"], [self.menu_system_permission.id]
-        )
+        self.assertEqual(response_data(r)["name"], "Test Developer")
+        self.assertEqual(response_data(r)["permissions"], ["sql.change_team"])
 
-    def test_get_user_group_detail(self):
-        """Test getting a single user group with permissions."""
-        self.group.permissions.add(self.menu_system_permission)
-        r = self.client.get(f"/api/v1/user/group/{self.group.id}/", format="json")
+    def test_get_permission_level_detail(self):
+        """Test getting a single permission level."""
+        self.group.permissions.add(self.change_team_permission)
+        r = self.client.get(
+            f"/api/v1/permission-levels/{self.group.id}/",
+            format="json",
+        )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(response_data(r)["id"], self.group.id)
-        self.assertEqual(
-            response_data(r)["permissions"], [self.menu_system_permission.id]
-        )
+        self.assertIn("sql.change_team", response_data(r)["permissions"])
 
-    def test_update_user_group(self):
-        """Test updating user group."""
+    def test_update_permission_level(self):
+        """Test updating a permission level."""
         json_data = {
             "name": "Updated Group Name",
-            "permissions": [self.menu_system_permission.id],
+            "permission_codes": ["sql.change_team"],
         }
         r = self.client.put(
-            f"/api/v1/user/group/{self.group.id}/", json_data, format="json"
+            f"/api/v1/permission-levels/{self.group.id}/",
+            json_data,
+            format="json",
         )
         group = Group.objects.get(pk=self.group.id)
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(group.name, "Updated Group Name")
         self.assertEqual(
             list(group.permissions.values_list("id", flat=True)),
-            [self.menu_system_permission.id],
+            [self.change_team_permission.id],
         )
 
-    def test_delete_user_group(self):
-        """Test deleting user group."""
-        r = self.client.delete(f"/api/v1/user/group/{self.group.id}/", format="json")
+    def test_delete_permission_level(self):
+        """Test deleting an unused permission level."""
+        level = Group.objects.create(name="Unused")
+        r = self.client.delete(
+            f"/api/v1/permission-levels/{level.id}/",
+            format="json",
+        )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(Group.objects.filter(name="DBA").count(), 0)
+        self.assertFalse(Group.objects.filter(pk=level.id).exists())
 
     def test_get_permission_catalog(self):
         """Test getting assignable permission catalog."""
-        r = self.client.get("/api/v1/user/permission/", format="json")
+        r = self.client.get(
+            "/api/v1/permission-levels/available-permissions/",
+            format="json",
+        )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        permissions = response_data(r)
-        self.assertGreater(len(permissions), 0)
+        permissions = [
+            permission
+            for category in response_data(r)
+            for permission in category["permissions"]
+        ]
         matching_permission = next(
             permission
             for permission in permissions
-            if permission["id"] == self.view_group_permission.id
+            if permission["code"] == "sql.change_team"
         )
-        self.assertEqual(matching_permission["codename"], "view_group")
-        self.assertEqual(matching_permission["app_label"], "auth")
-        self.assertEqual(matching_permission["model"], "group")
+        self.assertEqual(matching_permission["codename"], "change_team")
 
-    def test_get_resource_group_list(self):
-        """Test getting resource group list."""
-        self.res_group.users_set.add(self.member_user)
+    def test_get_team_list(self):
+        """Test getting team list."""
+        assign_user_to_team(self.member_user, self.res_group)
         self.res_group.instance_set.add(self.instance)
-        r = self.client.get("/api/v1/user/resourcegroup/", format="json")
+        r = self.client.get("/api/v1/teams/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         payload = response_data(r)
         self.assertEqual(payload["count"], 1)
-        self.assertEqual(payload["results"][0]["group_name"], "test")
+        self.assertEqual(payload["results"][0]["team_name"], "test")
         self.assertEqual(payload["results"][0]["user_count"], 1)
-        self.assertEqual(payload["results"][0]["instance_count"], 1)
+        self.assertEqual(payload["results"][0]["service_count"], 1)
 
-    def test_get_resource_group_list_with_search_and_deleted_filter(self):
+    def test_get_team_list_with_search_and_deleted_filter(self):
         """Search should match name or ID and skip deleted groups."""
-        deleted_group = ResourceGroup.objects.create(group_name="hidden", is_deleted=1)
-        visible_group = ResourceGroup.objects.create(group_name="analytics")
+        deleted_group = Team.objects.create(team_name="hidden", is_deleted=1)
+        visible_group = Team.objects.create(team_name="analytics")
         r = self.client.get(
-            f"/api/v1/user/resourcegroup/?search={visible_group.group_id}",
+            f"/api/v1/teams/?search={visible_group.team_id}",
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         payload = response_data(r)
         self.assertEqual(payload["count"], 1)
-        self.assertEqual(payload["results"][0]["group_name"], "analytics")
-        self.assertEqual(
-            ResourceGroup.objects.filter(group_id=deleted_group.group_id).count(), 1
-        )
+        self.assertEqual(payload["results"][0]["team_name"], "analytics")
+        self.assertEqual(Team.objects.filter(team_id=deleted_group.team_id).count(), 1)
 
-    def test_get_resource_group_list_with_ordering(self):
+    def test_get_team_list_with_ordering(self):
         """Ordering supports membership counts."""
-        busy_group = ResourceGroup.objects.create(group_name="busy")
-        busy_group.users_set.add(self.user, self.member_user)
-        idle_group = ResourceGroup.objects.create(group_name="idle")
+        busy_group = Team.objects.create(team_name="busy")
+        assign_user_to_team(self.user, busy_group)
+        assign_user_to_team(self.member_user, busy_group)
+        idle_group = Team.objects.create(team_name="idle")
         idle_group.instance_set.add(self.instance)
 
         r = self.client.get(
-            "/api/v1/user/resourcegroup/?ordering=-user_count",
+            "/api/v1/teams/?ordering=-user_count",
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         payload = response_data(r)
-        self.assertEqual(payload["results"][0]["group_name"], "busy")
+        self.assertEqual(payload["results"][0]["team_name"], "busy")
 
-    def test_get_resource_group_detail(self):
-        """Test getting a single resource group with memberships."""
-        self.res_group.users_set.add(self.member_user)
+    def test_get_team_detail(self):
+        """Test getting a single team with memberships."""
+        membership = assign_user_to_team(self.member_user, self.res_group)
         self.res_group.instance_set.add(self.instance)
 
-        r = self.client.get(
-            f"/api/v1/user/resourcegroup/{self.res_group.group_id}/", format="json"
-        )
+        r = self.client.get(f"/api/v1/teams/{self.res_group.team_id}/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         payload = response_data(r)
-        self.assertEqual(payload["group_id"], self.res_group.group_id)
-        self.assertEqual(payload["user_ids"], [self.member_user.id])
-        self.assertEqual(payload["instance_ids"], [self.instance.id])
+        self.assertEqual(payload["team_id"], self.res_group.team_id)
+        self.assertEqual(payload["user_access"][0]["user_id"], self.member_user.id)
+        self.assertEqual(
+            payload["user_access"][0]["permission_level_id"],
+            membership.permission_level_id,
+        )
+        self.assertEqual(payload["service_ids"], [self.instance.id])
         self.assertEqual(payload["user_count"], 1)
-        self.assertEqual(payload["instance_count"], 1)
+        self.assertEqual(payload["service_count"], 1)
 
-    def test_create_resource_group(self):
-        """Test creating resource group."""
+    def test_create_team(self):
+        """Test creating team."""
         json_data = {
-            "group_name": "prod",
-            "user_ids": [self.member_user.id],
-            "instance_ids": [self.instance.id],
+            "team_name": "prod",
+            "user_access": [
+                {
+                    "user_id": self.member_user.id,
+                    "permission_level_id": self.group.id,
+                }
+            ],
+            "node_ids": [],
+            "service_ids": [self.instance.id],
         }
-        r = self.client.post("/api/v1/user/resourcegroup/", json_data, format="json")
+        r = self.client.post("/api/v1/teams/", json_data, format="json")
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         payload = response_data(r)
-        self.assertEqual(payload["group_name"], "prod")
-        self.assertEqual(payload["user_ids"], [self.member_user.id])
-        self.assertEqual(payload["instance_ids"], [self.instance.id])
+        self.assertEqual(payload["team_name"], "prod")
+        self.assertEqual(payload["user_access"][0]["user_id"], self.member_user.id)
+        self.assertEqual(payload["service_ids"], [self.instance.id])
 
-    def test_update_resource_group(self):
-        """Test updating resource group."""
+    def test_update_team(self):
+        """Test updating team."""
         json_data = {
-            "group_name": "Updated Resource Group Name",
-            "user_ids": [self.member_user.id],
-            "instance_ids": [self.instance.id],
+            "team_name": "Updated Team Name",
+            "user_access": [
+                {
+                    "user_id": self.member_user.id,
+                    "permission_level_id": self.group.id,
+                }
+            ],
+            "node_ids": [],
+            "service_ids": [self.instance.id],
         }
         r = self.client.put(
-            f"/api/v1/user/resourcegroup/{self.res_group.group_id}/",
+            f"/api/v1/teams/{self.res_group.team_id}/",
             json_data,
             format="json",
         )
-        group = ResourceGroup.objects.get(pk=self.res_group.group_id)
+        group = Team.objects.get(pk=self.res_group.team_id)
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(group.group_name, "Updated Resource Group Name")
+        self.assertEqual(group.team_name, "Updated Team Name")
         self.assertEqual(
-            list(group.users_set.values_list("id", flat=True)), [self.member_user.id]
+            list(group.memberships.values_list("user_id", flat=True)),
+            [self.member_user.id],
         )
         self.assertEqual(
             list(group.instance_set.values_list("id", flat=True)), [self.instance.id]
         )
 
-    def test_delete_resource_group(self):
-        """Test deleting resource group."""
+    def test_delete_team(self):
+        """Test deleting team."""
         r = self.client.delete(
-            f"/api/v1/user/resourcegroup/{self.res_group.group_id}/", format="json"
+            f"/api/v1/teams/{self.res_group.team_id}/", format="json"
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(
-            ResourceGroup.objects.filter(group_id=self.res_group.group_id).count(), 0
-        )
+        self.assertEqual(Team.objects.filter(team_id=self.res_group.team_id).count(), 0)
 
-    def test_resource_group_user_lookup(self):
+    def test_team_user_lookup(self):
         """Lookup returns lightweight user records."""
         r = self.client.get(
-            "/api/v1/user/resourcegroup/users/lookup/?search=group",
+            "/api/v1/teams/users/lookup/?search=group",
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
@@ -696,10 +732,10 @@ class TestUser(CacheIsolatedAPITestCase):
         self.assertEqual(payload[0]["id"], self.member_user.id)
         self.assertEqual(payload[0]["label"], "Group Member")
 
-    def test_resource_group_instance_lookup(self):
+    def test_team_instance_lookup(self):
         """Lookup returns lightweight instance records."""
         r = self.client.get(
-            "/api/v1/user/resourcegroup/instances/lookup/?search=test_instance",
+            "/api/v1/teams/services/lookup/?search=test_instance",
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
@@ -793,8 +829,8 @@ class TestQueryAPI(CacheIsolatedAPITestCase):
 
         self.group = Group.objects.create(name="Query Group")
         self.user.groups.add(self.group)
-        self.res_group = ResourceGroup.objects.create(group_name="query_rg")
-        self.user.resource_group.add(self.res_group)
+        self.res_group = Team.objects.create(team_name="query_rg")
+        assign_user_to_team(self.user, self.res_group)
 
         self.read_tag = InstanceTag.objects.create(
             tag_code="can_read", tag_name="Can Read", active=1
@@ -820,7 +856,7 @@ class TestQueryAPI(CacheIsolatedAPITestCase):
         QueryPrivilegesApply.objects.all().delete()
         InstanceTag.objects.all().delete()
         Instance.objects.all().delete()
-        ResourceGroup.objects.all().delete()
+        Team.objects.all().delete()
         Group.objects.all().delete()
         SysConfig().purge()
 
@@ -915,7 +951,7 @@ class TestQueryAPI(CacheIsolatedAPITestCase):
         self.assertEqual(data["rows"][0]["Table"], "users")
 
     def test_query_describe_rejects_unrelated_instance(self):
-        other_group = ResourceGroup.objects.create(group_name="other_rg")
+        other_group = Team.objects.create(team_name="other_rg")
         other_instance = Instance.objects.create(
             instance_name="other_instance",
             type="master",
@@ -1107,7 +1143,7 @@ class TestQueryAPI(CacheIsolatedAPITestCase):
             {
                 "title": "apply db read",
                 "instance_name": self.ins.instance_name,
-                "group_name": self.res_group.group_name,
+                "team_name": self.res_group.team_name,
                 "priv_type": 1,
                 "db_list": ["db1"],
                 "valid_date": "2099-12-31",
@@ -1123,8 +1159,8 @@ class TestQueryAPI(CacheIsolatedAPITestCase):
 
     def test_query_privilege_list_and_modify(self):
         QueryPrivilegesApply.objects.create(
-            group_id=self.res_group.group_id,
-            group_name=self.res_group.group_name,
+            team_id=self.res_group.team_id,
+            team_name=self.res_group.team_name,
             title="history apply",
             user_name=self.user.username,
             user_display=self.user.display,
@@ -1218,8 +1254,8 @@ class TestQueryAPI(CacheIsolatedAPITestCase):
 
     def test_query_privilege_review_requires_review_permission(self):
         apply_obj = QueryPrivilegesApply.objects.create(
-            group_id=self.res_group.group_id,
-            group_name=self.res_group.group_name,
+            team_id=self.res_group.team_id,
+            team_name=self.res_group.team_name,
             title="apply one",
             user_name=self.user.username,
             user_display=self.user.display,
@@ -1259,8 +1295,8 @@ class TestQueryAPI(CacheIsolatedAPITestCase):
         self, mock_get_auditor, mock_callback, mock_async_task
     ):
         apply_obj = QueryPrivilegesApply.objects.create(
-            group_id=self.res_group.group_id,
-            group_name=self.res_group.group_name,
+            team_id=self.res_group.team_id,
+            team_name=self.res_group.team_name,
             title="apply one",
             user_name=self.user.username,
             user_display=self.user.display,
@@ -1315,7 +1351,7 @@ class TestInstance(CacheIsolatedAPITestCase):
     def tearDown(self):
         User.objects.all().delete()
         Instance.objects.all().delete()
-        ResourceGroup.objects.all().delete()
+        Team.objects.all().delete()
         InstanceTag.objects.all().delete()
         SysConfig().purge()
 
@@ -1406,8 +1442,8 @@ class TestInstance(CacheIsolatedAPITestCase):
             tag_code="ops", tag_name="Operations", active=True
         )
         InstanceTag.objects.create(tag_code="hidden", tag_name="Hidden", active=False)
-        visible_group = ResourceGroup.objects.create(group_name="Visible Group")
-        ResourceGroup.objects.create(group_name="Deleted Group", is_deleted=1)
+        visible_group = Team.objects.create(team_name="Visible Group")
+        Team.objects.create(team_name="Deleted Group", is_deleted=1)
 
         r = self.client.get("/api/v1/instance/metadata/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
@@ -1417,9 +1453,7 @@ class TestInstance(CacheIsolatedAPITestCase):
         )
         self.assertTrue(any(item["value"] == "mysql" for item in payload["db_types"]))
         self.assertEqual(payload["tags"][0]["id"], active_tag.id)
-        self.assertEqual(
-            payload["resource_groups"][0]["group_id"], visible_group.group_id
-        )
+        self.assertEqual(payload["teams"][0]["team_id"], visible_group.team_id)
 
     def test_get_instance_tag_list(self):
         """Instance tags should support list search and ordering."""
@@ -1668,9 +1702,9 @@ class TestInstance(CacheIsolatedAPITestCase):
         tag = InstanceTag.objects.create(
             tag_code="detail", tag_name="Detail", active=True
         )
-        resource_group = ResourceGroup.objects.create(group_name="Detail Group")
+        team = Team.objects.create(team_name="Detail Group")
         self.ins.instance_tag.add(tag)
-        self.ins.resource_group.add(resource_group)
+        self.ins.resource_group.add(team)
         self.ins.show_db_name_regex = "^detail_.*$"
         self.ins.denied_db_name_regex = "^mysql$"
         self.ins.charset = "utf8mb4"
@@ -1691,7 +1725,7 @@ class TestInstance(CacheIsolatedAPITestCase):
         self.assertEqual(payload["show_db_name_regex"], "^detail_.*$")
         self.assertEqual(payload["denied_db_name_regex"], "^mysql$")
         self.assertEqual(payload["charset"], "utf8mb4")
-        self.assertEqual(payload["resource_group_ids"], [resource_group.group_id])
+        self.assertEqual(payload["team_ids"], [team.team_id])
         self.assertEqual(payload["instance_tag_ids"], [tag.id])
 
     def test_create_instance_with_relationships(self):
@@ -1699,7 +1733,7 @@ class TestInstance(CacheIsolatedAPITestCase):
         tag = InstanceTag.objects.create(
             tag_code="inventory", tag_name="Inventory", active=True
         )
-        resource_group = ResourceGroup.objects.create(group_name="Inventory Group")
+        team = Team.objects.create(team_name="Inventory Group")
         json_data = {
             "instance_name": "inventory_ins",
             "type": "master",
@@ -1714,7 +1748,7 @@ class TestInstance(CacheIsolatedAPITestCase):
             "charset": "utf8mb4",
             "show_db_name_regex": "^inventory_.*$",
             "denied_db_name_regex": "^mysql$",
-            "resource_group_ids": [resource_group.group_id],
+            "team_ids": [team.team_id],
             "instance_tag_ids": [tag.id],
         }
         r = self.client.post("/api/v1/instance/", json_data, format="json")
@@ -1722,27 +1756,21 @@ class TestInstance(CacheIsolatedAPITestCase):
 
         payload = response_data(r)
         self.assertEqual(payload["instance_name"], "inventory_ins")
-        self.assertEqual(payload["resource_group_ids"], [resource_group.group_id])
+        self.assertEqual(payload["team_ids"], [team.team_id])
         self.assertEqual(payload["instance_tag_ids"], [tag.id])
 
         instance = Instance.objects.get(instance_name="inventory_ins")
         self.assertEqual(
-            list(instance.resource_group.values_list("group_id", flat=True)),
-            [resource_group.group_id],
+            list(instance.resource_group.values_list("team_id", flat=True)),
+            [team.team_id],
         )
         self.assertEqual(
             list(instance.instance_tag.values_list("id", flat=True)),
             [tag.id],
         )
 
-    @patch("api_instances.views.get_engine")
-    def test_test_draft_instance_connection(self, mock_get_engine):
-        """Draft connection testing should validate unsaved form data."""
-        mock_engine = Mock()
-        mock_result = Mock(error="")
-        mock_engine.test_connection.return_value = mock_result
-        mock_get_engine.return_value = mock_engine
-
+    def test_test_draft_instance_connection_requires_saved_agent_assignment(self):
+        self.client.force_authenticate(user=self.user)
         payload = {
             "instance_name": "draft_mysql",
             "type": "master",
@@ -1763,50 +1791,37 @@ class TestInstance(CacheIsolatedAPITestCase):
             payload,
             format="json",
         )
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(
-            Instance.objects.filter(instance_name="draft_mysql").count(), 0
-        )
-
-        payload = response_data(r)
-        self.assertEqual(payload["success"], True)
-        self.assertEqual(payload["message"], "Connection successful.")
-
-        instance = mock_get_engine.call_args.kwargs["instance"]
-        self.assertEqual(instance.instance_name, "draft_mysql")
-        self.assertEqual(instance.host, "draft-host")
-        self.assertEqual(instance.port, 3306)
-
-    @patch("api_instances.views.logger")
-    @patch("api_instances.views.get_engine")
-    def test_test_draft_instance_connection_returns_validation_error(
-        self, mock_get_engine, mock_logger
-    ):
-        """Draft connection testing should surface engine failures without saving."""
-        mock_engine = Mock()
-        mock_result = Mock(error="access denied")
-        mock_engine.test_connection.return_value = mock_result
-        mock_get_engine.return_value = mock_engine
-
-        r = self.client.post(
-            "/api/v1/instance/test-connection/",
-            {
-                "instance_name": "draft_mysql",
-                "type": "master",
-                "db_type": "mysql",
-                "host": "draft-host",
-                "port": 3306,
-            },
-            format="json",
-        )
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(
-            r.json()["errors"], "Unable to connect to instance. Check configuration."
-        )
-        self.assertEqual(
             Instance.objects.filter(instance_name="draft_mysql").count(), 0
         )
-        mock_logger.exception.assert_not_called()
+        self.assertEqual(
+            r.json()["errors"],
+            "Save the service and assign it to an online agent before testing the connection.",
+        )
+
+    @patch("sql.inventory.collect_inventory_snapshot")
+    def test_test_saved_instance_connection_refreshes_agent_inventory(
+        self, collect_inventory
+    ):
+        self.user.is_superuser = True
+        self.user.save(update_fields=["is_superuser"])
+        self.client.force_authenticate(user=self.user)
+        collect_inventory.return_value = {
+            "hostname": "detected-host",
+            "version": "8.0.36",
+        }
+
+        response = self.client.post(
+            f"/api/v1/instance/{self.ins.id}/test-connection/",
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.ins.refresh_from_db()
+        self.assertEqual(self.ins.inventory_status, "ok")
+        self.assertEqual(self.ins.inventory_detected_hostname, "detected-host")
+        self.assertEqual(self.ins.inventory_detected_version, "8.0.36")
 
     def test_update_instance(self):
         """Test updating instance."""
@@ -1823,7 +1838,7 @@ class TestInstance(CacheIsolatedAPITestCase):
         tag = InstanceTag.objects.create(
             tag_code="can_read", tag_name="Can Read", active=True
         )
-        resource_group = ResourceGroup.objects.create(group_name="Updated Group")
+        team = Team.objects.create(team_name="Updated Group")
         json_data = {
             "instance_name": "Updated Instance Name",
             "type": "master",
@@ -1840,7 +1855,7 @@ class TestInstance(CacheIsolatedAPITestCase):
             "charset": "utf8mb4",
             "service_name": "",
             "sid": "",
-            "resource_group_ids": [resource_group.group_id],
+            "team_ids": [team.team_id],
             "instance_tag_ids": [tag.id],
         }
         r = self.client.put(
@@ -1854,14 +1869,14 @@ class TestInstance(CacheIsolatedAPITestCase):
         self.assertEqual(self.ins.host, "updated-host")
         self.assertEqual(self.ins.port, 3307)
         self.assertEqual(
-            list(self.ins.resource_group.values_list("group_id", flat=True)),
-            [resource_group.group_id],
+            list(self.ins.resource_group.values_list("team_id", flat=True)),
+            [team.team_id],
         )
         self.assertEqual(
             list(self.ins.instance_tag.values_list("id", flat=True)),
             [tag.id],
         )
-        self.assertEqual(payload["resource_group_ids"], [resource_group.group_id])
+        self.assertEqual(payload["team_ids"], [team.team_id])
         self.assertEqual(payload["instance_tag_ids"], [tag.id])
 
     def test_delete_instance(self):
@@ -1874,7 +1889,7 @@ class TestInstance(CacheIsolatedAPITestCase):
 class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
     def setUp(self):
         self.review_group = Group.objects.create(name="Permission Approvers")
-        self.resource_group = ResourceGroup.objects.create(group_name="permission-rg")
+        self.team = Team.objects.create(team_name="permission-rg")
         self.instance = Instance.objects.create(
             instance_name="permission-instance",
             type="master",
@@ -1884,7 +1899,7 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
             user="root",
             password="pwd",
         )
-        self.instance.resource_group.add(self.resource_group)
+        self.instance.resource_group.add(self.team)
 
         self.requester = User(
             username="permission_requester",
@@ -1911,7 +1926,7 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
             Permission.objects.get(codename="menu_queryapplylist"),
         )
         self.reviewer.groups.add(self.review_group)
-        self.reviewer.resource_group.add(self.resource_group)
+        assign_user_to_team(self.reviewer, self.team)
 
         self.query_user = User(
             username="permission_query_user",
@@ -1925,16 +1940,16 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
         )
 
         WorkflowAuditSetting.objects.create(
-            group_id=self.resource_group.group_id,
-            group_name=self.resource_group.group_name,
+            team_id=self.team.team_id,
+            team_name=self.team.team_name,
             workflow_type=WorkflowType.ACCESS_REQUEST,
             audit_auth_groups=str(self.review_group.id),
         )
 
     def tearDown(self):
         TemporaryInstanceGrant.objects.all().delete()
-        TemporaryResourceGroupGrant.objects.all().delete()
-        PermanentResourceGroupGrant.objects.all().delete()
+        TemporaryTeamGrant.objects.all().delete()
+        PermanentTeamGrant.objects.all().delete()
         PermissionRequest.objects.all().delete()
         WorkflowAudit.objects.filter(workflow_type=WorkflowType.ACCESS_REQUEST).delete()
         WorkflowLog.objects.all().delete()
@@ -1942,7 +1957,7 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
             workflow_type=WorkflowType.ACCESS_REQUEST
         ).delete()
         Instance.objects.filter(id=self.instance.id).delete()
-        ResourceGroup.objects.filter(group_id=self.resource_group.group_id).delete()
+        Team.objects.filter(team_id=self.team.team_id).delete()
         Group.objects.filter(id=self.review_group.id).delete()
         User.objects.filter(
             id__in=[self.requester.id, self.reviewer.id, self.query_user.id]
@@ -1961,7 +1976,7 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
                 "title": "Need DML on one instance",
                 "reason": "Investigation",
                 "target_type": "instance",
-                "resource_group_id": self.resource_group.group_id,
+                "team_id": self.team.team_id,
                 "instance_id": self.instance.id,
                 "access_level": "query_dml",
                 "valid_date": "2099-12-31",
@@ -1974,7 +1989,7 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
         )
         self.assertEqual(request_obj.target_type, "instance")
         self.assertEqual(request_obj.access_level, "query_dml")
-        self.assertEqual(request_obj.resource_group_id, self.resource_group.group_id)
+        self.assertEqual(request_obj.team_id, self.team.team_id)
         self.assertEqual(request_obj.instance_id, self.instance.id)
 
     @patch("api_access.views.async_task")
@@ -1985,7 +2000,7 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
             {
                 "title": "Need query access",
                 "target_type": "instance",
-                "resource_group_id": self.resource_group.group_id,
+                "team_id": self.team.team_id,
                 "instance_id": self.instance.id,
                 "access_level": "query",
                 "valid_date": "2099-12-31",
@@ -2007,7 +2022,7 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
             {
                 "title": "Need query access",
                 "target_type": "instance",
-                "resource_group_id": self.resource_group.group_id,
+                "team_id": self.team.team_id,
                 "instance_id": self.instance.id,
                 "access_level": "query",
                 "valid_date": "2099-12-31",
@@ -2035,8 +2050,8 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
             "/api/v1/access/request/",
             {
                 "title": "Need group access",
-                "target_type": "resource_group",
-                "resource_group_id": self.resource_group.group_id,
+                "target_type": "team",
+                "team_id": self.team.team_id,
                 "valid_date": "2099-12-31",
             },
             format="json",
@@ -2051,26 +2066,24 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
         )
         self.assertEqual(review_response.status_code, status.HTTP_200_OK)
         self.assertTrue(
-            TemporaryResourceGroupGrant.objects.filter(
-                source_request_id=request_id
-            ).exists()
+            TemporaryTeamGrant.objects.filter(source_request_id=request_id).exists()
         )
-        self.assertIn(self.resource_group, user_groups(self.requester))
+        self.assertIn(self.team, user_groups(self.requester))
         self.assertIn(self.instance, list(user_instances(self.requester)))
 
     @patch("api_access.views.async_task")
-    def test_approving_resource_group_subject_instance_request_grants_group_members(
+    def test_approving_team_subject_instance_request_grants_group_members(
         self, _async_task
     ):
         group_member = User(
-            username="permission_resource_group_member",
-            display="Permission Resource Group Member",
+            username="permission_team_member",
+            display="Permission Team Member",
             is_active=True,
         )
         group_member.set_password("test_password")
         group_member.save()
-        self.requester.resource_group.add(self.resource_group)
-        group_member.resource_group.add(self.resource_group)
+        assign_user_to_team(self.requester, self.team)
+        assign_user_to_team(group_member, self.team)
         group_instance = Instance.objects.create(
             instance_name="permission-group-instance",
             type="master",
@@ -2085,11 +2098,11 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
         create_response = self.client.post(
             "/api/v1/access/request/",
             {
-                "title": "Need instance access for resource group",
+                "title": "Need instance access for team",
                 "target_type": "instance",
-                "subject_type": "resource_group",
+                "subject_type": "team",
                 "access_duration": "temporary",
-                "resource_group_id": self.resource_group.group_id,
+                "team_id": self.team.team_id,
                 "instance_id": group_instance.id,
                 "access_level": "query",
                 "valid_date": "2099-12-31",
@@ -2110,7 +2123,7 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
             TemporaryInstanceGrant.objects.filter(
                 source_request_id=request_id,
                 user__isnull=True,
-                resource_group=self.resource_group,
+                team=self.team,
                 instance=group_instance,
             ).exists()
         )
@@ -2126,10 +2139,10 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
             "/api/v1/access/request/",
             {
                 "title": "Need permanent resource access",
-                "target_type": "resource_group",
+                "target_type": "team",
                 "subject_type": "user",
                 "access_duration": "permanent",
-                "resource_group_id": self.resource_group.group_id,
+                "team_id": self.team.team_id,
                 "valid_date": "2099-12-31",
             },
             format="json",
@@ -2145,17 +2158,15 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
 
         self.assertEqual(review_response.status_code, status.HTTP_200_OK)
         self.assertTrue(
-            PermanentResourceGroupGrant.objects.filter(
+            PermanentTeamGrant.objects.filter(
                 source_request_id=request_id, user=self.requester
             ).exists()
         )
-        self.assertIn(self.resource_group, self.requester.resource_group.all())
-        self.assertIn(self.resource_group, user_groups(self.requester))
+        self.assertIn(self.team, user_groups(self.requester))
+        self.assertIn(self.team, user_groups(self.requester))
 
     @patch("api_access.views.async_task")
-    def test_approving_permanent_resource_group_request_adds_instance_to_group(
-        self, _async_task
-    ):
+    def test_approving_permanent_team_request_adds_instance_to_group(self, _async_task):
         group_member = User(
             username="permanent_group_member",
             display="Permanent Group Member",
@@ -2163,8 +2174,8 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
         )
         group_member.set_password("test_password")
         group_member.save()
-        self.requester.resource_group.add(self.resource_group)
-        group_member.resource_group.add(self.resource_group)
+        assign_user_to_team(self.requester, self.team)
+        assign_user_to_team(group_member, self.team)
         group_instance = Instance.objects.create(
             instance_name="permission-permanent-group-instance",
             type="master",
@@ -2181,9 +2192,9 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
             {
                 "title": "Need permanent group access",
                 "target_type": "instance",
-                "subject_type": "resource_group",
+                "subject_type": "team",
                 "access_duration": "permanent",
-                "resource_group_id": self.resource_group.group_id,
+                "team_id": self.team.team_id,
                 "instance_id": group_instance.id,
                 "access_level": "query",
                 "valid_date": "2099-12-31",
@@ -2201,15 +2212,15 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
 
         self.assertEqual(review_response.status_code, status.HTTP_200_OK)
         self.assertTrue(
-            PermanentResourceGroupGrant.objects.filter(
+            PermanentTeamGrant.objects.filter(
                 source_request_id=request_id,
                 user__isnull=True,
-                resource_group=self.resource_group,
+                team=self.team,
                 instance=group_instance,
             ).exists()
         )
-        self.assertIn(self.resource_group, group_instance.resource_group.all())
-        self.assertIn(self.resource_group, user_groups(group_member))
+        self.assertIn(self.team, group_instance.resource_group.all())
+        self.assertIn(self.team, user_groups(group_member))
         self.assertIn(group_instance, list(user_instances(group_member)))
 
         group_instance.delete()
@@ -2218,7 +2229,7 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
     def test_active_grant_list_and_revoke(self):
         grant = TemporaryInstanceGrant.objects.create(
             user=self.requester,
-            resource_group=self.resource_group,
+            team=self.team,
             instance=self.instance,
             access_level="query",
             valid_date=datetime.now().date() + timedelta(days=30),
@@ -2239,7 +2250,7 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
     def test_query_instance_list_includes_temporary_instance_grant(self):
         TemporaryInstanceGrant.objects.create(
             user=self.query_user,
-            resource_group=self.resource_group,
+            team=self.team,
             instance=self.instance,
             access_level="query",
             valid_date=datetime.now().date() + timedelta(days=30),
@@ -2252,7 +2263,7 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
         self.assertEqual(len(payload), 1)
         self.assertEqual(payload[0]["instance_name"], self.instance.instance_name)
 
-    def test_direct_resource_group_assignment_still_controls_instance_access_for_directory_user(
+    def test_direct_team_assignment_still_controls_instance_access_for_directory_user(
         self,
     ):
         self.query_user.workos_directory_managed = True
@@ -2268,7 +2279,7 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
         self.query_user.user_permissions.add(
             Permission.objects.get(codename="menu_sqlquery")
         )
-        self.query_user.resource_group.add(self.resource_group)
+        assign_user_to_team(self.query_user, self.team)
         read_tag = InstanceTag.objects.create(
             tag_code="can_read", tag_name="Can Read", active=True
         )
@@ -2291,40 +2302,11 @@ class TestPermissionRequestAPI_Legacy(CacheIsolatedAPITestCase):
         )
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
 
-    @patch("sql.inventory.get_engine")
-    def test_test_instance_connection(self, mock_get_engine):
-        """Superusers can run the SPA connection test action."""
-        self.requester.is_superuser = True
-        self.requester.save(update_fields=["is_superuser"])
-        self._login(self.requester)
-
-        mock_engine = Mock()
-        mock_result = Mock(error="")
-        mock_engine.test_connection.return_value = mock_result
-        mock_engine.get_inventory_details.return_value = {
-            "hostname": "detected-host",
-            "version": "8.0.36",
-        }
-        mock_get_engine.return_value = mock_engine
-
-        r = self.client.post(
-            f"/api/v1/instance/{self.instance.id}/test-connection/",
-            format="json",
-        )
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        payload = response_data(r)
-        self.assertEqual(payload["success"], True)
-        self.assertEqual(payload["message"], "Connection successful.")
-        self.instance.refresh_from_db()
-        self.assertEqual(self.instance.inventory_status, "ok")
-        self.assertEqual(self.instance.inventory_detected_hostname, "detected-host")
-        self.assertEqual(self.instance.inventory_detected_version, "8.0.36")
-
     @patch("api_instances.views.get_engine")
     def test_get_instance_resource(self, mock_get_engine):
         """Test querying instance resources."""
-        group = ResourceGroup.objects.create(group_name="instance_resource_test")
-        self.query_user.resource_group.add(group)
+        group = Team.objects.create(team_name="instance_resource_test")
+        assign_user_to_team(self.query_user, group)
         self.instance.resource_group.add(group)
         self._login(self.query_user)
 
@@ -2351,8 +2333,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
 
     def setUp(self):
         self.now = datetime.now()
-        self.group = Group.objects.create(id=1, name="DBA")
-        self.res_group = ResourceGroup.objects.create(group_id=1, group_name="test")
+        self.group, _ = Group.objects.get_or_create(name="DBA")
+        self.res_group = Team.objects.create(team_id=1, team_name="test")
         self.ins_tag = InstanceTag.objects.create(
             tag_code="can_write", tag_name="Can Write", active=1
         )
@@ -2360,9 +2342,9 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             tag_code="can_read", tag_name="Can Read", active=1
         )
         self.wfs = WorkflowAuditSetting.objects.create(
-            group_id=self.res_group.group_id,
+            team_id=self.res_group.team_id,
             workflow_type=2,
-            audit_auth_groups=self.group.id,
+            audit_auth_groups=str(self.group.id),
         )
         can_submit = Permission.objects.get(codename="sql_submit")
         can_export_submit = Permission.objects.get(codename="sqlexport_submit")
@@ -2372,11 +2354,21 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         )
         can_execute_permission = Permission.objects.get(codename="sql_execute")
         can_execute_resource_permission = Permission.objects.get(
-            codename="sql_execute_for_resource_group"
+            codename="sql_execute_for_team"
         )
         can_review_permission = Permission.objects.get(codename="sql_review")
         menu_sqlworkflow_permission = Permission.objects.get(
             codename="menu_sqlworkflow"
+        )
+        self.group.permissions.add(
+            can_submit,
+            can_export_submit,
+            can_export_download,
+            can_execute_permission,
+            can_execute_resource_permission,
+            can_review_permission,
+            menu_sqlworkflow_permission,
+            menu_sqlexportworkflow_permission,
         )
         self.user = User(username="test_user", display="Test User", is_active=True)
         self.user.set_password("test_password")
@@ -2392,7 +2384,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             menu_sqlexportworkflow_permission,
         )
         self.user.groups.add(self.group.id)
-        self.user.resource_group.add(self.res_group.group_id)
+        assign_user_to_team(self.user, self.res_group)
         self.ins = Instance.objects.create(
             instance_name="some_ins",
             type="slave",
@@ -2402,17 +2394,17 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             user="ins_user",
             password="some_str",
         )
-        self.ins.resource_group.add(self.res_group.group_id)
+        self.ins.resource_group.add(self.res_group.team_id)
         self.ins.instance_tag.add(self.ins_tag.id)
         self.ins.instance_tag.add(self.read_tag.id)
         self._create_agent_assignment(self.ins)
         self.wf1 = SqlWorkflow.objects.create(
             workflow_name="some_name",
-            group_id=1,
-            group_name="g1",
+            team_id=self.res_group.team_id,
+            team_name="g1",
             engineer=self.user.username,
             engineer_display=self.user.display,
-            audit_auth_groups="1",
+            audit_auth_groups=str(self.group.id),
             create_time=self.now - timedelta(days=1),
             status="workflow_manreviewing",
             is_backup=False,
@@ -2426,14 +2418,14 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             execute_result=json.dumps([{"id": 1, "sql": "some_content"}]),
         )
         self.audit1 = WorkflowAudit.objects.create(
-            group_id=1,
-            group_name="some_group",
+            team_id=self.res_group.team_id,
+            team_name="some_group",
             workflow_id=self.wf1.id,
             workflow_type=2,
             workflow_title="Apply Title",
             workflow_remark="Apply Remark",
-            audit_auth_groups="1",
-            current_audit="1",
+            audit_auth_groups=str(self.group.id),
+            current_audit=str(self.group.id),
             next_audit="-1",
             current_status=0,
             create_user=self.user.username,
@@ -2462,7 +2454,6 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.workflow_serializer_agent_check_patcher.stop()
         self.workflow_agent_check_patcher.stop()
         self.user.delete()
-        self.group.delete()
         self.res_group.delete()
         SqlWorkflowContent.objects.all().delete()
         SqlWorkflow.objects.all().delete()
@@ -2570,14 +2561,14 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             user="mysql_user",
             password="mysql_password",
         )
-        mysql_instance.resource_group.add(self.res_group.group_id)
+        mysql_instance.resource_group.add(self.res_group.team_id)
         mysql_instance.instance_tag.add(self.ins_tag.id)
         mysql_instance.instance_tag.add(self.read_tag.id)
         self._create_agent_assignment(mysql_instance)
         workflow = SqlWorkflow.objects.create(
             workflow_name="mysql_release",
-            group_id=self.res_group.group_id,
-            group_name=self.res_group.group_name,
+            team_id=self.res_group.team_id,
+            team_name=self.res_group.team_name,
             engineer=self.user.username,
             engineer_display=self.user.display,
             audit_auth_groups=str(self.group.id),
@@ -2596,8 +2587,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             ),
         )
         audit = WorkflowAudit.objects.create(
-            group_id=self.res_group.group_id,
-            group_name=self.res_group.group_name,
+            team_id=self.res_group.team_id,
+            team_name=self.res_group.team_name,
             workflow_id=workflow.id,
             workflow_type=2,
             workflow_title="MySQL Apply",
@@ -2642,8 +2633,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         submitter.save()
         own_workflow = SqlWorkflow.objects.create(
             workflow_name="own_workflow",
-            group_id=self.res_group.group_id,
-            group_name=self.res_group.group_name,
+            team_id=self.res_group.team_id,
+            team_name=self.res_group.team_name,
             engineer=submitter.username,
             engineer_display=submitter.display,
             audit_auth_groups="1",
@@ -2665,10 +2656,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         r = self.client.get("/api/v1/workflow/submission-metadata/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         payload = response_data(r)
-        self.assertEqual(len(payload["resource_groups"]), 1)
-        self.assertEqual(
-            payload["resource_groups"][0]["group_id"], self.res_group.group_id
-        )
+        self.assertEqual(len(payload["teams"]), 1)
+        self.assertEqual(payload["teams"][0]["team_id"], self.res_group.team_id)
         self.assertEqual(len(payload["instances"]), 1)
         self.assertEqual(payload["instances"][0]["id"], self.ins.id)
         self.assertEqual(payload["instances"][0]["allowed_syntax_types"], [1, 2])
@@ -2677,11 +2666,12 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self,
     ):
         self.user.user_permissions.remove(Permission.objects.get(codename="sql_submit"))
+        remove_team_permission(self.user, self.res_group, "sql_submit")
 
         r = self.client.get("/api/v1/workflow/submission-metadata/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         payload = response_data(r)
-        self.assertEqual(payload["resource_groups"], [])
+        self.assertEqual(payload["teams"], [])
         self.assertEqual(payload["instances"], [])
 
     def test_workflow_submission_metadata_includes_temporary_instance_grant_group(self):
@@ -2694,7 +2684,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         temp_user.save()
         TemporaryInstanceGrant.objects.create(
             user=temp_user,
-            resource_group=self.res_group,
+            team=self.res_group,
             instance=self.ins,
             access_level=InstanceAccessLevel.QUERY_DML,
             valid_date=datetime.now().date() + timedelta(days=1),
@@ -2704,15 +2694,11 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         r = self.client.get("/api/v1/workflow/submission-metadata/", format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         payload = response_data(r)
-        self.assertEqual(len(payload["resource_groups"]), 1)
+        self.assertEqual(len(payload["teams"]), 1)
+        self.assertEqual(payload["teams"][0]["team_id"], self.res_group.team_id)
+        self.assertEqual(payload["instances"][0]["team_ids"], [self.res_group.team_id])
         self.assertEqual(
-            payload["resource_groups"][0]["group_id"], self.res_group.group_id
-        )
-        self.assertEqual(
-            payload["instances"][0]["group_ids"], [self.res_group.group_id]
-        )
-        self.assertEqual(
-            payload["instances"][0]["group_names"], [self.res_group.group_name]
+            payload["instances"][0]["team_names"], [self.res_group.team_name]
         )
         self.assertEqual(payload["instances"][0]["allowed_syntax_types"], [2])
 
@@ -2726,7 +2712,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         temp_user.save()
         TemporaryInstanceGrant.objects.create(
             user=temp_user,
-            resource_group=self.res_group,
+            team=self.res_group,
             instance=self.ins,
             access_level=InstanceAccessLevel.QUERY_DML_DDL,
             valid_date=datetime.now().date() + timedelta(days=1),
@@ -2745,10 +2731,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         payload = response_data(r)
-        self.assertEqual(len(payload["resource_groups"]), 1)
-        self.assertEqual(
-            payload["resource_groups"][0]["group_id"], self.res_group.group_id
-        )
+        self.assertEqual(len(payload["teams"]), 1)
+        self.assertEqual(payload["teams"][0]["team_id"], self.res_group.team_id)
         self.assertEqual(len(payload["instances"]), 1)
         self.assertEqual(payload["instances"][0]["allowed_syntax_types"], [3])
 
@@ -2758,6 +2742,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.user.user_permissions.remove(
             Permission.objects.get(codename="sqlexport_submit")
         )
+        remove_team_permission(self.user, self.res_group, "sqlexport_submit")
 
         r = self.client.get(
             "/api/v1/workflow/export/submission-metadata/", format="json"
@@ -2775,7 +2760,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         export_user.user_permissions.add(
             Permission.objects.get(codename="sqlexport_submit")
         )
-        export_user.resource_group.add(self.res_group.group_id)
+        assign_user_to_team(export_user, self.res_group)
 
         self._login_as_user(export_user.username)
 
@@ -2800,7 +2785,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         )
         TemporaryInstanceGrant.objects.create(
             user=export_user,
-            resource_group=self.res_group,
+            team=self.res_group,
             instance=self.ins,
             access_level=InstanceAccessLevel.QUERY,
             valid_date=datetime.now().date() + timedelta(days=1),
@@ -2813,9 +2798,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         payload = response_data(r)
-        self.assertEqual(
-            payload["instances"][0]["group_ids"], [self.res_group.group_id]
-        )
+        self.assertEqual(payload["instances"][0]["team_ids"], [self.res_group.team_id])
         self.assertEqual(payload["instances"][0]["allowed_syntax_types"], [3])
 
     def test_workflow_parse_sql_returns_dml_summary(self):
@@ -2867,14 +2850,14 @@ class TestWorkflow(CacheIsolatedAPITestCase):
 
     def test_workflow_approval_preview(self):
         r = self.client.get(
-            f"/api/v1/workflow/approval-preview/?group_id={self.res_group.group_id}",
+            f"/api/v1/workflow/approval-preview/?team_id={self.res_group.team_id}",
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         payload = response_data(r)
-        self.assertEqual(payload["group_id"], self.res_group.group_id)
+        self.assertEqual(payload["team_id"], self.res_group.team_id)
         self.assertEqual(payload["display"], self.group.name)
-        self.assertEqual(payload["review_info"][0]["group_name"], self.group.name)
+        self.assertEqual(payload["review_info"][0]["team_name"], self.group.name)
 
     def test_workflow_approval_preview_allows_temporary_instance_grant_submitter(self):
         temp_user = User.objects.create(
@@ -2886,7 +2869,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         temp_user.save()
         TemporaryInstanceGrant.objects.create(
             user=temp_user,
-            resource_group=self.res_group,
+            team=self.res_group,
             instance=self.ins,
             access_level=InstanceAccessLevel.QUERY_DML,
             valid_date=datetime.now().date() + timedelta(days=1),
@@ -2894,7 +2877,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         authenticate_client(self.client, temp_user)
 
         r = self.client.get(
-            f"/api/v1/workflow/approval-preview/?group_id={self.res_group.group_id}",
+            f"/api/v1/workflow/approval-preview/?team_id={self.res_group.team_id}",
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
@@ -2912,48 +2895,48 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         export_user.user_permissions.add(
             Permission.objects.get(codename="sqlexport_submit")
         )
-        export_user.resource_group.add(self.res_group.group_id)
+        assign_user_to_team(export_user, self.res_group)
 
         self._login_as_user(export_user.username)
 
         r = self.client.get(
-            f"/api/v1/workflow/approval-preview/?group_id={self.res_group.group_id}",
+            f"/api/v1/workflow/approval-preview/?team_id={self.res_group.team_id}",
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         payload = response_data(r)
-        self.assertEqual(payload["group_id"], self.res_group.group_id)
+        self.assertEqual(payload["team_id"], self.res_group.team_id)
         self.assertEqual(payload["display"], self.group.name)
 
     def test_workflow_approval_preview_reports_missing_configuration(self):
         WorkflowAuditSetting.objects.filter(
-            group_id=self.res_group.group_id, workflow_type=WorkflowType.SQL_REVIEW
+            team_id=self.res_group.team_id, workflow_type=WorkflowType.SQL_REVIEW
         ).delete()
 
         r = self.client.get(
-            f"/api/v1/workflow/approval-preview/?group_id={self.res_group.group_id}",
+            f"/api/v1/workflow/approval-preview/?team_id={self.res_group.team_id}",
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(
             r.json()["errors"],
-            "Approval flow is not configured for this resource group.",
+            "Approval flow is not configured for this team.",
         )
 
     def test_workflow_approval_preview_supports_explicit_auto_pass(self):
         WorkflowAuditSetting.objects.filter(
-            group_id=self.res_group.group_id, workflow_type=WorkflowType.SQL_REVIEW
+            team_id=self.res_group.team_id, workflow_type=WorkflowType.SQL_REVIEW
         ).update(audit_auth_groups="")
 
         r = self.client.get(
-            f"/api/v1/workflow/approval-preview/?group_id={self.res_group.group_id}",
+            f"/api/v1/workflow/approval-preview/?team_id={self.res_group.team_id}",
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         payload = response_data(r)
         self.assertEqual(payload["audit_auth_groups"], "")
         self.assertEqual(payload["display"], "No approval required")
-        self.assertEqual(payload["review_info"][0]["group_name"], "Auto")
+        self.assertEqual(payload["review_info"][0]["team_name"], "Auto")
         self.assertTrue(payload["review_info"][0]["is_auto_pass"])
 
     def test_workflow_detail(self):
@@ -2965,7 +2948,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(payload["id"], self.wf1.id)
         self.assertEqual(payload["sql_content"], self.wfc1.sql_content)
         self.assertTrue(payload["is_can_review"])
-        self.assertEqual(payload["review_info"][0]["group_name"], self.group.name)
+        self.assertEqual(payload["review_info"][0]["team_name"], self.group.name)
 
     @patch("api_workflows.views._get_mysql_ddl_executor_state")
     def test_mysql_workflow_detail_includes_executor_options(self, mock_executor_state):
@@ -3024,7 +3007,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         response = self.client.get("/api/v1/workflow/metadata/", format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response_data(response)
-        self.assertEqual(len(data["resource_groups"]), 1)
+        self.assertEqual(len(data["teams"]), 1)
         self.assertEqual(len(data["instances"]), 1)
         self.assertEqual(data["instances"][0]["id"], self.ins.id)
         self.assertNotIn("allow_backup_toggle", data)
@@ -3035,26 +3018,24 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response_data(response)
-        self.assertEqual(len(data["resource_groups"]), 1)
-        self.assertEqual(
-            data["resource_groups"][0]["group_id"], self.res_group.group_id
-        )
+        self.assertEqual(len(data["teams"]), 1)
+        self.assertEqual(data["teams"][0]["team_id"], self.res_group.team_id)
         self.assertEqual(len(data["instances"]), 1)
         self.assertEqual(data["instances"][0]["id"], self.ins.id)
-        self.assertEqual(data["instances"][0]["group_ids"], [self.res_group.group_id])
+        self.assertEqual(data["instances"][0]["team_ids"], [self.res_group.team_id])
         self.assertNotIn("enable_backup_switch", data)
 
     def test_get_workflow_approval_preview(self):
         response = self.client.get(
             "/api/v1/workflow/approval-preview/",
-            {"group_id": self.res_group.group_id},
+            {"team_id": self.res_group.team_id},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response_data(response)
-        self.assertEqual(data["group_id"], self.res_group.group_id)
-        self.assertEqual(data["group_name"], self.res_group.group_name)
-        self.assertEqual(data["review_info"][0]["group_name"], self.group.name)
+        self.assertEqual(data["team_id"], self.res_group.team_id)
+        self.assertEqual(data["team_name"], self.res_group.team_name)
+        self.assertEqual(data["review_info"][0]["team_name"], self.group.name)
         self.assertFalse(data["review_info"][0]["is_auto_pass"])
 
     def test_get_workflow_metadata_includes_temporary_instance_grant_group(self):
@@ -3067,7 +3048,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         temp_user.save()
         TemporaryInstanceGrant.objects.create(
             user=temp_user,
-            resource_group=self.res_group,
+            team=self.res_group,
             instance=self.ins,
             access_level="query_dml",
             valid_date=datetime.now().date() + timedelta(days=1),
@@ -3079,16 +3060,13 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         data = response_data(response)
         self.assertEqual(
-            [
-                (group["group_id"], group["group_name"])
-                for group in data["resource_groups"]
-            ],
-            [(self.res_group.group_id, self.res_group.group_name)],
+            [(group["team_id"], group["team_name"]) for group in data["teams"]],
+            [(self.res_group.team_id, self.res_group.team_name)],
         )
         self.assertEqual(len(data["instances"]), 1)
         self.assertEqual(
-            data["instances"][0]["resource_groups"][0]["group_id"],
-            self.res_group.group_id,
+            data["instances"][0]["teams"][0]["team_id"],
+            self.res_group.team_id,
         )
 
         temp_user.delete()
@@ -3339,6 +3317,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.user.user_permissions.remove(
             Permission.objects.get(codename="sqlexport_submit")
         )
+        remove_team_permission(self.user, self.res_group, "sqlexport_submit")
 
         r = self.client.post(
             "/api/v1/workflow/export/sqlcheck/",
@@ -3352,7 +3331,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_export_sqlcheck_requires_read_access_to_instance(self):
-        isolated_group = ResourceGroup.objects.create(group_name="isolated_group")
+        isolated_group = Team.objects.create(team_name="isolated_group")
         isolated_user = User.objects.create(
             username="export_only_submitter",
             display="Export Only Submitter",
@@ -3363,7 +3342,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         isolated_user.user_permissions.add(
             Permission.objects.get(codename="sqlexport_submit")
         )
-        isolated_user.resource_group.add(isolated_group.group_id)
+        assign_user_to_team(isolated_user, isolated_group)
 
         self._login_as_user(isolated_user.username)
 
@@ -3385,7 +3364,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             "workflow": {
                 "workflow_name": "Release Workflow 1",
                 "demand_url": "test",
-                "group_id": 1,
+                "team_id": 1,
                 "db_name": "test_db",
                 "instance": self.ins.id,
                 "is_offline_export": 0,
@@ -3421,7 +3400,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             "workflow": {
                 "workflow_name": "Release Workflow Default Backup",
                 "demand_url": "test",
-                "group_id": 1,
+                "team_id": 1,
                 "db_name": "test_db",
                 "instance": self.ins.id,
                 "is_offline_export": 0,
@@ -3457,7 +3436,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             "workflow": {
                 "workflow_name": "Release Workflow Ignored Backup",
                 "demand_url": "test",
-                "group_id": 1,
+                "team_id": 1,
                 "db_name": "test_db",
                 "instance": self.ins.id,
                 "is_backup": True,
@@ -3475,7 +3454,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         json_data = {
             "workflow": {
                 "workflow_name": "Export Workflow 1",
-                "group_id": 1,
+                "team_id": 1,
                 "db_name": "test_db",
                 "schema_name": "analytics",
                 "instance": self.ins.id,
@@ -3499,7 +3478,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertFalse(workflow.is_backup)
 
     @patch("api_workflows.serializers.get_engine", create=True)
-    def test_submit_workflow_rejects_resource_group_not_attached_to_instance(
+    def test_submit_workflow_rejects_team_not_attached_to_instance(
         self, mock_get_engine
     ):
         review_set = ReviewSet(
@@ -3517,12 +3496,12 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         review_set.warning_count = 0
         mock_get_engine.return_value.auto_backup = True
         mock_get_engine.return_value.execute_check.return_value = review_set
-        other_group = ResourceGroup.objects.create(group_name="other-group")
+        other_group = Team.objects.create(team_name="other-group")
 
         json_data = {
             "workflow": {
                 "workflow_name": "Release Workflow Wrong Group",
-                "group_id": other_group.group_id,
+                "team_id": other_group.team_id,
                 "db_name": "test_db",
                 "instance": self.ins.id,
                 "is_offline_export": 0,
@@ -3534,16 +3513,13 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(
             r.json()["errors"],
-            "Selected resource group does not belong to this instance.",
+            "Selected team does not belong to this instance.",
         )
 
     @patch("api_workflows.serializers.get_engine", create=True)
-    @patch(
-        "api_workflows.serializers.user_has_group_instance_access", return_value=True
-    )
     @patch("api_workflows.serializers.user_has_instance_workflow_access")
     def test_submit_workflow_allows_temporary_write_access_even_with_group_access(
-        self, mock_temporary_access, _mock_group_access, mock_get_engine
+        self, mock_temporary_access, mock_get_engine
     ):
         review_set = ReviewSet(
             rows=[
@@ -3569,13 +3545,13 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         )
         limited_user.set_password("test_password")
         limited_user.save()
-        limited_user.resource_group.add(self.res_group.group_id)
+        assign_user_to_team(limited_user, self.res_group)
         self._login_as_user(limited_user.username)
 
         json_data = {
             "workflow": {
                 "workflow_name": "Release Workflow Temporary Access",
-                "group_id": 1,
+                "team_id": 1,
                 "db_name": "test_db",
                 "instance": self.ins.id,
                 "is_offline_export": 0,
@@ -3598,7 +3574,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         json_data = {
             "workflow": {
                 "workflow_name": "Release Workflow Engine Failure",
-                "group_id": 1,
+                "team_id": 1,
                 "db_name": "test_db",
                 "instance": self.ins.id,
                 "is_offline_export": 0,
@@ -3640,7 +3616,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         json_data = {
             "workflow": {
                 "workflow_name": "Release Workflow Save Failure",
-                "group_id": 1,
+                "team_id": 1,
                 "db_name": "test_db",
                 "instance": self.ins.id,
                 "is_offline_export": 0,
@@ -3684,7 +3660,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         json_data = {
             "workflow": {
                 "workflow_name": "Release Workflow Atomic Save",
-                "group_id": 1,
+                "team_id": 1,
                 "db_name": "test_db",
                 "instance": self.ins.id,
                 "is_offline_export": 0,
@@ -3714,7 +3690,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         json_data = {
             "workflow": {
                 "workflow_name": "Export Workflow 1",
-                "group_id": 1,
+                "team_id": 1,
                 "db_name": "test_db",
                 "instance": self.ins.id,
                 "is_offline_export": 1,
@@ -3733,10 +3709,11 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.user.user_permissions.remove(
             Permission.objects.get(codename="sqlexport_submit")
         )
+        remove_team_permission(self.user, self.res_group, "sqlexport_submit")
         json_data = {
             "workflow": {
                 "workflow_name": "Export Workflow 1",
-                "group_id": 1,
+                "team_id": 1,
                 "db_name": "test_db",
                 "instance": self.ins.id,
                 "is_offline_export": 1,
@@ -3754,8 +3731,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
     def test_workflow_list_includes_export_metadata(self):
         export_workflow = SqlWorkflow.objects.create(
             workflow_name="export_listed",
-            group_id=self.res_group.group_id,
-            group_name=self.res_group.group_name,
+            team_id=self.res_group.team_id,
+            team_name=self.res_group.team_name,
             engineer=self.user.username,
             engineer_display=self.user.display,
             audit_auth_groups="1",
@@ -3789,8 +3766,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
     def test_workflow_detail_includes_export_metadata(self):
         export_workflow = SqlWorkflow.objects.create(
             workflow_name="export_detail",
-            group_id=self.res_group.group_id,
-            group_name=self.res_group.group_name,
+            team_id=self.res_group.team_id,
+            team_name=self.res_group.team_name,
             engineer=self.user.username,
             engineer_display=self.user.display,
             audit_auth_groups="1",
@@ -3810,8 +3787,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             execute_result=json.dumps([{"stagestatus": "Execution succeeded"}]),
         )
         WorkflowAudit.objects.create(
-            group_id=self.res_group.group_id,
-            group_name=self.res_group.group_name,
+            team_id=self.res_group.team_id,
+            team_name=self.res_group.team_name,
             workflow_id=export_workflow.id,
             workflow_type=2,
             workflow_title="Export Apply",
@@ -3837,8 +3814,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
     def test_download_export_workflow(self, mock_download_export_file):
         export_workflow = SqlWorkflow.objects.create(
             workflow_name="export_ready",
-            group_id=self.res_group.group_id,
-            group_name=self.res_group.group_name,
+            team_id=self.res_group.team_id,
+            team_name=self.res_group.team_name,
             engineer=self.user.username,
             engineer_display=self.user.display,
             audit_auth_groups="1",
@@ -3856,8 +3833,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             sql_content="select * from demo",
         )
         WorkflowAudit.objects.create(
-            group_id=self.res_group.group_id,
-            group_name=self.res_group.group_name,
+            team_id=self.res_group.team_id,
+            team_name=self.res_group.team_name,
             workflow_id=export_workflow.id,
             workflow_type=2,
             workflow_title="Export Apply",
@@ -3884,8 +3861,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
     def test_download_export_workflow_requires_download_permission(self):
         export_workflow = SqlWorkflow.objects.create(
             workflow_name="export_ready",
-            group_id=self.res_group.group_id,
-            group_name=self.res_group.group_name,
+            team_id=self.res_group.team_id,
+            team_name=self.res_group.team_name,
             engineer=self.user.username,
             engineer_display=self.user.display,
             audit_auth_groups="1",
@@ -3903,8 +3880,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             sql_content="select * from demo",
         )
         WorkflowAudit.objects.create(
-            group_id=self.res_group.group_id,
-            group_name=self.res_group.group_name,
+            team_id=self.res_group.team_id,
+            team_name=self.res_group.team_name,
             workflow_id=export_workflow.id,
             workflow_type=2,
             workflow_title="Export Apply",
@@ -3930,7 +3907,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         blocked_user.user_permissions.remove(
             Permission.objects.get(codename="offline_download")
         )
-        blocked_user.resource_group.add(self.res_group.group_id)
+        assign_user_to_team(blocked_user, self.res_group)
         export_workflow.engineer = blocked_user.username
         export_workflow.engineer_display = blocked_user.display
         export_workflow.save(update_fields=["engineer", "engineer_display"])
@@ -3944,8 +3921,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
     def test_download_export_workflow_rejects_unfinished_artifact(self):
         export_workflow = SqlWorkflow.objects.create(
             workflow_name="export_pending",
-            group_id=self.res_group.group_id,
-            group_name=self.res_group.group_name,
+            team_id=self.res_group.team_id,
+            team_name=self.res_group.team_name,
             engineer=self.user.username,
             engineer_display=self.user.display,
             audit_auth_groups="1",
@@ -3963,8 +3940,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             sql_content="select * from demo",
         )
         WorkflowAudit.objects.create(
-            group_id=self.res_group.group_id,
-            group_name=self.res_group.group_name,
+            team_id=self.res_group.team_id,
+            team_name=self.res_group.team_name,
             workflow_id=export_workflow.id,
             workflow_type=2,
             workflow_title="Export Apply",
@@ -3996,17 +3973,18 @@ class TestWorkflow(CacheIsolatedAPITestCase):
 
     def test_submit_workflow_super(self):
         """Test admin submitting SQL release workflow with specified user."""
-        User.objects.filter(id=self.user.id).update(is_superuser=1)
+        self.user.is_superuser = True
+        self.user.save(update_fields=["is_superuser"])
         user2 = User.objects.create(
             username="test_user2", display="Test User 2", is_active=True
         )
         user2.groups.add(self.group.id)
-        user2.resource_group.add(self.res_group.group_id)
+        assign_user_to_team(user2, self.res_group)
         json_data = {
             "workflow": {
                 "workflow_name": "Release Workflow 1",
                 "demand_url": "test",
-                "group_id": 1,
+                "team_id": 1,
                 "db_name": "test_db",
                 "engineer": "test_user2",
                 "instance": self.ins.id,
@@ -4027,7 +4005,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             "workflow": {
                 "workflow_name": "Release Workflow 1",
                 "demand_url": "test",
-                "group_id": 1,
+                "team_id": 1,
                 "db_name": "test_db",
                 "instance": self.ins.id,
                 "is_offline_export": 0,
@@ -4047,7 +4025,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             "workflow": {
                 "workflow_name": "Release Workflow 1",
                 "demand_url": "test",
-                "group_id": 1,
+                "team_id": 1,
                 "db_name": "test_db",
                 "instance": self.ins.id,
             },
@@ -4074,7 +4052,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             "workflow": {
                 "workflow_name": "Release Workflow 1",
                 "demand_url": "test",
-                "group_id": 1,
+                "team_id": 1,
                 "db_name": "test_db",
                 "instance": self.ins.id,
                 "is_offline_export": 0,
@@ -4254,7 +4232,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             Permission.objects.get(codename="sql_execute")
         )
         self.user.user_permissions.remove(
-            Permission.objects.get(codename="sql_execute_for_resource_group")
+            Permission.objects.get(codename="sql_execute_for_team")
         )
         r = self.client.post(
             f"/api/v1/workflow/{self.wf1.id}/executions/",
@@ -4439,8 +4417,8 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
         self.review_group = Group.objects.create(name="Permission Reviewers")
         self.reviewer.groups.add(self.review_group)
 
-        self.res_group = ResourceGroup.objects.create(group_name="permission_rg")
-        self.reviewer.resource_group.add(self.res_group)
+        self.res_group = Team.objects.create(team_name="permission_rg")
+        assign_user_to_team(self.reviewer, self.res_group)
 
         self.instance = Instance.objects.create(
             instance_name="permission_instance",
@@ -4460,13 +4438,13 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
 
     def tearDown(self):
         TemporaryInstanceGrant.objects.all().delete()
-        TemporaryResourceGroupGrant.objects.all().delete()
-        PermanentResourceGroupGrant.objects.all().delete()
+        TemporaryTeamGrant.objects.all().delete()
+        PermanentTeamGrant.objects.all().delete()
         PermissionRequest.objects.all().delete()
         WorkflowLog.objects.all().delete()
         WorkflowAudit.objects.all().delete()
         Instance.objects.all().delete()
-        ResourceGroup.objects.all().delete()
+        Team.objects.all().delete()
         Group.objects.all().delete()
         User.objects.filter(
             username__in=[
@@ -4494,7 +4472,7 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
                 {
                     "title": "Need DML access",
                     "target_type": "instance",
-                    "resource_group_id": self.res_group.group_id,
+                    "team_id": self.res_group.team_id,
                     "instance_id": self.instance.id,
                     "access_level": "query_dml",
                     "valid_date": "2099-12-31",
@@ -4509,8 +4487,8 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
 
     def test_request_list_only_shows_own_requests(self):
         PermissionRequest.objects.create(
-            resource_group=self.res_group,
-            target_type="resource_group",
+            team=self.res_group,
+            target_type="team",
             title="My request",
             user_name=self.user.username,
             user_display=self.user.display,
@@ -4522,8 +4500,8 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
             username="other_requester", display="Other Requester", is_active=True
         )
         PermissionRequest.objects.create(
-            resource_group=self.res_group,
-            target_type="resource_group",
+            team=self.res_group,
+            target_type="team",
             title="Other request",
             user_name=other_user.username,
             user_display=other_user.display,
@@ -4540,8 +4518,8 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
 
     def test_request_detail_returns_logs(self):
         permission_request = PermissionRequest.objects.create(
-            resource_group=self.res_group,
-            target_type="resource_group",
+            team=self.res_group,
+            target_type="team",
             title="Detail request",
             user_name=self.user.username,
             user_display=self.user.display,
@@ -4550,8 +4528,8 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
             audit_auth_groups=str(self.review_group.id),
         )
         audit = WorkflowAudit.objects.create(
-            group_id=self.res_group.group_id,
-            group_name=self.res_group.group_name,
+            team_id=self.res_group.team_id,
+            team_name=self.res_group.team_name,
             workflow_id=permission_request.request_id,
             workflow_type=WorkflowType.ACCESS_REQUEST,
             workflow_title=permission_request.title,
@@ -4582,8 +4560,8 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
 
     def test_reviewer_can_see_pending_request_for_direct_member_group(self):
         permission_request = PermissionRequest.objects.create(
-            resource_group=self.res_group,
-            target_type="resource_group",
+            team=self.res_group,
+            target_type="team",
             title="Needs approval",
             user_name=self.user.username,
             user_display=self.user.display,
@@ -4592,8 +4570,8 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
             audit_auth_groups=str(self.review_group.id),
         )
         WorkflowAudit.objects.create(
-            group_id=self.res_group.group_id,
-            group_name=self.res_group.group_name,
+            team_id=self.res_group.team_id,
+            team_name=self.res_group.team_name,
             workflow_id=permission_request.request_id,
             workflow_type=WorkflowType.ACCESS_REQUEST,
             workflow_title=permission_request.title,
@@ -4631,8 +4609,8 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
         temporary_reviewer.groups.add(self.review_group)
 
         permission_request = PermissionRequest.objects.create(
-            resource_group=self.res_group,
-            target_type="resource_group",
+            team=self.res_group,
+            target_type="team",
             title="Restricted approval",
             user_name=self.user.username,
             user_display=self.user.display,
@@ -4641,8 +4619,8 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
             audit_auth_groups=str(self.review_group.id),
         )
         WorkflowAudit.objects.create(
-            group_id=self.res_group.group_id,
-            group_name=self.res_group.group_name,
+            team_id=self.res_group.team_id,
+            team_name=self.res_group.team_name,
             workflow_id=permission_request.request_id,
             workflow_type=WorkflowType.ACCESS_REQUEST,
             workflow_title=permission_request.title,
@@ -4653,9 +4631,10 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
             create_user=self.user.username,
             create_user_display=self.user.display,
         )
-        TemporaryResourceGroupGrant.objects.create(
+        TemporaryTeamGrant.objects.create(
             user=temporary_reviewer,
-            resource_group=self.res_group,
+            team=self.res_group,
+            permission_level=self.review_group,
             valid_date=datetime.now().date() + timedelta(days=1),
         )
 
@@ -4667,14 +4646,15 @@ class TestPermissionRequestAPI(CacheIsolatedAPITestCase):
         self.assertEqual(payload["count"], 0)
 
     def test_active_grant_list_and_revoke(self):
-        TemporaryResourceGroupGrant.objects.create(
+        TemporaryTeamGrant.objects.create(
             user=self.user,
-            resource_group=self.res_group,
+            team=self.res_group,
+            permission_level=self.review_group,
             valid_date=datetime.now().date() + timedelta(days=1),
         )
         instance_grant = TemporaryInstanceGrant.objects.create(
             user=self.user,
-            resource_group=self.res_group,
+            team=self.res_group,
             instance=self.instance,
             access_level="query_dml",
             valid_date=datetime.now().date() + timedelta(days=1),
@@ -4717,8 +4697,8 @@ class TestDashboardAPI(CacheIsolatedAPITestCase):
         self.workflow = SqlWorkflow.objects.create(
             workflow_name="dashboard-wf",
             demand_url="",
-            group_id=1,
-            group_name="DBA",
+            team_id=1,
+            team_name="DBA",
             instance=self.ins,
             db_name="mysql",
             syntax_type=2,
@@ -4729,8 +4709,8 @@ class TestDashboardAPI(CacheIsolatedAPITestCase):
             audit_auth_groups="1",
         )
         QueryPrivilegesApply.objects.create(
-            group_id=1,
-            group_name="DBA",
+            team_id=1,
+            team_name="DBA",
             title="query-apply",
             user_name=self.user.username,
             user_display=self.user.display,
@@ -4854,7 +4834,7 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
         self.regular_user.set_password("regular_password")
         self.regular_user.save(update_fields=["password"])
         self.group = Group.objects.create(name="Ops")
-        self.resource_group = ResourceGroup.objects.create(group_name="Core Systems")
+        self.team = Team.objects.create(team_name="Core Systems")
         self.instance_tag = InstanceTag.objects.create(
             tag_code="can_read", tag_name="Can Read"
         )
@@ -4862,7 +4842,7 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
     def tearDown(self):
         SysConfig().purge()
         InstanceTag.objects.all().delete()
-        ResourceGroup.objects.all().delete()
+        Team.objects.all().delete()
         Group.objects.all().delete()
         User.objects.all().delete()
 
@@ -4889,7 +4869,10 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
         self.assertEqual(
             payload["options"]["instance_tags"][0]["value"], self.instance_tag.tag_code
         )
-        self.assertEqual(payload["options"]["auth_groups"][0]["value"], self.group.name)
+        auth_group_values = {
+            option["value"] for option in payload["options"]["auth_groups"]
+        }
+        self.assertIn(self.group.name, auth_group_values)
 
     def test_staff_gets_default_storage_type_when_blank_config_is_stored(self):
         SysConfig().set("storage_type", "")
@@ -4921,7 +4904,6 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
                 "storage_type": "sftp",
                 "sftp_host": "sftp.internal",
                 "sftp_port": 2222,
-                "default_auth_group": [self.group.name],
                 "api_user_whitelist": [self.regular_user.id],
                 "gh_ost": "/bin/echo",
                 "pt_osc": "/bin/echo",
@@ -4937,7 +4919,6 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
         self.assertTrue(payload["auto_review"])
         self.assertEqual(payload["auto_review_tag"], [self.instance_tag.tag_code])
         self.assertEqual(payload["notify_phase_control"], ["Apply", "Execute"])
-        self.assertEqual(payload["default_auth_group"], [self.group.name])
         self.assertEqual(payload["api_user_whitelist"], [self.regular_user.id])
 
         config = SysConfig()
@@ -4946,7 +4927,6 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
         self.assertEqual(config.get("notify_phase_control"), "Apply,Execute")
         self.assertEqual(config.get("storage_type"), "sftp")
         self.assertEqual(config.get("sftp_port"), "2222")
-        self.assertEqual(config.get("default_auth_group"), self.group.name)
         self.assertEqual(config.get("api_user_whitelist"), str(self.regular_user.id))
         self.assertEqual(config.get("gh_ost"), "/bin/echo")
         self.assertEqual(config.get("pt_osc"), "/bin/echo")
@@ -5031,10 +5011,8 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
             },
         )
 
-        self.resource_group = ResourceGroup.objects.create(group_name="Archive Group")
-        self.other_resource_group = ResourceGroup.objects.create(
-            group_name="Other Archive Group"
-        )
+        self.team = Team.objects.create(team_name="Archive Group")
+        self.other_team = Team.objects.create(team_name="Other Archive Group")
 
         self.mysql_instance = Instance.objects.create(
             instance_name="archive-mysql",
@@ -5045,8 +5023,8 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
             user="root",
             password="pwd",
         )
-        self.mysql_instance.resource_group.add(self.resource_group)
-        self.mysql_instance.resource_group.add(self.other_resource_group)
+        self.mysql_instance.resource_group.add(self.team)
+        self.mysql_instance.resource_group.add(self.other_team)
         self.mysql_instance.instance_tag.add(self.can_write_tag)
 
         self.pg_instance = Instance.objects.create(
@@ -5059,7 +5037,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
             password="pwd",
             db_name="workflow_pg",
         )
-        self.pg_instance.resource_group.add(self.resource_group)
+        self.pg_instance.resource_group.add(self.team)
         self.pg_instance.instance_tag.add(self.can_write_tag)
 
         self.reviewer_auth_group = Group.objects.create(name="Archive DBA")
@@ -5068,14 +5046,14 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
             "archive_requester",
             "Archive Requester",
             permissions=("menu_archive", "archive_apply"),
-            resource_groups=(self.resource_group,),
+            teams=(self.team,),
         )
         self.reviewer = self._create_user(
             "archive_reviewer",
             "Archive Reviewer",
             permissions=("menu_archive", "archive_review", "archive_mgt"),
             auth_groups=(self.reviewer_auth_group,),
-            resource_groups=(self.resource_group,),
+            teams=(self.team,),
         )
         self.outsider = self._create_user(
             "archive_outsider",
@@ -5084,14 +5062,14 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
 
         WorkflowAuditSetting.objects.create(
             workflow_type=WorkflowType.ARCHIVE,
-            group_id=self.resource_group.group_id,
-            group_name=self.resource_group.group_name,
+            team_id=self.team.team_id,
+            team_name=self.team.team_name,
             audit_auth_groups=str(self.reviewer_auth_group.id),
         )
         WorkflowAuditSetting.objects.create(
             workflow_type=WorkflowType.ARCHIVE,
-            group_id=self.other_resource_group.group_id,
-            group_name=self.other_resource_group.group_name,
+            team_id=self.other_team.team_id,
+            team_name=self.other_team.team_name,
             audit_auth_groups=str(self.reviewer_auth_group.id),
         )
 
@@ -5101,7 +5079,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
         display,
         permissions=(),
         auth_groups=(),
-        resource_groups=(),
+        teams=(),
     ):
         user = User.objects.create(
             username=username,
@@ -5114,8 +5092,8 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
             user.user_permissions.add(Permission.objects.get(codename=permission))
         for auth_group in auth_groups:
             user.groups.add(auth_group)
-        for resource_group in resource_groups:
-            user.resource_group.add(resource_group)
+        for team in teams:
+            assign_user_to_team(user, team)
         return user
 
     def authenticate(self, user):
@@ -5124,7 +5102,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
     def archive_payload(self, **overrides):
         payload = {
             "title": "Delete expired rows",
-            "group_id": self.resource_group.group_id,
+            "team_id": self.team.team_id,
             "instance_id": self.mysql_instance.id,
             "db_name": "demo_orders",
             "table_name": "orders",
@@ -5186,15 +5164,15 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
             for item in payload["instances"]
             if item["id"] == self.mysql_instance.id
         )
-        resource_group_ids = {group["group_id"] for group in payload["resource_groups"]}
-        self.assertEqual(mysql_record["group_ids"], [self.resource_group.group_id])
-        self.assertEqual(resource_group_ids, {self.resource_group.group_id})
+        team_ids = {group["team_id"] for group in payload["teams"]}
+        self.assertEqual(mysql_record["team_ids"], [self.team.team_id])
+        self.assertEqual(team_ids, {self.team.team_id})
 
     def test_archive_approval_preview_checks_group_access(self):
         self.authenticate(self.requester)
 
         response = self.client.get(
-            f"/api/v1/archive/approval-preview/?group_id={self.resource_group.group_id}",
+            f"/api/v1/archive/approval-preview/?team_id={self.team.team_id}",
             format="json",
         )
 
@@ -5203,7 +5181,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
         self.assertEqual(payload["display"], "Archive DBA")
 
         forbidden_response = self.client.get(
-            f"/api/v1/archive/approval-preview/?group_id={self.other_resource_group.group_id}",
+            f"/api/v1/archive/approval-preview/?team_id={self.other_team.team_id}",
             format="json",
         )
         self.assertEqual(forbidden_response.status_code, status.HTTP_403_FORBIDDEN)
@@ -5253,7 +5231,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
         with patch("api_archives.views.async_task"):
             response = self.client.post(
                 "/api/v1/archive/",
-                self.archive_payload(group_id=self.other_resource_group.group_id),
+                self.archive_payload(team_id=self.other_team.team_id),
                 format="json",
             )
 
@@ -5467,7 +5445,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
     def test_run_now_requires_manager_group_scope(self):
         archive = ArchiveConfig.objects.create(
             title="Other group archive",
-            resource_group=self.other_resource_group,
+            team=self.other_team,
             audit_auth_groups="",
             src_instance=self.mysql_instance,
             src_db_name="demo_orders",
@@ -5524,7 +5502,7 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
     def test_state_update_requires_manager_group_scope(self):
         archive = ArchiveConfig.objects.create(
             title="Other group scheduled archive",
-            resource_group=self.other_resource_group,
+            team=self.other_team,
             audit_auth_groups="",
             src_instance=self.mysql_instance,
             src_db_name="demo_orders",

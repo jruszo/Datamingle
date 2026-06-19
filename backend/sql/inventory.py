@@ -7,7 +7,6 @@ from django.utils import timezone
 
 from common.config import SysConfig
 from common.task_queue import delete_schedule, schedule, task_info
-from sql.engines import get_engine
 from sql.models import Config, Instance, TaskSchedule
 
 logger = logging.getLogger("default")
@@ -103,11 +102,18 @@ def _normalize_inventory_details(details):
 
 
 def collect_inventory_snapshot(instance):
-    engine = get_engine(instance=instance)
-    test_result = engine.test_connection()
-    if getattr(test_result, "error", ""):
-        raise RuntimeError(test_result.error)
-    return _normalize_inventory_details(engine.get_inventory_details())
+    from api_agents.models import AgentCommandType
+    from api_agents.services import run_agent_command_sync
+
+    command = run_agent_command_sync(
+        instance=instance,
+        command_type=AgentCommandType.INVENTORY_COLLECT,
+        workflow_type="inventory",
+        workflow_id=f"inventory:{instance.id}:{timezone.now().timestamp()}",
+        payload={"instance_id": instance.id},
+        timeout_seconds=30,
+    )
+    return _normalize_inventory_details(command.result)
 
 
 def refresh_instance_inventory_snapshot(instance, now=None):
@@ -117,7 +123,7 @@ def refresh_instance_inventory_snapshot(instance, now=None):
 
     try:
         details = collect_inventory_snapshot(instance)
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "Failed to refresh inventory snapshot for instance_id=%s", instance.id
         )
@@ -127,7 +133,11 @@ def refresh_instance_inventory_snapshot(instance, now=None):
             else Instance.INVENTORY_STATUS_FAILED
         )
         instance.save(update_fields=update_fields)
-        return {"success": False, "status": instance.inventory_status}
+        return {
+            "success": False,
+            "status": instance.inventory_status,
+            "error": str(exc),
+        }
 
     instance.inventory_status = Instance.INVENTORY_STATUS_OK
     instance.inventory_last_success_at = attempt_time

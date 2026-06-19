@@ -20,16 +20,17 @@ from sql.models import (
     SqlWorkflow,
     SqlWorkflowContent,
     Instance,
-    ResourceGroup,
+    Team,
     WorkflowLog,
     DataMaskingRules,
     DataMaskingColumns,
     InstanceTag,
     TaskSchedule,
-    TemporaryResourceGroupGrant,
+    TemporaryTeamGrant,
     TemporaryInstanceGrant,
+    TeamMembership,
 )
-from sql.utils.resource_group import user_groups, user_instances, auth_group_users
+from sql.utils.team import user_groups, user_instances, auth_group_users
 from sql.utils.sql_review import (
     can_execute,
     can_timingtask,
@@ -43,6 +44,17 @@ from sql.utils.tasks import add_sql_schedule, del_schedule, task_info
 from sql.utils.data_masking import data_masking, brute_mask, simple_column_mask
 
 User = Users
+
+
+def assign_user_to_team(user, team, permission_level=None):
+    permission_level = permission_level or Group.objects.get_or_create(name="QA")[0]
+    TeamMembership.objects.update_or_create(
+        user=user,
+        team=team,
+        defaults={"permission_level": permission_level},
+    )
+
+
 __author__ = "hhyo"
 
 
@@ -67,11 +79,11 @@ class TestSQLReview(TestCase):
         self.master.save()
         self.sys_config = SysConfig()
         self.client = Client()
-        self.group = ResourceGroup.objects.create(group_id=1, group_name="group_name")
+        self.group = Team.objects.create(team_id=1, team_name="team_name")
         self.wf1 = SqlWorkflow.objects.create(
             workflow_name="workflow_name",
-            group_id=self.group.group_id,
-            group_name=self.group.group_name,
+            team_id=self.group.team_id,
+            team_name=self.group.team_name,
             engineer=self.superuser.username,
             engineer_display=self.superuser.display,
             audit_auth_groups="audit_auth_groups",
@@ -98,7 +110,7 @@ class TestSQLReview(TestCase):
 class TestTemporaryAccessHelpers(TestCase):
     def setUp(self):
         self.user = User.objects.create(username="temp_access_user")
-        self.group = ResourceGroup.objects.create(group_name="temp_access_group")
+        self.group = Team.objects.create(team_name="temp_access_group")
         self.read_tag = InstanceTag.objects.create(
             tag_code="can_read", tag_name="Can Read", active=True
         )
@@ -119,28 +131,29 @@ class TestTemporaryAccessHelpers(TestCase):
 
     def tearDown(self):
         TemporaryInstanceGrant.objects.all().delete()
-        TemporaryResourceGroupGrant.objects.all().delete()
+        TemporaryTeamGrant.objects.all().delete()
         Instance.objects.all().delete()
-        ResourceGroup.objects.all().delete()
+        Team.objects.all().delete()
         InstanceTag.objects.all().delete()
         User.objects.filter(username="temp_access_user").delete()
 
     def test_user_groups_include_temporary_group_grant(self):
-        TemporaryResourceGroupGrant.objects.create(
+        TemporaryTeamGrant.objects.create(
             user=self.user,
-            resource_group=self.group,
+            team=self.group,
+            permission_level=Group.objects.get_or_create(name="QA")[0],
             valid_date=datetime.date.today() + datetime.timedelta(days=1),
         )
 
         self.assertEqual(
-            [group.group_name for group in user_groups(self.user)],
-            [self.group.group_name],
+            [group.team_name for group in user_groups(self.user)],
+            [self.group.team_name],
         )
 
     def test_user_instances_include_temporary_instance_grant(self):
         TemporaryInstanceGrant.objects.create(
             user=self.user,
-            resource_group=self.group,
+            team=self.group,
             instance=self.instance,
             access_level="query_dml",
             valid_date=datetime.date.today() + datetime.timedelta(days=1),
@@ -167,23 +180,21 @@ class TestSQLReviewAccess(TestSQLReview):
         r = can_view(user=self.user, workflow_id=self.wfc1.workflow_id)
         self.assertTrue(r)
 
-    def test_can_execute_for_resource_group(
+    def test_can_execute_for_team(
         self,
     ):
         """
-        Test can_execute condition: user has resource-group-level execute
+        Test can_execute condition: user has team-level execute
         permission and belongs to the group.
         :return:
         """
-        # Set workflow to review_pass, user has resource-group execute permission
+        # Set workflow to review_pass, user has team execute permission
         # and belongs to the group.
         self.wf1.status = "workflow_review_pass"
         self.wf1.save(update_fields=("status",))
-        sql_execute_for_resource_group = Permission.objects.get(
-            codename="sql_execute_for_resource_group"
-        )
-        self.user.user_permissions.add(sql_execute_for_resource_group)
-        self.user.resource_group.add(self.group)
+        sql_execute_for_team = Permission.objects.get(codename="sql_execute_for_team")
+        self.user.user_permissions.add(sql_execute_for_team)
+        assign_user_to_team(self.user, self.group)
         r = can_execute(user=self.user, workflow_id=self.wfc1.workflow_id)
         self.assertTrue(r)
 
@@ -241,17 +252,15 @@ class TestSQLReviewAccess(TestSQLReview):
         self,
     ):
         """
-        User has resource-group-level execute permission but is not in the group.
+        User has team-level execute permission but is not in the group.
         :return:
         """
-        # Set workflow to review_pass, user has resource-group execute permission
+        # Set workflow to review_pass, user has team execute permission
         # but is not in the group.
         self.wf1.status = "workflow_review_pass"
         self.wf1.save(update_fields=("status",))
-        sql_execute_for_resource_group = Permission.objects.get(
-            codename="sql_execute_for_resource_group"
-        )
-        self.user.user_permissions.add(sql_execute_for_resource_group)
+        sql_execute_for_team = Permission.objects.get(codename="sql_execute_for_team")
+        self.user.user_permissions.add(sql_execute_for_team)
         r = can_execute(user=self.user, workflow_id=self.wfc1.workflow_id)
         self.assertFalse(r)
 
@@ -442,8 +451,8 @@ class TestExecuteSql(TestCase):
         )
         self.wf = SqlWorkflow.objects.create(
             workflow_name="some_name",
-            group_id=1,
-            group_name="g1",
+            team_id=1,
+            team_name="g1",
             engineer_display="",
             audit_auth_groups="some_group",
             create_time=datetime.datetime.now(),
@@ -643,8 +652,8 @@ class TestDataMasking(TestCase):
         self.sys_config = SysConfig()
         self.wf1 = SqlWorkflow.objects.create(
             workflow_name="workflow_name",
-            group_id=1,
-            group_name="group_name",
+            team_id=1,
+            team_name="team_name",
             engineer=self.superuser.username,
             engineer_display=self.superuser.display,
             audit_auth_groups="audit_auth_groups",
@@ -1190,7 +1199,7 @@ class TestDataMasking(TestCase):
         self.assertEqual(r.rows, mask_result_rows)
 
 
-class TestResourceGroup(TestCase):
+class TestTeam(TestCase):
     def setUp(self):
         self.sys_config = SysConfig()
         self.user = User.objects.create(
@@ -1217,27 +1226,27 @@ class TestResourceGroup(TestCase):
             user="ins_user",
             password="some_str",
         )
-        self.rgp1 = ResourceGroup.objects.create(group_name="group1")
-        self.rgp2 = ResourceGroup.objects.create(group_name="group2")
+        self.rgp1 = Team.objects.create(team_name="group1")
+        self.rgp2 = Team.objects.create(team_name="group2")
         self.agp = Group.objects.create(name="auth_group")
 
     def tearDown(self):
         self.sys_config.purge()
         User.objects.all().delete()
         Instance.objects.all().delete()
-        ResourceGroup.objects.all().delete()
+        Team.objects.all().delete()
         Group.objects.all().delete()
 
     def test_user_groups_super(self):
-        """Get resource groups for superuser."""
+        """Get teams for superuser."""
         groups = user_groups(self.su)
         self.assertEqual(groups.__len__(), 2)
         self.assertIn(self.rgp1, groups)
         self.assertIn(self.rgp2, groups)
 
     def test_user_groups(self):
-        """Get resource groups for normal user."""
-        self.user.resource_group.add(self.rgp1)
+        """Get teams for normal user."""
+        assign_user_to_team(self.user, self.rgp1)
         groups = user_groups(self.user)
         self.assertEqual(groups.__len__(), 1)
         self.assertIn(self.rgp1, groups)
@@ -1251,27 +1260,25 @@ class TestResourceGroup(TestCase):
         self.assertIn(self.ins2, ins)
 
     def test_user_instances_associated_group(self):
-        """Get instance list for normal user with associated resource group."""
-        self.user.resource_group.add(self.rgp1)
+        """Get instance list for normal user with associated team."""
+        assign_user_to_team(self.user, self.rgp1)
         self.ins1.resource_group.add(self.rgp1)
         ins = user_instances(self.user)
         self.assertEqual(ins.__len__(), 1)
         self.assertIn(self.ins1, ins)
 
     def test_user_instances_unassociated_group(self):
-        """Get instance list for normal user without associated resource group."""
+        """Get instance list for normal user without associated team."""
         self.ins1.resource_group.add(self.rgp1)
         ins = user_instances(self.user)
         self.assertEqual(ins.__len__(), 0)
 
     def test_auth_group_users(self):
-        """Get users in resource group associated with a specific auth group."""
+        """Get users in team associated with a specific auth group."""
         # Associate user with auth group.
-        self.user.groups.add(self.agp)
-        # Associate user with resource group.
-        self.user.resource_group.add(self.rgp1)
-        # Get users in resource group associated with target auth group.
+        assign_user_to_team(self.user, self.rgp1, self.agp)
+        # Get users in team associated with target auth group.
         users = auth_group_users(
-            auth_group_names=[self.agp.name], group_id=self.rgp1.group_id
+            auth_group_names=[self.agp.name], team_id=self.rgp1.team_id
         )
         self.assertIn(self.user, users)

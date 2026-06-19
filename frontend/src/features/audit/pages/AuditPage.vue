@@ -376,7 +376,7 @@ onMounted(async () => {
                   </RouterLink>
                   <p class="text-xs text-slate-500">{{ record.syntax_type_label }}</p>
                 </td>
-                <td class="px-4 py-3 text-slate-600">{{ record.group_name }} / {{ record.instance_name }} / {{ record.db_name }}</td>
+                <td class="px-4 py-3 text-slate-600">{{ record.team_name }} / {{ record.instance_name }} / {{ record.db_name }}</td>
                 <td class="px-4 py-3 text-slate-600">{{ record.engineer_display || record.engineer }}</td>
                 <td class="px-4 py-3"><Badge variant="outline">{{ record.status_label || record.status }}</Badge></td>
                 <td class="px-4 py-3 text-slate-500">{{ formatDateTime(record.create_time) }}</td>

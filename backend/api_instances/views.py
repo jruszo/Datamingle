@@ -32,7 +32,7 @@ from sql.models import (
     InstanceTag,
     ParamHistory,
     ParamTemplate,
-    ResourceGroup,
+    Team,
     Users,
 )
 from sql.utils.instance_management import (
@@ -40,7 +40,7 @@ from sql.utils.instance_management import (
     get_instanceaccount_unique_key,
     get_instanceaccount_unique_value,
 )
-from sql.utils.resource_group import user_instances
+from sql.utils.team import user_instances
 from sql.utils.sql_utils import filter_db_list
 
 from api_core.pagination import CustomizedPagination
@@ -690,7 +690,7 @@ class InstanceMetadata(views.APIView):
     @extend_schema(
         summary="Instance Inventory Metadata",
         responses={200: InstanceMetadataSerializer},
-        description="List available instance types, enabled database types, active tags, and resource groups.",
+        description="List available instance types, enabled database types, active tags, and teams.",
     )
     def get(self, request):
         _require_any_permission(request, "sql.menu_instance", "sql.menu_instance_list")
@@ -713,9 +713,7 @@ class InstanceMetadata(views.APIView):
                 "name", "id"
             ),
             "tags": InstanceTag.objects.filter(active=True).order_by("tag_name", "id"),
-            "resource_groups": ResourceGroup.objects.filter(is_deleted=0).order_by(
-                "group_name", "group_id"
-            ),
+            "teams": Team.objects.filter(is_deleted=0).order_by("team_name", "team_id"),
         }
         serializer = InstanceMetadataSerializer(payload)
         return success_response(data=serializer.data)
@@ -2412,40 +2410,26 @@ class InstanceConnectionTest(views.APIView):
 
 
 class InstanceDraftConnectionTest(views.APIView):
-    """Check whether an unsaved instance configuration is reachable."""
+    """Reject tests for configurations that do not have an agent assignment."""
 
     @extend_schema(
         summary="Test Draft Instance Connection",
         request=InstanceConnectionTestRequestSerializer,
         responses={200: InstanceConnectionTestResultSerializer},
-        description="Validate draft instance connection settings without creating an instance record.",
+        description="Draft connections cannot be tested until the service is saved and assigned to an agent.",
     )
     @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
     def post(self, request):
         serializer = InstanceConnectionTestRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        instance = serializer.build_instance()
-
-        try:
-            query_engine = get_engine(instance=instance)
-            test_result = query_engine.test_connection()
-        except serializers.ValidationError:
-            raise
-        except Exception:
-            logger.exception("Failed draft instance connection test")
-            raise serializers.ValidationError(
-                {"errors": "Unable to connect to instance. Check configuration."}
-            )
-
-        if test_result.error:
-            raise serializers.ValidationError(
-                {"errors": "Unable to connect to instance. Check configuration."}
-            )
-
-        payload = InstanceConnectionTestResultSerializer(
-            {"success": True, "message": "Connection successful."}
-        ).data
-        return success_response(data=payload, detail="Connection successful.")
+        raise serializers.ValidationError(
+            {
+                "errors": (
+                    "Save the service and assign it to an online agent before "
+                    "testing the connection."
+                )
+            }
+        )
 
 
 class InstanceResource(views.APIView):

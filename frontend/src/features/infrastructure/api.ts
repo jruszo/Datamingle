@@ -8,6 +8,7 @@ import {
   type PaginatedResponse,
 } from '@/lib/api'
 import { apiGet, apiPatch, apiPost, isRecord } from '@/shared/api/http'
+import type { LabelFilter } from '@/shared/filters/labelFilters'
 
 export {
   createAgent,
@@ -23,6 +24,7 @@ export type InfrastructureListOptions = {
   page?: number
   size?: number
   search?: string
+  labelFilters?: LabelFilter[]
 }
 
 export type InfrastructureNodePayload = {
@@ -32,7 +34,8 @@ export type InfrastructureNodePayload = {
   metadata: Record<string, unknown>
   monitoring_enabled: boolean
   monitoring_collectors: string[]
-  resource_group_ids?: number[]
+  monitoring_labels: Record<string, string>
+  team_ids?: number[]
 }
 
 export type InfrastructureNodeAgentRecord = {
@@ -73,13 +76,14 @@ export type DatabaseServicePayload = {
   password?: string
   monitoring_enabled: boolean
   monitoring_collectors: string[]
+  monitoring_labels: Record<string, string>
   is_ssl: boolean
   verify_ssl: boolean
   db_name: string
   show_db_name_regex: string
   denied_db_name_regex: string
   charset: string
-  resource_group_ids: number[]
+  team_ids: number[]
   service_tag_ids: number[]
   recommendation_id?: number
 }
@@ -89,6 +93,7 @@ export type DatabaseServiceRecord = Omit<
   'password' | 'recommendation_id'
 > & {
   id: number
+  effective_monitoring_labels: Record<string, string>
   inventory_status: 'never' | 'ok' | 'stale' | 'failed'
   inventory_detected_hostname?: string
   inventory_detected_version?: string
@@ -133,15 +138,47 @@ function buildInfrastructureListPath(options: InfrastructureListOptions) {
   if (options.search?.trim()) {
     params.set('search', options.search.trim())
   }
+  appendLabelFilters(params, options.labelFilters ?? [])
 
   const queryString = params.toString()
   return queryString ? `/v1/infrastructure/nodes/?${queryString}` : '/v1/infrastructure/nodes/'
+}
+
+function appendLabelFilters(params: URLSearchParams, filters: LabelFilter[]) {
+  for (const filter of filters) {
+    const prefix = filter.mode === 'include' ? 'lf.' : 'lx.'
+    for (const value of filter.values) {
+      if (filter.label && value) {
+        params.append(`${prefix}${filter.label}`, value)
+      }
+    }
+  }
 }
 
 export function fetchInfrastructureNodes(token: string, options: InfrastructureListOptions = {}) {
   return apiGet<unknown>(buildInfrastructureListPath(options), { token }).then((payload) =>
     extractData<PaginatedResponse<InfrastructureNodeRecord>>(payload),
   )
+}
+
+export function fetchInfrastructureNodeLabelNames(token: string) {
+  return apiGet<unknown>('/v1/infrastructure/nodes/labels/', { token }).then((payload) =>
+    extractData<string[]>(payload),
+  )
+}
+
+export function fetchInfrastructureNodeLabelValues(
+  labelName: string,
+  token: string,
+  filters: LabelFilter[] = [],
+) {
+  const params = new URLSearchParams()
+  appendLabelFilters(params, filters)
+  const query = params.toString()
+  const path = `/v1/infrastructure/nodes/label/${encodeURIComponent(labelName)}/values/${
+    query ? `?${query}` : ''
+  }`
+  return apiGet<unknown>(path, { token }).then((payload) => extractData<string[]>(payload))
 }
 
 export function fetchInfrastructureNode(nodeId: number, token: string) {

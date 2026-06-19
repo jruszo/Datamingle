@@ -1,5 +1,4 @@
 from datetime import datetime
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import override_settings
@@ -9,7 +8,6 @@ from rest_framework.test import APITestCase
 
 from api_agents.models import (
     Agent,
-    AgentCommandStatus,
     AgentInstanceAssignment,
     AgentStatus,
 )
@@ -18,15 +16,15 @@ from sql.models import (
     DEFAULT_NODE_EXPORTER_COLLECTORS,
     InfrastructureNode,
     Instance,
-    ResourceGroup,
+    Team,
     ServiceRecommendation,
     Users,
 )
 
 
-def create_resource_group(name):
-    return ResourceGroup.objects.create(
-        group_name=name,
+def create_team(name):
+    return Team.objects.create(
+        team_name=name,
         group_parent_id=0,
         group_sort=1,
         group_level=1,
@@ -85,7 +83,7 @@ class InfrastructureNodeApiTests(APITestCase):
         self.client.force_authenticate(user=self.user)
 
     def test_node_list_includes_services_and_recommendations(self):
-        group = create_resource_group("primary services")
+        group = create_team("primary services")
         node = create_node(monitoring_enabled=False)
         node.resource_group.set([group])
         agent = Agent.objects.create(
@@ -127,7 +125,7 @@ class InfrastructureNodeApiTests(APITestCase):
         self.assertEqual(
             payload["monitoring_collectors"], list(DEFAULT_NODE_EXPORTER_COLLECTORS)
         )
-        self.assertEqual(payload["resource_group_ids"], [group.group_id])
+        self.assertEqual(payload["team_ids"], [group.team_id])
         self.assertEqual(payload["agent_id"], agent.id)
         self.assertEqual(payload["agent_status"], AgentStatus.ONLINE)
         self.assertEqual(payload["agent"]["hostname"], "db-host-01")
@@ -202,7 +200,7 @@ class InfrastructureNodeApiTests(APITestCase):
                 "show_db_name_regex": "",
                 "denied_db_name_regex": "",
                 "charset": "utf8mb4",
-                "resource_group_ids": [],
+                "team_ids": [],
                 "service_tag_ids": [],
             },
             format="json",
@@ -272,10 +270,149 @@ class InfrastructureNodeApiTests(APITestCase):
         self.assertEqual(agent.desired_config_revision, 2)
         config = build_agent_config(agent)
         self.assertFalse(config["node"]["monitoring_enabled"])
+        modules = {module["name"]: module for module in config["modules"]}
         self.assertEqual(
-            config["modules"][-1]["raw"]["node_exporter"]["collectors"],
+            modules["node_monitoring"]["raw"]["node_exporter"]["collectors"],
             ["cpu", "meminfo", "filesystem"],
         )
+
+    def test_monitoring_labels_are_inherited_and_service_values_override_node(self):
+        node = create_node()
+        node.monitoring_labels = {"environment": "prod", "team": "platform"}
+        node.save(update_fields=["monitoring_labels"])
+        agent = Agent.objects.create(name="agent-a", local_node=node)
+        service = create_instance("orders-primary", node=node)
+        service.monitoring_labels = {"team": "payments"}
+        service.save(update_fields=["monitoring_labels"])
+
+        response = self.client.get(f"/api/v1/infrastructure/nodes/{node.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response.json()["data"]
+        self.assertEqual(payload["monitoring_labels"], node.monitoring_labels)
+        self.assertEqual(
+            payload["services"][0]["effective_monitoring_labels"],
+            {"environment": "prod", "team": "payments"},
+        )
+        config = build_agent_config(agent)
+        modules = {module["name"]: module for module in config["modules"]}
+        self.assertEqual(
+            modules["node_monitoring"]["raw"]["labels"]["dm_environment"], "prod"
+        )
+        self.assertEqual(
+            modules["service_monitoring"]["raw"]["services"][0]["labels"],
+            {"dm_environment": "prod", "dm_team": "payments"},
+        )
+
+    def test_update_node_saves_monitoring_labels(self):
+        node = create_node()
+
+        response = self.client.patch(
+            f"/api/v1/infrastructure/nodes/{node.id}/",
+            {"monitoring_labels": {"environment": "prod", "team": "platform"}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.json()["data"]["monitoring_labels"],
+            {"environment": "prod", "team": "platform"},
+        )
+        node.refresh_from_db()
+        self.assertEqual(
+            node.monitoring_labels,
+            {"environment": "prod", "team": "platform"},
+        )
+
+    def test_node_list_filters_monitoring_labels(self):
+        prod_platform = create_node(name="prod-platform", address="10.0.0.11")
+        prod_platform.monitoring_labels = {
+            "environment": "prod",
+            "team": "platform",
+        }
+        prod_platform.save(update_fields=["monitoring_labels"])
+        prod_payments = create_node(name="prod-payments", address="10.0.0.12")
+        prod_payments.monitoring_labels = {
+            "environment": "prod",
+            "team": "payments",
+        }
+        prod_payments.save(update_fields=["monitoring_labels"])
+        create_node(name="unlabelled", address="10.0.0.13")
+
+        response = self.client.get(
+            "/api/v1/infrastructure/nodes/",
+            {
+                "lf.environment": "prod",
+                "lx.team": "payments",
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [node["name"] for node in response.json()["data"]["results"]],
+            ["prod-platform"],
+        )
+
+        exclude_response = self.client.get(
+            "/api/v1/infrastructure/nodes/",
+            {"lx.team": "payments"},
+        )
+        self.assertEqual(exclude_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [node["name"] for node in exclude_response.json()["data"]["results"]],
+            ["prod-platform", "unlabelled"],
+        )
+
+    def test_node_label_filter_supports_multiple_values(self):
+        for suffix, environment in (
+            ("prod", "prod"),
+            ("stage", "stage"),
+            ("dev", "dev"),
+        ):
+            node = create_node(name=f"node-{suffix}", address=f"10.0.1.{len(suffix)}")
+            node.monitoring_labels = {"environment": environment}
+            node.save(update_fields=["monitoring_labels"])
+
+        response = self.client.get(
+            "/api/v1/infrastructure/nodes/",
+            [("lf.environment", "prod"), ("lf.environment", "stage")],
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [node["name"] for node in response.json()["data"]["results"]],
+            ["node-prod", "node-stage"],
+        )
+
+    def test_node_label_names_and_values_are_available_for_autocomplete(self):
+        first = create_node(name="first", address="10.0.2.1")
+        first.monitoring_labels = {"environment": "prod", "team": "platform"}
+        first.save(update_fields=["monitoring_labels"])
+        second = create_node(name="second", address="10.0.2.2")
+        second.monitoring_labels = {"environment": "stage"}
+        second.save(update_fields=["monitoring_labels"])
+
+        names_response = self.client.get("/api/v1/infrastructure/nodes/labels/")
+        values_response = self.client.get(
+            "/api/v1/infrastructure/nodes/label/environment/values/"
+        )
+
+        self.assertEqual(names_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(names_response.json()["data"], ["environment", "team"])
+        self.assertEqual(values_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(values_response.json()["data"], ["prod", "stage"])
+
+    def test_rejects_invalid_monitoring_label_names(self):
+        node = create_node()
+
+        response = self.client.patch(
+            f"/api/v1/infrastructure/nodes/{node.id}/",
+            {"monitoring_labels": {"not-valid": "prod"}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("monitoring_labels", response.json())
 
     def test_create_service_accepts_recommendation(self):
         node = create_node()
@@ -307,7 +444,7 @@ class InfrastructureNodeApiTests(APITestCase):
                 "show_db_name_regex": "",
                 "denied_db_name_regex": "",
                 "charset": "",
-                "resource_group_ids": [],
+                "team_ids": [],
                 "service_tag_ids": [],
                 "recommendation_id": recommendation.id,
             },
@@ -318,17 +455,14 @@ class InfrastructureNodeApiTests(APITestCase):
         recommendation.refresh_from_db()
         self.assertEqual(recommendation.status, ServiceRecommendation.STATUS_ACCEPTED)
 
-    def test_service_connection_test_dispatches_agent_command(self):
+    def test_service_connection_test_refreshes_inventory_through_agent(self):
         node = create_node()
         service = create_instance("orders-primary", node=node)
-        command = SimpleNamespace(
-            status=AgentCommandStatus.SUCCEEDED,
-            result={"message": "Connection successful from agent."},
-        )
 
         with patch(
-            "api_infrastructure.views.run_agent_command_sync", return_value=command
-        ) as run_command:
+            "api_infrastructure.views.refresh_instance_inventory_snapshot",
+            return_value={"success": True, "status": "ok"},
+        ) as refresh_inventory:
             response = self.client.post(
                 f"/api/v1/infrastructure/services/{service.id}/test/",
                 {},
@@ -337,9 +471,7 @@ class InfrastructureNodeApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(
-            response.json()["data"]["message"], "Connection successful from agent."
+            response.json()["data"]["message"],
+            "Connection successful and inventory refreshed.",
         )
-        self.assertEqual(run_command.call_args.kwargs["instance"], service)
-        self.assertEqual(
-            run_command.call_args.kwargs["command_type"], "connection.test"
-        )
+        self.assertEqual(refresh_inventory.call_args.kwargs["instance"], service)

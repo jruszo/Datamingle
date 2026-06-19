@@ -8,12 +8,12 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table'
-import { deleteResourceGroup, fetchResourceGroups, type ResourceGroupRecord } from '../api'
+import { deleteTeam, fetchTeams, type TeamRecord } from '../api'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
 
-const resourceGroups = ref<ResourceGroupRecord[]>([])
+const resourceGroups = ref<TeamRecord[]>([])
 const isLoading = ref(false)
 const error = ref('')
 const feedback = ref('')
@@ -21,13 +21,13 @@ const totalCount = ref(0)
 const searchQuery = ref('')
 const currentPage = ref(1)
 const pageSize = ref(20)
-const sortKey = ref('group_name')
+const sortKey = ref('team_name')
 const sortDirection = ref<'asc' | 'desc'>('asc')
 const latestRequestId = ref(0)
 
 const columns: DataTableColumn[] = [
   {
-    key: 'group_name',
+    key: 'team_name',
     label: 'Group',
     sortable: true,
     hideable: false,
@@ -43,7 +43,7 @@ const columns: DataTableColumn[] = [
     sortable: true,
   },
   {
-    key: 'group_id',
+    key: 'team_id',
     label: 'Group ID',
     sortable: true,
     defaultVisible: false,
@@ -63,23 +63,22 @@ function hasPermission(permission: string) {
   return authStore.currentUser?.permissions?.includes(permission) ?? false
 }
 
-const canViewResourceGroups = computed(
+const canViewTeams = computed(
   () =>
     hasPermission('sql.menu_system')
-    || hasPermission('sql.view_resourcegroup')
-    || hasPermission('sql.resource_group_owner'),
+    || hasPermission('sql.view_team')
+    || hasPermission('sql.change_team'),
 )
-const canCreateResourceGroups = computed(
-  () => hasPermission('sql.menu_system') || hasPermission('sql.add_resourcegroup'),
+const canCreateTeams = computed(
+  () => hasPermission('sql.menu_system') || hasPermission('sql.add_team'),
 )
-const canEditResourceGroups = computed(
+const canEditTeams = computed(
   () =>
     hasPermission('sql.menu_system')
-    || hasPermission('sql.change_resourcegroup')
-    || hasPermission('sql.resource_group_owner'),
+    || hasPermission('sql.change_team'),
 )
-const canDeleteResourceGroups = computed(
-  () => hasPermission('sql.menu_system') || hasPermission('sql.delete_resourcegroup'),
+const canDeleteTeams = computed(
+  () => hasPermission('sql.menu_system') || hasPermission('sql.delete_team'),
 )
 
 function toUserFacingMessage(errorValue: unknown, fallback: string) {
@@ -103,7 +102,7 @@ function requireToken() {
   return authStore.accessToken
 }
 
-async function loadResourceGroups() {
+async function loadTeams() {
   const requestId = latestRequestId.value + 1
   latestRequestId.value = requestId
   isLoading.value = true
@@ -112,17 +111,17 @@ async function loadResourceGroups() {
   try {
     await authStore.loadCurrentUser()
 
-    if (!canViewResourceGroups.value) {
+    if (!canViewTeams.value) {
       resourceGroups.value = []
       totalCount.value = 0
-      error.value = 'You do not have permission to manage Datamingle resource groups.'
+      error.value = 'You do not have permission to manage Datamingle teams.'
       return
     }
 
     const ordering = sortKey.value
       ? `${sortDirection.value === 'desc' ? '-' : ''}${sortKey.value}`
       : undefined
-    const response = await fetchResourceGroups(requireToken(), {
+    const response = await fetchTeams(requireToken(), {
       page: currentPage.value,
       size: pageSize.value,
       search: searchQuery.value,
@@ -139,7 +138,7 @@ async function loadResourceGroups() {
     if (requestId !== latestRequestId.value) {
       return
     }
-    error.value = toUserFacingMessage(errorValue, 'Failed to load resource groups.')
+    error.value = toUserFacingMessage(errorValue, 'Failed to load teams.')
   } finally {
     if (requestId === latestRequestId.value) {
       isLoading.value = false
@@ -147,32 +146,32 @@ async function loadResourceGroups() {
   }
 }
 
-async function removeResourceGroup(resourceGroup: ResourceGroupRecord) {
-  if (!canDeleteResourceGroups.value) {
+async function removeTeam(resourceGroup: TeamRecord) {
+  if (!canDeleteTeams.value) {
     return
   }
 
-  if (!window.confirm(`Delete the "${resourceGroup.group_name}" resource group from Datamingle?`)) {
+  if (!window.confirm(`Delete the "${resourceGroup.team_name}" team from Datamingle?`)) {
     return
   }
 
   try {
-    const detail = await deleteResourceGroup(resourceGroup.group_id, requireToken())
+    const detail = await deleteTeam(resourceGroup.team_id, requireToken())
     feedback.value = detail
-    await loadResourceGroups()
+    await loadTeams()
   } catch (errorValue) {
-    error.value = toUserFacingMessage(errorValue, 'Failed to delete the resource group.')
+    error.value = toUserFacingMessage(errorValue, 'Failed to delete the team.')
   }
 }
 
-function removeResourceGroupById(groupId: number) {
-  const resourceGroup = resourceGroups.value.find((item) => item.group_id === groupId)
+function removeTeamById(groupId: number) {
+  const resourceGroup = resourceGroups.value.find((item) => item.team_id === groupId)
   if (!resourceGroup) {
-    error.value = 'Unable to locate the selected resource group.'
+    error.value = 'Unable to locate the selected team.'
     return
   }
 
-  void removeResourceGroup(resourceGroup)
+  void removeTeam(resourceGroup)
 }
 
 function handleSearchQueryChange(value: string) {
@@ -186,31 +185,31 @@ function handlePageSizeChange(value: number) {
 }
 
 onMounted(() => {
-  void loadResourceGroups()
+  void loadTeams()
 })
 
-const debouncedLoadResourceGroups = useDebounceFn(() => {
+const debouncedLoadTeams = useDebounceFn(() => {
   feedback.value = ''
-  void loadResourceGroups()
+  void loadTeams()
 }, 250)
 
 watch([currentPage, pageSize, sortKey, sortDirection], () => {
   feedback.value = ''
-  void loadResourceGroups()
+  void loadTeams()
 })
 
 watch(searchQuery, () => {
   feedback.value = ''
-  debouncedLoadResourceGroups()
+  debouncedLoadTeams()
 })
 </script>
 
 <template>
   <section class="grid gap-6">
     <div class="space-y-1">
-      <h2 class="text-2xl font-semibold text-slate-900">Resource Groups</h2>
+      <h2 class="text-2xl font-semibold text-slate-900">Teams</h2>
       <p class="text-sm text-slate-600">
-        Manage the Datamingle resource groups that bundle users and servers together.
+        Manage the Datamingle teams that bundle users and servers together.
       </p>
     </div>
 
@@ -234,7 +233,7 @@ watch(searchQuery, () => {
 
         <DataTable
           :columns="columns"
-          :empty-text="'No Datamingle resource groups are available.'"
+          :empty-text="'No Datamingle teams are available.'"
           :manual-pagination="true"
           :manual-search="true"
           :manual-sort="true"
@@ -246,9 +245,9 @@ watch(searchQuery, () => {
           :sort-key="sortKey"
           :sort-direction="sortDirection"
           :total-rows="totalCount"
-          row-key="group_id"
-          search-placeholder="Filter resource groups by name or ID"
-          :search-keys="['group_name', 'group_id', 'user_count', 'instance_count']"
+          row-key="team_id"
+          search-placeholder="Filter teams by name or ID"
+          :search-keys="['team_name', 'team_id', 'user_count', 'instance_count']"
           @update:page="currentPage = $event"
           @update:page-size="handlePageSizeChange"
           @update:search-query="handleSearchQueryChange"
@@ -256,21 +255,21 @@ watch(searchQuery, () => {
           @update:sort-direction="sortDirection = $event"
         >
           <template #toolbar-actions>
-            <Button variant="outline" @click="loadResourceGroups">
+            <Button variant="outline" @click="loadTeams">
               <RefreshCw class="h-4 w-4" />
               Refresh
             </Button>
-            <Button v-if="canCreateResourceGroups" as-child>
-              <RouterLink to="/settings/resource-groups/new">
+            <Button v-if="canCreateTeams" as-child>
+              <RouterLink to="/settings/teams/new">
                 <Plus class="h-4 w-4" />
-                Create resource group
+                Create team
               </RouterLink>
             </Button>
           </template>
 
-          <template #cell-group_name="{ row }">
-            <div class="font-medium text-slate-900">{{ row.group_name }}</div>
-            <div class="mt-1 text-xs text-slate-500">Group ID {{ row.group_id }}</div>
+          <template #cell-team_name="{ row }">
+            <div class="font-medium text-slate-900">{{ row.team_name }}</div>
+            <div class="mt-1 text-xs text-slate-500">Group ID {{ row.team_id }}</div>
           </template>
 
           <template #cell-user_count="{ value }">
@@ -288,18 +287,18 @@ watch(searchQuery, () => {
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-2">
               <Button
-                v-if="canViewResourceGroups || canEditResourceGroups"
+                v-if="canViewTeams || canEditTeams"
                 as-child
                 size="sm"
                 variant="outline"
               >
-                <RouterLink :to="`/settings/resource-groups/${row.group_id}`">Open</RouterLink>
+                <RouterLink :to="`/settings/teams/${row.team_id}`">Open</RouterLink>
               </Button>
               <Button
-                v-if="canDeleteResourceGroups"
+                v-if="canDeleteTeams"
                 size="sm"
                 variant="ghost"
-                @click="removeResourceGroupById(Number(row.group_id))"
+                @click="removeTeamById(Number(row.team_id))"
               >
                 Delete
               </Button>

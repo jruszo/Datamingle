@@ -119,7 +119,7 @@ const filteredInstances = computed(() => {
     return rows
   }
   return rows.filter((instance) =>
-    instance.resource_groups.some((group) => group.group_id === groupId),
+    instance.teams.some((group) => group.team_id === groupId),
   )
 })
 
@@ -239,7 +239,7 @@ async function submitWorkflowForm() {
     return
   }
   if (!form.groupId) {
-    formError.value = 'Choose a resource group first.'
+    formError.value = 'Choose a team first.'
     return
   }
   if (!form.instanceId) {
@@ -267,7 +267,7 @@ async function submitWorkflowForm() {
         workflow: {
           workflow_name: form.workflowName.trim(),
           demand_url: form.demandUrl.trim() || undefined,
-          group_id: Number(form.groupId),
+          team_id: Number(form.groupId),
           db_name: form.dbName.trim(),
           instance: Number(form.instanceId),
           is_offline_export: 0,
@@ -387,15 +387,15 @@ onMounted(async () => {
               </div>
 
               <div class="space-y-2">
-                <label class="text-sm font-medium text-slate-700" for="workflow-group">Resource group</label>
+                <label class="text-sm font-medium text-slate-700" for="workflow-group">Team</label>
                 <select id="workflow-group" v-model="form.groupId" :class="selectClass" :disabled="metadataLoading">
                   <option value="">Select group</option>
                   <option
-                    v-for="group in metadata?.resource_groups ?? []"
-                    :key="group.group_id"
-                    :value="`${group.group_id}`"
+                    v-for="group in metadata?.teams ?? []"
+                    :key="group.team_id"
+                    :value="`${group.team_id}`"
                   >
-                    {{ group.group_name }}
+                    {{ group.team_name }}
                   </option>
                 </select>
               </div>

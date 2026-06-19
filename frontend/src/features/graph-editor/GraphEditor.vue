@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
+  applyMetricsFilters,
+  metricsFiltersSelector,
+  type MetricsFilter,
+} from '@/features/metrics/filters'
+import {
   Bot,
   Check,
   Copy,
@@ -62,11 +67,13 @@ const props = withDefaults(
     variableValues?: Record<string, string[]>
     contextMetric?: string
     showFooter?: boolean
+    metricsFilters?: MetricsFilter[]
   }>(),
   {
     variableValues: () => ({}),
     contextMetric: '',
     showFooter: false,
+    metricsFilters: () => [],
   },
 )
 
@@ -143,7 +150,7 @@ async function loadCatalog() {
   catalogLoading.value = true
   try {
     const [names, labels, metadata] = await Promise.all([
-      fetchMetricNames(props.token, '', 300),
+      fetchMetricNames(props.token, '', 300, metricsFiltersSelector(props.metricsFilters)),
       fetchMetricLabelNames(props.token),
       fetchMetricMetadata('', props.token),
     ])
@@ -161,7 +168,11 @@ async function loadBuilderMetric(metric: string) {
     return
   }
   try {
-    metricSeries.value = await fetchMetricSeries(metric, props.token)
+    metricSeries.value = await fetchMetricSeries(
+      metric,
+      props.token,
+      metricsFiltersSelector(props.metricsFilters),
+    )
   } catch {
     metricSeries.value = []
   }
@@ -237,7 +248,12 @@ function scheduleMetricSearch(value: string) {
   metricNames.value = []
   metricSearchTimer = window.setTimeout(async () => {
     try {
-      const names = await fetchMetricNames(props.token, search, 100)
+      const names = await fetchMetricNames(
+        props.token,
+        search,
+        100,
+        metricsFiltersSelector(props.metricsFilters),
+      )
       if (requestId === metricSearchRequestId) {
         metricNames.value = names
       }
@@ -371,7 +387,10 @@ async function runQueries(refIds = enabledQueries.value.map((query) => query.ref
       const started = performance.now()
       try {
         const { start, end } = resolveTimeRange(props.timeRange)
-        const resolvedQuery = substituteDashboardVariables(query.query, props.variableValues)
+        const resolvedQuery = applyMetricsFilters(
+          substituteDashboardVariables(query.query, props.variableValues),
+          props.metricsFilters,
+        )
         const response = await queryMetricRange(
           resolvedQuery,
           start,

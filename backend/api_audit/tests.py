@@ -108,8 +108,8 @@ class AuditApiTests(TestCase):
         )
         SqlWorkflow.objects.create(
             workflow_name="Create accounts table",
-            group_id=1,
-            group_name="DBA",
+            team_id=1,
+            team_name="DBA",
             instance=instance,
             db_name="appdb",
             syntax_type=1,
@@ -134,8 +134,8 @@ class AuditApiTests(TestCase):
     def test_workflow_operation_logs_resolve_by_workflow_id(self):
         self.add_audit_permission()
         workflow_audit = WorkflowAudit.objects.create(
-            group_id=1,
-            group_name="DBA",
+            team_id=1,
+            team_name="DBA",
             workflow_id=42,
             workflow_type=WorkflowType.SQL_REVIEW,
             workflow_title="Workflow",

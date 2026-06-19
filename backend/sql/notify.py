@@ -19,13 +19,13 @@ from sql.models import (
     QueryPrivilegesApply,
     Users,
     SqlWorkflow,
-    ResourceGroup,
+    Team,
     ArchiveConfig,
     WorkflowAudit,
     WorkflowAuditDetail,
     SqlWorkflowContent,
 )
-from sql.utils.resource_group import auth_group_users
+from sql.utils.team import auth_group_users
 from sql.utils.workflow_audit import Audit, AuditV2
 from api_archives.serializers import ArchiveConfigSerializer
 from api_instances.serializers import InstanceSerializer
@@ -149,7 +149,7 @@ class LegacyRender(Notifier):
         status = self.audit.current_status
         workflow_title = self.audit.workflow_title
         workflow_from = self.audit.create_user_display
-        group_name = self.audit.group_name
+        team_name = self.audit.team_name
         # Get current approver and approval flow.
         audit_handler = AuditV2(workflow=self.workflow, audit=self.audit)
         review_info = audit_handler.get_review_info()
@@ -202,8 +202,8 @@ class LegacyRender(Notifier):
             msg_title = "[{}]New Workflow Request#{}".format(
                 workflow_type_display, audit_id
             )
-            # Send to users in auth groups for this resource group.
-            msg_to = auth_group_users([self.audit.current_audit], self.audit.group_id)
+            # Send to users in auth groups for this team.
+            msg_to = auth_group_users([self.audit.current_audit], self.audit.team_id)
             # Message content
             msg_content = """Created At: {}
 Requester: {}
@@ -217,7 +217,7 @@ Workflow URL: {}
 Workflow Preview: {}""".format(
                 workflow_detail.create_time.strftime("%Y-%m-%d %H:%M:%S"),
                 workflow_from,
-                group_name,
+                team_name,
                 instance,
                 db_name,
                 review_info.readable_info,
@@ -236,7 +236,7 @@ Workflow Preview: {}""".format(
             msg_content = """Created At: {}\nRequester: {}\nGroup: {}\nTarget Instance: {}\nDatabase: {}\nApproval Flow: {}\nWorkflow Name: {}\nWorkflow URL: {}\nWorkflow Preview: {}\n""".format(
                 workflow_detail.create_time.strftime("%Y-%m-%d %H:%M:%S"),
                 workflow_from,
-                group_name,
+                team_name,
                 instance,
                 db_name,
                 review_info.readable_info,
@@ -263,15 +263,15 @@ Workflow Preview: {}""".format(
             msg_title = "[{}]Workflow Cancelled by Submitter#{}".format(
                 workflow_type_display, audit_id
             )
-            # Send to users in all auth groups for this resource group.
+            # Send to users in all auth groups for this team.
             msg_to = auth_group_users(
-                self.audit.audit_auth_groups.split(","), self.audit.group_id
+                self.audit.audit_auth_groups.split(","), self.audit.team_id
             )
             # Message content
             msg_content = """Created At: {}\nRequester: {}\nGroup: {}\nTarget Instance: {}\nDatabase: {}\nWorkflow Name: {}\nWorkflow URL: {}\nCancellation Reason: {}""".format(
                 workflow_detail.create_time.strftime("%Y-%m-%d %H:%M:%S"),
                 workflow_from,
-                group_name,
+                team_name,
                 instance,
                 db_name,
                 workflow_title,
@@ -306,7 +306,7 @@ Workflow Preview: {}""".format(
         )
         msg_content = f"""Created At: {self.workflow.create_time.strftime("%Y-%m-%d %H:%M:%S")}
 Requester: {self.workflow.engineer_display}
-Group: {self.workflow.group_name}
+Group: {self.workflow.team_name}
 Target Instance: {self.workflow.instance.instance_name}
 Database: {self.workflow.db_name}
 Approval Flow: {review_info.readable_info}
@@ -316,7 +316,7 @@ Workflow Preview: {preview}"""
         # Email submitter and copy DBA.
         msg_to = Users.objects.filter(username=self.workflow.engineer)
         msg_cc = auth_group_users(
-            auth_group_names=["DBA"], group_id=self.workflow.group_id
+            auth_group_names=["DBA"], team_id=self.workflow.team_id
         )
         self.messages.append(LegacyMessage(msg_title, msg_content, msg_to, msg_cc))
         # DDL notification
@@ -331,7 +331,7 @@ Workflow Preview: {preview}"""
                     audit_id
                 )
                 msg_content = f"""Requester: {Users.objects.get(username=self.workflow.engineer).display}
-Change Group: {self.workflow.group_name}
+Change Group: {self.workflow.team_name}
 Change Instance: {self.workflow.instance.instance_name}
 Change Database: {self.workflow.db_name}
 Workflow Name: {self.workflow.workflow_name}
@@ -357,9 +357,7 @@ class FeishuWebhookNotifier(LegacyRender):
     sys_config_key: str = "feishu_webhook"
 
     def send(self):
-        feishu_webhook = ResourceGroup.objects.get(
-            group_id=self.audit.group_id
-        ).feishu_webhook
+        feishu_webhook = Team.objects.get(team_id=self.audit.team_id).feishu_webhook
         if not feishu_webhook:
             return
         msg_sender = MsgSender()
@@ -392,9 +390,7 @@ class QywxWebhookNotifier(LegacyRender):
     sys_config_key: str = "qywx_webhook"
 
     def send(self):
-        qywx_webhook = ResourceGroup.objects.get(
-            group_id=self.audit.group_id
-        ).qywx_webhook
+        qywx_webhook = Team.objects.get(team_id=self.audit.team_id).qywx_webhook
         if not qywx_webhook:
             return
         msg_sender = MsgSender()

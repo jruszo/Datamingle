@@ -114,19 +114,22 @@ const profileRows = computed(() => {
     return []
   }
 
+  const groups = profile.groups ?? []
+  const teams = profile.teams ?? []
+
   return [
     { label: 'User', value: profile.username },
     { label: 'Display', value: profile.display || '-' },
     { label: 'Email', value: profile.email || '-' },
     {
       label: 'Groups',
-      value: profile.groups.length > 0 ? profile.groups.map((group) => group.name).join(', ') : '-',
+      value: groups.length > 0 ? groups.map((group) => group.name).join(', ') : '-',
     },
     {
-      label: 'Resource Groups',
+      label: 'Teams',
       value:
-        profile.resource_groups.length > 0
-          ? profile.resource_groups.map((group) => group.group_name).join(', ')
+        teams.length > 0
+          ? teams.map((team) => team.team_name).join(', ')
           : '-',
     },
   ]

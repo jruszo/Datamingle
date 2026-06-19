@@ -13,10 +13,10 @@ from django.utils import timezone
 from django.conf import settings
 
 from sql.engines.models import ReviewResult
-from sql.utils.resource_group import (
-    access_role_label,
-    normalize_access_role,
-    normalize_access_role_sequence,
+from sql.utils.team import (
+    permission_group_label,
+    normalize_permission_group,
+    normalize_permission_group_sequence,
     roles_at_or_below,
     user_has_resource_role,
 )
@@ -26,13 +26,13 @@ from sql.models import (
     WorkflowAuditDetail,
     WorkflowAuditSetting,
     WorkflowLog,
-    ResourceGroup,
+    Team,
     SqlWorkflow,
     QueryPrivilegesApply,
     PermissionRequest,
     Users,
     ArchiveConfig,
-    ResourceGroupMembership,
+    TeamMembership,
 )
 from common.config import SysConfig
 from sql.utils.sql_utils import remove_comments
@@ -55,7 +55,7 @@ class ReviewRole:
 
     @property
     def name(self):
-        return access_role_label(self.code)
+        return permission_group_label(self.code)
 
 
 @dataclass
@@ -111,7 +111,7 @@ class ReviewInfo:
 @dataclass
 class AuditSetting:
     """
-    `audit_auth_groups` are resource access role codes.
+    `audit_auth_groups` are resource permission group codes.
     """
 
     audit_auth_groups: List = field(default_factory=list)
@@ -133,13 +133,13 @@ def reviewable_audit_ids(user, workflow_type=None):
         return list(queryset.values_list("audit_id", flat=True))
 
     filters = Q()
-    for membership in ResourceGroupMembership.objects.filter(
+    for membership in TeamMembership.objects.filter(
         user=user,
-        resource_group__is_deleted=0,
+        team__is_deleted=0,
     ):
         filters |= Q(
-            group_id=membership.resource_group_id,
-            current_audit__in=roles_at_or_below(membership.access_role),
+            team_id=membership.team_id,
+            current_audit__in=roles_at_or_below(membership.permission_level),
         )
     if not filters:
         return []
@@ -175,8 +175,8 @@ class AuditV2:
     audit: WorkflowAudit = None
     workflow_type: WorkflowType = WorkflowType.SQL_REVIEW
     # ArchiveConfig does not contain these two fields, so they are required.
-    resource_group: str = ""
-    resource_group_id: int = 0
+    team: str = ""
+    team_id: int = 0
 
     def __post_init__(self):
         if not self.workflow:
@@ -185,22 +185,20 @@ class AuditV2:
             self.get_workflow()
         self.workflow_type = self.workflow.workflow_type
         if isinstance(self.workflow, SqlWorkflow):
-            self.resource_group = self.workflow.group_name
-            self.resource_group_id = self.workflow.group_id
+            self.team = self.workflow.team_name
+            self.team_id = self.workflow.team_id
         elif isinstance(self.workflow, ArchiveConfig):
             try:
-                group_in_db = ResourceGroup.objects.get(group_name=self.resource_group)
-                self.resource_group_id = group_in_db.group_id
-            except ResourceGroup.DoesNotExist:
-                raise AuditException(
-                    f"Invalid parameter: resource group {self.resource_group} not found"
-                )
+                group_in_db = Team.objects.get(team_name=self.team)
+                self.team_id = group_in_db.team_id
+            except Team.DoesNotExist:
+                raise AuditException(f"Invalid parameter: team {self.team} not found")
         elif isinstance(self.workflow, QueryPrivilegesApply):
-            self.resource_group = self.workflow.group_name
-            self.resource_group_id = self.workflow.group_id
+            self.team = self.workflow.team_name
+            self.team_id = self.workflow.team_id
         elif isinstance(self.workflow, PermissionRequest):
-            self.resource_group = self.workflow.group_name
-            self.resource_group_id = self.workflow.group_id
+            self.team = self.workflow.team_name
+            self.team_id = self.workflow.team_id
         # This may fail to get an approval flow for new workflows; do not raise.
         self.get_audit_info()
         # Prevent explicit `None` passed from `get_auditor`.
@@ -214,21 +212,23 @@ class AuditV2:
             audit_auth_group = "No approval required"
         else:
             audit_auth_group = "->".join(
-                access_role_label(role)
-                for role in normalize_access_role_sequence(self.audit.audit_auth_groups)
+                permission_group_label(role)
+                for role in normalize_permission_group_sequence(
+                    self.audit.audit_auth_groups
+                )
             )
         if self.audit.current_audit == "-1":
             current_audit_auth_group = None
         else:
-            current_audit_auth_group = access_role_label(self.audit.current_audit)
+            current_audit_auth_group = permission_group_label(self.audit.current_audit)
         return audit_auth_group, current_audit_auth_group
 
     def get_workflow(self):
         """Try to get workflow from audit."""
         self.workflow = self.audit.get_workflow()
         if self.audit.workflow_type == WorkflowType.ARCHIVE:
-            self.resource_group = self.audit.group_name
-            self.resource_group_id = self.audit.group_id
+            self.team = self.audit.team_name
+            self.team_id = self.audit.team_id
 
     def is_auto_reject(self):
         """Whether system should auto-reject this workflow."""
@@ -310,13 +310,13 @@ class AuditV2:
             WorkflowType.QUERY,
             WorkflowType.ACCESS_REQUEST,
         ]:
-            group_id = self.workflow.group_id
+            team_id = self.workflow.team_id
         else:
             # ArchiveConfig
-            group_id = self.resource_group_id
+            team_id = self.team_id
         try:
             workflow_audit_setting = WorkflowAuditSetting.objects.get(
-                workflow_type=self.workflow_type, group_id=group_id
+                workflow_type=self.workflow_type, team_id=team_id
             )
         except WorkflowAuditSetting.DoesNotExist:
             raise AuditException(
@@ -325,7 +325,7 @@ class AuditV2:
         return AuditSetting(
             auto_pass=self.is_auto_review(),
             auto_reject=self.is_auto_reject(),
-            audit_auth_groups=normalize_access_role_sequence(
+            audit_auth_groups=normalize_permission_group_sequence(
                 workflow_audit_setting.audit_auth_groups
             ),
         )
@@ -345,29 +345,29 @@ class AuditV2:
 
         if self.workflow_type == WorkflowType.QUERY:
             workflow_title = self.workflow.title
-            group_id = self.workflow.group_id
-            group_name = self.workflow.group_name
+            team_id = self.workflow.team_id
+            team_name = self.workflow.team_name
             create_user = self.workflow.user_name
             create_user_display = self.workflow.user_display
             self.workflow.audit_auth_groups = audit_setting.audit_auth_group_in_db
         elif self.workflow_type == WorkflowType.ACCESS_REQUEST:
             workflow_title = self.workflow.title
-            group_id = self.workflow.group_id
-            group_name = self.workflow.group_name
+            team_id = self.workflow.team_id
+            team_name = self.workflow.team_name
             create_user = self.workflow.user_name
             create_user_display = self.workflow.user_display
             self.workflow.audit_auth_groups = audit_setting.audit_auth_group_in_db
         elif self.workflow_type == WorkflowType.SQL_REVIEW:
             workflow_title = self.workflow.workflow_name
-            group_id = self.workflow.group_id
-            group_name = self.workflow.group_name
+            team_id = self.workflow.team_id
+            team_name = self.workflow.team_name
             create_user = self.workflow.engineer
             create_user_display = self.workflow.engineer_display
             self.workflow.audit_auth_groups = audit_setting.audit_auth_group_in_db
         elif self.workflow_type == WorkflowType.ARCHIVE:
             workflow_title = self.workflow.title
-            group_id = self.resource_group_id
-            group_name = self.resource_group
+            team_id = self.team_id
+            team_name = self.team
             create_user = self.workflow.user_name
             create_user_display = self.workflow.user_display
             self.workflow.audit_auth_groups = audit_setting.audit_auth_group_in_db
@@ -377,8 +377,8 @@ class AuditV2:
             )
         self.workflow.save()
         self.audit = WorkflowAudit(
-            group_id=group_id,
-            group_name=group_name,
+            team_id=team_id,
+            team_name=team_name,
             workflow_id=self.workflow.pk,
             workflow_type=self.workflow_type,
             workflow_title=workflow_title,
@@ -481,10 +481,15 @@ class AuditV2:
                 raise AuditException(
                     "Current configuration forbids reviewing your own workflow"
                 )
-            current_role = normalize_access_role(self.audit.current_audit)
+            current_role = normalize_permission_group(self.audit.current_audit)
             if not current_role:
                 raise AuditException("Current review role is not configured")
-            if not user_has_resource_role(actor, self.resource_group_id, current_role):
+            if not TeamMembership.objects.filter(
+                user=actor,
+                team_id=self.team_id,
+                permission_level_id=current_role,
+                team__is_deleted=0,
+            ).exists():
                 raise AuditException(
                     "User is not in the current resource role review node"
                 )
@@ -564,7 +569,7 @@ class AuditV2:
         if self.audit.current_audit == "-1":
             operation_info = f"Approval remark: {remark}, no next approval"
         else:
-            next_group_name = access_role_label(self.audit.current_audit)
+            next_group_name = permission_group_label(self.audit.current_audit)
             operation_info = (
                 f"Approval remark: {remark}, next approval: {next_group_name}"
             )
@@ -641,8 +646,8 @@ class AuditV2:
         self.get_audit_info()
         review_nodes = []
         has_met_current_node = False
-        current_node_role = normalize_access_role(self.audit.current_audit)
-        roles = normalize_access_role_sequence(self.audit.audit_auth_groups)
+        current_node_role = normalize_permission_group(self.audit.current_audit)
+        roles = normalize_permission_group_sequence(self.audit.audit_auth_groups)
         if not roles:
             review_nodes.append(
                 ReviewNode(
@@ -729,30 +734,36 @@ class Audit(object):
 
     # Get audit settings by group and workflow type.
     @staticmethod
-    def settings(group_id, workflow_type):
+    def settings(team_id, workflow_type):
         try:
             raw_roles = WorkflowAuditSetting.objects.get(
-                workflow_type=workflow_type, group_id=group_id
+                workflow_type=workflow_type, team_id=team_id
             ).audit_auth_groups
-            return ",".join(normalize_access_role_sequence(raw_roles))
+            return ",".join(
+                str(group_id)
+                for group_id in normalize_permission_group_sequence(raw_roles)
+            )
         except Exception:
             return None
 
     # Update or create settings.
     @staticmethod
-    def change_settings(group_id, workflow_type, audit_auth_groups):
-        audit_auth_groups = ",".join(normalize_access_role_sequence(audit_auth_groups))
+    def change_settings(team_id, workflow_type, audit_auth_groups):
+        audit_auth_groups = ",".join(
+            str(group_id)
+            for group_id in normalize_permission_group_sequence(audit_auth_groups)
+        )
         try:
             WorkflowAuditSetting.objects.get(
-                workflow_type=workflow_type, group_id=group_id
+                workflow_type=workflow_type, team_id=team_id
             )
             WorkflowAuditSetting.objects.filter(
-                workflow_type=workflow_type, group_id=group_id
+                workflow_type=workflow_type, team_id=team_id
             ).update(audit_auth_groups=audit_auth_groups)
         except Exception:
             inset = WorkflowAuditSetting()
-            inset.group_id = group_id
-            inset.group_name = ResourceGroup.objects.get(group_id=group_id).group_name
+            inset.team_id = team_id
+            inset.team_name = Team.objects.get(team_id=team_id).team_name
             inset.audit_auth_groups = audit_auth_groups
             inset.workflow_type = workflow_type
             inset.save()
@@ -763,7 +774,7 @@ class Audit(object):
         audit_info = WorkflowAudit.objects.get(
             workflow_id=workflow_id, workflow_type=workflow_type
         )
-        group_id = audit_info.group_id
+        team_id = audit_info.team_id
         result = False
 
         def get_workflow_applicant(workflow_id, workflow_type):
@@ -791,10 +802,15 @@ class Audit(object):
             return result
         # Only workflows in waiting status are reviewable.
         if audit_info.current_status == WorkflowStatus.WAITING:
-            if user.is_superuser or user_has_resource_role(
-                user,
-                group_id,
-                normalize_access_role(audit_info.current_audit),
+            current_group_id = normalize_permission_group(audit_info.current_audit)
+            if user.is_superuser or (
+                current_group_id
+                and TeamMembership.objects.filter(
+                    user=user,
+                    team_id=team_id,
+                    permission_level_id=current_group_id,
+                    team__is_deleted=0,
+                ).exists()
             ):
                 result = True
         return result
@@ -835,8 +851,8 @@ def get_auditor(
     audit: WorkflowAudit = None,
     workflow_type: WorkflowType = WorkflowType.SQL_REVIEW,
     # ArchiveConfig does not contain these two fields, so they are required.
-    resource_group: str = "",
-    resource_group_id: int = 0,
+    team: str = "",
+    team_id: int = 0,
 ) -> AuditV2:
     current_auditor = settings.CURRENT_AUDITOR
     module, o = current_auditor.split(":")
@@ -846,6 +862,6 @@ def get_auditor(
         workflow_type=workflow_type,
         sys_config=sys_config,
         audit=audit,
-        resource_group=resource_group,
-        resource_group_id=resource_group_id,
+        team=team,
+        team_id=team_id,
     )

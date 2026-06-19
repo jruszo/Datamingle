@@ -25,8 +25,8 @@ class TestMssql(TestCase):
         cls.engine = MssqlEngine(instance=cls.ins1)
         cls.wf = SqlWorkflow.objects.create(
             workflow_name="some_name",
-            group_id=1,
-            group_name="g1",
+            team_id=1,
+            team_name="g1",
             engineer_display="",
             audit_auth_groups="some_group",
             create_time=datetime.now() - timedelta(days=1),

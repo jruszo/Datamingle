@@ -1,19 +1,17 @@
+import re
+
 from django.db import transaction
 from django.db.models import Count, Prefetch, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, permissions, serializers, status, views
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from api_agents.dispatch import send_agent_message
 from api_agents.models import AgentNodeAssignment
 from api_agents.models import AgentStatus
-from api_agents.models import AgentCommandType
 from api_agents.services import (
-    AgentCommandDispatchError,
-    AgentCommandExecutionError,
     has_active_agent_websocket,
-    run_agent_command_sync,
 )
 from api_core.pagination import CustomizedPagination
 from api_core.response import success_response
@@ -28,7 +26,8 @@ from api_infrastructure.serializers import (
     ServiceRecommendationSerializer,
 )
 from sql.models import InfrastructureNode, Instance, ServiceRecommendation
-from sql.utils.resource_group import user_instances
+from sql.inventory import refresh_instance_inventory_snapshot
+from sql.utils.team import user_groups, user_instances
 
 INFRASTRUCTURE_MENU_PERMISSIONS = (
     "sql.menu_infrastructure",
@@ -36,6 +35,9 @@ INFRASTRUCTURE_MENU_PERMISSIONS = (
     "sql.menu_instance_list",
     "api_agents.menu_agent",
 )
+MONITORING_LABEL_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+MAX_MONITORING_LABEL_FILTER_VALUES = 32
+MAX_MONITORING_LABEL_VALUE_LENGTH = 256
 
 
 def _has_permission(user, permission):
@@ -68,6 +70,58 @@ def _require_manage_infrastructure(request):
     raise PermissionDenied(
         "Missing required permission. Need sql.menu_infrastructure or sql.menu_instance."
     )
+
+
+def _parse_monitoring_label_filters(request):
+    filters = []
+    for parameter, values in request.query_params.lists():
+        if parameter.startswith("lf."):
+            mode = "include"
+        elif parameter.startswith("lx."):
+            mode = "exclude"
+        else:
+            continue
+        label = parameter[3:]
+        if not MONITORING_LABEL_NAME_RE.fullmatch(label):
+            raise ValidationError({"labels": f'"{label}" is not a valid label name.'})
+        oversized_values = [
+            value.strip()
+            for value in values
+            if len(value.strip()) > MAX_MONITORING_LABEL_VALUE_LENGTH
+        ]
+        if oversized_values:
+            raise ValidationError(
+                {
+                    "labels": (
+                        f'Values for label "{label}" must be '
+                        f"{MAX_MONITORING_LABEL_VALUE_LENGTH} characters or fewer."
+                    )
+                }
+            )
+        normalized_values = sorted({value.strip() for value in values if value.strip()})
+        if len(normalized_values) > MAX_MONITORING_LABEL_FILTER_VALUES:
+            raise ValidationError(
+                {
+                    "labels": (
+                        f"At most {MAX_MONITORING_LABEL_FILTER_VALUES} values are "
+                        f'allowed for label "{label}".'
+                    )
+                }
+            )
+        if normalized_values:
+            filters.append((label, mode, normalized_values))
+    return filters
+
+
+def _apply_monitoring_label_filters(queryset, filters):
+    for label, mode, values in filters:
+        lookup = {f"monitoring_labels__{label}__in": values}
+        if mode == "include":
+            queryset = queryset.filter(**lookup)
+            continue
+        has_label = Q(monitoring_labels__has_key=label)
+        queryset = queryset.filter(~has_label | (has_label & ~Q(**lookup)))
+    return queryset
 
 
 def _active_node_agent(node):
@@ -149,9 +203,9 @@ class InfrastructureNodeListCreateView(generics.ListAPIView):
             .order_by("name", "id")
         )
         if not request_can_manage_infrastructure(self.request):
-            user_groups = self.request.user.resource_group.filter(is_deleted=0)
+            visible_teams = user_groups(self.request.user)
             queryset = queryset.filter(
-                Q(resource_group__in=user_groups)
+                Q(resource_group__in=visible_teams)
                 | Q(services__id__in=visible_service_ids)
             ).distinct()
         search = self.request.query_params.get("search", "").strip()
@@ -168,6 +222,9 @@ class InfrastructureNodeListCreateView(generics.ListAPIView):
                 | Q(local_agents__name__icontains=search)
                 | Q(local_agents__hostname__icontains=search)
             ).distinct()
+        queryset = _apply_monitoring_label_filters(
+            queryset, _parse_monitoring_label_filters(self.request)
+        )
         return queryset
 
     def get(self, request):
@@ -193,6 +250,38 @@ class InfrastructureNodeListCreateView(generics.ListAPIView):
         )
 
 
+class InfrastructureNodeLabelNamesView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        _require_any_permission(request, *INFRASTRUCTURE_MENU_PERMISSIONS)
+        nodes = InfrastructureNodeListCreateView()
+        nodes.request = request
+        names = set()
+        for labels in nodes.get_queryset().values_list("monitoring_labels", flat=True):
+            names.update((labels or {}).keys())
+        return success_response(data=sorted(names))
+
+
+class InfrastructureNodeLabelValuesView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, label_name):
+        _require_any_permission(request, *INFRASTRUCTURE_MENU_PERMISSIONS)
+        if not MONITORING_LABEL_NAME_RE.fullmatch(label_name):
+            raise ValidationError({"label": "Invalid label name."})
+        nodes = InfrastructureNodeListCreateView()
+        nodes.request = request
+        values = {
+            str(labels[label_name])
+            for labels in nodes.get_queryset().values_list(
+                "monitoring_labels", flat=True
+            )
+            if label_name in (labels or {})
+        }
+        return success_response(data=sorted(values))
+
+
 class InfrastructureNodeDetailView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -208,9 +297,9 @@ class InfrastructureNodeDetailView(views.APIView):
     def ensure_node_visible(self, request, node):
         if request_can_manage_infrastructure(request):
             return
-        user_groups = request.user.resource_group.filter(is_deleted=0)
+        visible_teams = user_groups(request.user)
         if node.resource_group.filter(
-            group_id__in=user_groups.values("group_id")
+            team_id__in=[team.team_id for team in visible_teams]
         ).exists():
             return
         if self.get_visible_services(request).filter(node=node).exists():
@@ -287,24 +376,14 @@ class InfrastructureServiceConnectionTestView(views.APIView):
     def post(self, request, service_id):
         _require_manage_infrastructure(request)
         service = get_object_or_404(Instance, pk=service_id)
-        try:
-            command = run_agent_command_sync(
-                instance=service,
-                command_type=AgentCommandType.CONNECTION_TEST,
-                workflow_type="infrastructure",
-                workflow_id=f"service-test:{service.id}:{timezone.now().timestamp()}",
-                payload={"action": "connection_test", "instance_id": service.id},
-                timeout_seconds=30,
+        result = refresh_instance_inventory_snapshot(instance=service)
+        if not result["success"]:
+            raise serializers.ValidationError(
+                {"errors": result.get("error") or "Agent inventory collection failed."}
             )
-        except (AgentCommandDispatchError, AgentCommandExecutionError) as exc:
-            raise serializers.ValidationError({"errors": str(exc)}) from exc
-
-        message = ""
-        if isinstance(command.result, dict):
-            message = command.result.get("message", "")
         return success_response(
-            data={"message": message or "Connection successful."},
-            detail="Connection test completed.",
+            data={"message": "Connection successful and inventory refreshed."},
+            detail="Agent inventory collection completed.",
         )
 
 

@@ -44,7 +44,7 @@ func NewRunner(cfg config.Config) *Runner {
 		executor:        commands.NewExecutor(),
 		runningCommands: make(map[int64]context.CancelFunc),
 		modules: modules.NewManager(
-			placeholder.New("mysql", []string{"connection.test", "query.execute"}),
+			placeholder.New("mysql", []string{"connection.test", "inventory.collect", "query.execute"}),
 			placeholder.New("metrics", []string{"metrics.export"}),
 			placeholder.New("online_schema", []string{"schema.change"}),
 			monitoring.New(cfg.DataDir, cfg.APIKeyEnv),

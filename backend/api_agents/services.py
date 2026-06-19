@@ -313,6 +313,10 @@ def serialize_assignment(assignment):
             if instance.node_id
             else list(DEFAULT_NODE_EXPORTER_COLLECTORS)
         ),
+        "node_monitoring_labels": (
+            dict(instance.node.monitoring_labels or {}) if instance.node_id else {}
+        ),
+        "service_monitoring_labels": dict(instance.monitoring_labels or {}),
         "service_monitoring_enabled": (
             instance.monitoring_enabled and instance.db_type in ("mysql", "pgsql")
         ),
@@ -662,6 +666,14 @@ def build_node_monitoring_module_config(agent):
             "artifact": serialize_tool_artifact(artifact) if artifact else None,
         },
         "labels": {
+            **{
+                f"dm_{name}": value
+                for name, value in (
+                    agent.local_node.monitoring_labels or {}
+                    if agent.local_node_id
+                    else {}
+                ).items()
+            },
             "agent_id": str(agent.id),
             "agent_name": agent.name,
             "node_id": str(agent.local_node_id or ""),
@@ -714,6 +726,18 @@ def build_service_monitoring_module_config(agent, assignments):
                 "username": assignment["username"],
                 "password": assignment["password"],
                 "database": assignment["database"],
+                "labels": {
+                    **{
+                        f"dm_{name}": value
+                        for name, value in assignment["node_monitoring_labels"].items()
+                    },
+                    **{
+                        f"dm_{name}": value
+                        for name, value in assignment[
+                            "service_monitoring_labels"
+                        ].items()
+                    },
+                },
                 "collectors": assignment["service_monitoring_collectors"],
                 "scrape_profiles": build_scrape_profiles(
                     assignment["service_monitoring_collectors"],

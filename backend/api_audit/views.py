@@ -136,7 +136,7 @@ class SqlWorkflowAuditLogList(generics.ListAPIView):
             OpenApiParameter("search", OpenApiTypes.STR, OpenApiParameter.QUERY),
             OpenApiParameter("status", OpenApiTypes.STR, OpenApiParameter.QUERY),
             OpenApiParameter("syntax_type", OpenApiTypes.INT, OpenApiParameter.QUERY),
-            OpenApiParameter("group_id", OpenApiTypes.INT, OpenApiParameter.QUERY),
+            OpenApiParameter("team_id", OpenApiTypes.INT, OpenApiParameter.QUERY),
             OpenApiParameter("instance_id", OpenApiTypes.INT, OpenApiParameter.QUERY),
             OpenApiParameter("start_date", OpenApiTypes.DATE, OpenApiParameter.QUERY),
             OpenApiParameter("end_date", OpenApiTypes.DATE, OpenApiParameter.QUERY),
@@ -156,7 +156,7 @@ class SqlWorkflowAuditLogList(generics.ListAPIView):
         search = self.request.query_params.get("search", "").strip()
         status_value = self.request.query_params.get("status", "").strip()
         syntax_type = self.request.query_params.get("syntax_type", "").strip()
-        group_id = self.request.query_params.get("group_id", "").strip()
+        team_id = self.request.query_params.get("team_id", "").strip()
         instance_id = self.request.query_params.get("instance_id", "").strip()
         start_date = self.request.query_params.get("start_date", "").strip()
         end_date = self.request.query_params.get("end_date", "").strip()
@@ -165,8 +165,8 @@ class SqlWorkflowAuditLogList(generics.ListAPIView):
             queryset = queryset.filter(status=status_value)
         if syntax_type:
             queryset = queryset.filter(syntax_type=syntax_type)
-        if group_id:
-            queryset = queryset.filter(group_id=group_id)
+        if team_id:
+            queryset = queryset.filter(team_id=team_id)
         if instance_id:
             queryset = queryset.filter(instance_id=instance_id)
 
@@ -179,7 +179,7 @@ class SqlWorkflowAuditLogList(generics.ListAPIView):
                 Q(workflow_name__icontains=search)
                 | Q(engineer__icontains=search)
                 | Q(engineer_display__icontains=search)
-                | Q(group_name__icontains=search)
+                | Q(team_name__icontains=search)
                 | Q(db_name__icontains=search)
                 | Q(instance__instance_name__icontains=search)
             )

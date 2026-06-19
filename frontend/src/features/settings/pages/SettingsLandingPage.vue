@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
-import { Database, Settings2, Tags } from 'lucide-vue-next'
+import { Database, KeyRound, Settings2, Tags } from 'lucide-vue-next'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -22,15 +22,15 @@ const settings = [
   },
 ]
 
-const canManageResourceGroups = computed(() => {
+const canManageTeams = computed(() => {
   if (authStore.currentUser?.is_superuser) {
     return true
   }
   const permissions = authStore.currentUser?.permissions ?? []
   return (
     permissions.includes('sql.menu_system')
-    || permissions.includes('sql.view_resourcegroup')
-    || permissions.includes('sql.resource_group_owner')
+    || permissions.includes('sql.view_team')
+    || permissions.includes('sql.change_team')
   )
 })
 
@@ -55,9 +55,9 @@ const canManageInstanceTags = computed(() => {
         <div class="grid gap-0 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
           <div class="bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.18),_transparent_48%),linear-gradient(135deg,#fffaf0_0%,#f8fafc_48%,#eff6ff_100%)] p-6 lg:p-8">
             <Badge variant="outline" class="border-slate-300 bg-white/80 text-slate-700">Resource Access</Badge>
-            <h2 class="mt-5 text-2xl font-semibold text-slate-900">Resource groups for users and servers</h2>
+            <h2 class="mt-5 text-2xl font-semibold text-slate-900">Teams for users and servers</h2>
             <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-              Use resource groups to bundle Datamingle users and database servers together for scoped access and workflow routing.
+              Use teams to bundle Datamingle users and database servers together for scoped access and workflow routing.
             </p>
           </div>
           <div class="flex flex-col justify-between gap-4 border-t border-slate-200 bg-white p-6 lg:border-l lg:border-t-0 lg:p-8">
@@ -67,31 +67,50 @@ const canManageInstanceTags = computed(() => {
                   <Database class="h-5 w-5" />
                 </div>
                 <div>
-                  <p class="text-sm font-semibold text-slate-900">Resource Groups</p>
+                  <p class="text-sm font-semibold text-slate-900">Teams</p>
                   <p class="text-sm text-slate-500">Scoped user roles for server access.</p>
                 </div>
               </div>
               <p class="mt-4 text-sm leading-6 text-slate-600">
-                Assign query, requester, approver, or owner access per user and resource group.
+                Assign query, requester, approver, or owner access per user and team.
               </p>
             </div>
             <div class="flex items-center justify-between gap-3">
               <Badge
-                :variant="canManageResourceGroups ? 'secondary' : 'outline'"
-                :class="canManageResourceGroups ? 'bg-emerald-100 text-emerald-800' : 'text-slate-500'"
+                :variant="canManageTeams ? 'secondary' : 'outline'"
+                :class="canManageTeams ? 'bg-emerald-100 text-emerald-800' : 'text-slate-500'"
               >
                 <Settings2 class="h-3.5 w-3.5" />
-                {{ canManageResourceGroups ? 'Access available' : 'No access' }}
+                {{ canManageTeams ? 'Access available' : 'No access' }}
               </Badge>
               <Button
-                v-if="canManageResourceGroups"
+                v-if="canManageTeams"
                 as-child
               >
-                <RouterLink to="/settings/resource-groups">Open resource groups</RouterLink>
+                <RouterLink to="/settings/teams">Open teams</RouterLink>
               </Button>
             </div>
           </div>
         </div>
+      </CardContent>
+    </Card>
+
+    <Card v-if="authStore.currentUser?.is_superuser" class="border-slate-200">
+      <CardHeader>
+        <div class="flex items-center gap-3">
+          <div class="rounded-xl bg-slate-900 p-3 text-white">
+            <KeyRound class="h-5 w-5" />
+          </div>
+          <div>
+            <CardTitle>Permission Levels</CardTitle>
+            <CardDescription>Define reusable permissions for team memberships.</CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <Button as-child>
+          <RouterLink to="/settings/permission-levels">Manage permission levels</RouterLink>
+        </Button>
       </CardContent>
     </Card>
 

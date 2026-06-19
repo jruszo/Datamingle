@@ -90,14 +90,14 @@ const canCreateArchives = computed(() => hasPermission('sql.archive_apply'))
 const eligibleGroups = computed(() => {
   const selectedInstanceId = Number(form.instanceId)
   if (!selectedInstanceId) {
-    return metadata.value?.resource_groups ?? []
+    return metadata.value?.teams ?? []
   }
   const instance = metadata.value?.instances.find((record) => record.id === selectedInstanceId)
   if (!instance) {
-    return metadata.value?.resource_groups ?? []
+    return metadata.value?.teams ?? []
   }
-  return (metadata.value?.resource_groups ?? []).filter((group) =>
-    instance.group_ids.includes(group.group_id),
+  return (metadata.value?.teams ?? []).filter((group) =>
+    instance.team_ids.includes(group.team_id),
   )
 })
 
@@ -107,7 +107,7 @@ const eligibleInstances = computed(() => {
     return metadata.value?.instances ?? []
   }
   return (metadata.value?.instances ?? []).filter((instance) =>
-    instance.group_ids.includes(selectedGroupId),
+    instance.team_ids.includes(selectedGroupId),
   )
 })
 
@@ -218,7 +218,7 @@ async function submitArchive() {
     const result = await createArchive(
       {
         title: form.title.trim(),
-        group_id: Number(form.groupId),
+        team_id: Number(form.groupId),
         instance_id: Number(form.instanceId),
         db_name: form.dbName,
         table_name: form.tableName,
@@ -371,15 +371,15 @@ onMounted(async () => {
               </select>
             </div>
             <div class="space-y-2">
-              <label class="text-sm font-medium text-slate-700">Resource group</label>
+              <label class="text-sm font-medium text-slate-700">Team</label>
               <select v-model="form.groupId" data-testid="archive-group" :class="selectClass">
                 <option value="">Select group</option>
                 <option
                   v-for="group in eligibleGroups"
-                  :key="group.group_id"
-                  :value="`${group.group_id}`"
+                  :key="group.team_id"
+                  :value="`${group.team_id}`"
                 >
-                  {{ group.group_name }}
+                  {{ group.team_name }}
                 </option>
               </select>
             </div>
@@ -508,11 +508,11 @@ onMounted(async () => {
                 <div class="flex flex-wrap gap-2">
                   <Badge
                     v-for="node in approvalPreview.review_info"
-                    :key="node.group_name"
+                    :key="node.team_name"
                     variant="outline"
                     class="border-slate-200 bg-white text-slate-700"
                   >
-                    {{ node.group_name }}
+                    {{ node.team_name }}
                   </Badge>
                 </div>
               </template>

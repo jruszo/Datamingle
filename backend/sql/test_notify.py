@@ -16,7 +16,7 @@ from sql.models import (
     QueryPrivilegesApply,
     WorkflowAudit,
     WorkflowAuditDetail,
-    ResourceGroup,
+    Team,
     ArchiveConfig,
 )
 from sql.notify import (
@@ -45,7 +45,7 @@ class TestNotify(TestCase):
 
     def setUp(self):
         self.sys_config = SysConfig()
-        self.aug = Group.objects.create(id=1, name="auth_group")
+        self.aug = Group.objects.create(name="auth_group")
         self.user = User.objects.create(
             username="test_user", display="Display Name", is_active=True
         )
@@ -69,8 +69,8 @@ class TestNotify(TestCase):
         )
         self.wf = SqlWorkflow.objects.create(
             workflow_name="some_name",
-            group_id=1,
-            group_name="g1",
+            team_id=1,
+            team_name="g1",
             engineer=self.user.username,
             engineer_display=self.user.display,
             audit_auth_groups="some_audit_group",
@@ -85,8 +85,8 @@ class TestNotify(TestCase):
             workflow=self.wf, sql_content="some_sql", execute_result=""
         )
         self.query_apply_1 = QueryPrivilegesApply.objects.create(
-            group_id=1,
-            group_name="some_name",
+            team_id=1,
+            team_name="some_name",
             title="some_title1",
             user_name="some_user",
             instance=self.ins,
@@ -101,14 +101,14 @@ class TestNotify(TestCase):
         # WorkflowAudit: one record per workflow.
         # WorkflowAuditDetail: one record per audit step linked to WorkflowAudit.
         self.audit_wf = WorkflowAudit.objects.create(
-            group_id=1,
-            group_name="some_group",
+            team_id=1,
+            team_name="some_group",
             workflow_id=self.wf.id,
             workflow_type=2,
             workflow_title="Request title",
             workflow_remark="Request note",
-            audit_auth_groups="1",
-            current_audit="1",
+            audit_auth_groups=str(self.aug.id),
+            current_audit=str(self.aug.id),
             next_audit="2",
             current_status=0,
             create_user=self.user.username,
@@ -121,8 +121,8 @@ class TestNotify(TestCase):
             remark="Test note",
         )
         self.audit_query = WorkflowAudit.objects.create(
-            group_id=1,
-            group_name="some_group",
+            team_id=1,
+            team_name="some_group",
             workflow_id=self.query_apply_1.apply_id,
             workflow_type=1,
             workflow_title="Request title",
@@ -140,11 +140,11 @@ class TestNotify(TestCase):
             remark="Test query note",
         )
 
-        self.rs = ResourceGroup.objects.create(group_id=1)
+        self.rs = Team.objects.create(team_id=1)
 
         self.archive_apply = ArchiveConfig.objects.create(
             title="Test archive",
-            resource_group=self.rs,
+            team=self.rs,
             src_instance=self.ins,
             src_db_name="foo",
             src_table_name="bar",
@@ -157,8 +157,8 @@ class TestNotify(TestCase):
             user_display=self.user.display,
         )
         self.archive_apply_audit = WorkflowAudit.objects.create(
-            group_id=1,
-            group_name="some_group",
+            team_id=1,
+            team_name="some_group",
             workflow_id=self.archive_apply.id,
             workflow_type=3,
             workflow_title=self.archive_apply.title,
@@ -177,7 +177,7 @@ class TestNotify(TestCase):
         WorkflowAudit.objects.all().delete()
         WorkflowAuditDetail.objects.all().delete()
         ArchiveConfig.objects.all().delete()
-        ResourceGroup.objects.all().delete()
+        Team.objects.all().delete()
 
     def test_empty_notifiers(self):
         with self.settings(ENABLED_NOTIFIERS=()):
@@ -386,12 +386,12 @@ class TestNotify(TestCase):
             notifier.request_data["audit"],
             {
                 "audit_id": self.audit_wf.audit_id,
-                "group_name": "some_group",
+                "team_name": "some_group",
                 "workflow_type": 2,
                 "create_user_display": "",
                 "workflow_title": "Request title",
                 "audit_auth_groups": self.audit_wf.audit_auth_groups,
-                "current_audit": "1",
+                "current_audit": str(self.aug.id),
                 "current_status": 0,
                 "create_time": self.audit_wf.create_time.isoformat(),
             },
@@ -402,8 +402,8 @@ class TestNotify(TestCase):
                 "id": self.wf.id,
                 "workflow_name": "some_name",
                 "demand_url": "",
-                "group_id": 1,
-                "group_name": "g1",
+                "team_id": 1,
+                "team_name": "g1",
                 "db_name": "some_db",
                 "schema_name": "",
                 "syntax_type": 1,

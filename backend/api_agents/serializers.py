@@ -1,7 +1,7 @@
 from django.db import transaction
 from rest_framework import serializers
 
-from sql.utils.resource_group import user_instances
+from sql.utils.team import user_instances
 from api_agents.services import notify_node_config_changed
 from api_agents.models import (
     Agent,

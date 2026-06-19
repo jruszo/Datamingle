@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jruszo/datamingle/agent/internal/client"
@@ -18,6 +19,28 @@ func TestExecuteRejectsUnassignedInstance(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("expected unassigned instance error")
+	}
+}
+
+func TestExecuteSupportsInventoryCollection(t *testing.T) {
+	executor := NewExecutor()
+
+	_, err := executor.Execute(
+		context.Background(),
+		client.AgentCommand{InstanceID: 42, CommandType: "inventory.collect"},
+		client.AgentConfig{Assignments: []client.Assignment{{
+			InstanceID: 42,
+			DBType:     "mysql",
+			Host:       "127.0.0.1",
+			Port:       1,
+		}}},
+	)
+
+	if err == nil {
+		t.Fatal("expected connection error")
+	}
+	if strings.Contains(err.Error(), "unsupported command type") {
+		t.Fatalf("inventory command was not dispatched: %v", err)
 	}
 }
 

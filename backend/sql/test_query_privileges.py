@@ -6,7 +6,7 @@ from django.test import TestCase
 
 import sql.query_privileges
 from common.config import SysConfig
-from sql.models import Instance, QueryPrivileges, QueryPrivilegesApply, ResourceGroup
+from sql.models import Instance, QueryPrivileges, QueryPrivilegesApply, Team
 from sql.tests import User
 
 
@@ -27,10 +27,10 @@ class TestQueryPrivilegesApply(TestCase):
         )
         self.sys_config = SysConfig()
         tomorrow = datetime.today() + timedelta(days=1)
-        self.group = ResourceGroup.objects.create(group_id=1, group_name="group_name")
+        self.group = Team.objects.create(team_id=1, team_name="team_name")
         self.query_apply_1 = QueryPrivilegesApply.objects.create(
-            group_id=self.group.group_id,
-            group_name=self.group.group_name,
+            team_id=self.group.team_id,
+            team_name=self.group.team_name,
             title="some_title1",
             user_name="some_user",
             instance=self.slave,
@@ -42,8 +42,8 @@ class TestQueryPrivilegesApply(TestCase):
             audit_auth_groups="some_audit_group",
         )
         self.query_apply_2 = QueryPrivilegesApply.objects.create(
-            group_id=2,
-            group_name="some_group2",
+            team_id=2,
+            team_name="some_group2",
             title="some_title2",
             user_name="some_user",
             instance=self.slave,
@@ -60,7 +60,7 @@ class TestQueryPrivilegesApply(TestCase):
         self.superuser.delete()
         self.user.delete()
         Instance.objects.all().delete()
-        ResourceGroup.objects.all().delete()
+        Team.objects.all().delete()
         QueryPrivilegesApply.objects.all().delete()
         QueryPrivileges.objects.all().delete()
         self.sys_config.replace(json.dumps({}))

@@ -104,14 +104,14 @@ function invalidateCheck() {
   checkedFingerprint.value = ''
 }
 
-const eligibleGroups = computed(() => submissionMetadata.value?.resource_groups ?? [])
+const eligibleGroups = computed(() => submissionMetadata.value?.teams ?? [])
 const filteredInstances = computed(() => {
   const instances = submissionMetadata.value?.instances ?? []
   const groupId = Number(form.groupId)
   if (!groupId) {
     return instances
   }
-  return instances.filter((instance) => instance.group_ids.includes(groupId))
+  return instances.filter((instance) => instance.team_ids.includes(groupId))
 })
 
 const selectedInstance = computed<WorkflowSubmitInstanceRecord | null>(() => {
@@ -211,8 +211,8 @@ function restoreDraft() {
     return
   }
 
-  if (matchedInstance.group_ids.length === 1) {
-    form.groupId = `${matchedInstance.group_ids[0]}`
+  if (matchedInstance.team_ids.length === 1) {
+    form.groupId = `${matchedInstance.team_ids[0]}`
   }
   form.instanceId = `${matchedInstance.id}`
   form.dbName = draft.dbName?.trim() || ''
@@ -293,7 +293,7 @@ async function submitWorkflow() {
       {
         workflow: {
           workflow_name: form.workflowName.trim(),
-          group_id: Number(form.groupId),
+          team_id: Number(form.groupId),
           db_name: form.dbName,
           schema_name: form.schemaName.trim() || undefined,
           instance: Number(form.instanceId),
@@ -523,11 +523,11 @@ onMounted(async () => {
               </div>
 
               <div class="space-y-2">
-                <label class="text-sm font-medium text-slate-700" for="export-workflow-group">Resource group</label>
+                <label class="text-sm font-medium text-slate-700" for="export-workflow-group">Team</label>
                 <select id="export-workflow-group" v-model="form.groupId" data-testid="export-workflow-group" :class="selectClass" :disabled="submitting">
-                  <option value="">Select a resource group</option>
-                  <option v-for="group in eligibleGroups" :key="group.group_id" :value="group.group_id">
-                    {{ group.group_name }}
+                  <option value="">Select a team</option>
+                  <option v-for="group in eligibleGroups" :key="group.team_id" :value="group.team_id">
+                    {{ group.team_name }}
                   </option>
                 </select>
               </div>
@@ -587,7 +587,7 @@ onMounted(async () => {
           <Card class="border-slate-200">
             <CardHeader>
               <CardTitle>Approval flow</CardTitle>
-              <CardDescription>Preview the configured reviewers for this resource group.</CardDescription>
+              <CardDescription>Preview the configured reviewers for this team.</CardDescription>
             </CardHeader>
             <CardContent class="space-y-3">
               <p v-if="approvalError" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -597,18 +597,18 @@ onMounted(async () => {
                 Loading approval flow...
               </p>
               <p v-else-if="!approvalPreview" class="text-sm text-slate-500">
-                Select a resource group to preview the approval chain.
+                Select a team to preview the approval chain.
               </p>
               <template v-else>
                 <p data-testid="export-approval-preview" class="text-sm text-slate-500">{{ approvalPreview.display }}</p>
                 <div class="flex flex-wrap gap-2">
                   <Badge
                     v-for="(node, index) in approvalPreview.review_info"
-                    :key="`${node.group_name}-${index}`"
+                    :key="`${node.team_name}-${index}`"
                     variant="outline"
                     class="border-slate-200 bg-slate-50 text-slate-700"
                   >
-                    {{ node.group_name }}
+                    {{ node.team_name }}
                   </Badge>
                 </div>
               </template>

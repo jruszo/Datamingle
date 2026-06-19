@@ -18,7 +18,7 @@ def lists(request):
     limit = offset + limit
     search = request.POST.get("search", "")
 
-    # Return only records in the user's resource groups waiting for this reviewer
+    # Return only records in the user's teams waiting for this reviewer
     workflow_audit = WorkflowAudit.objects.filter(
         audit_id__in=reviewable_audit_ids(user, workflow_type=workflow_type or None),
         workflow_title__icontains=search,
@@ -38,7 +38,7 @@ def lists(request):
         "current_status",
         "audit_auth_groups",
         "current_audit",
-        "group_name",
+        "team_name",
     )
 
     # Serialize QuerySet

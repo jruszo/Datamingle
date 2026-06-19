@@ -4,9 +4,9 @@ import re
 from django.db import transaction
 
 from sql.engines.models import ReviewResult
-from sql.models import ResourceAccessRole, SqlWorkflow
+from sql.models import TeamPermissionGroup, SqlWorkflow
 from common.config import SysConfig
-from sql.utils.resource_group import resource_groups_for_role, user_groups
+from sql.utils.team import teams_for_role, user_groups
 from sql.utils.sql_utils import remove_comments
 
 
@@ -14,7 +14,7 @@ def can_execute(user, workflow_id):
     """
     Determine whether the user can execute now.
     User has execution permission in two cases:
-    1. User has resource-group-level execution permission and is in the group.
+    1. User has team-level execution permission and is in the group.
     2. User is the submitter and has execution permission.
     :param user:
     :param workflow_id:
@@ -30,10 +30,10 @@ def can_execute(user, workflow_id):
             "workflow_timingtask",
         ]:
             return False
-    # User has resource-group-level execution permission and is in the group.
-    group_ids = [group.group_id for group in user_groups(user)]
-    if workflow_detail.group_id in group_ids and user.has_perm(
-        "sql.sql_execute_for_resource_group"
+    # User has team-level execution permission and is in the group.
+    group_ids = [group.team_id for group in user_groups(user)]
+    if workflow_detail.team_id in group_ids and user.has_perm(
+        "sql.sql_execute_for_team"
     ):
         result = True
     # User is submitter and has execution permission.
@@ -64,7 +64,7 @@ def can_timingtask(user, workflow_id):
     """
     Determine whether the user can schedule execution now.
     User has scheduling permission in two cases:
-    1. User has resource-group-level execution permission and is in the group.
+    1. User has team-level execution permission and is in the group.
     2. User is the submitter and has execution permission.
     :param user:
     :param workflow_id:
@@ -74,10 +74,10 @@ def can_timingtask(user, workflow_id):
     result = False
     # Only approved and scheduled workflows can be executed.
     if workflow_detail.status in ["workflow_review_pass", "workflow_timingtask"]:
-        # User has resource-group-level execution permission and is in the group.
-        group_ids = [group.group_id for group in user_groups(user)]
-        if workflow_detail.group_id in group_ids and user.has_perm(
-            "sql.sql_execute_for_resource_group"
+        # User has team-level execution permission and is in the group.
+        group_ids = [group.team_id for group in user_groups(user)]
+        if workflow_detail.team_id in group_ids and user.has_perm(
+            "sql.sql_execute_for_team"
         ):
             result = True
         # User is submitter and has execution permission.
@@ -128,19 +128,17 @@ def can_view(user, workflow_id):
     # Superuser can view all workflows.
     if user.is_superuser or user.has_perm("sql.audit_user"):
         result = True
-    # Non-admin users with review permission or resource-group-level execution
+    # Non-admin users with review permission or team-level execution
     # permission can view all workflows in their groups.
-    elif resource_groups_for_role(
-        user, ResourceAccessRole.WORKFLOW_APPROVER
-    ).exists() or user.has_perm("sql.sql_execute_for_resource_group"):
-        # Get user's resource groups first.
-        group_list = resource_groups_for_role(
-            user, ResourceAccessRole.WORKFLOW_APPROVER
-        )
-        if user.has_perm("sql.sql_execute_for_resource_group"):
+    elif teams_for_role(
+        user, TeamPermissionGroup.WORKFLOW_APPROVER
+    ).exists() or user.has_perm("sql.sql_execute_for_team"):
+        # Get user's teams first.
+        group_list = teams_for_role(user, TeamPermissionGroup.WORKFLOW_APPROVER)
+        if user.has_perm("sql.sql_execute_for_team"):
             group_list = user_groups(user)
-        group_ids = [group.group_id for group in group_list]
-        if workflow_detail.group_id in group_ids:
+        group_ids = [group.team_id for group in group_list]
+        if workflow_detail.team_id in group_ids:
             result = True
     # Others can only view workflows submitted by themselves.
     else:

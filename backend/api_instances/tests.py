@@ -1,6 +1,5 @@
-from api_core.legacy_tests import TestInstance
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Permission
+from django.contrib.auth.models import Group, Permission
 from django.test import TestCase, override_settings
 from django.urls import Resolver404, resolve
 import tempfile
@@ -17,8 +16,18 @@ from sql.models import (
     InstanceDatabase,
     ParamHistory,
     ParamTemplate,
-    ResourceGroup,
+    Team,
+    TeamMembership,
 )
+
+
+def assign_user_to_team(user, team):
+    permission_level, _ = Group.objects.get_or_create(name="QA")
+    TeamMembership.objects.update_or_create(
+        user=user,
+        team=team,
+        defaults={"permission_level": permission_level},
+    )
 
 
 class FakeDictionaryResult:
@@ -255,8 +264,8 @@ class DataDictionaryApiTests(TestCase):
         self.user = get_user_model().objects.create_user(
             username="dictionary_user", password="test"
         )
-        self.group = ResourceGroup.objects.create(group_name="Dictionary Group")
-        self.user.resource_group.add(self.group)
+        self.group = Team.objects.create(team_name="Dictionary Group")
+        assign_user_to_team(self.user, self.group)
         self.instance = Instance.objects.create(
             instance_name="dictionary-mysql",
             type="master",
@@ -386,8 +395,8 @@ class InstanceOperationDatabaseApiTests(TestCase):
         self.owner = get_user_model().objects.create_user(
             username="database_owner", password="test", display="Database Owner"
         )
-        self.group = ResourceGroup.objects.create(group_name="Database Group")
-        self.user.resource_group.add(self.group)
+        self.group = Team.objects.create(team_name="Database Group")
+        assign_user_to_team(self.user, self.group)
         self.instance = Instance.objects.create(
             instance_name="ops-mysql",
             type="master",
@@ -509,8 +518,8 @@ class InstanceOperationAccountApiTests(TestCase):
         self.user = get_user_model().objects.create_user(
             username="account_user", password="test"
         )
-        self.group = ResourceGroup.objects.create(group_name="Account Group")
-        self.user.resource_group.add(self.group)
+        self.group = Team.objects.create(team_name="Account Group")
+        assign_user_to_team(self.user, self.group)
         self.instance = Instance.objects.create(
             instance_name="ops-account-mysql",
             type="master",
@@ -824,8 +833,8 @@ class InstanceOperationParamApiTests(TestCase):
         self.user = get_user_model().objects.create_user(
             username="param_user", password="test", display="Param User"
         )
-        self.group = ResourceGroup.objects.create(group_name="Parameter Group")
-        self.user.resource_group.add(self.group)
+        self.group = Team.objects.create(team_name="Parameter Group")
+        assign_user_to_team(self.user, self.group)
         self.instance = Instance.objects.create(
             instance_name="ops-param-mysql",
             type="master",
@@ -998,8 +1007,8 @@ class InstanceOperationDiagnosticApiTests(TestCase):
         self.user = get_user_model().objects.create_user(
             username="diagnostic_user", password="test"
         )
-        self.group = ResourceGroup.objects.create(group_name="Diagnostic Group")
-        self.user.resource_group.add(self.group)
+        self.group = Team.objects.create(team_name="Diagnostic Group")
+        assign_user_to_team(self.user, self.group)
         self.instance = Instance.objects.create(
             instance_name="ops-diagnostic-mysql",
             type="master",

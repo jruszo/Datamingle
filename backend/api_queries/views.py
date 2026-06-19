@@ -28,8 +28,8 @@ from sql.models import (
     QueryLog,
     QueryPrivileges,
     QueryPrivilegesApply,
-    ResourceAccessRole,
-    ResourceGroup,
+    TeamPermissionGroup,
+    Team,
 )
 from sql.notify import notify_for_audit
 from sql.query_privileges import (
@@ -38,13 +38,13 @@ from sql.query_privileges import (
     _tb_priv,
     query_priv_check,
 )
-from sql.utils.resource_group import (
-    resource_groups_for_role,
+from sql.utils.team import (
+    teams_for_role,
     user_groups,
     user_instances,
     user_member_groups,
 )
-from sql.utils.resource_group import (
+from sql.utils.team import (
     has_any_active_instance_grant,
     temp_instance_access_level,
     READ_ACCESS_LEVELS,
@@ -100,7 +100,7 @@ def _require_any_permission(request, *perm_list):
 def _require_query_page_access(request):
     if has_any_active_instance_grant(request.user):
         return
-    if resource_groups_for_role(request.user, ResourceAccessRole.QUERY).exists():
+    if teams_for_role(request.user, TeamPermissionGroup.QUERY).exists():
         return
     _require_any_permission(
         request, "sql.menu_query", "sql.menu_sqlquery", "sql.query_submit"
@@ -716,8 +716,8 @@ class QueryPrivilegesApplyListCreate(views.APIView):
         if user.is_superuser:
             pass
         elif user.has_perm("sql.query_review"):
-            group_ids = [group.group_id for group in user_member_groups(user)]
-            queryset = queryset.filter(group_id__in=group_ids)
+            group_ids = [group.team_id for group in user_member_groups(user)]
+            queryset = queryset.filter(team_id__in=group_ids)
         else:
             queryset = queryset.filter(user_name=user.username)
         queryset = queryset.order_by("-apply_id")
@@ -749,11 +749,9 @@ class QueryPrivilegesApplyListCreate(views.APIView):
             )
 
         try:
-            group = ResourceGroup.objects.get(group_name=data["group_name"])
-        except ResourceGroup.DoesNotExist:
-            raise serializers.ValidationError(
-                {"errors": "Resource group does not exist."}
-            )
+            group = Team.objects.get(team_name=data["team_name"])
+        except Team.DoesNotExist:
+            raise serializers.ValidationError({"errors": "Team does not exist."})
 
         priv_type = data["priv_type"]
         if priv_type == 1:
@@ -791,8 +789,8 @@ class QueryPrivilegesApplyListCreate(views.APIView):
 
         apply_info = QueryPrivilegesApply(
             title=data["title"],
-            group_id=group.group_id,
-            group_name=group.group_name,
+            team_id=group.team_id,
+            team_name=group.team_name,
             audit_auth_groups="",
             user_name=user.username,
             user_display=user.display,
@@ -891,9 +889,9 @@ class QueryPrivilegesList(generics.ListAPIView):
         if user.is_superuser:
             pass
         elif user.has_perm("sql.query_mgtpriv"):
-            group_ids = [group.group_id for group in user_member_groups(user)]
+            group_ids = [group.team_id for group in user_member_groups(user)]
             queryset = queryset.filter(
-                instance__queryprivilegesapply__group_id__in=group_ids
+                instance__queryprivilegesapply__team_id__in=group_ids
             )
         else:
             queryset = queryset.filter(user_name=user.username)

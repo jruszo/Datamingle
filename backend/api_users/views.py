@@ -4,34 +4,40 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from drf_spectacular.utils import extend_schema
 from django.db import transaction
 from django.db.models import Count, Prefetch, Q
+from django.db.models.deletion import ProtectedError
 from django.contrib.auth.models import Group
 from django.http import Http404
 from api_users.serializers import (
     UserManagementReadSerializer,
     UserManagementUpdateSerializer,
     WorkOSUserInvitationSerializer,
-    AccessRoleSerializer,
-    ResourceGroupListSerializer,
-    ResourceGroupDetailSerializer,
-    ResourceGroupUserLookupSerializer,
-    ResourceGroupInstanceLookupSerializer,
+    PermissionLevelSerializer,
+    PermissionLevelWriteSerializer,
+    TeamListSerializer,
+    TeamDetailSerializer,
+    TeamUserLookupSerializer,
+    TeamNodeLookupSerializer,
+    TeamServiceLookupSerializer,
     CurrentUserSerializer,
 )
 from common.auth import init_user
 from common.authenticate.workos import WorkOSAuthClient
+from common.team_permissions import permission_catalog
 from api_core.pagination import CustomizedPagination
 from api_users.filters import UserFilter
 from api_core.response import success_response
-from sql.models import Users, ResourceGroup, Instance, WorkOSDirectoryGroupMembership
 from sql.models import (
-    ResourceAccessRole,
-    ResourceGroupMembership,
-    RESOURCE_ACCESS_ROLE_CATALOG,
+    InfrastructureNode,
+    Instance,
+    Team,
+    TeamMembership,
+    TeamPermissionGroup,
+    Users,
+    WorkflowAuditSetting,
 )
-from sql.utils.resource_group import (
+from sql.utils.team import (
     active_instance_grants,
-    resource_groups_for_role,
-    set_user_resource_memberships,
+    teams_for_role,
     user_groups,
     user_has_resource_role,
 )
@@ -39,24 +45,11 @@ from sql.utils.resource_group import (
 
 def _user_management_prefetches():
     return (
-        Prefetch("groups", queryset=Group.objects.order_by("id")),
         Prefetch(
-            "resource_group",
-            queryset=ResourceGroup.objects.filter(is_deleted=0).order_by("group_id"),
-        ),
-        Prefetch(
-            "resource_group_memberships",
-            queryset=ResourceGroupMembership.objects.select_related("resource_group")
-            .filter(resource_group__is_deleted=0)
-            .order_by("resource_group__group_name", "resource_group_id"),
-        ),
-        Prefetch(
-            "workos_directory_memberships",
-            queryset=WorkOSDirectoryGroupMembership.objects.filter(
-                directory_group__is_deleted=False,
-                directory_group__resource_group__is_deleted=0,
-            ).select_related("directory_group"),
-            to_attr="active_workos_directory_memberships",
+            "team_memberships",
+            queryset=TeamMembership.objects.select_related("team", "permission_level")
+            .filter(team__is_deleted=0)
+            .order_by("team__team_name", "team_id"),
         ),
     )
 
@@ -77,23 +70,21 @@ def _require_superuser(request):
     raise PermissionDenied("Only superusers can access user management.")
 
 
-def _user_can_access_resource_groups(user):
+def _user_can_access_teams(user):
     return (
         user.is_superuser
         or user.has_perm("sql.menu_system")
-        or user.has_perm("sql.view_resourcegroup")
-        or resource_groups_for_role(user, ResourceAccessRole.RESOURCE_OWNER).exists()
+        or user.has_perm("sql.view_team")
+        or teams_for_role(user, TeamPermissionGroup.RESOURCE_OWNER).exists()
     )
 
 
-def _require_resource_group_manager(request, resource_group):
+def _require_team_manager(request, team):
     if request.user.is_superuser or request.user.has_perm("sql.menu_system"):
         return
-    if user_has_resource_role(
-        request.user, resource_group, ResourceAccessRole.RESOURCE_OWNER
-    ):
+    if user_has_resource_role(request.user, team, TeamPermissionGroup.RESOURCE_OWNER):
         return
-    raise PermissionDenied("You do not own this resource group.")
+    raise PermissionDenied("You do not own this team.")
 
 
 def _get_attr(source, name, default=""):
@@ -143,12 +134,6 @@ def _validate_invited_local_user(email):
 def _create_or_update_invited_local_user(
     email,
     display_name,
-    groups,
-    groups_provided,
-    resource_groups,
-    resource_groups_provided,
-    resource_access=None,
-    resource_access_provided=False,
 ):
     user = _validate_invited_local_user(email)
     with transaction.atomic():
@@ -163,22 +148,6 @@ def _create_or_update_invited_local_user(
         elif display_name and user.display != display_name:
             user.display = display_name
             user.save(update_fields=["display"])
-
-        if groups_provided:
-            user.groups.set(groups)
-        if resource_access_provided:
-            set_user_resource_memberships(user, resource_access)
-        elif resource_groups_provided:
-            set_user_resource_memberships(
-                user,
-                [
-                    {
-                        "resource_group": resource_group,
-                        "access_role": ResourceAccessRole.QUERY,
-                    }
-                    for resource_group in resource_groups
-                ],
-            )
 
     return user
 
@@ -209,37 +178,6 @@ class CurrentUser(views.APIView):
     def _serialize_user(user):
         permissions = set(user.get_all_permissions())
         active_instance_access = active_instance_grants(user)
-        if resource_groups_for_role(user, ResourceAccessRole.QUERY).exists():
-            permissions.update(
-                {"sql.menu_query", "sql.menu_sqlquery", "sql.query_submit"}
-            )
-        if resource_groups_for_role(
-            user, ResourceAccessRole.WORKFLOW_REQUESTER
-        ).exists():
-            permissions.update(
-                {
-                    "sql.menu_sqlworkflow",
-                    "sql.sql_submit",
-                    "sql.menu_sqlexportworkflow",
-                    "sql.sqlexport_submit",
-                    "sql.menu_archive",
-                    "sql.archive_apply",
-                }
-            )
-        if resource_groups_for_role(
-            user, ResourceAccessRole.WORKFLOW_APPROVER
-        ).exists():
-            permissions.update(
-                {"sql.sql_review", "sql.archive_review", "sql.query_review"}
-            )
-        if resource_groups_for_role(user, ResourceAccessRole.RESOURCE_OWNER).exists():
-            permissions.update(
-                {
-                    "sql.resource_group_owner",
-                    "sql.view_resourcegroup",
-                    "sql.change_resourcegroup",
-                }
-            )
         if active_instance_access.exists():
             permissions.update(
                 {"sql.menu_query", "sql.menu_sqlquery", "sql.query_submit"}
@@ -248,7 +186,6 @@ class CurrentUser(views.APIView):
             access_level__in=["query_dml", "query_dml_ddl"]
         ).exists():
             permissions.update({"sql.menu_sqlworkflow", "sql.sql_submit"})
-
         payload = {
             "id": user.id,
             "username": user.username,
@@ -256,17 +193,20 @@ class CurrentUser(views.APIView):
             "email": user.email or "",
             "avatar_url": user.avatar_url or "",
             "is_workos_managed": bool(user.workos_user_id),
-            "is_directory_managed": bool(user.workos_directory_managed),
             "is_superuser": user.is_superuser,
             "is_staff": user.is_staff,
             "is_active": user.is_active,
-            "groups": list(user.groups.values("id", "name").order_by("id")),
-            "resource_groups": list(
-                ResourceGroup.objects.filter(
-                    group_id__in=[group.group_id for group in user_groups(user)]
+            "groups": list(
+                user.groups.filter(name="superadmin")
+                .values("id", "name")
+                .order_by("id")
+            ),
+            "teams": list(
+                Team.objects.filter(
+                    team_id__in=[team.team_id for team in user_groups(user)]
                 )
-                .values("group_id", "group_name")
-                .order_by("group_id")
+                .values("team_id", "team_name")
+                .order_by("team_id")
             ),
             "permissions": sorted(permissions),
         }
@@ -276,7 +216,7 @@ class CurrentUser(views.APIView):
     @extend_schema(
         summary="Current User Context",
         responses={200: CurrentUserSerializer},
-        description="Get current user profile, groups, resource groups, permissions, and 2FA methods.",
+        description="Get current user profile, groups, teams, permissions, and 2FA methods.",
     )
     def get(self, request):
         return success_response(data=self._serialize_user(request.user))
@@ -356,13 +296,6 @@ class WorkOSUserInvitation(views.APIView):
 
         email = serializer.validated_data["email"]
         display = serializer.validated_data.get("display", "")
-        groups_provided = "groups" in serializer.validated_data
-        resource_groups_provided = "resource_groups" in serializer.validated_data
-        resource_access_provided = "resource_access" in serializer.validated_data
-        groups = serializer.validated_data.get("groups", [])
-        resource_groups = serializer.validated_data.get("resource_groups", [])
-        resource_access = serializer.validated_data.get("resource_access", [])
-
         _validate_invited_local_user(email)
         invitation = WorkOSAuthClient().send_invitation(
             email=email,
@@ -371,12 +304,6 @@ class WorkOSUserInvitation(views.APIView):
         local_user = _create_or_update_invited_local_user(
             email=email,
             display_name=display,
-            groups=groups,
-            groups_provided=groups_provided,
-            resource_groups=resource_groups,
-            resource_groups_provided=resource_groups_provided,
-            resource_access=resource_access,
-            resource_access_provided=resource_access_provided,
         )
 
         return success_response(
@@ -389,17 +316,112 @@ class WorkOSUserInvitation(views.APIView):
         )
 
 
-class AccessRoleCatalog(views.APIView):
+def _serialize_permission_level(group):
+    permissions = sorted(
+        f"{permission.content_type.app_label}.{permission.codename}"
+        for permission in group.permissions.filter(
+            content_type__app_label="sql"
+        ).select_related("content_type")
+    )
+    return {
+        "id": group.id,
+        "name": group.name,
+        "permissions": permissions,
+        "membership_count": group.team_memberships.count(),
+    }
+
+
+def _approval_level_is_referenced(group):
+    group_id = str(group.id)
+    return any(
+        group_id
+        in {
+            token.strip()
+            for token in setting.audit_auth_groups.split(",")
+            if token.strip()
+        }
+        for setting in WorkflowAuditSetting.objects.exclude(audit_auth_groups="")
+    )
+
+
+class PermissionLevelList(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
-    serializer_class = AccessRoleSerializer
+    serializer_class = PermissionLevelSerializer
 
     @extend_schema(
-        summary="Resource Access Role Catalog",
-        responses={200: AccessRoleSerializer(many=True)},
-        description="List fixed resource access roles available for assignments.",
+        summary="Permission Levels",
+        responses={200: PermissionLevelSerializer(many=True)},
     )
     def get(self, request):
-        return success_response(data=list(RESOURCE_ACCESS_ROLE_CATALOG))
+        levels = (
+            Group.objects.exclude(name="superadmin")
+            .prefetch_related("permissions__content_type")
+            .order_by("name", "id")
+        )
+        return success_response(
+            data=[_serialize_permission_level(level) for level in levels]
+        )
+
+    @extend_schema(request=PermissionLevelWriteSerializer)
+    def post(self, request):
+        _require_superuser(request)
+        serializer = PermissionLevelWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        level = serializer.save()
+        return success_response(
+            data=_serialize_permission_level(level),
+            status_code=status.HTTP_201_CREATED,
+        )
+
+
+class PermissionLevelDetail(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self, pk):
+        try:
+            return (
+                Group.objects.exclude(name="superadmin")
+                .prefetch_related("permissions__content_type")
+                .get(pk=pk)
+            )
+        except Group.DoesNotExist as exc:
+            raise Http404 from exc
+
+    def get(self, request, pk):
+        return success_response(data=_serialize_permission_level(self.get_object(pk)))
+
+    @extend_schema(request=PermissionLevelWriteSerializer)
+    def put(self, request, pk):
+        _require_superuser(request)
+        level = self.get_object(pk)
+        serializer = PermissionLevelWriteSerializer(
+            level, data=request.data, partial=False
+        )
+        serializer.is_valid(raise_exception=True)
+        return success_response(data=_serialize_permission_level(serializer.save()))
+
+    def delete(self, request, pk):
+        _require_superuser(request)
+        level = self.get_object(pk)
+        if _approval_level_is_referenced(level):
+            raise ValidationError(
+                "Reassign approval flows before deleting this permission level."
+            )
+        try:
+            level.delete()
+        except ProtectedError as exc:
+            raise ValidationError(
+                "Reassign memberships, requests, and grants before deleting this permission level."
+            ) from exc
+        return success_response()
+
+
+class AvailableTeamPermissions(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        _require_superuser(request)
+        return success_response(data=permission_catalog())
 
 
 class UserDetail(views.APIView):
@@ -458,14 +480,14 @@ class UserDetail(views.APIView):
         return success_response(detail="User deleted successfully.")
 
 
-class ResourceGroupList(generics.ListAPIView):
+class TeamList(generics.ListAPIView):
     """
-    List all resource groups or create a new resource group.
+    List all teams or create a new team.
     """
 
     pagination_class = CustomizedPagination
-    serializer_class = ResourceGroupListSerializer
-    queryset = ResourceGroup.objects.filter(is_deleted=0).order_by("group_id")
+    serializer_class = TeamListSerializer
+    queryset = Team.objects.filter(is_deleted=0).order_by("team_id")
 
     def get_queryset(self):
         queryset = (
@@ -473,54 +495,53 @@ class ResourceGroupList(generics.ListAPIView):
             .get_queryset()
             .annotate(
                 user_count=Count("memberships", distinct=True),
-                instance_count=Count("instance", distinct=True),
+                node_count=Count("infrastructurenode", distinct=True),
+                service_count=Count("instance", distinct=True),
             )
         )
         search = self.request.query_params.get("search", "").strip()
         ordering = self.request.query_params.get("ordering", "").strip()
 
         if search:
-            search_filter = Q(group_name__icontains=search)
+            search_filter = Q(team_name__icontains=search)
             if search.isdigit():
-                search_filter |= Q(group_id=int(search))
+                search_filter |= Q(team_id=int(search))
             queryset = queryset.filter(search_filter)
 
         if ordering in {
-            "group_id",
-            "-group_id",
-            "group_name",
-            "-group_name",
+            "team_id",
+            "-team_id",
+            "team_name",
+            "-team_name",
             "user_count",
             "-user_count",
-            "instance_count",
-            "-instance_count",
+            "node_count",
+            "-node_count",
+            "service_count",
+            "-service_count",
         }:
-            queryset = queryset.order_by(ordering, "group_id")
+            queryset = queryset.order_by(ordering, "team_id")
 
         return queryset
 
     @extend_schema(
-        summary="Resource Group List",
-        request=ResourceGroupDetailSerializer,
-        responses={200: ResourceGroupListSerializer},
-        description="List all resource groups (filtering, pagination).",
+        summary="Team List",
+        request=TeamDetailSerializer,
+        responses={200: TeamListSerializer},
+        description="List all teams (filtering, pagination).",
     )
     def get(self, request):
-        if not request.user.is_superuser and not _user_can_access_resource_groups(
-            request.user
-        ):
-            raise PermissionDenied(
-                "You do not have permission to access resource groups."
-            )
+        if not request.user.is_superuser and not _user_can_access_teams(request.user):
+            raise PermissionDenied("You do not have permission to access teams.")
         groups = self.filter_queryset(self.get_queryset())
         if not request.user.is_superuser and not request.user.has_perm(
             "sql.menu_system"
         ):
             groups = groups.filter(
-                group_id__in=[
-                    group.group_id
-                    for group in resource_groups_for_role(
-                        request.user, ResourceAccessRole.RESOURCE_OWNER
+                team_id__in=[
+                    team.team_id
+                    for team in teams_for_role(
+                        request.user, TeamPermissionGroup.RESOURCE_OWNER
                     )
                 ]
             )
@@ -529,14 +550,14 @@ class ResourceGroupList(generics.ListAPIView):
         return self.get_paginated_response(serializer_obj.data)
 
     @extend_schema(
-        summary="Create Resource Group",
-        request=ResourceGroupDetailSerializer,
-        responses={201: ResourceGroupDetailSerializer},
-        description="Create a resource group.",
+        summary="Create Team",
+        request=TeamDetailSerializer,
+        responses={201: TeamDetailSerializer},
+        description="Create a team.",
     )
     def post(self, request):
-        _require_any_permission(request, "sql.menu_system", "sql.add_resourcegroup")
-        serializer = ResourceGroupDetailSerializer(data=request.data)
+        _require_any_permission(request, "sql.menu_system", "sql.add_team")
+        serializer = TeamDetailSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
             return success_response(
@@ -545,77 +566,71 @@ class ResourceGroupList(generics.ListAPIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class ResourceGroupDetail(views.APIView):
+class TeamDetail(views.APIView):
     """
-    Resource group operations.
+    Team operations.
     """
 
-    serializer_class = ResourceGroupDetailSerializer
+    serializer_class = TeamDetailSerializer
 
     def get_object(self, pk):
         try:
-            return ResourceGroup.objects.get(pk=pk, is_deleted=0)
-        except ResourceGroup.DoesNotExist:
+            return Team.objects.get(pk=pk, is_deleted=0)
+        except Team.DoesNotExist:
             raise Http404
 
     @extend_schema(
-        summary="Resource Group Detail",
-        responses={200: ResourceGroupDetailSerializer},
-        description="Get a resource group with its assigned users and instances.",
+        summary="Team Detail",
+        responses={200: TeamDetailSerializer},
+        description="Get a team with its assigned users and instances.",
     )
     def get(self, request, pk):
         group = self.get_object(pk)
-        if not _user_can_access_resource_groups(request.user):
-            raise PermissionDenied(
-                "You do not have permission to access resource groups."
-            )
+        if not _user_can_access_teams(request.user):
+            raise PermissionDenied("You do not have permission to access teams.")
         if not request.user.is_superuser and not request.user.has_perm(
             "sql.menu_system"
         ):
-            _require_resource_group_manager(request, group)
+            _require_team_manager(request, group)
         serializer = self.serializer_class(group)
         return success_response(data=serializer.data)
 
     @extend_schema(
-        summary="Update Resource Group",
-        request=ResourceGroupDetailSerializer,
-        responses={200: ResourceGroupDetailSerializer},
-        description="Update a resource group.",
+        summary="Update Team",
+        request=TeamDetailSerializer,
+        responses={200: TeamDetailSerializer},
+        description="Update a team.",
     )
     def put(self, request, pk):
         group = self.get_object(pk)
-        _require_resource_group_manager(request, group)
+        _require_team_manager(request, group)
         serializer = self.serializer_class(group, data=request.data)
         if serializer.is_valid():
             serializer.save()
             return success_response(data=serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    @extend_schema(
-        summary="Delete Resource Group", description="Delete a resource group."
-    )
+    @extend_schema(summary="Delete Team", description="Delete a team.")
     def delete(self, request, pk):
-        _require_any_permission(request, "sql.menu_system", "sql.delete_resourcegroup")
+        _require_any_permission(request, "sql.menu_system", "sql.delete_team")
         group = self.get_object(pk)
         group.delete()
         return success_response()
 
 
-class ResourceGroupUserLookup(views.APIView):
-    """List assignable users for resource-group membership."""
+class TeamUserLookup(views.APIView):
+    """List assignable users for team membership."""
 
-    serializer_class = ResourceGroupUserLookupSerializer
+    serializer_class = TeamUserLookupSerializer
 
     @extend_schema(
-        summary="Resource Group User Lookup",
-        responses={200: ResourceGroupUserLookupSerializer(many=True)},
-        description="List lightweight user records for resource-group membership selection.",
+        summary="Team User Lookup",
+        responses={200: TeamUserLookupSerializer(many=True)},
+        description="List lightweight user records for team membership selection.",
     )
     def get(self, request):
-        if not _user_can_access_resource_groups(request.user):
-            raise PermissionDenied(
-                "You do not have permission to access resource groups."
-            )
+        if not _user_can_access_teams(request.user):
+            raise PermissionDenied("You do not have permission to access teams.")
         search = request.query_params.get("search", "").strip()
         users = Users.objects.all().order_by("display", "username", "id")
         if search:
@@ -626,28 +641,43 @@ class ResourceGroupUserLookup(views.APIView):
         return success_response(data=serializer.data)
 
 
-class ResourceGroupInstanceLookup(views.APIView):
-    """List assignable instances for resource-group membership."""
+class TeamNodeLookup(views.APIView):
+    """List assignable infrastructure nodes for Team assignment."""
 
-    serializer_class = ResourceGroupInstanceLookupSerializer
+    serializer_class = TeamNodeLookupSerializer
 
     @extend_schema(
-        summary="Resource Group Instance Lookup",
-        responses={200: ResourceGroupInstanceLookupSerializer(many=True)},
-        description="List lightweight instance records for resource-group membership selection.",
+        summary="Team Node Lookup",
+        responses={200: TeamNodeLookupSerializer(many=True)},
     )
     def get(self, request):
-        if not _user_can_access_resource_groups(request.user):
-            raise PermissionDenied(
-                "You do not have permission to access resource groups."
-            )
+        if not _user_can_access_teams(request.user):
+            raise PermissionDenied("You do not have permission to access teams.")
         search = request.query_params.get("search", "").strip()
-        instances = Instance.objects.all().order_by("instance_name", "id")
+        nodes = InfrastructureNode.objects.all().order_by("name", "id")
         if search:
-            instances = instances.filter(
+            nodes = nodes.filter(
+                Q(name__icontains=search) | Q(address__icontains=search)
+            )
+        serializer = self.serializer_class(nodes, many=True)
+        return success_response(data=serializer.data)
+
+
+class TeamServiceLookup(views.APIView):
+    """List assignable database services for Team assignment."""
+
+    serializer_class = TeamServiceLookupSerializer
+
+    def get(self, request):
+        if not _user_can_access_teams(request.user):
+            raise PermissionDenied("You do not have permission to access teams.")
+        search = request.query_params.get("search", "").strip()
+        services = Instance.objects.all().order_by("instance_name", "id")
+        if search:
+            services = services.filter(
                 Q(instance_name__icontains=search)
                 | Q(db_type__icontains=search)
                 | Q(host__icontains=search)
             )
-        serializer = self.serializer_class(instances, many=True)
+        serializer = self.serializer_class(services, many=True)
         return success_response(data=serializer.data)

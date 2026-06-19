@@ -16,7 +16,7 @@ from django_redis import get_redis_connection
 from common.utils.extend_json_encoder import ExtendJSONEncoder
 from sql.engines import get_engine, ResultSet
 from sql.models import Instance, InstanceDatabase, Users
-from sql.utils.resource_group import user_instances
+from sql.utils.team import user_instances
 
 __author__ = "hhyo"
 

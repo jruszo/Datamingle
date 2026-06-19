@@ -1,6 +1,5 @@
 import json
 import secrets
-from datetime import datetime, timedelta, timezone as datetime_timezone
 from urllib.parse import urlencode
 
 from django.conf import settings
@@ -9,7 +8,6 @@ from django.core.exceptions import ImproperlyConfigured, SuspiciousOperation
 from django.http import HttpResponseRedirect
 from django.http.request import validate_host
 from django.utils import timezone
-from django.utils.dateparse import parse_datetime
 from django_redis import get_redis_connection
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status, permissions, views
@@ -18,14 +16,12 @@ from rest_framework.response import Response
 from common.auth import SUPERADMIN_GROUP_NAME, ensure_superadmin_group, init_user
 from common.authenticate.workos import WorkOSAuthClient
 from common.authenticate.workos_jwt import WorkOSJWTVerifier
-from common.celery_tasks import process_workos_webhook_task
 from sql.models import Users
 from api_core.response import success_response
 
 WORKOS_STATE_COOKIE_NAME = "datamingle_workos_state"
 WORKOS_SESSION_COOKIE_NAME = "datamingle_workos_session_id"
 WORKOS_EXCHANGE_PREFIX = "workos-exchange-code:"
-WORKOS_WEBHOOK_MAX_AGE_SECONDS = 300
 
 
 def _cookie_secure(request):
@@ -82,66 +78,6 @@ def _json_safe_workos_value(value):
         }
 
     return str(value)
-
-
-def _parse_workos_webhook_timestamp(value):
-    if value in (None, ""):
-        return None
-
-    if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(float(value), tz=datetime_timezone.utc)
-
-    raw_value = str(value).strip()
-    if not raw_value:
-        return None
-
-    try:
-        return datetime.fromtimestamp(float(raw_value), tz=datetime_timezone.utc)
-    except ValueError:
-        pass
-
-    parsed_value = parse_datetime(raw_value)
-    if parsed_value is None:
-        raise SuspiciousOperation("WorkOS webhook timestamp is invalid.")
-    if timezone.is_naive(parsed_value):
-        parsed_value = timezone.make_aware(parsed_value, datetime_timezone.utc)
-    return parsed_value
-
-
-def _workos_signature_timestamp(event_signature):
-    for part in event_signature.split(","):
-        key, separator, value = part.strip().partition("=")
-        if separator and key == "t":
-            return _parse_workos_webhook_timestamp(value)
-    return None
-
-
-def _workos_event_timestamp(event):
-    for field_name in ("created_at", "occurred_at", "timestamp"):
-        value = _workos_attr(event, field_name, None)
-        if value:
-            return _parse_workos_webhook_timestamp(value)
-    return None
-
-
-def _validate_workos_webhook_freshness(event, event_signature=""):
-    event_timestamp = _workos_signature_timestamp(
-        event_signature
-    ) or _workos_event_timestamp(event)
-    if event_timestamp is None:
-        return
-
-    now = datetime.now(datetime_timezone.utc)
-    if timezone.is_naive(event_timestamp):
-        event_timestamp = timezone.make_aware(event_timestamp, datetime_timezone.utc)
-    else:
-        event_timestamp = event_timestamp.astimezone(datetime_timezone.utc)
-
-    allowed_skew = timedelta(seconds=WORKOS_WEBHOOK_MAX_AGE_SECONDS)
-    if now - event_timestamp > allowed_skew:
-        raise SuspiciousOperation("WorkOS webhook timestamp is too old.")
-    if event_timestamp - now > allowed_skew:
-        raise SuspiciousOperation("WorkOS webhook timestamp is too far in the future.")
 
 
 def _require_workos_linked_user(user):
@@ -586,35 +522,6 @@ class WorkOSSessionRevokeView(views.APIView):
 
         client.revoke_session(session_id=session_id)
         return success_response(detail="WorkOS session revoked.")
-
-
-class WorkOSWebhookView(views.APIView):
-    permission_classes = [permissions.AllowAny]
-    authentication_classes = []
-
-    @extend_schema(
-        summary="WorkOS Webhook",
-        description="Receive WorkOS Directory Sync webhooks and reconcile local resource-group membership.",
-    )
-    def post(self, request):
-        event_signature = request.headers.get("WorkOS-Signature", "")
-
-        try:
-            event = json.loads(request.body.decode("utf-8"))
-            event_payload = _json_safe_workos_value(event)
-            _validate_workos_webhook_freshness(event_payload, event_signature)
-            task_result = process_workos_webhook_task.delay(event_payload)
-            if isinstance(task_result, dict):
-                result = task_result
-            else:
-                result = {
-                    "queued": True,
-                    "event": str(_workos_attr(event_payload, "event", "") or ""),
-                }
-        except (ValueError, SuspiciousOperation, ImproperlyConfigured) as exc:
-            return Response({"errors": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-        return success_response(data=result, detail="WorkOS webhook queued.")
 
 
 class WorkOSLogoutView(views.APIView):
