@@ -19,7 +19,7 @@ Repository Layout
 ===============
 This repository is organized as a monorepo:
 
-- `backend/` contains the Django API, backend Docker files, Helm chart, and backend Python dependencies.
+- `backend/` contains the Django API, local Docker files, demo database compose files, and backend Python dependencies.
 - `frontend/` contains the Vue/Vite SPA.
 - `shared-infra/` contains the local shared observability stack for Cortex, Quickwit, Grafana, Jaeger, Prometheus, and MinIO.
 - `agent/` is reserved for the upcoming Datamingle agent module.
@@ -57,14 +57,62 @@ Quick Start
 ### Live Demo
 Public Datamingle demo: coming soon.
 
-### Docker
-Use the Docker and compose files in this repository (`backend/src/docker` and `backend/src/docker-compose`).
+### Local Demo Environment
+The supported local demo setup uses three compose files:
+
+- `backend/src/docker-compose/docker-compose.local-dev.yml` for Datamingle, MySQL, Redis, goInception, Celery, and the Vite frontend.
+- `backend/src/docker-compose/docker-compose.demo-dbs.yml` for demo MySQL and PostgreSQL databases used by seeded workflow examples.
+- `shared-infra/docker-compose.yml` for optional local observability services.
+
+Create the shared Docker network once:
+
+```bash
+docker network create datamingle
+```
+
+Prepare local app settings from the tracked example:
+
+```bash
+cp backend/src/docker-compose/.env.example backend/src/docker-compose/.env.local-dev
+```
+
+Edit `backend/src/docker-compose/.env.local-dev` and set the required `WORKOS_*`
+values. Generate local-only values for `SECRET_KEY` and
+`FIELD_ENCRYPTION_KEYS`; that file is ignored by Git and must not be committed:
+
+```bash
+python3 - <<'PY'
+import base64
+import os
+import secrets
+
+print("SECRET_KEY=" + secrets.token_urlsafe(50))
+print("FIELD_ENCRYPTION_KEYS=" + base64.urlsafe_b64encode(os.urandom(32)).decode())
+PY
+```
+
+Start the demo databases first:
+
+```bash
+docker-compose -f backend/src/docker-compose/docker-compose.demo-dbs.yml up -d
+```
+
+Build and start the app and frontend:
+
+```bash
+docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend
+```
+
+Open the frontend at http://localhost:5173. The backend is proxied through the
+frontend dev server and is also available directly at http://localhost:9123.
 
 The shared observability infrastructure lives outside the app stack in
 `shared-infra/`. It is a dedicated local stack for tenant-shared services used
-to test metrics and trace ingestion:
+to test metrics and trace ingestion. It is optional for basic demo usage:
 
 ```bash
+cp shared-infra/.env.example shared-infra/.env
+# Edit shared-infra/.env and set WORKOS_API_KEY.
 docker-compose -f shared-infra/docker-compose.yml up -d
 ```
 
@@ -79,13 +127,7 @@ into the new `datamingle` database before starting the renamed stack:
 scripts/docker/migrate-archery-db-to-datamingle.sh
 ```
 
-The script defaults to the local ARM MySQL container, `datamingle-mysql`. If you
-are using `backend/src/docker-compose/docker-compose.yml`, where the MySQL container is
-named `mysql`, override the container name:
-
-```bash
-MYSQL_CONTAINER=mysql scripts/docker/migrate-archery-db-to-datamingle.sh
-```
+The script defaults to the local demo app MySQL container, `datamingle-mysql`.
 
 ### Local Demo Seed
 The local ARM compose setup seeds resource groups, auth groups, workflow settings, instance tags, and demo database instances for manual UX testing.
@@ -108,9 +150,9 @@ Authentication
 Datamingle uses WorkOS as the only sign-in method for every deployment. Each running Datamingle instance maps to one fixed WorkOS organization.
 
 ```env
-WORKOS_API_KEY=sk_test_or_live_xxx
-WORKOS_CLIENT_ID=client_xxx
-WORKOS_ORGANIZATION_ID=org_xxx
+WORKOS_API_KEY=replace-with-workos-api-key
+WORKOS_CLIENT_ID=replace-with-workos-client-id
+WORKOS_ORGANIZATION_ID=replace-with-workos-organization-id
 WORKOS_STAFF_EMAILS=ops@datamingle.dev,admin@datamingle.dev
 WORKOS_SUPERUSER_EMAILS=admin@datamingle.dev
 WORKOS_SUPERADMIN_ROLE_SLUGS=admin

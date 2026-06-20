@@ -41,7 +41,7 @@ cleanup_on_error() {
 
 if ! docker inspect "$MYSQL_CONTAINER" >/dev/null 2>&1; then
   echo "MySQL container '$MYSQL_CONTAINER' was not found." >&2
-  echo "Set MYSQL_CONTAINER=mysql when using backend/src/docker-compose/docker-compose.yml." >&2
+  echo "Start the local app stack first, or set MYSQL_CONTAINER to the container that holds the source database." >&2
   exit 1
 fi
 

@@ -14,6 +14,35 @@ The local dev compose environment can seed a manual-testing setup for workflow U
 
 The local compose file sets `RUN_LOCAL_DEMO_SEED=1` on the `datamingle-app` container.
 
+Create the shared Docker network once:
+
+```bash
+docker network create datamingle
+```
+
+Prepare ignored local app settings from the tracked example:
+
+```bash
+cp backend/src/docker-compose/.env.example backend/src/docker-compose/.env.local-dev
+```
+
+Edit `backend/src/docker-compose/.env.local-dev` and set the required `WORKOS_*`
+values before starting the app stack. Generate local-only values for
+`SECRET_KEY` and `FIELD_ENCRYPTION_KEYS`:
+
+```bash
+python3 - <<'PY'
+import base64
+import os
+import secrets
+
+print("SECRET_KEY=" + secrets.token_urlsafe(50))
+print("FIELD_ENCRYPTION_KEYS=" + base64.urlsafe_b64encode(os.urandom(32)).decode())
+PY
+```
+
+Keep `.env.local-dev` out of Git.
+
 The demo databases run in a separate compose stack. Start them first:
 
 ```bash

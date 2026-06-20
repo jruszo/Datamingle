@@ -16,6 +16,8 @@ The Docker Compose project name is pinned to `datamingle-shared-infra`, so Docke
 ## Start
 
 ```bash
+cp shared-infra/.env.example shared-infra/.env
+# Edit shared-infra/.env and set WORKOS_API_KEY.
 docker-compose -f shared-infra/docker-compose.yml up -d
 ```
 
