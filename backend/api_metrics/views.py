@@ -52,8 +52,9 @@ DASHBOARD_ICON_MAX_PIXELS = 16_000_000
 DASHBOARD_ICON_FORMATS = {"JPEG", "PNG", "WEBP", "GIF"}
 
 PROMETHEUS_READ_BASE_PATH = "/prometheus/api/v1"
-CORTEX_WRITE_PATH = "/api/v1/push"
-CORTEX_OTLP_METRICS_PATH = "/api/v1/otlp/v1/metrics"
+VICTORIAMETRICS_WRITE_PATH = "/api/v1/write"
+VICTORIAMETRICS_OTLP_METRICS_PATH = "/opentelemetry/v1/metrics"
+VICTORIAMETRICS_DIRECT_READ_PATHS = {"/metadata"}
 TENANT_PARAM_NAMES = {
     "org_id",
     "organization_id",
@@ -72,23 +73,64 @@ def _setting_int(name, default):
     return max(value, 1)
 
 
-def _cortex_url(path):
-    base_url = getattr(settings, "DATAMINGLE_CORTEX_URL", "http://cortex:9009")
-    return f"{base_url.rstrip('/')}{PROMETHEUS_READ_BASE_PATH}{path}"
+def _metrics_tenant_url_map():
+    raw_urls = getattr(settings, "DATAMINGLE_METRICS_TENANT_URLS", "")
+    if isinstance(raw_urls, dict):
+        return {
+            str(key).strip(): str(value).strip().rstrip("/")
+            for key, value in raw_urls.items()
+            if str(key).strip() and str(value).strip()
+        }
+    if not str(raw_urls or "").strip():
+        return {}
+    try:
+        parsed = json.loads(raw_urls)
+    except (TypeError, ValueError):
+        logger.warning("Ignoring invalid DATAMINGLE_METRICS_TENANT_URLS JSON.")
+        return {}
+    if not isinstance(parsed, dict):
+        logger.warning("Ignoring non-object DATAMINGLE_METRICS_TENANT_URLS value.")
+        return {}
+    return {
+        str(key).strip(): str(value).strip().rstrip("/")
+        for key, value in parsed.items()
+        if str(key).strip() and str(value).strip()
+    }
 
 
-def _cortex_direct_url(path):
-    base_url = getattr(settings, "DATAMINGLE_CORTEX_URL", "http://cortex:9009")
-    return f"{base_url.rstrip('/')}{path}"
+def _metrics_backend_base_url(organization_id=""):
+    tenant_urls = _metrics_tenant_url_map()
+    organization_id = str(organization_id or "").strip()
+    if organization_id and organization_id in tenant_urls:
+        return tenant_urls[organization_id]
+
+    base_url = getattr(
+        settings,
+        "DATAMINGLE_METRICS_BACKEND_URL",
+        "http://victoriametrics-local-dev:8428",
+    )
+    return str(base_url).rstrip("/")
 
 
-def _cortex_json(path, organization_id, params=None):
+def _metrics_read_url(path, organization_id=""):
+    read_base_path = (
+        "/api/v1"
+        if path in VICTORIAMETRICS_DIRECT_READ_PATHS
+        else PROMETHEUS_READ_BASE_PATH
+    )
+    return f"{_metrics_backend_base_url(organization_id)}{read_base_path}{path}"
+
+
+def _metrics_ingest_url(path, organization_id=""):
+    return f"{_metrics_backend_base_url(organization_id)}{path}"
+
+
+def _metrics_json(path, organization_id, params=None):
     response = requests.get(
-        _cortex_url(path),
+        _metrics_read_url(path, organization_id),
         params=params,
         headers={
             "Accept": "application/json",
-            "X-Scope-OrgID": organization_id,
         },
         timeout=_setting_int(
             "DATAMINGLE_METRICS_PROXY_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS
@@ -102,9 +144,9 @@ def _cortex_json(path, organization_id, params=None):
 
 
 def _promql_ai_context(organization_id, search_text=""):
-    names = _cortex_json("/label/__name__/values", organization_id)
-    labels = _cortex_json("/labels", organization_id)
-    metadata = _cortex_json("/metadata", organization_id)
+    names = _metrics_json("/label/__name__/values", organization_id)
+    labels = _metrics_json("/labels", organization_id)
+    metadata = _metrics_json("/metadata", organization_id)
     if not isinstance(names, list) or not isinstance(labels, list):
         raise ValueError("Metrics backend returned invalid discovery data.")
     if not isinstance(metadata, dict):
@@ -252,11 +294,11 @@ def _parse_step_seconds(value):
     return number * multipliers[unit]
 
 
-class CortexMetricsProxyView(views.APIView):
+class MetricsBackendProxyView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "metrics_metadata"
-    cortex_path = ""
+    metrics_path = ""
     allowed_methods = ("GET",)
 
     def get(self, request, *args, **kwargs):
@@ -265,8 +307,8 @@ class CortexMetricsProxyView(views.APIView):
     def post(self, request, *args, **kwargs):
         return self.proxy(request, *args, **kwargs)
 
-    def get_cortex_path(self, **kwargs):
-        return self.cortex_path
+    def get_metrics_path(self, **kwargs):
+        return self.metrics_path
 
     def proxy(self, request, *args, **kwargs):
         if request.method not in self.allowed_methods:
@@ -281,7 +323,6 @@ class CortexMetricsProxyView(views.APIView):
         request_kwargs = {
             "headers": {
                 "Accept": "application/json",
-                "X-Scope-OrgID": org_id,
             },
             "timeout": _setting_int(
                 "DATAMINGLE_METRICS_PROXY_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS
@@ -296,11 +337,11 @@ class CortexMetricsProxyView(views.APIView):
         try:
             response = requests.request(
                 request.method,
-                _cortex_url(self.get_cortex_path(**kwargs)),
+                _metrics_read_url(self.get_metrics_path(**kwargs), org_id),
                 **request_kwargs,
             )
         except requests.RequestException as exc:
-            logger.warning("Cortex metrics proxy request failed.", exc_info=True)
+            logger.warning("Metrics backend proxy request failed.", exc_info=True)
             return Response(
                 {"status": "error", "error": "Metrics backend is unavailable."},
                 status=status.HTTP_502_BAD_GATEWAY,
@@ -322,7 +363,7 @@ class CortexMetricsProxyView(views.APIView):
             and isinstance(payload, dict)
             and "bucket index is too old" in str(payload.get("error") or "").lower()
         ):
-            logger.warning("Cortex bucket index is stale.")
+            logger.warning("Metrics backend bucket index is stale.")
             return Response(
                 {
                     "status": "error",
@@ -411,17 +452,20 @@ class MetricsIngestProxyView(views.APIView):
     authentication_classes = [AgentAPIKeyAuthentication]
     permission_classes = [IsAuthenticatedAgent]
     throttle_classes = []
-    cortex_path = ""
+    metrics_path = ""
 
     def post(self, request):
-        org_id = str(settings.DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID or "").strip()
+        agent = request.auth
+        org_id = str(
+            getattr(agent, "organization_id", "")
+            or settings.DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID
+            or ""
+        ).strip()
         if not org_id:
             raise PermissionDenied(
                 "Authenticated metrics requests require an organization id."
             )
-        headers = {
-            "X-Scope-OrgID": org_id,
-        }
+        headers = {}
         content_type = request.META.get("CONTENT_TYPE", "").strip()
         if content_type:
             headers["Content-Type"] = content_type
@@ -434,7 +478,7 @@ class MetricsIngestProxyView(views.APIView):
 
         try:
             response = requests.post(
-                _cortex_direct_url(self.cortex_path),
+                _metrics_ingest_url(self.metrics_path, org_id),
                 data=request.body,
                 headers=headers,
                 timeout=_setting_int(
@@ -443,7 +487,7 @@ class MetricsIngestProxyView(views.APIView):
                 ),
             )
         except requests.RequestException:
-            logger.warning("Cortex metrics ingest request failed.", exc_info=True)
+            logger.warning("Metrics backend ingest request failed.", exc_info=True)
             return Response(
                 {"status": "error", "error": "Metrics backend is unavailable."},
                 status=status.HTTP_502_BAD_GATEWAY,
@@ -458,19 +502,19 @@ class MetricsIngestProxyView(views.APIView):
 
 
 class PrometheusRemoteWriteIngestView(MetricsIngestProxyView):
-    cortex_path = CORTEX_WRITE_PATH
+    metrics_path = VICTORIAMETRICS_WRITE_PATH
 
 
 class OTLPMetricsIngestView(MetricsIngestProxyView):
-    cortex_path = CORTEX_OTLP_METRICS_PATH
+    metrics_path = VICTORIAMETRICS_OTLP_METRICS_PATH
 
 
-class MetricsLabelsView(CortexMetricsProxyView):
-    cortex_path = "/labels"
+class MetricsLabelsView(MetricsBackendProxyView):
+    metrics_path = "/labels"
 
 
-class MetricsNamesView(CortexMetricsProxyView):
-    cortex_path = "/label/__name__/values"
+class MetricsNamesView(MetricsBackendProxyView):
+    metrics_path = "/label/__name__/values"
 
     def validate_request(self, request, **kwargs):
         search = _first_param(request, "search").strip()
@@ -539,19 +583,19 @@ class MetricsNamesView(CortexMetricsProxyView):
         return Response(payload, status=response.status_code)
 
 
-class MetricsLabelValuesView(CortexMetricsProxyView):
+class MetricsLabelValuesView(MetricsBackendProxyView):
     def validate_request(self, request, **kwargs):
         self.validate_matchers(request)
 
-    def get_cortex_path(self, **kwargs):
+    def get_metrics_path(self, **kwargs):
         label_name = kwargs.get("label_name", "")
         if not LABEL_NAME_RE.match(label_name):
             raise ValidationError({"label": "Invalid Prometheus label name."})
         return f"/label/{quote(label_name, safe='')}/values"
 
 
-class MetricsSeriesView(CortexMetricsProxyView):
-    cortex_path = "/series"
+class MetricsSeriesView(MetricsBackendProxyView):
+    metrics_path = "/series"
     allowed_methods = ("GET", "POST")
 
     def validate_request(self, request, **kwargs):
@@ -559,8 +603,8 @@ class MetricsSeriesView(CortexMetricsProxyView):
         self.validate_timerange(request)
 
 
-class MetricsMetadataView(CortexMetricsProxyView):
-    cortex_path = "/metadata"
+class MetricsMetadataView(MetricsBackendProxyView):
+    metrics_path = "/metadata"
 
     def validate_request(self, request, **kwargs):
         metric = _first_param(request, "metric").strip()
@@ -576,8 +620,8 @@ class MetricsMetadataView(CortexMetricsProxyView):
                 raise ValidationError({"limit": "Must be between 1 and 10000."})
 
 
-class MetricsQueryView(CortexMetricsProxyView):
-    cortex_path = "/query"
+class MetricsQueryView(MetricsBackendProxyView):
+    metrics_path = "/query"
     allowed_methods = ("GET", "POST")
     throttle_scope = "metrics_query"
 
@@ -585,8 +629,8 @@ class MetricsQueryView(CortexMetricsProxyView):
         self.validate_query(request)
 
 
-class MetricsQueryRangeView(CortexMetricsProxyView):
-    cortex_path = "/query_range"
+class MetricsQueryRangeView(MetricsBackendProxyView):
+    metrics_path = "/query_range"
     allowed_methods = ("GET", "POST")
     throttle_scope = "metrics_query_range"
 
@@ -625,8 +669,8 @@ class MetricsQueryRangeView(CortexMetricsProxyView):
             )
 
 
-class MetricsFormatQueryView(CortexMetricsProxyView):
-    cortex_path = "/format_query"
+class MetricsFormatQueryView(MetricsBackendProxyView):
+    metrics_path = "/format_query"
     allowed_methods = ("GET", "POST")
     throttle_scope = "metrics_query"
 
@@ -634,8 +678,8 @@ class MetricsFormatQueryView(CortexMetricsProxyView):
         self.validate_query(request)
 
 
-class MetricsParseQueryView(CortexMetricsProxyView):
-    cortex_path = "/parse_query"
+class MetricsParseQueryView(MetricsBackendProxyView):
+    metrics_path = "/parse_query"
     allowed_methods = ("GET", "POST")
     throttle_scope = "metrics_query"
 

@@ -25,7 +25,7 @@ This document is intentionally a living plan. It should be refined before implem
 
 - Do not build a logs pipeline yet. Provide the module interface and disabled placeholder only.
 - Do not allow arbitrary direct command execution from the UI. Commands must be workflow-gated.
-- Do not store raw time-series metrics in Django. Metrics should flow to the configured Datamingle telemetry backend, such as OTel/Cortex.
+- Do not store raw time-series metrics in Django. Metrics should flow to the configured Datamingle telemetry backend, such as OTel/VictoriaMetrics.
 - Do not support every operating system at launch. Start with Linux packages.
 
 ## Current Repo Context
@@ -483,7 +483,7 @@ V1 modules:
 
 - `metrics`
   - Manage node exporter and mysqld exporter.
-  - Send metrics to Datamingle-configured OTel/Cortex endpoint.
+  - Send metrics to Datamingle-configured OTel/VictoriaMetrics endpoint.
   - Use temporary credentials for mysqld exporter.
 
 - `online_schema`
@@ -819,7 +819,7 @@ cd frontend && npm run build
 - WorkOS API Keys are the chosen auth strategy.
 - Commands are workflow-gated only.
 - gh-ost and pt-online-schema-change are downloaded on enable with checksum verification.
-- Metrics are sent to a configured Datamingle/OTel/Cortex endpoint from backend config.
+- Metrics are sent to a configured Datamingle/OTel/VictoriaMetrics endpoint from backend config.
 - Go is not installed in the current local workspace, so implementation must add Go setup guidance and CI tooling.
 
 ## Open Questions For Later Iterations

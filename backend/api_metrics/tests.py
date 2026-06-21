@@ -44,11 +44,12 @@ class MetricsProxyTests(APITestCase):
         )
 
     @override_settings(
-        DATAMINGLE_CORTEX_URL="http://cortex.test",
+        DATAMINGLE_METRICS_BACKEND_URL="http://metrics-default.test",
+        DATAMINGLE_METRICS_TENANT_URLS='{"org_test_123":"http://metrics-org.test"}',
         DATAMINGLE_METRICS_PROXY_TIMEOUT_SECONDS=7,
     )
     @patch("api_metrics.views.requests.request")
-    def test_labels_proxy_injects_authenticated_org_scope(self, mock_request):
+    def test_labels_proxy_routes_to_authenticated_tenant_backend(self, mock_request):
         mock_request.return_value = SimpleNamespace(
             status_code=200,
             json=lambda: {"status": "success", "data": ["__name__", "job"]},
@@ -61,18 +62,15 @@ class MetricsProxyTests(APITestCase):
         self.assertEqual(response.data["data"], ["__name__", "job"])
         mock_request.assert_called_once()
         _, url = mock_request.call_args.args
-        self.assertEqual(url, "http://cortex.test/prometheus/api/v1/labels")
-        self.assertEqual(
-            mock_request.call_args.kwargs["headers"]["X-Scope-OrgID"],
-            "org_test_123",
-        )
+        self.assertEqual(url, "http://metrics-org.test/prometheus/api/v1/labels")
+        self.assertNotIn("X-Scope-OrgID", mock_request.call_args.kwargs["headers"])
         self.assertNotIn(
             ("org_id", "org_from_frontend"),
             mock_request.call_args.kwargs["params"],
         )
         self.assertEqual(mock_request.call_args.kwargs["timeout"], 7)
 
-    @override_settings(DATAMINGLE_CORTEX_URL="http://cortex.test")
+    @override_settings(DATAMINGLE_METRICS_BACKEND_URL="http://metrics.test")
     @patch("api_metrics.views.requests.request")
     def test_metric_names_are_filtered_and_limited_server_side(self, mock_request):
         mock_request.return_value = SimpleNamespace(
@@ -106,12 +104,12 @@ class MetricsProxyTests(APITestCase):
         _, url = mock_request.call_args.args
         self.assertEqual(
             url,
-            "http://cortex.test/prometheus/api/v1/label/__name__/values",
+            "http://metrics.test/prometheus/api/v1/label/__name__/values",
         )
         self.assertNotIn(("search", "node_"), mock_request.call_args.kwargs["params"])
         self.assertNotIn(("limit", "2"), mock_request.call_args.kwargs["params"])
 
-    @override_settings(DATAMINGLE_CORTEX_URL="http://cortex.test")
+    @override_settings(DATAMINGLE_METRICS_BACKEND_URL="http://metrics.test")
     @patch("api_metrics.views.requests.request")
     def test_metric_name_search_is_case_insensitive_and_prioritizes_prefixes(
         self, mock_request
@@ -146,9 +144,9 @@ class MetricsProxyTests(APITestCase):
             ],
         )
 
-    @override_settings(DATAMINGLE_CORTEX_URL="http://cortex.test")
+    @override_settings(DATAMINGLE_METRICS_BACKEND_URL="http://metrics.test")
     @patch("api_metrics.views.requests.request")
-    def test_query_range_post_is_proxied_to_cortex(self, mock_request):
+    def test_query_range_post_is_proxied_to_metrics_backend(self, mock_request):
         mock_request.return_value = SimpleNamespace(
             status_code=200,
             json=lambda: {
@@ -172,7 +170,7 @@ class MetricsProxyTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         method, url = mock_request.call_args.args
         self.assertEqual(method, "POST")
-        self.assertEqual(url, "http://cortex.test/prometheus/api/v1/query_range")
+        self.assertEqual(url, "http://metrics.test/prometheus/api/v1/query_range")
         self.assertIn(
             ("query", 'rate(http_requests_total{job="api"}[5m])'),
             mock_request.call_args.kwargs["data"],
@@ -217,7 +215,7 @@ class MetricsProxyTests(APITestCase):
         DATAMINGLE_METRICS_MAX_RANGE_POINTS=1000,
     )
     @patch("api_metrics.views.requests.request")
-    def test_query_range_rejects_oversized_ranges_before_cortex(self, mock_request):
+    def test_query_range_rejects_oversized_ranges_before_backend(self, mock_request):
         response = self.client.get(
             "/api/v1/metrics/query_range",
             {
@@ -233,7 +231,7 @@ class MetricsProxyTests(APITestCase):
         mock_request.assert_not_called()
 
     @patch("api_metrics.views.requests.request")
-    def test_query_range_rejects_too_many_points_before_cortex(self, mock_request):
+    def test_query_range_rejects_too_many_points_before_backend(self, mock_request):
         response = self.client.get(
             "/api/v1/metrics/query_range",
             {
@@ -249,7 +247,7 @@ class MetricsProxyTests(APITestCase):
         mock_request.assert_not_called()
 
     @patch("api_metrics.views.requests.request")
-    def test_invalid_label_name_is_rejected_before_cortex(self, mock_request):
+    def test_invalid_label_name_is_rejected_before_backend(self, mock_request):
         response = self.client.get("/api/v1/metrics/label/bad-label/values")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
@@ -265,13 +263,16 @@ class MetricsIngestProxyTests(APITestCase):
         return agent, api_key
 
     @override_settings(
-        DATAMINGLE_CORTEX_URL="http://cortex.test",
+        DATAMINGLE_METRICS_BACKEND_URL="http://metrics-default.test",
+        DATAMINGLE_METRICS_TENANT_URLS='{"org_agent_123":"http://metrics-tenant.test"}',
         DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID="datamingle",
         DATAMINGLE_METRICS_PROXY_TIMEOUT_SECONDS=7,
     )
     @patch("api_metrics.views.requests.post")
     def test_prometheus_remote_write_ingest_proxies_raw_body(self, mock_post):
-        self.authenticate_agent()
+        self.authenticate_agent(
+            Agent.objects.create(name="metrics-agent", organization_id="org_agent_123")
+        )
         mock_post.return_value = SimpleNamespace(
             status_code=204,
             content=b"",
@@ -289,12 +290,9 @@ class MetricsIngestProxyTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         mock_post.assert_called_once()
         url = mock_post.call_args.args[0]
-        self.assertEqual(url, "http://cortex.test/api/v1/push")
+        self.assertEqual(url, "http://metrics-tenant.test/api/v1/write")
         self.assertEqual(mock_post.call_args.kwargs["data"], b"prometheus-bytes")
-        self.assertEqual(
-            mock_post.call_args.kwargs["headers"]["X-Scope-OrgID"],
-            "datamingle",
-        )
+        self.assertNotIn("X-Scope-OrgID", mock_post.call_args.kwargs["headers"])
         self.assertEqual(
             mock_post.call_args.kwargs["headers"]["Content-Type"],
             "application/x-protobuf",
@@ -306,7 +304,7 @@ class MetricsIngestProxyTests(APITestCase):
         self.assertEqual(mock_post.call_args.kwargs["timeout"], 7)
 
     @override_settings(
-        DATAMINGLE_CORTEX_URL="http://cortex.test",
+        DATAMINGLE_METRICS_BACKEND_URL="http://metrics.test",
         DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID="datamingle",
     )
     @patch("api_metrics.views.requests.post")
@@ -328,12 +326,12 @@ class MetricsIngestProxyTests(APITestCase):
         self.assertEqual(response.content, b'{"ok":true}')
         self.assertEqual(
             mock_post.call_args.args[0],
-            "http://cortex.test/api/v1/otlp/v1/metrics",
+            "http://metrics.test/opentelemetry/v1/metrics",
         )
         self.assertEqual(mock_post.call_args.kwargs["data"], b"otlp-bytes")
 
     @patch("api_metrics.views.requests.post")
-    def test_ingest_rejects_invalid_agent_key_before_cortex(self, mock_post):
+    def test_ingest_rejects_invalid_agent_key_before_backend(self, mock_post):
         self.client.credentials(HTTP_AUTHORIZATION="Bearer dm_agent_missing")
 
         response = self.client.post(
@@ -360,9 +358,9 @@ class MetricsIngestProxyTests(APITestCase):
         self.assertIn("organization id", response.data["detail"].lower())
         mock_post.assert_not_called()
 
-    @override_settings(DATAMINGLE_CORTEX_URL="http://cortex.test")
+    @override_settings(DATAMINGLE_METRICS_BACKEND_URL="http://metrics.test")
     @patch("api_metrics.views.requests.post")
-    def test_ingest_returns_bad_gateway_when_cortex_is_unavailable(self, mock_post):
+    def test_ingest_returns_bad_gateway_when_backend_is_unavailable(self, mock_post):
         self.authenticate_agent()
         mock_post.side_effect = requests.ConnectionError("unavailable")
 
@@ -1048,7 +1046,7 @@ class MetricsAIAssistantTests(APITestCase):
     @patch.dict("os.environ", {"OPENAI_KEY": "configured"}, clear=False)
     @patch("api_metrics.views.requests.get")
     def test_assistant_returns_service_unavailable_when_context_fails(self, mock_get):
-        mock_get.side_effect = requests.RequestException("Cortex unavailable")
+        mock_get.side_effect = requests.RequestException("Metrics backend unavailable")
 
         response = self.client.post(
             "/api/v1/metrics/ai/assist",
@@ -1074,6 +1072,10 @@ class MetricsAIAssistantTests(APITestCase):
     )
     @patch("openai.OpenAI")
     @patch("api_metrics.views.requests.get")
+    @override_settings(
+        DATAMINGLE_METRICS_BACKEND_URL="http://metrics-default.test",
+        DATAMINGLE_METRICS_TENANT_URLS='{"org_test_123":"http://metrics-org.test"}',
+    )
     def test_assistant_builds_tenant_context_server_side(self, mock_get, openai_class):
         mock_get.side_effect = [
             SimpleNamespace(
@@ -1148,6 +1150,11 @@ class MetricsAIAssistantTests(APITestCase):
         self.assertNotIn("client_injected_label", user_message)
         self.assertNotIn("client_injected_query", user_message)
         self.assertEqual(
-            mock_get.call_args_list[0].kwargs["headers"]["X-Scope-OrgID"],
-            "org_test_123",
+            mock_get.call_args_list[0].args[0],
+            "http://metrics-org.test/prometheus/api/v1/label/__name__/values",
         )
+        self.assertEqual(
+            mock_get.call_args_list[2].args[0],
+            "http://metrics-org.test/api/v1/metadata",
+        )
+        self.assertNotIn("X-Scope-OrgID", mock_get.call_args_list[0].kwargs["headers"])

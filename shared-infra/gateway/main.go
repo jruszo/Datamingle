@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jruszo/datamingle/gateway/internal/auth"
@@ -12,19 +15,29 @@ import (
 )
 
 const (
-	defaultCortexEndpoint = "http://cortex:9009"
-	defaultRedisURL       = "redis://redis:6379"
-	defaultGatewayPort    = "4430"
+	defaultVictoriaMetricsURL = "http://victoriametrics-local-dev:8428"
+	defaultRedisURL           = "redis://redis:6379"
+	defaultGatewayPort        = "4430"
 
-	prometheusRemoteWritePath = "/api/v1/push"
-	otlpMetricsPath           = "/api/v1/otlp/v1/metrics"
+	prometheusRemoteWritePath = "/api/v1/write"
+	otlpMetricsPath           = "/opentelemetry/v1/metrics"
 )
 
 func main() {
-	cortexEndpoint := os.Getenv("CORTEX_ENDPOINT")
-	if cortexEndpoint == "" {
-		cortexEndpoint = defaultCortexEndpoint
+	rawDefaultMetricsURL := strings.TrimSpace(os.Getenv("VICTORIAMETRICS_DEFAULT_URL"))
+	defaultMetricsURL := ""
+	if rawDefaultMetricsURL == "" {
+		defaultMetricsURL = defaultVictoriaMetricsURL
+	} else {
+		normalizedURL, ok := normalizeBackendURL(rawDefaultMetricsURL)
+		if !ok {
+			slog.Error("invalid default VictoriaMetrics URL", "url", rawDefaultMetricsURL)
+			os.Exit(1)
+		}
+		defaultMetricsURL = normalizedURL
 	}
+
+	tenantMetricsURLs := parseTenantURLs(os.Getenv("VICTORIAMETRICS_TENANT_URLS"))
 
 	workosAPIKey := os.Getenv("WORKOS_API_KEY")
 	if workosAPIKey == "" {
@@ -50,8 +63,9 @@ func main() {
 
 	authenticator := auth.NewAuthenticator(workosAPIKey, apiKeyCache)
 
-	promWriteProxy := proxy.CortexHandler(cortexEndpoint + prometheusRemoteWritePath)
-	otlpMetricsProxy := proxy.CortexHandler(cortexEndpoint + otlpMetricsPath)
+	metricsBackends := proxy.NewTenantBackendResolver(defaultMetricsURL, tenantMetricsURLs)
+	promWriteProxy := proxy.MetricsHandler(metricsBackends, prometheusRemoteWritePath)
+	otlpMetricsProxy := proxy.MetricsHandler(metricsBackends, otlpMetricsPath)
 
 	mux := http.NewServeMux()
 	mux.Handle("POST /api/v1/prometheus/write", authenticator.Middleware(promWriteProxy))
@@ -64,7 +78,8 @@ func main() {
 
 	slog.Info("gateway starting",
 		"port", port,
-		"cortex_endpoint", cortexEndpoint,
+		"default_victoriametrics_url", defaultMetricsURL,
+		"tenant_url_count", len(tenantMetricsURLs),
 	)
 
 	server := &http.Server{
@@ -80,4 +95,41 @@ func main() {
 		slog.Error("server error", "error", err)
 		os.Exit(1)
 	}
+}
+
+func parseTenantURLs(raw string) map[string]string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+
+	var parsed map[string]string
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		slog.Warn("ignoring invalid VICTORIAMETRICS_TENANT_URLS JSON", "error", err)
+		return nil
+	}
+
+	cleaned := make(map[string]string, len(parsed))
+	for tenantID, backendURL := range parsed {
+		tenantID = strings.TrimSpace(tenantID)
+		backendURL, ok := normalizeBackendURL(backendURL)
+		if tenantID == "" || !ok {
+			slog.Warn("ignoring invalid tenant VictoriaMetrics URL", "tenant_id", tenantID)
+			continue
+		}
+		cleaned[tenantID] = backendURL
+	}
+	return cleaned
+}
+
+func normalizeBackendURL(raw string) (string, bool) {
+	backendURL := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if backendURL == "" {
+		return "", false
+	}
+	parsedURL, err := url.Parse(backendURL)
+	if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
+		return "", false
+	}
+	return backendURL, true
 }

@@ -9,26 +9,44 @@ import (
 	"github.com/jruszo/datamingle/gateway/internal/auth"
 )
 
-func CortexHandler(targetURL string) http.Handler {
-	target, err := url.Parse(targetURL)
-	if err != nil {
-		panic("invalid cortex target URL: " + err.Error())
-	}
+type TenantBackendResolver struct {
+	defaultBaseURL string
+	tenantBaseURLs map[string]string
+}
 
+func NewTenantBackendResolver(defaultBaseURL string, tenantBaseURLs map[string]string) TenantBackendResolver {
+	return TenantBackendResolver{
+		defaultBaseURL: defaultBaseURL,
+		tenantBaseURLs: tenantBaseURLs,
+	}
+}
+
+func (r TenantBackendResolver) URLForTenant(tenantID string) string {
+	if tenantBaseURL, ok := r.tenantBaseURLs[tenantID]; ok {
+		return tenantBaseURL
+	}
+	return r.defaultBaseURL
+}
+
+func MetricsHandler(backends TenantBackendResolver, targetPath string) http.Handler {
 	reverseProxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.SetURL(target)
-			pr.Out.URL.Path = target.Path
-			pr.Out.URL.RawPath = target.RawPath
-			pr.Out.URL.RawQuery = target.RawQuery
-
 			orgID, ok := auth.OrgIDFromContext(pr.In.Context())
 			if !ok {
 				slog.Error("missing org_id in context, auth middleware should have set this")
 				return
 			}
 
-			pr.Out.Header.Set("X-Scope-OrgID", orgID)
+			target, err := url.Parse(backends.URLForTenant(orgID) + targetPath)
+			if err != nil {
+				slog.Error("invalid metrics backend target URL", "error", err, "org_id", orgID)
+				return
+			}
+
+			pr.SetURL(target)
+			pr.Out.URL.Path = target.Path
+			pr.Out.URL.RawPath = target.RawPath
+			pr.Out.URL.RawQuery = target.RawQuery
 
 			slog.Info("proxying request",
 				"method", pr.In.Method,

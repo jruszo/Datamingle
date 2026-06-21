@@ -2,16 +2,13 @@ apiVersion: 1
 prune: true
 
 datasources:
-  - name: Cortex
+  - name: VictoriaMetrics local-dev
     type: prometheus
     access: proxy
-    url: http://cortex:9009/prometheus
+    url: http://victoriametrics-local-dev:8428/prometheus
     isDefault: true
     jsonData:
-      httpHeaderName1: X-Scope-OrgID
       timeInterval: 15s
-    secureJsonData:
-      httpHeaderValue1: local-dev
 
   - name: Prometheus Local
     type: prometheus

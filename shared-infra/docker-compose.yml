@@ -26,10 +26,7 @@ services:
     entrypoint: >-
       /bin/sh -c "
       until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 2; done &&
-      mc mb --ignore-existing local/cortex-blocks &&
-      mc mb --ignore-existing local/cortex-ruler &&
-      mc mb --ignore-existing local/cortex-alertmanager &&
-       mc mb --ignore-existing local/quickwit-indexes"
+      mc mb --ignore-existing local/quickwit-indexes"
     networks:
       - datamingle
 
@@ -56,22 +53,17 @@ services:
     networks:
       - datamingle
 
-  cortex:
-    image: cortexproject/cortex:v1.20.1
-    container_name: datamingle-shared-cortex
+  victoriametrics-local-dev:
+    image: victoriametrics/victoria-metrics:v1.103.0
+    container_name: datamingle-victoriametrics-local-dev
     restart: always
-    depends_on:
-      minio-init:
-        condition: service_completed_successfully
     command:
-      - "-config.file=/etc/cortex/cortex.yaml"
+      - "-storageDataPath=/victoria-metrics-data"
+      - "-opentelemetry.usePrometheusNaming=true"
     ports:
-      - "9009:9009"
+      - "8428:8428"
     volumes:
-      - "./config/cortex/cortex.yaml:/etc/cortex/cortex.yaml:ro"
-      - "./config/cortex/runtime-config.yaml:/etc/cortex/runtime-config.yaml:ro"
-      - "./config/cortex/rules:/rules"
-      - shared_cortex_data:/data
+      - shared_victoriametrics_local_dev_data:/victoria-metrics-data
     networks:
       - datamingle
 
@@ -80,7 +72,7 @@ services:
     container_name: datamingle-shared-gateway
     restart: always
     depends_on:
-      cortex:
+      victoriametrics-local-dev:
         condition: service_started
       redis:
         condition: service_started
@@ -89,7 +81,8 @@ services:
     env_file:
       - .env
     environment:
-      CORTEX_ENDPOINT: http://cortex:9009
+      VICTORIAMETRICS_DEFAULT_URL: http://victoriametrics-local-dev:8428
+      VICTORIAMETRICS_TENANT_URLS: '{"local-dev":"http://victoriametrics-local-dev:8428"}'
       REDIS_URL: redis://redis:6379
     networks:
       - datamingle
@@ -159,7 +152,7 @@ services:
     container_name: datamingle-shared-prometheus
     restart: always
     depends_on:
-      cortex:
+      victoriametrics-local-dev:
         condition: service_started
       quickwit:
         condition: service_started
@@ -180,7 +173,7 @@ services:
     container_name: datamingle-shared-grafana
     restart: always
     depends_on:
-      cortex:
+      victoriametrics-local-dev:
         condition: service_started
       quickwit:
         condition: service_started
@@ -204,10 +197,10 @@ networks:
     external: true
 
 volumes:
-  shared_cortex_data:
   shared_grafana_data:
   shared_minio_data:
   shared_prometheus_data:
+  shared_victoriametrics_local_dev_data:
   shared_quickwit_node_1_data:
   shared_quickwit_node_2_data:
   shared_quickwit_postgres_data:

@@ -21,7 +21,7 @@ This repository is organized as a monorepo:
 
 - `backend/` contains the Django API, local Docker files, demo database compose files, and backend Python dependencies.
 - `frontend/` contains the Vue/Vite SPA.
-- `shared-infra/` contains the local shared observability stack for Cortex, Quickwit, Grafana, Jaeger, Prometheus, and MinIO.
+- `shared-infra/` contains the local shared observability stack for per-tenant VictoriaMetrics, Quickwit, Grafana, Jaeger, Prometheus, and MinIO.
 - `agent/` is reserved for the upcoming Datamingle agent module.
 - `scripts/` contains repo-level helper scripts.
 - `documentation/` contains end-user documentation for the Datamingle web application.
@@ -115,8 +115,8 @@ cp shared-infra/.env.example shared-infra/.env
 docker-compose -f shared-infra/docker-compose.yml up -d
 ```
 
-See [shared-infra/README.md](shared-infra/README.md) for service URLs, Cortex
-query headers, and reset instructions.
+See [shared-infra/README.md](shared-infra/README.md) for service URLs, VictoriaMetrics
+tenant routing, and reset instructions.
 
 Existing local Docker data directories from before the Datamingle rename may
 still have the application database under the old `archery` name. Copy that data
