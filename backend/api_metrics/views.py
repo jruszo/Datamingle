@@ -334,10 +334,11 @@ class CortexMetricsProxyView(views.APIView):
             auth.get("org_id")
             or getattr(request.user, "organization_id", "")
             or getattr(request.user, "workos_claims", {}).get("org_id", "")
+            or settings.DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID
         ).strip()
         if not org_id:
             raise PermissionDenied(
-                "Authenticated metrics requests require a WorkOS org_id."
+                "Authenticated metrics requests require an organization id."
             )
         return org_id
 
@@ -581,10 +582,11 @@ def _request_organization_id(request):
         auth.get("org_id")
         or getattr(request.user, "organization_id", "")
         or getattr(request.user, "workos_claims", {}).get("org_id", "")
+        or settings.DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID
     ).strip()
     if not organization_id:
         raise PermissionDenied(
-            "Authenticated dashboard requests require a WorkOS org_id."
+            "Authenticated dashboard requests require an organization id."
         )
     return organization_id
 

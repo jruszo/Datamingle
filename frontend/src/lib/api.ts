@@ -38,35 +38,12 @@ export type CurrentUserContext = {
   display: string
   email: string
   avatar_url: string
-  is_workos_managed: boolean
   is_superuser: boolean
   is_staff: boolean
   is_active: boolean
   groups: Array<{ id: number; name: string }>
   teams: Array<{ team_id: number; team_name: string }>
   permissions: string[]
-}
-
-export type WorkosProfile = {
-  id: string
-  email: string
-  first_name: string
-  last_name: string
-  display_name: string
-  profile_picture_url: string
-}
-
-export type WorkosSessionRecord = {
-  id: string
-  status: string
-  auth_method: string
-  ip_address: string
-  user_agent: string
-  expires_at: string
-  ended_at: string
-  created_at: string
-  updated_at: string
-  is_current: boolean
 }
 
 export type SystemSettingsValue = string | number | boolean | Array<string | number> | null
@@ -140,7 +117,6 @@ export type UserManagementRecord = {
   username: string
   display: string
   email: string
-  is_workos_managed: boolean
   is_active: boolean
   is_superuser: boolean
   is_staff: boolean
@@ -162,22 +138,11 @@ export type UpdateUserPayload = {
   is_active?: boolean
 }
 
-export type InviteWorkosUserPayload = {
+export type CreateUserPayload = {
   email: string
   display?: string
-}
-
-export type WorkosInvitationRecord = {
-  id: string
-  email: string
-  state: string
-  organization_id: string
-  expires_at: string
-}
-
-export type InviteWorkosUserResponse = {
-  user: UserManagementRecord
-  invitation: WorkosInvitationRecord
+  password: string
+  is_active?: boolean
 }
 
 export type InstanceTagRecord = {
@@ -521,74 +486,23 @@ function extractDetail(payload: unknown, fallback: string): string {
   return fallback
 }
 
-function isTokenPair(value: unknown): value is TokenPair {
-  if (!isRecord(value)) {
-    return false
+function extractAllauthTokenPair(payload: unknown): TokenPair {
+  const meta = isRecord(payload) && isRecord(payload.meta) ? payload.meta : null
+  if (!meta) {
+    throw new Error('Token response did not include authentication metadata')
   }
-  return typeof value.access === 'string' && typeof value.refresh === 'string'
-}
-
-function extractTokenPair(payload: unknown): TokenPair {
-  if (isTokenPair(payload)) {
-    return payload
+  if (typeof meta.access_token !== 'string' || typeof meta.refresh_token !== 'string') {
+    throw new Error('Token response did not include access/refresh fields')
   }
-
-  if (isRecord(payload) && isTokenPair(payload.data)) {
-    return payload.data
+  return {
+    access: meta.access_token,
+    refresh: meta.refresh_token,
   }
-
-  throw new Error('Token response did not include access/refresh fields')
 }
 
-let activeWorkosExchange:
-  | {
-      code: string
-      request: Promise<TokenPair>
-    }
-  | undefined
-
-export function exchangeWorkosCode(code: string) {
-  if (activeWorkosExchange?.code === code) {
-    return activeWorkosExchange.request
-  }
-
-  const request = apiPost<unknown>('/auth/workos/exchange/', { code })
-    .then(extractTokenPair)
-    .catch((error: unknown) => {
-      if (activeWorkosExchange?.code === code) {
-        activeWorkosExchange = undefined
-      }
-      throw error
-    })
-
-  activeWorkosExchange = { code, request }
-  return request
-}
-
-export function fetchWorkosProfile(token: string) {
-  return apiGet<unknown>('/auth/workos/profile/', { token }).then((payload) =>
-    extractData<WorkosProfile>(payload),
-  )
-}
-
-export function updateWorkosProfile(
-  payload: { first_name: string; last_name: string },
-  token: string,
-) {
-  return apiPatch<unknown>('/auth/workos/profile/', payload, { token }).then((responsePayload) =>
-    extractData<WorkosProfile>(responsePayload),
-  )
-}
-
-export function fetchWorkosSessions(token: string) {
-  return apiGet<unknown>('/auth/workos/sessions/', { token }).then((payload) =>
-    extractData<WorkosSessionRecord[]>(payload),
-  )
-}
-
-export function revokeWorkosSession(sessionId: string, token: string) {
-  return apiPost<unknown>(`/auth/workos/sessions/${sessionId}/revoke/`, {}, { token }).then(
-    (payload) => extractDetail(payload, 'WorkOS session revoked.'),
+export function loginWithPassword(email: string, password: string) {
+  return apiPost<unknown>('/_allauth/app/v1/auth/login', { email, password }).then(
+    extractAllauthTokenPair,
   )
 }
 
@@ -674,9 +588,9 @@ export function deleteUser(userId: number, token: string) {
   )
 }
 
-export function inviteWorkosUser(payload: InviteWorkosUserPayload, token: string) {
-  return apiPost<unknown>('/v1/user/invitations/', payload, { token }).then((responsePayload) =>
-    extractData<InviteWorkosUserResponse>(responsePayload),
+export function createUser(payload: CreateUserPayload, token: string) {
+  return apiPost<unknown>('/v1/user/', payload, { token }).then((responsePayload) =>
+    extractData<UserManagementRecord>(responsePayload),
   )
 }
 

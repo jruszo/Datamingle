@@ -3,15 +3,18 @@ from types import SimpleNamespace
 from unittest.mock import patch, Mock
 import re
 
+from django.conf import settings
+from django.contrib.auth import BACKEND_SESSION_KEY, HASH_SESSION_KEY, SESSION_KEY
 from django.test import TestCase
 from django.core.cache import cache
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
 from django.http import HttpResponse
 from django.urls import Resolver404, resolve
+from importlib import import_module
 from rest_framework.test import APITestCase, APIClient
 from rest_framework import status
-from rest_framework_simplejwt.tokens import RefreshToken
+from allauth.headless.tokens.strategies.jwt import internal as allauth_jwt
 from common.config import SysConfig
 from sql.utils.workflow_audit import AuditException, AuditSetting
 from sql.engines import ReviewSet
@@ -66,8 +69,16 @@ def assert_success_envelope(testcase, response):
 
 
 def token_pair_for_user(user):
-    refresh = RefreshToken.for_user(user)
-    return {"refresh": str(refresh), "access": str(refresh.access_token)}
+    SessionStore = import_module(settings.SESSION_ENGINE).SessionStore
+    session = SessionStore()
+    session[SESSION_KEY] = str(user.pk)
+    session[BACKEND_SESSION_KEY] = "common.auth_backends.TeamPermissionBackend"
+    session[HASH_SESSION_KEY] = user.get_session_auth_hash()
+    session.save()
+    access = allauth_jwt.create_access_token(user, session, {})
+    refresh = allauth_jwt.create_refresh_token(user, session)
+    session.save()
+    return {"refresh": refresh, "access": access}
 
 
 def authenticate_client(client, user):
@@ -359,7 +370,6 @@ class TestUser(CacheIsolatedAPITestCase):
                 "username",
                 "display",
                 "email",
-                "is_workos_managed",
                 "is_active",
                 "is_superuser",
                 "is_staff",
@@ -746,7 +756,7 @@ class TestUser(CacheIsolatedAPITestCase):
 
 
 class TestSPATokenHelpers(CacheIsolatedAPITestCase):
-    """Test token refresh and verification after WorkOS issues SPA JWTs."""
+    """Test allauth headless token refresh for the SPA."""
 
     def setUp(self):
         self.user = User(
@@ -765,46 +775,20 @@ class TestSPATokenHelpers(CacheIsolatedAPITestCase):
         refresh_token = token_pair_for_user(self.user)["refresh"]
 
         r = self.client.post(
-            "/api/auth/token/refresh/",
-            {"refresh": refresh_token},
+            "/api/_allauth/app/v1/tokens/refresh",
+            {"refresh_token": refresh_token},
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
-        refreshed = assert_success_envelope(self, r)
-        self.assertIn("access", refreshed)
-
-    def test_token_verify_success_envelope(self):
-        access_token = token_pair_for_user(self.user)["access"]
-
-        r = self.client.post(
-            "/api/auth/token/verify/",
-            {"token": access_token},
-            format="json",
-        )
-        self.assertEqual(r.status_code, status.HTTP_200_OK)
-        self.assertEqual(assert_success_envelope(self, r), {})
+        self.assertIn("access_token", r.json()["data"])
 
     def test_token_refresh_invalid_token_returns_error_contract(self):
         r = self.client.post(
-            "/api/auth/token/refresh/",
-            {"refresh": "invalid.refresh.token"},
+            "/api/_allauth/app/v1/tokens/refresh",
+            {"refresh_token": "invalid.refresh.token"},
             format="json",
         )
-        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
-        self.assertIn("detail", r.json())
-        self.assertIn("code", r.json())
-        self.assertNotIn("data", r.json())
-
-    def test_token_verify_invalid_token_returns_error_contract(self):
-        r = self.client.post(
-            "/api/auth/token/verify/",
-            {"token": "invalid.access.token"},
-            format="json",
-        )
-        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
-        self.assertIn("detail", r.json())
-        self.assertIn("code", r.json())
-        self.assertNotIn("data", r.json())
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
 
 
 class TestQueryAPI(CacheIsolatedAPITestCase):

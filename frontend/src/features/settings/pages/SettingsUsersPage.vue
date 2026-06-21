@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useDebounceFn } from '@vueuse/core'
-import { MailPlus, RefreshCw, X } from 'lucide-vue-next'
+import { RefreshCw, UserPlus, X } from 'lucide-vue-next'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -10,9 +10,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table'
 import { Input } from '@/components/ui/input'
 import {
+  createUser,
   deleteUser,
   fetchUsers,
-  inviteWorkosUser,
   updateUser,
   type UserManagementRecord,
 } from '../api'
@@ -34,6 +34,7 @@ const latestRequestId = ref(0)
 const isInviteDialogOpen = ref(false)
 const inviteEmail = ref('')
 const inviteDisplay = ref('')
+const invitePassword = ref('')
 const inviteSubmitting = ref(false)
 const inviteError = ref('')
 
@@ -209,6 +210,7 @@ function openInviteDialog() {
 
   inviteEmail.value = ''
   inviteDisplay.value = ''
+  invitePassword.value = ''
   inviteError.value = ''
   isInviteDialogOpen.value = true
 }
@@ -231,23 +233,28 @@ async function submitInvite() {
     inviteError.value = 'Email is required.'
     return
   }
+  if (!invitePassword.value) {
+    inviteError.value = 'Password is required.'
+    return
+  }
 
   inviteSubmitting.value = true
   inviteError.value = ''
 
   try {
-    const response = await inviteWorkosUser(
+    const user = await createUser(
       {
         email,
         display: inviteDisplay.value.trim(),
+        password: invitePassword.value,
       },
       requireToken(),
     )
-    feedback.value = `Invitation sent to ${response.invitation.email || email}.`
+    feedback.value = `User ${user.email || email} created.`
     isInviteDialogOpen.value = false
     await loadUsers()
   } catch (errorValue) {
-    inviteError.value = toUserFacingMessage(errorValue, 'Failed to send WorkOS invitation.')
+    inviteError.value = toUserFacingMessage(errorValue, 'Failed to create the user.')
   } finally {
     inviteSubmitting.value = false
   }
@@ -288,8 +295,7 @@ watch(searchQuery, () => {
     <div class="space-y-1">
       <h2 class="text-2xl font-semibold text-slate-900">User Management</h2>
       <p class="text-sm text-slate-600">
-        Superusers can invite users and manage team access.
-        memberships.
+        Superusers can create users and manage team access.
       </p>
     </div>
 
@@ -339,8 +345,8 @@ watch(searchQuery, () => {
         >
           <template #toolbar-actions>
             <Button @click="openInviteDialog">
-              <MailPlus class="h-4 w-4" />
-              Invite user
+              <UserPlus class="h-4 w-4" />
+              Create user
             </Button>
             <Button variant="outline" @click="loadUsers">
               <RefreshCw class="h-4 w-4" />
@@ -410,12 +416,6 @@ watch(searchQuery, () => {
               <Badge v-if="row.is_staff" variant="secondary" class="bg-sky-100 text-sky-800">
                 Staff
               </Badge>
-              <Badge
-                :variant="row.is_workos_managed ? 'secondary' : 'outline'"
-                :class="row.is_workos_managed ? 'bg-slate-100 text-slate-700' : 'text-slate-600'"
-              >
-                {{ row.is_workos_managed ? 'WorkOS linked' : 'Datamingle teams' }}
-              </Badge>
             </div>
           </template>
 
@@ -452,9 +452,9 @@ watch(searchQuery, () => {
       <div class="w-full max-w-2xl rounded-lg bg-white shadow-xl">
         <div class="flex items-start justify-between border-b border-slate-200 px-6 py-4">
           <div>
-            <h3 class="text-lg font-semibold text-slate-900">Invite WorkOS user</h3>
+            <h3 class="text-lg font-semibold text-slate-900">Create user</h3>
             <p class="mt-1 text-sm text-slate-600">
-              Send a WorkOS invitation and assign initial team access.
+              Create a Datamingle email/password account. Team access is assigned separately.
             </p>
           </div>
           <Button variant="ghost" size="icon" type="button" @click="closeInviteDialog">
@@ -494,6 +494,20 @@ watch(searchQuery, () => {
             />
           </div>
 
+          <div class="grid gap-2">
+            <label for="invite-password" class="text-sm font-medium text-slate-900">
+              Initial password
+            </label>
+            <Input
+              id="invite-password"
+              v-model="invitePassword"
+              autocomplete="new-password"
+              :disabled="inviteSubmitting"
+              placeholder="At least 9 characters"
+              type="password"
+            />
+          </div>
+
           <div class="flex justify-end gap-3 border-t border-slate-200 pt-4">
             <Button
               variant="outline"
@@ -508,8 +522,8 @@ watch(searchQuery, () => {
               class="gap-2"
               :disabled="inviteSubmitting"
             >
-              <MailPlus class="h-4 w-4" />
-              {{ inviteSubmitting ? 'Sending...' : 'Send invitation' }}
+              <UserPlus class="h-4 w-4" />
+              {{ inviteSubmitting ? 'Creating...' : 'Create user' }}
             </Button>
           </div>
         </form>

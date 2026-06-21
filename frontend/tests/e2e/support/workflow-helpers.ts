@@ -23,8 +23,8 @@ export async function loginAs(page: Page, username: DemoUser) {
 
   await page.goto('/login')
   await page.evaluate((issuedTokens) => {
-    localStorage.setItem('workos.access_token', issuedTokens.access)
-    localStorage.setItem('workos.refresh_token', issuedTokens.refresh)
+    localStorage.setItem('datamingle.access_token', issuedTokens.access)
+    localStorage.setItem('datamingle.refresh_token', issuedTokens.refresh)
   }, tokens)
   await page.goto('/')
   await expect(page.getByRole('link', { name: 'Workflows' })).toBeVisible()
@@ -33,11 +33,22 @@ export async function loginAs(page: Page, username: DemoUser) {
 function issueDemoTokens(username: DemoUser) {
   const script = [
     'import json',
-    'from rest_framework_simplejwt.tokens import RefreshToken',
+    'from django.conf import settings',
+    'from django.contrib.auth import BACKEND_SESSION_KEY, HASH_SESSION_KEY, SESSION_KEY',
+    'from importlib import import_module',
+    'from allauth.headless.tokens.strategies.jwt import internal',
     'from sql.models import Users',
     `user = Users.objects.get(username=${JSON.stringify(username)})`,
-    'refresh = RefreshToken.for_user(user)',
-    'print(json.dumps({"access": str(refresh.access_token), "refresh": str(refresh)}))',
+    'SessionStore = import_module(settings.SESSION_ENGINE).SessionStore',
+    'session = SessionStore()',
+    'session[SESSION_KEY] = str(user.pk)',
+    'session[BACKEND_SESSION_KEY] = "common.auth_backends.TeamPermissionBackend"',
+    'session[HASH_SESSION_KEY] = user.get_session_auth_hash()',
+    'session.save()',
+    'access = internal.create_access_token(user, session, {})',
+    'refresh = internal.create_refresh_token(user, session)',
+    'session.save()',
+    'print(json.dumps({"access": access, "refresh": refresh}))',
   ].join('; ')
   const output = execFileSync(
     'docker',

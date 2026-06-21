@@ -281,10 +281,20 @@ async function openMailboxPage() {
 }
 
 async function logout() {
+  const token = authStore.accessToken
   mailboxStore.stopPolling()
   mailboxStore.reset()
+  if (token) {
+    await fetch(publicApiUrl('/_allauth/app/v1/auth/session'), {
+      method: 'DELETE',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    }).catch(() => undefined)
+  }
   authStore.clearTokens()
-  window.location.assign(publicApiUrl('/auth/workos/logout/'))
+  await router.replace('/login')
 }
 
 onMounted(() => {

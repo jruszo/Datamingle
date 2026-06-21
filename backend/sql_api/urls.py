@@ -13,6 +13,7 @@ router = routers.DefaultRouter()
 
 urlpatterns = [
     path("v1/", include(router.urls)),
+    path("_allauth/", include("allauth.headless.urls")),
     path("", include("api_auth.urls")),
     path("", include("api_admin.urls")),
     path("", include("api_users.urls")),

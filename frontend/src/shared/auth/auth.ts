@@ -1,10 +1,12 @@
-export const ACCESS_TOKEN_KEY = 'workos.access_token'
-export const REFRESH_TOKEN_KEY = 'workos.refresh_token'
+export const ACCESS_TOKEN_KEY = 'datamingle.access_token'
+export const REFRESH_TOKEN_KEY = 'datamingle.refresh_token'
 export const AUTH_UNAUTHORIZED_EVENT = 'archery:auth-unauthorized'
 export const AUTH_TOKENS_UPDATED_EVENT = 'archery:auth-tokens-updated'
 
 const LEGACY_ACCESS_TOKEN_KEY = 'archery.access_token'
 const LEGACY_REFRESH_TOKEN_KEY = 'archery.refresh_token'
+const LEGACY_WORKOS_ACCESS_TOKEN_KEY = 'workos.access_token'
+const LEGACY_WORKOS_REFRESH_TOKEN_KEY = 'workos.refresh_token'
 
 import {
   buildUrl,
@@ -67,6 +69,8 @@ export function setStoredTokens(access: string, refresh: string) {
   localStorage.setItem(REFRESH_TOKEN_KEY, refresh)
   localStorage.removeItem(LEGACY_ACCESS_TOKEN_KEY)
   localStorage.removeItem(LEGACY_REFRESH_TOKEN_KEY)
+  localStorage.removeItem(LEGACY_WORKOS_ACCESS_TOKEN_KEY)
+  localStorage.removeItem(LEGACY_WORKOS_REFRESH_TOKEN_KEY)
   window.dispatchEvent(
     new CustomEvent(AUTH_TOKENS_UPDATED_EVENT, {
       detail: { access, refresh },
@@ -79,6 +83,8 @@ export function clearStoredTokens() {
   localStorage.removeItem(REFRESH_TOKEN_KEY)
   localStorage.removeItem(LEGACY_ACCESS_TOKEN_KEY)
   localStorage.removeItem(LEGACY_REFRESH_TOKEN_KEY)
+  localStorage.removeItem(LEGACY_WORKOS_ACCESS_TOKEN_KEY)
+  localStorage.removeItem(LEGACY_WORKOS_REFRESH_TOKEN_KEY)
 }
 
 export function notifyUnauthorized(message: string) {
@@ -95,13 +101,29 @@ function extractRefreshTokens(payload: unknown, fallbackRefresh: string) {
       ? payload.data
       : payload
 
-  if (!isRecord(source) || typeof source.access !== 'string') {
+  if (!isRecord(source)) {
+    throw new Error('Refresh response did not include a new access token.')
+  }
+
+  const access =
+    typeof source.access_token === 'string'
+      ? source.access_token
+      : typeof source.access === 'string'
+        ? source.access
+        : ''
+
+  if (!access) {
     throw new Error('Refresh response did not include a new access token.')
   }
 
   return {
-    access: source.access,
-    refresh: typeof source.refresh === 'string' ? source.refresh : fallbackRefresh,
+    access,
+    refresh:
+      typeof source.refresh_token === 'string'
+        ? source.refresh_token
+        : typeof source.refresh === 'string'
+          ? source.refresh
+          : fallbackRefresh,
   }
 }
 
@@ -117,13 +139,13 @@ export async function refreshAccessToken(): Promise<string> {
   }
 
   refreshRequest = (async () => {
-    const response = await fetch(buildUrl('/auth/token/refresh/'), {
+    const response = await fetch(buildUrl('/_allauth/app/v1/tokens/refresh'), {
       method: 'POST',
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ refresh: refreshToken }),
+      body: JSON.stringify({ refresh_token: refreshToken }),
     })
 
     const body = await response.text()

@@ -2,7 +2,6 @@ from rest_framework import views, generics, status, permissions
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from drf_spectacular.utils import extend_schema
-from django.db import transaction
 from django.db.models import Count, Prefetch, Q
 from django.db.models.deletion import ProtectedError
 from django.contrib.auth.models import Group
@@ -10,7 +9,7 @@ from django.http import Http404
 from api_users.serializers import (
     UserManagementReadSerializer,
     UserManagementUpdateSerializer,
-    WorkOSUserInvitationSerializer,
+    UserManagementCreateSerializer,
     PermissionLevelSerializer,
     PermissionLevelWriteSerializer,
     TeamListSerializer,
@@ -21,7 +20,6 @@ from api_users.serializers import (
     CurrentUserSerializer,
 )
 from common.auth import init_user
-from common.authenticate.workos import WorkOSAuthClient
 from common.team_permissions import permission_catalog
 from api_core.pagination import CustomizedPagination
 from api_users.filters import UserFilter
@@ -87,71 +85,6 @@ def _require_team_manager(request, team):
     raise PermissionDenied("You do not own this team.")
 
 
-def _get_attr(source, name, default=""):
-    if isinstance(source, dict):
-        return source.get(name, default)
-    return getattr(source, name, default)
-
-
-def _serialize_workos_invitation(invitation):
-    return {
-        "id": str(_get_attr(invitation, "id", "") or ""),
-        "email": str(_get_attr(invitation, "email", "") or "").strip().lower(),
-        "state": str(_get_attr(invitation, "state", "") or ""),
-        "organization_id": str(_get_attr(invitation, "organization_id", "") or ""),
-        "expires_at": str(_get_attr(invitation, "expires_at", "") or ""),
-    }
-
-
-def _get_single_local_user_by_email(email):
-    matching_users = list(Users.objects.filter(email__iexact=email))
-    if len(matching_users) > 1:
-        raise ValidationError(
-            "Multiple Datamingle users already use that email address."
-        )
-    return matching_users[0] if matching_users else None
-
-
-def _local_display_name_for_invitation(email, display_name=""):
-    if display_name:
-        return display_name
-    local_part = email.split("@", 1)[0].replace(".", " ").replace("_", " ").strip()
-    return local_part.title()[:50] or email[:50]
-
-
-def _validate_invited_local_user(email):
-    user = _get_single_local_user_by_email(email)
-    username_owner = Users.objects.filter(username__iexact=email).first()
-    if username_owner and (user is None or username_owner.pk != user.pk):
-        raise ValidationError(
-            "A Datamingle username already exists for that email address."
-        )
-    if user and user.workos_user_id:
-        raise ValidationError("That email address is already linked to a WorkOS user.")
-    return user
-
-
-def _create_or_update_invited_local_user(
-    email,
-    display_name,
-):
-    user = _validate_invited_local_user(email)
-    with transaction.atomic():
-        if user is None:
-            user = Users.objects.create_user(
-                username=email,
-                email=email,
-                display=_local_display_name_for_invitation(email, display_name),
-                is_active=True,
-            )
-            init_user(user)
-        elif display_name and user.display != display_name:
-            user.display = display_name
-            user.save(update_fields=["display"])
-
-    return user
-
-
 def _validate_user_management_lifecycle(request_user, target_user, action):
     if request_user.pk == target_user.pk:
         if action == "delete":
@@ -192,7 +125,6 @@ class CurrentUser(views.APIView):
             "display": user.display,
             "email": user.email or "",
             "avatar_url": user.avatar_url or "",
-            "is_workos_managed": bool(user.workos_user_id),
             "is_superuser": user.is_superuser,
             "is_staff": user.is_staff,
             "is_active": user.is_active,
@@ -279,39 +211,21 @@ class UserList(generics.ListAPIView):
         serializer_obj = self.get_serializer(page_user, many=True)
         return self.get_paginated_response(serializer_obj.data)
 
-
-class WorkOSUserInvitation(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
     @extend_schema(
-        summary="Invite WorkOS User",
-        request=WorkOSUserInvitationSerializer,
+        summary="Create User",
+        request=UserManagementCreateSerializer,
         responses={201: UserManagementReadSerializer},
-        description="Send a WorkOS invitation and create or update the matching local Datamingle access record.",
+        description="Create a local Datamingle email/password user.",
     )
     def post(self, request):
         _require_superuser(request)
-        serializer = WorkOSUserInvitationSerializer(data=request.data)
+        serializer = UserManagementCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
-        email = serializer.validated_data["email"]
-        display = serializer.validated_data.get("display", "")
-        _validate_invited_local_user(email)
-        invitation = WorkOSAuthClient().send_invitation(
-            email=email,
-            inviter_user_id=request.user.workos_user_id or "",
-        )
-        local_user = _create_or_update_invited_local_user(
-            email=email,
-            display_name=display,
-        )
-
+        user = serializer.save()
+        init_user(user)
         return success_response(
-            data={
-                "user": UserManagementReadSerializer(local_user).data,
-                "invitation": _serialize_workos_invitation(invitation),
-            },
-            detail="WorkOS invitation sent.",
+            data=UserManagementReadSerializer(user).data,
+            detail="User created.",
             status_code=status.HTTP_201_CREATED,
         )
 
