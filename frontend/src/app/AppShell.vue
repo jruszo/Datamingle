@@ -17,6 +17,7 @@ import {
 
 import { Button } from '@/components/ui/button'
 import { publicApiUrl } from '@/shared/api/http'
+import { allauthHeadlessPath } from '@/shared/auth/allauth'
 import { getVisibleNavigationItems, matchesNavigationItem } from '@/app/feature-registry'
 import type { FeatureNavigationItem } from '@/app/feature-contract'
 import { useAuthStore } from '@/stores/auth'
@@ -285,7 +286,7 @@ async function logout() {
   mailboxStore.stopPolling()
   mailboxStore.reset()
   if (token) {
-    await fetch(publicApiUrl('/_allauth/app/v1/auth/session'), {
+    await fetch(publicApiUrl(allauthHeadlessPath('/auth/session')), {
       method: 'DELETE',
       headers: {
         Accept: 'application/json',

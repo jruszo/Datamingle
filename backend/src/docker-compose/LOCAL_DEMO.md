@@ -26,9 +26,8 @@ Prepare ignored local app settings from the tracked example:
 cp backend/src/docker-compose/.env.example backend/src/docker-compose/.env.local-dev
 ```
 
-Edit `backend/src/docker-compose/.env.local-dev` and set the required `WORKOS_*`
-values before starting the app stack. Generate local-only values for
-`SECRET_KEY` and `FIELD_ENCRYPTION_KEYS`:
+Edit `backend/src/docker-compose/.env.local-dev` and generate local-only values
+for `SECRET_KEY` and `FIELD_ENCRYPTION_KEYS` before starting the app stack:
 
 ```bash
 python3 - <<'PY'
@@ -71,9 +70,10 @@ The local demo seed no longer creates local app users. It removes legacy seeded
 records named `demo_admin`, `demo_requester`, `demo_pm`, and `demo_dba` if they
 exist.
 
-Manual testing should sign in through WorkOS. A WorkOS user with the built-in
-Admin role (`admin`) is refreshed into local Datamingle superuser access on
-every login.
+Manual testing should sign in with a local Datamingle email/password account
+through the allauth headless login flow. Public signup is closed; create or
+promote local users through the existing management/admin workflow before
+testing privileged flows.
 
 ## Demo teams and approval chains
 

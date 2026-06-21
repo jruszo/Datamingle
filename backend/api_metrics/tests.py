@@ -11,12 +11,21 @@ from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from api_agents.models import Agent
+from api_agents.services import agent_api_key_hash
 from api_metrics.models import (
     MetricsDashboard,
     MetricsDashboardFavorite,
     MetricsDashboardRevision,
 )
 from sql.models import Users
+
+
+def assign_agent_api_key(agent, api_key="dm_agent_metrics_key"):
+    agent.api_key_hash = agent_api_key_hash(api_key)
+    agent.api_key_prefix = api_key[:16]
+    agent.save(update_fields=["api_key_hash", "api_key_prefix", "update_time"])
+    return api_key
 
 
 class MetricsProxyTests(APITestCase):
@@ -246,6 +255,125 @@ class MetricsProxyTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("label", response.data)
         mock_request.assert_not_called()
+
+
+class MetricsIngestProxyTests(APITestCase):
+    def authenticate_agent(self, agent=None, api_key="dm_agent_metrics_key"):
+        agent = agent or Agent.objects.create(name="metrics-agent")
+        api_key = assign_agent_api_key(agent, api_key)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {api_key}")
+        return agent, api_key
+
+    @override_settings(
+        DATAMINGLE_CORTEX_URL="http://cortex.test",
+        DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID="datamingle",
+        DATAMINGLE_METRICS_PROXY_TIMEOUT_SECONDS=7,
+    )
+    @patch("api_metrics.views.requests.post")
+    def test_prometheus_remote_write_ingest_proxies_raw_body(self, mock_post):
+        self.authenticate_agent()
+        mock_post.return_value = SimpleNamespace(
+            status_code=204,
+            content=b"",
+            headers={"Content-Type": "text/plain"},
+        )
+
+        response = self.client.post(
+            "/api/v1/prometheus/write?org_id=evil",
+            data=b"prometheus-bytes",
+            content_type="application/x-protobuf",
+            HTTP_CONTENT_ENCODING="snappy",
+            HTTP_X_SCOPE_ORGID="evil",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        mock_post.assert_called_once()
+        url = mock_post.call_args.args[0]
+        self.assertEqual(url, "http://cortex.test/api/v1/push")
+        self.assertEqual(mock_post.call_args.kwargs["data"], b"prometheus-bytes")
+        self.assertEqual(
+            mock_post.call_args.kwargs["headers"]["X-Scope-OrgID"],
+            "datamingle",
+        )
+        self.assertEqual(
+            mock_post.call_args.kwargs["headers"]["Content-Type"],
+            "application/x-protobuf",
+        )
+        self.assertEqual(
+            mock_post.call_args.kwargs["headers"]["Content-Encoding"],
+            "snappy",
+        )
+        self.assertEqual(mock_post.call_args.kwargs["timeout"], 7)
+
+    @override_settings(
+        DATAMINGLE_CORTEX_URL="http://cortex.test",
+        DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID="datamingle",
+    )
+    @patch("api_metrics.views.requests.post")
+    def test_otlp_metrics_ingest_proxies_raw_body(self, mock_post):
+        self.authenticate_agent(api_key="dm_agent_otlp_key")
+        mock_post.return_value = SimpleNamespace(
+            status_code=200,
+            content=b'{"ok":true}',
+            headers={"Content-Type": "application/json"},
+        )
+
+        response = self.client.post(
+            "/api/otlp/v1/metrics",
+            data=b"otlp-bytes",
+            content_type="application/x-protobuf",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.content, b'{"ok":true}')
+        self.assertEqual(
+            mock_post.call_args.args[0],
+            "http://cortex.test/api/v1/otlp/v1/metrics",
+        )
+        self.assertEqual(mock_post.call_args.kwargs["data"], b"otlp-bytes")
+
+    @patch("api_metrics.views.requests.post")
+    def test_ingest_rejects_invalid_agent_key_before_cortex(self, mock_post):
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer dm_agent_missing")
+
+        response = self.client.post(
+            "/api/v1/prometheus/write",
+            data=b"prometheus-bytes",
+            content_type="application/x-protobuf",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        mock_post.assert_not_called()
+
+    @override_settings(DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID="")
+    @patch("api_metrics.views.requests.post")
+    def test_ingest_requires_configured_organization_scope(self, mock_post):
+        self.authenticate_agent()
+
+        response = self.client.post(
+            "/api/v1/prometheus/write",
+            data=b"prometheus-bytes",
+            content_type="application/x-protobuf",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn("organization id", response.data["detail"].lower())
+        mock_post.assert_not_called()
+
+    @override_settings(DATAMINGLE_CORTEX_URL="http://cortex.test")
+    @patch("api_metrics.views.requests.post")
+    def test_ingest_returns_bad_gateway_when_cortex_is_unavailable(self, mock_post):
+        self.authenticate_agent()
+        mock_post.side_effect = requests.ConnectionError("unavailable")
+
+        response = self.client.post(
+            "/api/v1/prometheus/write",
+            data=b"prometheus-bytes",
+            content_type="application/x-protobuf",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+        self.assertEqual(response.data["error"], "Metrics backend is unavailable.")
 
 
 class MetricsDashboardTests(APITestCase):

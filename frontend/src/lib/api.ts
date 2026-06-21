@@ -15,6 +15,7 @@ import {
   isRecord,
   publicApiUrl,
 } from '@/shared/api/http'
+import { allauthHeadlessPath } from '@/shared/auth/allauth'
 
 export { publicApiUrl }
 
@@ -501,7 +502,7 @@ function extractAllauthTokenPair(payload: unknown): TokenPair {
 }
 
 export function loginWithPassword(email: string, password: string) {
-  return apiPost<unknown>('/_allauth/app/v1/auth/login', { email, password }).then(
+  return apiPost<unknown>(allauthHeadlessPath('/auth/login'), { email, password }).then(
     extractAllauthTokenPair,
   )
 }

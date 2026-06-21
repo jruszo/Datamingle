@@ -24,6 +24,15 @@ def backfill_email_addresses(apps, schema_editor):
         )
         if existing:
             if existing.user_id == user.pk:
+                (
+                    EmailAddress.objects.using(db_alias)
+                    .filter(
+                        user_id=user.pk,
+                        primary=True,
+                    )
+                    .exclude(pk=existing.pk)
+                    .update(primary=False)
+                )
                 existing.email = email
                 existing.verified = True
                 existing.primary = True

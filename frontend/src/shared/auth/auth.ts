@@ -14,6 +14,7 @@ import {
   isRecord,
   parseResponseMessage,
 } from '@/shared/api/http-helpers'
+import { allauthHeadlessPath } from '@/shared/auth/allauth'
 
 let refreshRequest: Promise<string> | null = null
 
@@ -139,7 +140,7 @@ export async function refreshAccessToken(): Promise<string> {
   }
 
   refreshRequest = (async () => {
-    const response = await fetch(buildUrl('/_allauth/app/v1/tokens/refresh'), {
+    const response = await fetch(buildUrl(allauthHeadlessPath('/tokens/refresh')), {
       method: 'POST',
       headers: {
         Accept: 'application/json',

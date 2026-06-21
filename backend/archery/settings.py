@@ -33,8 +33,6 @@ env = environ.Env(
     WORKOS_JWKS_URL=(str, ""),
     WORKOS_JWT_ISSUER=(str, ""),
     DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID=(str, "datamingle"),
-    DATAMINGLE_AGENT_API_KEY_BACKEND=(str, "workos"),
-    DATAMINGLE_INGEST_GATEWAY_URL=(str, "http://localhost:4430"),
     DATAMINGLE_CORTEX_URL=(str, "http://cortex:9009"),
     DATAMINGLE_METRICS_PROXY_TIMEOUT_SECONDS=(int, 20),
     DATAMINGLE_METRICS_MAX_QUERY_LENGTH=(int, 8192),
@@ -407,12 +405,6 @@ WORKOS_JWT_ISSUER = env("WORKOS_JWT_ISSUER", default="") or WORKOS_BASE_URL.rstr
 DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID = env(
     "DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID", default="datamingle"
 )
-DATAMINGLE_AGENT_API_KEY_BACKEND = env(
-    "DATAMINGLE_AGENT_API_KEY_BACKEND", default="workos"
-)
-DATAMINGLE_INGEST_GATEWAY_URL = env(
-    "DATAMINGLE_INGEST_GATEWAY_URL", default="http://localhost:4430"
-).rstrip("/")
 DATAMINGLE_CORTEX_URL = env(
     "DATAMINGLE_CORTEX_URL", default="http://cortex:9009"
 ).rstrip("/")

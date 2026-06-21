@@ -642,7 +642,7 @@ watch([commandPage, commandPageSize], () => {
         <div class="flex items-start justify-between border-b border-slate-200 px-6 py-4">
           <div>
             <h3 class="text-lg font-semibold text-slate-900">Create Agent</h3>
-            <p class="mt-1 text-sm text-slate-500">Provision a dedicated WorkOS API key for one host agent.</p>
+            <p class="mt-1 text-sm text-slate-500">Provision a dedicated API key for one host agent.</p>
           </div>
           <Button variant="ghost" size="icon" type="button" @click="closeCreateDialog">
             <X class="h-4 w-4" />

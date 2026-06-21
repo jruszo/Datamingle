@@ -2,27 +2,20 @@ import hashlib
 import json
 import logging
 import os
+import secrets
 import tempfile
 import time
 from dataclasses import dataclass
 from urllib.parse import quote
-from urllib.parse import urljoin
 
 from django_redis import get_redis_connection
 from django.conf import settings
-from django.core.exceptions import (
-    ImproperlyConfigured,
-    ObjectDoesNotExist,
-    PermissionDenied,
-)
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.utils import timezone
-import requests
-from rest_framework.exceptions import APIException
 
 from common.config import SysConfig
-from common.authenticate.workos import _dynamic_import_workos
 from common.utils.const import WorkflowType
 from sql.engines import ResultSet
 from sql.engines.models import ReviewResult, ReviewSet
@@ -65,19 +58,11 @@ REQUIRED_AGENT_KEY_PERMISSIONS = (
     "datamingle-agent:execute-command",
 )
 AGENT_INGEST_METRICS_PERMISSION = "datamingle-agent:ingest-metrics"
-WORKOS_AGENT_API_KEY_PERMISSIONS = REQUIRED_AGENT_KEY_PERMISSIONS + (
-    AGENT_INGEST_METRICS_PERMISSION,
-)
+AGENT_API_KEY_PREFIX = "dm_agent_"
 
 
 class AgentAPIKeyRejected(Exception):
     pass
-
-
-class WorkOSAPIKeyIssueError(APIException):
-    status_code = 502
-    default_detail = "WorkOS could not create an agent API key."
-    default_code = "workos_api_key_issue_failed"
 
 
 class AgentCommandDispatchError(Exception):
@@ -100,161 +85,73 @@ class IssuedAgentAPIKey:
     key_id: str = ""
     prefix: str = ""
     obfuscated_value: str = ""
-    backend: str = "workos"
+    backend: str = "django"
 
 
 def authenticate_agent_api_key(api_key):
-    return get_agent_api_key_provider().authenticate(api_key)
+    api_key = str(api_key or "").strip()
+    if not api_key:
+        return None
+    api_key_hash = agent_api_key_hash(api_key)
+    try:
+        agent = Agent.objects.get(api_key_hash=api_key_hash)
+    except Agent.DoesNotExist:
+        return None
+    if not agent.can_connect:
+        raise AgentAPIKeyRejected("Agent is disabled or revoked.")
+    return agent
 
 
 def issue_agent_api_key(agent):
-    return get_agent_api_key_provider().issue(agent)
+    for _ in range(5):
+        api_key = generate_agent_api_key()
+        agent.api_key_hash = agent_api_key_hash(api_key)
+        agent.api_key_prefix = api_key[:AGENT_KEY_VISIBLE_PREFIX_LENGTH]
+        agent.workos_api_key_id = ""
+        try:
+            with transaction.atomic():
+                agent.save(
+                    update_fields=[
+                        "api_key_hash",
+                        "api_key_prefix",
+                        "workos_api_key_id",
+                        "update_time",
+                    ]
+                )
+        except IntegrityError:
+            continue
+        break
+    else:
+        raise AgentAPIKeyRejected("Unable to issue a unique agent API key.")
+    return IssuedAgentAPIKey(
+        value=api_key,
+        key_id="",
+        prefix=agent.api_key_prefix,
+        obfuscated_value=f"{agent.api_key_prefix}...",
+        backend="django",
+    )
 
 
 def revoke_agent_api_key(agent):
-    return get_agent_api_key_provider().revoke(agent)
-
-
-def get_agent_api_key_provider():
-    backend = settings.DATAMINGLE_AGENT_API_KEY_BACKEND.strip().lower()
-    if backend == "workos":
-        return WorkOSAgentAPIKeyProvider()
-    if backend == "local":
-        raise ImproperlyConfigured(
-            "Local agent API keys are disabled. Configure WorkOS organization API keys."
-        )
-    raise ImproperlyConfigured(
-        f"Unsupported DATAMINGLE_AGENT_API_KEY_BACKEND: {backend}"
+    agent.api_key_hash = None
+    agent.api_key_prefix = ""
+    agent.workos_api_key_id = ""
+    agent.save(
+        update_fields=[
+            "api_key_hash",
+            "api_key_prefix",
+            "workos_api_key_id",
+            "update_time",
+        ]
     )
 
 
-class WorkOSAgentAPIKeyProvider:
-    def issue(self, agent):
-        if not settings.WORKOS_API_KEY or not settings.WORKOS_ORGANIZATION_ID:
-            raise ImproperlyConfigured(
-                "WORKOS_API_KEY and WORKOS_ORGANIZATION_ID are required to issue agent API keys."
-            )
-        previous_key_id = agent.workos_api_key_id
-        api_key = create_workos_organization_api_key(
-            name=f"Datamingle Agent: {agent.display_name or agent.name}",
-            permissions=list(WORKOS_AGENT_API_KEY_PERMISSIONS),
-        )
-        owner = api_key.get("owner") or {}
-        if (
-            owner.get("type") != "organization"
-            or owner.get("id") != settings.WORKOS_ORGANIZATION_ID
-        ):
-            raise PermissionDenied(
-                "WorkOS returned an API key for the wrong organization."
-            )
-
-        value = api_key["value"]
-        agent.workos_api_key_id = api_key["id"]
-        agent.api_key_hash = None
-        agent.api_key_prefix = (
-            api_key.get("obfuscated_value") or value[:AGENT_KEY_VISIBLE_PREFIX_LENGTH]
-        )
-        agent.save(
-            update_fields=[
-                "workos_api_key_id",
-                "api_key_hash",
-                "api_key_prefix",
-                "update_time",
-            ]
-        )
-        if previous_key_id and previous_key_id != agent.workos_api_key_id:
-            workos_client().api_keys.delete_api_key(previous_key_id)
-        return IssuedAgentAPIKey(
-            value=value,
-            key_id=api_key["id"],
-            prefix=agent.api_key_prefix,
-            obfuscated_value=api_key.get("obfuscated_value", ""),
-            backend="workos",
-        )
-
-    def authenticate(self, api_key):
-        workos_key = validate_workos_api_key(api_key)
-        if workos_key is None:
-            return None
-        owner = getattr(workos_key, "owner", None)
-        owner_type = getattr(owner, "type", "")
-        owner_id = getattr(owner, "id", "")
-        if owner_type != "organization" or owner_id != settings.WORKOS_ORGANIZATION_ID:
-            raise AgentAPIKeyRejected(
-                "Agent API key belongs to the wrong organization."
-            )
-        permissions = set(getattr(workos_key, "permissions", []) or [])
-        missing = set(REQUIRED_AGENT_KEY_PERMISSIONS) - permissions
-        if missing:
-            raise AgentAPIKeyRejected("Agent API key is missing required permissions.")
-        try:
-            agent = Agent.objects.get(workos_api_key_id=workos_key.id)
-        except Agent.DoesNotExist:
-            return None
-        if not agent.can_connect:
-            raise AgentAPIKeyRejected("Agent is disabled or revoked.")
-        return agent
-
-    def revoke(self, agent):
-        if not agent.workos_api_key_id:
-            return
-        workos_client().api_keys.delete_api_key(agent.workos_api_key_id)
-        agent.workos_api_key_id = ""
-        agent.api_key_prefix = ""
-        agent.save(update_fields=["workos_api_key_id", "api_key_prefix", "update_time"])
+def generate_agent_api_key():
+    return AGENT_API_KEY_PREFIX + secrets.token_urlsafe(32)
 
 
-def workos_client():
-    workos_client_class = _dynamic_import_workos()
-    return workos_client_class(
-        api_key=settings.WORKOS_API_KEY,
-        client_id=settings.WORKOS_CLIENT_ID,
-        base_url=settings.WORKOS_BASE_URL,
-    )
-
-
-def validate_workos_api_key(api_key):
-    result = workos_client().api_keys.validate_api_key(value=api_key)
-    if result is None:
-        return None
-    if isinstance(result, dict):
-        return result.get("api_key")
-    return getattr(result, "api_key", result)
-
-
-def create_workos_organization_api_key(name, permissions):
-    url = urljoin(
-        settings.WORKOS_BASE_URL.rstrip("/") + "/",
-        f"organizations/{settings.WORKOS_ORGANIZATION_ID}/api_keys",
-    )
-    payload = {"name": name}
-    if permissions:
-        payload["permissions"] = permissions
-    response = requests.post(
-        url,
-        json=payload,
-        headers={
-            "Authorization": f"Bearer {settings.WORKOS_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        timeout=10,
-    )
-    try:
-        response.raise_for_status()
-    except requests.HTTPError as exc:
-        detail = (
-            "WorkOS could not create an agent API key. Confirm these permission slugs "
-            "are enabled in WorkOS under Authorization > Configuration > "
-            f"Organization API key permissions: {', '.join(permissions)}."
-        )
-        if response.text:
-            detail = f"{detail} WorkOS response: {response.text[:500]}"
-        raise WorkOSAPIKeyIssueError(detail=detail) from exc
-    response_payload = response.json()
-    api_key = response_payload.get("api_key") or response_payload
-    if not api_key.get("id") or not api_key.get("value"):
-        raise PermissionDenied("WorkOS did not return a usable API key.")
-    return api_key
+def agent_api_key_hash(api_key):
+    return hashlib.sha256(str(api_key).encode("utf-8")).hexdigest()
 
 
 def build_agent_install_command(request, api_key):
@@ -267,7 +164,7 @@ def build_agent_install_command(request, api_key):
     )
 
 
-def build_agent_config(agent):
+def build_agent_config(agent, datamingle_url=""):
     assignment_records = list(
         agent.assignments.filter(enabled=True).select_related(
             "instance", "instance__node", "local_node"
@@ -277,7 +174,7 @@ def build_agent_config(agent):
         serialize_assignment(assignment) for assignment in assignment_records
     ]
     nodes = build_agent_node_configs(agent, assignment_records)
-    modules = build_module_configs(agent, assignments)
+    modules = build_module_configs(agent, assignments, datamingle_url=datamingle_url)
     tool_artifacts = [
         serialize_tool_artifact(artifact)
         for artifact in AgentToolArtifact.objects.filter(enabled=True)
@@ -285,7 +182,9 @@ def build_agent_config(agent):
     payload = {
         "agent_id": agent.id,
         "revision": agent.desired_config_revision,
-        "organization_id": agent.organization_id or settings.WORKOS_ORGANIZATION_ID,
+        "organization_id": (
+            agent.organization_id or settings.DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID
+        ),
         "node": serialize_node(agent.local_node) if agent.local_node_id else None,
         "nodes": nodes,
         "assignments": assignments,
@@ -586,7 +485,7 @@ def clear_node_assignment_from_services(node_assignment):
     )
 
 
-def build_module_configs(agent, assignments):
+def build_module_configs(agent, assignments, datamingle_url=""):
     configs = []
     node_monitoring_enabled = any(
         node.get("monitoring_enabled") for node in build_agent_node_configs(agent, [])
@@ -612,7 +511,9 @@ def build_module_configs(agent, assignments):
         enabled = bool(module_assignments)
         if module_name == "node_monitoring":
             enabled = node_monitoring_enabled
-            raw = build_node_monitoring_module_config(agent)
+            raw = build_node_monitoring_module_config(
+                agent, datamingle_url=datamingle_url
+            )
         if module_name == "service_monitoring":
             monitored_assignments = [
                 assignment
@@ -622,7 +523,11 @@ def build_module_configs(agent, assignments):
                 and assignment.get("db_type") in ("mysql", "pgsql")
             ]
             enabled = bool(monitored_assignments)
-            raw = build_service_monitoring_module_config(agent, monitored_assignments)
+            raw = build_service_monitoring_module_config(
+                agent,
+                monitored_assignments,
+                datamingle_url=datamingle_url,
+            )
         configs.append(
             {
                 "name": module_name,
@@ -635,7 +540,16 @@ def build_module_configs(agent, assignments):
     return configs
 
 
-def build_node_monitoring_module_config(agent):
+def build_remote_write_url(datamingle_url=""):
+    base_url = (datamingle_url or "").rstrip("/")
+    return (
+        f"{base_url}/api/v1/prometheus/write"
+        if base_url
+        else "/api/v1/prometheus/write"
+    )
+
+
+def build_node_monitoring_module_config(agent, datamingle_url=""):
     artifact = (
         AgentToolArtifact.objects.filter(
             tool_name=AgentToolArtifact.TOOL_NODE_EXPORTER,
@@ -644,9 +558,7 @@ def build_node_monitoring_module_config(agent):
         .order_by("-version", "id")
         .first()
     )
-    remote_write_url = (
-        settings.DATAMINGLE_INGEST_GATEWAY_URL.rstrip("/") + "/api/v1/prometheus/write"
-    )
+    remote_write_url = build_remote_write_url(datamingle_url)
     collectors = (
         list(agent.local_node.monitoring_collectors or [])
         if agent.local_node_id
@@ -682,7 +594,7 @@ def build_node_monitoring_module_config(agent):
     }
 
 
-def build_service_monitoring_module_config(agent, assignments):
+def build_service_monitoring_module_config(agent, assignments, datamingle_url=""):
     mysql_artifact = (
         AgentToolArtifact.objects.filter(
             tool_name=AgentToolArtifact.TOOL_MYSQLD_EXPORTER,
@@ -699,9 +611,7 @@ def build_service_monitoring_module_config(agent, assignments):
         .order_by("-version", "id")
         .first()
     )
-    remote_write_url = (
-        settings.DATAMINGLE_INGEST_GATEWAY_URL.rstrip("/") + "/api/v1/prometheus/write"
-    )
+    remote_write_url = build_remote_write_url(datamingle_url)
     services = []
     for index, assignment in enumerate(assignments):
         port = 9200 + index

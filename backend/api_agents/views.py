@@ -94,7 +94,7 @@ class AgentListCreateView(generics.ListAPIView):
         serializer.is_valid(raise_exception=True)
         organization_id = (
             getattr(request.user, "organization_id", "")
-            or settings.WORKOS_ORGANIZATION_ID
+            or settings.DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID
         )
         with transaction.atomic():
             agent = serializer.save(organization_id=organization_id)
