@@ -2,7 +2,7 @@
 
 ## Summary
 
-Build a Go-based Datamingle Agent in `agent/` plus a new backend `api_agents` Django app and frontend `agents` feature. The agent will behave like a Datadog-style host process: it connects to Datamingle with only `DATAMINGLE_URL` and a WorkOS organization API key, keeps a websocket open for configuration and command notifications, periodically fetches full configuration, manages modules/exporters for one or more assigned database servers, and executes only workflow-approved commands.
+Build a Go-based Datamingle Agent in `agent/` plus a new backend `api_agents` Django app and frontend `agents` feature. The agent will behave like a Datadog-style host process: it connects to Datamingle with only `DATAMINGLE_URL` and a Datamingle-managed agent API key, keeps a websocket open for configuration and command notifications, periodically fetches full configuration, manages modules/exporters for one or more assigned database servers, and executes only workflow-approved commands.
 
 This document is intentionally a living plan. It should be refined before implementation starts.
 
@@ -31,7 +31,7 @@ This document is intentionally a living plan. It should be refined before implem
 ## Current Repo Context
 
 - `agent/` currently contains only `README.md`; there is no existing Go module.
-- Backend is Django/DRF with JWT for browser APIs and WorkOS for user login.
+- Backend is Django/DRF with local allauth JWT for browser APIs.
 - Backend currently has no agent API, no websocket endpoint, and no Channels dependency.
 - Existing database/server records live in `sql.models.Instance`.
 - Existing credentials on `Instance` are encrypted fields and can be decrypted by the backend when authorized.
@@ -47,8 +47,8 @@ This document is intentionally a living plan. It should be refined before implem
 
 ## Key Architecture
 
-- Use WorkOS AuthKit organization API keys for agent authentication.
-- Datamingle creates per-agent WorkOS API keys with agent permissions, stores only metadata, and validates inbound keys server-side.
+- Use Datamingle-managed per-agent API keys for agent authentication.
+- Datamingle creates per-agent API keys, stores only hashes and display metadata, and validates inbound keys server-side.
 - Add backend models for agents, assignments, config revisions, commands, command events, tool artifacts, and module status.
 - Add Django Channels plus `channels-redis`.
 - Use websocket for notifications and lightweight control messages.
@@ -72,7 +72,6 @@ Fields:
 - `name`
 - `display_name`
 - `status`: `pending`, `online`, `offline`, `disabled`, `revoked`
-- `workos_api_key_id`
 - `api_key_prefix`
 - `hostname`
 - `platform`
@@ -91,7 +90,7 @@ Fields:
 
 Rules:
 
-- Never store the raw API key; store only hashed local keys, WorkOS key IDs, and derived visible prefixes/fingerprints.
+- Never store the raw API key; store only hashed local keys and derived visible prefixes/fingerprints.
 - API key value is shown only once during creation or rotation. The UI presents `Create/Rotate key`, displays the new raw key and install/update command once, and records an audit event.
 - Rotation revokes the old key immediately by default. A configurable grace period may be added later, but the backend must then accept both fingerprints only until the grace window expires.
 - Agents receive replacement keys through operator-driven reinstall/update commands or a future authenticated provisioning REST/websocket flow. Raw keys are never written to durable config.
@@ -234,7 +233,7 @@ Rules:
 
 - `POST /api/v1/agents/`
   - Create pending agent record.
-  - Create WorkOS organization API key with agent permissions.
+  - Create a Datamingle agent API key.
   - Return raw key once plus install command.
 
 - `GET /api/v1/agents/{id}/`
@@ -244,7 +243,7 @@ Rules:
   - Rename, enable, disable, or update metadata.
 
 - `DELETE /api/v1/agents/{id}/`
-  - Revoke WorkOS key if present.
+  - Revoke the old Datamingle agent API key if present.
   - Disable agent and disconnect websocket.
 
 - `GET /api/v1/agents/{id}/assignments/`
@@ -601,7 +600,7 @@ Pages:
 
 - Agent create/install
   - Use a modal or dedicated page.
-  - Create backend agent and WorkOS API key.
+  - Create backend agent and Datamingle agent API key.
   - Show API key exactly once.
   - Show install command requiring only Datamingle host and API key.
 
@@ -655,11 +654,11 @@ Connection testing:
 
 ## Security And Audit
 
-WorkOS API key validation:
+Datamingle agent API key validation:
 
-- Validate API key through WorkOS.
-- Verify organization ID.
-- Verify required permissions.
+- Validate API key hash against Datamingle agent records.
+- Verify organization ID from the matched agent record.
+- Verify the agent is allowed to connect.
 - Cache successful validation briefly by key hash.
 - Reject disabled/revoked Datamingle agent records.
 
@@ -688,7 +687,7 @@ Audit events:
 Redaction:
 
 - Redact database passwords.
-- Redact WorkOS/Datamingle API keys.
+- Redact Datamingle API keys.
 - Redact DSNs.
 - Redact temporary credential file paths.
 - Redact command-line args known to include passwords.
@@ -732,7 +731,7 @@ Installer verification:
 
 Backend tests:
 
-- WorkOS API key validation success/failure with mocked WorkOS client.
+- Datamingle agent API key validation success/failure.
 - Agent registration binds install ID and host metadata.
 - Disabled/revoked agents cannot authenticate.
 - Config payload includes only assigned instances.
@@ -816,7 +815,7 @@ cd frontend && npm run build
 
 - V1 supports Linux amd64 and arm64 packages first.
 - Current Datamingle remains single-organization, but agent models include `organization_id` for future multi-org support.
-- WorkOS API Keys are the chosen auth strategy.
+- Datamingle-managed agent API keys are the chosen auth strategy.
 - Commands are workflow-gated only.
 - gh-ost and pt-online-schema-change are downloaded on enable with checksum verification.
 - Metrics are sent to a configured Datamingle/OTel/VictoriaMetrics endpoint from backend config.
@@ -825,7 +824,7 @@ cd frontend && npm run build
 ## Open Questions For Later Iterations
 
 - Should metrics-only duplicate assignments be allowed in V1, or should all assignments remain unique per instance?
-- Which exact WorkOS API key permissions and metadata fields should Datamingle create?
+- Which exact Datamingle agent API key metadata fields should the UI expose?
 - Should Datamingle proxy tool downloads, or should agents download directly from vendor/GitHub URLs?
 - Which schema-change executor should be preferred by default for MySQL: gh-ost or pt-online-schema-change?
 - Should agent command results be stored fully in Django or offloaded to object storage for large outputs?

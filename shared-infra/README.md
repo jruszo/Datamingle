@@ -16,7 +16,6 @@ The Docker Compose project name is pinned to `datamingle-shared-infra`, so Docke
 ## Start
 
 ```bash
-cp shared-infra/.env.example shared-infra/.env
 docker-compose -f shared-infra/docker-compose.yml up -d
 ```
 
@@ -42,19 +41,16 @@ In Grafana, use the `VictoriaMetrics local-dev` datasource for stored metrics an
 
 Datamingle routes metrics by organization id to a tenant-specific VictoriaMetrics base URL. For local development, all unknown tenants fall back to `http://victoriametrics-local-dev:8428`.
 
-Configure backend reads and agent ingests with:
+Configure backend reads and Django agent ingest proxying with:
 
 ```bash
 DATAMINGLE_METRICS_BACKEND_URL=http://victoriametrics-local-dev:8428
 DATAMINGLE_METRICS_TENANT_URLS={"org_123":"http://victoriametrics-org-123:8428"}
 ```
 
-Configure the shared ingest gateway with:
-
-```bash
-VICTORIAMETRICS_DEFAULT_URL=http://victoriametrics-local-dev:8428
-VICTORIAMETRICS_TENANT_URLS={"org_123":"http://victoriametrics-org-123:8428"}
-```
+Agents remote-write to Datamingle's Django endpoint at `/api/v1/prometheus/write`.
+The Django backend authenticates the Datamingle agent API key and proxies the
+ingest body to the tenant's VictoriaMetrics installation.
 
 ## Test Traces
 

@@ -127,7 +127,6 @@ The shared observability infrastructure lives outside the app stack in
 used to test metrics and trace ingestion. It is optional for basic demo usage:
 
 ```bash
-cp shared-infra/.env.example shared-infra/.env
 docker-compose -f shared-infra/docker-compose.yml up -d
 ```
 

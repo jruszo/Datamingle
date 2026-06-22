@@ -692,7 +692,6 @@ def _request_organization_id(request):
     organization_id = str(
         auth.get("org_id")
         or getattr(request.user, "organization_id", "")
-        or getattr(request.user, "workos_claims", {}).get("org_id", "")
         or settings.DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID
     ).strip()
     if not organization_id:
@@ -712,9 +711,7 @@ def _dashboard_queryset(request):
     from api_metrics.models import MetricsDashboard, MetricsDashboardFavorite
 
     return (
-        MetricsDashboard.objects.filter(
-            organization_id=_request_organization_id(request)
-        )
+        MetricsDashboard.objects.all()
         .select_related("created_by")
         .annotate(
             is_favorite=Exists(
@@ -794,7 +791,6 @@ class MetricsDashboardListCreateView(views.APIView):
         serializer.is_valid(raise_exception=True)
         with transaction.atomic():
             dashboard = serializer.save(
-                organization_id=_request_organization_id(request),
                 created_by=request.user,
             )
             dashboard.is_favorite = False
@@ -988,7 +984,6 @@ class MetricsDashboardRevisionListView(views.APIView):
         dashboard = get_object_or_404(
             MetricsDashboard,
             pk=dashboard_id,
-            organization_id=_request_organization_id(request),
         )
         revisions = dashboard.history.select_related("saved_by").all()
         return success_response(
@@ -1011,7 +1006,6 @@ class MetricsDashboardRevisionDetailView(views.APIView):
                 "saved_by",
             ),
             dashboard_id=dashboard_id,
-            dashboard__organization_id=_request_organization_id(request),
             revision=revision,
         )
 

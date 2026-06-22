@@ -524,7 +524,7 @@ class MetricsDashboardTests(APITestCase):
             self.assertFalse(response.data["data"]["is_favorite"])
         self.assertFalse(MetricsDashboardFavorite.objects.exists())
 
-    def test_favorite_is_tenant_scoped_and_deleted_with_dashboard(self):
+    def test_favorite_is_personal_and_deleted_with_dashboard(self):
         dashboard_id = self.create_dashboard().data["data"]["id"]
         self.client.patch(
             f"/api/v1/metrics/dashboards/{dashboard_id}/favorite/",
@@ -533,12 +533,13 @@ class MetricsDashboardTests(APITestCase):
         )
         self.authenticate(self.other_user, "org_other")
 
-        hidden_response = self.client.patch(
+        other_favorite_response = self.client.patch(
             f"/api/v1/metrics/dashboards/{dashboard_id}/favorite/",
             {"favorite": True},
             format="json",
         )
-        self.assertEqual(hidden_response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(other_favorite_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(MetricsDashboardFavorite.objects.count(), 2)
 
         self.authenticate(self.user, "org_test_123")
         delete_response = self.client.delete(
@@ -612,7 +613,7 @@ class MetricsDashboardTests(APITestCase):
         self.assertLessEqual(normalized.width, 256)
         self.assertLessEqual(normalized.height, 256)
 
-    def test_dashboard_icon_is_hidden_from_other_organization(self):
+    def test_dashboard_icon_is_visible_to_other_user(self):
         dashboard_id = self.create_dashboard().data["data"]["id"]
         self.client.post(
             f"/api/v1/metrics/dashboards/{dashboard_id}/icon/",
@@ -623,7 +624,7 @@ class MetricsDashboardTests(APITestCase):
 
         response = self.client.get(f"/api/v1/metrics/dashboards/{dashboard_id}/icon/")
 
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     def test_invalid_dashboard_icon_is_rejected(self):
         dashboard_id = self.create_dashboard().data["data"]["id"]
@@ -779,7 +780,7 @@ class MetricsDashboardTests(APITestCase):
         self.assertEqual(detail_response.data["data"]["name"], "API overview")
         self.assertEqual(len(detail_response.data["data"]["panels"]), 1)
 
-    def test_revision_history_is_hidden_from_other_organization(self):
+    def test_revision_history_is_visible_to_other_user(self):
         dashboard_id = self.create_dashboard().data["data"]["id"]
         self.authenticate(self.other_user, "org_other")
 
@@ -790,8 +791,8 @@ class MetricsDashboardTests(APITestCase):
             f"/api/v1/metrics/dashboards/{dashboard_id}/revisions/1/"
         )
 
-        self.assertEqual(list_response.status_code, status.HTTP_404_NOT_FOUND)
-        self.assertEqual(detail_response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
 
     def test_restore_creates_a_new_revision_and_preserves_history(self):
         dashboard_id = self.create_dashboard().data["data"]["id"]
@@ -895,16 +896,18 @@ class MetricsDashboardTests(APITestCase):
         self.assertEqual(stale_update.data["data"]["revision"], 2)
         self.assertEqual(stale_update.data["data"]["description"], "Updated first")
 
-    def test_dashboard_is_hidden_from_other_organization(self):
+    def test_dashboard_is_visible_to_other_user(self):
         dashboard_id = self.create_dashboard().data["data"]["id"]
         self.authenticate(self.other_user, "org_other")
 
         detail_response = self.client.get(f"/api/v1/metrics/dashboards/{dashboard_id}/")
         list_response = self.client.get("/api/v1/metrics/dashboards/")
 
-        self.assertEqual(detail_response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
         self.assertEqual(list_response.status_code, status.HTTP_200_OK)
-        self.assertEqual(list_response.data["data"], [])
+        self.assertEqual(
+            [item["id"] for item in list_response.data["data"]], [dashboard_id]
+        )
 
     def test_invalid_panel_layout_is_rejected(self):
         invalid_panel = self.panel()

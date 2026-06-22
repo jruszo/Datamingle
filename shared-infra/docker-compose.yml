@@ -67,26 +67,6 @@ services:
     networks:
       - datamingle
 
-  gateway:
-    build: ./gateway
-    container_name: datamingle-shared-gateway
-    restart: always
-    depends_on:
-      victoriametrics-local-dev:
-        condition: service_started
-      redis:
-        condition: service_started
-    ports:
-      - "4430:4430"
-    env_file:
-      - .env
-    environment:
-      VICTORIAMETRICS_DEFAULT_URL: http://victoriametrics-local-dev:8428
-      VICTORIAMETRICS_TENANT_URLS: '{"local-dev":"http://victoriametrics-local-dev:8428"}'
-      REDIS_URL: redis://redis:6379
-    networks:
-      - datamingle
-
   quickwit:
     image: quickwit/quickwit:0.8.2
     container_name: datamingle-shared-quickwit
