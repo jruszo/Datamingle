@@ -32,11 +32,7 @@ env = environ.Env(
     WORKOS_BASE_URL=(str, "https://api.workos.com/"),
     WORKOS_JWKS_URL=(str, ""),
     WORKOS_JWT_ISSUER=(str, ""),
-    WORKOS_STAFF_EMAILS=(list, []),
-    WORKOS_SUPERUSER_EMAILS=(list, []),
-    WORKOS_SUPERADMIN_ROLE_SLUGS=(list, ["admin"]),
-    DATAMINGLE_AGENT_API_KEY_BACKEND=(str, "workos"),
-    DATAMINGLE_INGEST_GATEWAY_URL=(str, "http://localhost:4430"),
+    DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID=(str, "datamingle"),
     DATAMINGLE_CORTEX_URL=(str, "http://cortex:9009"),
     DATAMINGLE_METRICS_PROXY_TIMEOUT_SECONDS=(int, 20),
     DATAMINGLE_METRICS_MAX_QUERY_LENGTH=(int, 8192),
@@ -96,14 +92,7 @@ DEBUG = env("DEBUG")
 
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 
-AUTH_MODE = "workos"
-ENABLE_WORKOS_AUTH = True
-# Datamingle uses WorkOS as the sole authentication provider.
-# The previous dual-mode "builtin" local-password and 2FA login
-# flows have been removed. Deployments must configure valid
-# WORKOS_CLIENT_ID, WORKOS_API_KEY, and WORKOS_ORGANIZATION_ID for
-# interactive sign-in. The credentials are validated when WorkOS auth
-# is used so non-auth processes, such as Celery workers, can start.
+AUTH_MODE = "allauth"
 
 # https://docs.djangoproject.com/en/4.0/ref/settings/#csrf-trusted-origins
 CSRF_TRUSTED_ORIGINS = env("CSRF_TRUSTED_ORIGINS")
@@ -150,6 +139,7 @@ INSTALLED_APPS = (
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
+    "django.contrib.sites",
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "channels",
@@ -172,6 +162,10 @@ INSTALLED_APPS = (
     "rest_framework",
     "django_filters",
     "drf_spectacular",
+    "allauth",
+    "allauth.account",
+    "allauth.headless",
+    "allauth.usersessions",
 )
 
 DATAMINGLE_API_EXTENSION_APPS = []
@@ -181,6 +175,7 @@ MIDDLEWARE = (
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "allauth.account.middleware.AccountMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django.middleware.security.SecurityMiddleware",
@@ -236,8 +231,29 @@ STORAGES = {
 
 # Used to extend users field in Django admin, pointing to sql/models.py Users class
 AUTH_USER_MODEL = "sql.Users"
-AUTHENTICATION_BACKENDS = ("common.auth_backends.TeamPermissionBackend",)
+AUTHENTICATION_BACKENDS = (
+    "common.auth_backends.TeamPermissionBackend",
+    "allauth.account.auth_backends.AuthenticationBackend",
+)
 LOGIN_REDIRECT_URL = "/"
+SITE_ID = 1
+
+ACCOUNT_ADAPTER = "api_auth.adapters.DatamingleAccountAdapter"
+ACCOUNT_LOGIN_METHODS = {"email"}
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
+ACCOUNT_EMAIL_VERIFICATION = "optional"
+ACCOUNT_UNIQUE_EMAIL = True
+ACCOUNT_USER_MODEL_EMAIL_FIELD = "email"
+ACCOUNT_USER_MODEL_USERNAME_FIELD = "username"
+HEADLESS_ONLY = True
+HEADLESS_CLIENTS = ("app",)
+HEADLESS_TOKEN_STRATEGY = "allauth.headless.tokens.strategies.jwt.JWTTokenStrategy"
+HEADLESS_JWT_ALGORITHM = "HS256"
+HEADLESS_JWT_ACCESS_TOKEN_EXPIRES_IN = 60 * 60 * 4
+HEADLESS_JWT_REFRESH_TOKEN_EXPIRES_IN = 60 * 60 * 24 * 3
+HEADLESS_JWT_ROTATE_REFRESH_TOKEN = True
+HEADLESS_JWT_STATEFUL_VALIDATION_ENABLED = True
+HEADLESS_JWT_AUTHORIZATION_HEADER_SCHEME = "Bearer"
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -339,7 +355,7 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
     # Authentication
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "common.authenticate.workos_jwt.WorkOSJWTAuthentication",
+        "allauth.headless.contrib.rest_framework.authentication.JWTTokenAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ),
     # Permissions
@@ -386,12 +402,9 @@ WORKOS_ORGANIZATION_ID = env("WORKOS_ORGANIZATION_ID", default="")
 WORKOS_BASE_URL = env("WORKOS_BASE_URL", default="https://api.workos.com/")
 WORKOS_JWKS_URL = env("WORKOS_JWKS_URL", default="")
 WORKOS_JWT_ISSUER = env("WORKOS_JWT_ISSUER", default="") or WORKOS_BASE_URL.rstrip("/")
-DATAMINGLE_AGENT_API_KEY_BACKEND = env(
-    "DATAMINGLE_AGENT_API_KEY_BACKEND", default="workos"
+DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID = env(
+    "DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID", default="datamingle"
 )
-DATAMINGLE_INGEST_GATEWAY_URL = env(
-    "DATAMINGLE_INGEST_GATEWAY_URL", default="http://localhost:4430"
-).rstrip("/")
 DATAMINGLE_CORTEX_URL = env(
     "DATAMINGLE_CORTEX_URL", default="http://cortex:9009"
 ).rstrip("/")
@@ -411,22 +424,6 @@ DATAMINGLE_METRICS_MAX_RANGE_POINTS = env(
     "DATAMINGLE_METRICS_MAX_RANGE_POINTS", default=11000
 )
 DATAMINGLE_METRICS_MAX_MATCHERS = env("DATAMINGLE_METRICS_MAX_MATCHERS", default=32)
-WORKOS_STAFF_EMAILS = [
-    email.strip().lower()
-    for email in env("WORKOS_STAFF_EMAILS", default=[])
-    if email.strip()
-]
-WORKOS_SUPERUSER_EMAILS = [
-    email.strip().lower()
-    for email in env("WORKOS_SUPERUSER_EMAILS", default=[])
-    if email.strip()
-]
-WORKOS_SUPERADMIN_ROLE_SLUGS = [
-    role_slug.strip().lower()
-    for role_slug in env("WORKOS_SUPERADMIN_ROLE_SLUGS", default=["admin"])
-    if role_slug.strip()
-]
-
 # Logging configuration
 LOGGING = {
     "version": 1,

@@ -20,34 +20,29 @@ vi.mock('@/shared/api/http', () => ({
   publicApiUrl: (path: string) => path,
 }))
 
-import { exchangeWorkosCode, fetchCurrentUserContext } from '@/lib/api'
+import { fetchCurrentUserContext, loginWithPassword } from '@/lib/api'
 
 describe('core API authentication helpers', () => {
   beforeEach(() => {
     Object.values(mocks).forEach((mock) => mock.mockReset())
   })
 
-  it('deduplicates concurrent WorkOS exchanges for the same one-time code', async () => {
-    let resolveExchange!: (value: unknown) => void
-    mocks.apiPost.mockReturnValue(
-      new Promise((resolve) => {
-        resolveExchange = resolve
-      }),
-    )
+  it('extracts allauth login tokens from response metadata', async () => {
+    mocks.apiPost.mockResolvedValue({
+      meta: {
+        access_token: 'access-token',
+        refresh_token: 'refresh-token',
+      },
+    })
 
-    const first = exchangeWorkosCode('exchange-code-1')
-    const second = exchangeWorkosCode('exchange-code-1')
-    resolveExchange({ data: { access: 'access-token', refresh: 'refresh-token' } })
-
-    await expect(first).resolves.toEqual({
+    await expect(loginWithPassword('person@example.com', 'password')).resolves.toEqual({
       access: 'access-token',
       refresh: 'refresh-token',
     })
-    await expect(second).resolves.toEqual({
-      access: 'access-token',
-      refresh: 'refresh-token',
+    expect(mocks.apiPost).toHaveBeenCalledWith('/_allauth/app/v1/auth/login', {
+      email: 'person@example.com',
+      password: 'password',
     })
-    expect(mocks.apiPost).toHaveBeenCalledTimes(1)
   })
 
   it('normalizes missing current-user collections to empty arrays', async () => {
@@ -58,7 +53,6 @@ describe('core API authentication helpers', () => {
         display: 'User',
         email: 'user@example.com',
         avatar_url: '',
-        is_workos_managed: true,
         is_superuser: false,
         is_staff: false,
         is_active: true,

@@ -795,11 +795,11 @@ async function issueExistingAgentInstallKey() {
   try {
     createdAgent.value = await issueAgentInstallKey(selectedNode.value.agent_id, requireToken())
     isAgentDialogOpen.value = true
-    feedback.value = 'WorkOS organization API key created for agent install.'
+    feedback.value = 'Agent API key created for install.'
     await loadSelectedNode()
     await loadNodes()
   } catch (errorValue) {
-    error.value = toUserFacingMessage(errorValue, 'Failed to create WorkOS agent API key.')
+    error.value = toUserFacingMessage(errorValue, 'Failed to create agent API key.')
   } finally {
     agentInstallIssuing.value = false
   }
@@ -1760,7 +1760,7 @@ watch(
           <div class="flex justify-end gap-2 border-t border-slate-200 pt-4">
             <Button variant="outline" type="button" @click="closeAgentDialog">Cancel</Button>
             <Button type="submit" :disabled="agentSaving">
-              {{ agentTargetNodeId ? 'Create WorkOS Key' : 'Create Node and Key' }}
+              {{ agentTargetNodeId ? 'Create Agent Key' : 'Create Node and Key' }}
             </Button>
           </div>
         </form>
@@ -1768,7 +1768,7 @@ watch(
           <div
             class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
           >
-            A WorkOS organization API key was created for this agent. The full key is shown once.
+            An agent API key was created. The full key is shown once.
           </div>
           <p class="text-sm text-slate-600">
             Run the install command on the node. Creating new install instructions rotates the agent
@@ -1780,7 +1780,7 @@ watch(
           </div>
           <div class="grid gap-2">
             <div class="flex items-center justify-between">
-              <span class="text-sm font-medium text-slate-700">WorkOS API Key</span>
+              <span class="text-sm font-medium text-slate-700">Agent API Key</span>
               <Button
                 variant="outline"
                 size="sm"

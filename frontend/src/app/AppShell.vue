@@ -17,6 +17,7 @@ import {
 
 import { Button } from '@/components/ui/button'
 import { publicApiUrl } from '@/shared/api/http'
+import { allauthHeadlessPath } from '@/shared/auth/allauth'
 import { getVisibleNavigationItems, matchesNavigationItem } from '@/app/feature-registry'
 import type { FeatureNavigationItem } from '@/app/feature-contract'
 import { useAuthStore } from '@/stores/auth'
@@ -281,10 +282,20 @@ async function openMailboxPage() {
 }
 
 async function logout() {
+  const token = authStore.accessToken
   mailboxStore.stopPolling()
   mailboxStore.reset()
+  if (token) {
+    await fetch(publicApiUrl(allauthHeadlessPath('/auth/session')), {
+      method: 'DELETE',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    }).catch(() => undefined)
+  }
   authStore.clearTokens()
-  window.location.assign(publicApiUrl('/auth/workos/logout/'))
+  await router.replace('/login')
 }
 
 onMounted(() => {

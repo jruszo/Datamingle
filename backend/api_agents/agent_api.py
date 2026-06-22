@@ -155,7 +155,11 @@ class AgentConfigView(views.APIView):
     throttle_classes = []
 
     def get(self, request):
-        return Response(build_agent_config(request.auth), status=status.HTTP_200_OK)
+        datamingle_url = request.build_absolute_uri("/").rstrip("/")
+        return Response(
+            build_agent_config(request.auth, datamingle_url=datamingle_url),
+            status=status.HTTP_200_OK,
+        )
 
 
 class AgentHeartbeatView(views.APIView):

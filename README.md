@@ -19,7 +19,7 @@ Repository Layout
 ===============
 This repository is organized as a monorepo:
 
-- `backend/` contains the Django API, backend Docker files, Helm chart, and backend Python dependencies.
+- `backend/` contains the Django API, local Docker files, demo database compose files, and backend Python dependencies.
 - `frontend/` contains the Vue/Vite SPA.
 - `shared-infra/` contains the local shared observability stack for Cortex, Quickwit, Grafana, Jaeger, Prometheus, and MinIO.
 - `agent/` is reserved for the upcoming Datamingle agent module.
@@ -57,19 +57,66 @@ Quick Start
 ### Live Demo
 Public Datamingle demo: coming soon.
 
-### Docker
-Use the Docker and compose files in this repository (`backend/src/docker` and `backend/src/docker-compose`).
+### Local Demo Environment
+The supported local demo setup uses three compose files:
 
-The shared observability infrastructure lives outside the app stack in
-`shared-infra/`. It is a dedicated local stack for tenant-shared services used
-to test metrics and trace ingestion:
+- `backend/src/docker-compose/docker-compose.local-dev.yml` for Datamingle, MySQL, Redis, goInception, Celery, and the Vite frontend.
+- `backend/src/docker-compose/docker-compose.demo-dbs.yml` for demo MySQL and PostgreSQL databases used by seeded workflow examples.
+- `shared-infra/docker-compose.yml` for optional local observability services.
+
+Create the shared Docker network once:
 
 ```bash
+docker network create datamingle
+```
+
+Prepare local app settings from the tracked example:
+
+```bash
+cp backend/src/docker-compose/.env.example backend/src/docker-compose/.env.local-dev
+```
+
+Edit `backend/src/docker-compose/.env.local-dev` and generate local-only values
+for `SECRET_KEY` and `FIELD_ENCRYPTION_KEYS`; that file is ignored by Git and
+must not be committed:
+
+```bash
+python3 - <<'PY'
+import base64
+import os
+import secrets
+
+print("SECRET_KEY=" + secrets.token_urlsafe(50))
+print("FIELD_ENCRYPTION_KEYS=" + base64.urlsafe_b64encode(os.urandom(32)).decode())
+PY
+```
+
+Start the demo databases first:
+
+```bash
+docker-compose -f backend/src/docker-compose/docker-compose.demo-dbs.yml up -d
+```
+
+Build and start the app and frontend:
+
+```bash
+docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend
+```
+
+Open the frontend at http://localhost:5173. The backend is proxied through the
+frontend dev server and is also available directly at http://localhost:9123.
+
+The shared observability infrastructure lives outside the app stack in
+`shared-infra/`. It is a dedicated local stack for shared observability services
+used to test metrics and trace ingestion. It is optional for basic demo usage:
+
+```bash
+cp shared-infra/.env.example shared-infra/.env
 docker-compose -f shared-infra/docker-compose.yml up -d
 ```
 
-See [shared-infra/README.md](shared-infra/README.md) for service URLs, tenant
-headers, and reset instructions.
+See [shared-infra/README.md](shared-infra/README.md) for service URLs, Cortex
+query headers, and reset instructions.
 
 Existing local Docker data directories from before the Datamingle rename may
 still have the application database under the old `archery` name. Copy that data
@@ -79,18 +126,13 @@ into the new `datamingle` database before starting the renamed stack:
 scripts/docker/migrate-archery-db-to-datamingle.sh
 ```
 
-The script defaults to the local ARM MySQL container, `datamingle-mysql`. If you
-are using `backend/src/docker-compose/docker-compose.yml`, where the MySQL container is
-named `mysql`, override the container name:
-
-```bash
-MYSQL_CONTAINER=mysql scripts/docker/migrate-archery-db-to-datamingle.sh
-```
+The script defaults to the local demo app MySQL container, `datamingle-mysql`.
 
 ### Local Demo Seed
 The local ARM compose setup seeds resource groups, auth groups, workflow settings, instance tags, and demo database instances for manual UX testing.
 
-It no longer seeds local app users. Sign-in and privileged access come from WorkOS.
+It no longer seeds local app users. Sign-in uses django-allauth headless JWT
+email/password authentication for local Datamingle users.
 
 See [backend/src/docker-compose/LOCAL_DEMO.md](backend/src/docker-compose/LOCAL_DEMO.md) for:
 
@@ -105,72 +147,39 @@ Use this repository as the source of truth: https://github.com/jruszo/Datamingle
 
 Authentication
 ===============
-Datamingle uses WorkOS as the only sign-in method for every deployment. Each running Datamingle instance maps to one fixed WorkOS organization.
+Datamingle uses django-allauth headless JWT endpoints for SPA authentication.
+End users sign in with local Datamingle email/password accounts against the
+configured headless client `app`.
 
-```env
-WORKOS_API_KEY=sk_test_or_live_xxx
-WORKOS_CLIENT_ID=client_xxx
-WORKOS_ORGANIZATION_ID=org_xxx
-WORKOS_STAFF_EMAILS=ops@datamingle.dev,admin@datamingle.dev
-WORKOS_SUPERUSER_EMAILS=admin@datamingle.dev
-WORKOS_SUPERADMIN_ROLE_SLUGS=admin
+Relevant Django settings:
+
+```python
+SITE_ID = 1
+HEADLESS_CLIENTS = ("app",)
 ```
 
 Behavior:
 
-- The SPA login page shows only the WorkOS button.
-- Local password login, user-created passwords, and local 2FA login routes are not registered.
-- Datamingle still keeps its own local `Users`, auth/permission groups, and resource groups after login.
-- WorkOS Directory Sync mirrors directory groups into Datamingle resource groups and owns resource-group membership for directory-managed users.
-- Superusers manage fallback Datamingle resource-group assignments for customers without SSO/Directory Sync and can still change active/inactive state.
+- The SPA login page posts to `/_allauth/app/v1/auth/login` and stores the JWT
+  access/refresh tokens returned by allauth.
+- Public signup is closed. Superusers create local Datamingle email/password
+  users through user management.
+- Datamingle keeps its own local `Users`, auth/permission groups, and resource
+  groups.
+- Superusers manage resource-group assignments and can change active/inactive state.
 - Auth groups remain permission/role levels used inside resource groups. Resource access is assigned through Datamingle resource groups. Access requests can grant temporary access to an individual user or a resource group; approved permanent requests add the user to a resource group or attach an instance to a resource group.
 
-WorkOS setup assumptions in this repo:
-
-- One Datamingle deployment maps to one tenant.
-- That deployment uses one fixed WorkOS organization via `WORKOS_ORGANIZATION_ID`.
-- Users are provisioned just-in-time on first successful WorkOS login.
-- Directory Sync users can also be created or updated from WorkOS webhooks.
-- The local Datamingle account uses the WorkOS email as the username.
-- Users with a WorkOS organization role slug listed in `WORKOS_SUPERADMIN_ROLE_SLUGS` are refreshed into Datamingle superuser access on every login, including membership in the local `superadmin` auth group. By default this uses WorkOS' built-in Admin role (`admin`).
-- `WORKOS_STAFF_EMAILS` and `WORKOS_SUPERUSER_EMAILS` remain bootstrap allowlists for initial elevated access.
-- Datamingle derives the WorkOS callback and logout return URLs from the current request host.
-- Directory Sync group names auto-create matching Datamingle resource groups. Assign database servers to those resource groups in Datamingle.
-
-### WorkOS Setup Steps
-1. Create or choose the tenant organization in your WorkOS account.
-2. Configure the Datamingle application redirect URI in WorkOS:
-   `https://<tenant-host>/api/auth/workos/callback/`
-3. Configure the logout return URL in WorkOS:
-   `https://<tenant-host>/login`
-   For local Vite development, use:
-   - Redirect URI: `http://localhost:5173/api/auth/workos/callback/`
-   - Logout return URL: `http://localhost:5173/login`
-4. Set the required `WORKOS_*` values in `.env`.
-5. Configure the WorkOS webhook endpoint:
-   `https://<tenant-host>/api/auth/workos/webhook/`
-   Include Directory Sync events.
-6. Optionally backfill an existing directory after setup:
-
-```bash
-docker exec -w /opt/datamingle/backend datamingle-app python manage.py sync_workos_directory --directory-id directory_xxx
-```
-
-Use the directory ID from the WorkOS Dashboard, or fetch it through the WorkOS
-API, in place of `directory_xxx`.
-
-7. Rebuild the app container so the `workos` Python dependency is installed:
+After authentication or environment changes, rebuild the app container:
 
 ```bash
 docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend
 ```
 
-8. Restart the deployment and open `/login/`.
-9. Sign in through WorkOS. A local Datamingle user will be created automatically on first login.
-
 ### Notes
-- WorkOS still issues Datamingle JWTs to the SPA after the WorkOS callback completes.
-- Existing local users may remain for permissions and audit history, but sign-in must come through WorkOS.
+- The `django.contrib.sites` migrations create the default `Site` row used by
+  `SITE_ID = 1`; apply migrations before using allauth endpoints.
+- Existing local users may remain for permissions and audit history, but sign-in
+  now uses allauth email/password JWT endpoints.
 
 Run Tests
 ===============
@@ -211,7 +220,6 @@ Dependencies
 - Phoenix connector [phoenixdb](https://github.com/lalinsky/python-phoenixdb)
 - ODPS connector [pyodps](https://github.com/aliyun/aliyun-odps-python-sdk)
 - ClickHouse connector [clickhouse-driver](https://github.com/mymarilyn/clickhouse-driver)
-- WorkOS auth [workos-python](https://github.com/workos/workos-python)
 - SQL parse/split/type detection [sqlparse](https://github.com/andialbrecht/sqlparse)
 - Serialization [simplejson](https://github.com/simplejson/simplejson)
 - Time utilities [python-dateutil](https://github.com/paxan/python-dateutil)

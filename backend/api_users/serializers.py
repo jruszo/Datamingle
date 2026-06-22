@@ -1,6 +1,8 @@
 from django.contrib.auth.models import Group
+from django.contrib.auth.password_validation import validate_password
 from django.db import transaction
 from rest_framework import serializers
+from allauth.account.models import EmailAddress
 
 from common.team_permissions import (
     assignable_team_permissions,
@@ -77,7 +79,6 @@ class PermissionLevelWriteSerializer(serializers.Serializer):
 class UserManagementReadSerializer(serializers.ModelSerializer):
     teams = serializers.SerializerMethodField()
     team_ids = serializers.SerializerMethodField()
-    is_workos_managed = serializers.SerializerMethodField()
 
     def _memberships(self, obj):
         cached = getattr(obj, "_prefetched_objects_cache", {})
@@ -107,9 +108,6 @@ class UserManagementReadSerializer(serializers.ModelSerializer):
     def get_team_ids(self, obj):
         return [membership.team_id for membership in self._memberships(obj)]
 
-    def get_is_workos_managed(self, obj):
-        return bool(obj.workos_user_id)
-
     class Meta:
         model = Users
         fields = (
@@ -117,7 +115,6 @@ class UserManagementReadSerializer(serializers.ModelSerializer):
             "username",
             "display",
             "email",
-            "is_workos_managed",
             "is_active",
             "is_superuser",
             "is_staff",
@@ -139,14 +136,53 @@ class UserManagementUpdateSerializer(serializers.ModelSerializer):
         fields = ("is_active",)
 
 
-class WorkOSUserInvitationSerializer(serializers.Serializer):
+class UserManagementCreateSerializer(serializers.Serializer):
     email = serializers.EmailField()
     display = serializers.CharField(
         allow_blank=True, max_length=50, required=False, trim_whitespace=True
     )
+    password = serializers.CharField(write_only=True, trim_whitespace=False)
+    is_active = serializers.BooleanField(required=False, default=True)
 
     def validate_email(self, value):
-        return value.strip().lower()
+        email = value.strip().lower()
+        if Users.objects.filter(email__iexact=email).exists():
+            raise serializers.ValidationError(
+                "A Datamingle user already uses that email address."
+            )
+        if Users.objects.filter(username__iexact=email).exists():
+            raise serializers.ValidationError(
+                "A Datamingle username already exists for that email address."
+            )
+        return email
+
+    def validate_password(self, value):
+        validate_password(value)
+        return value
+
+    @staticmethod
+    def _default_display(email):
+        local_part = email.split("@", 1)[0].replace(".", " ").replace("_", " ").strip()
+        return local_part.title()[:50] or email[:50]
+
+    def create(self, validated_data):
+        email = validated_data["email"]
+        display = validated_data.get("display") or self._default_display(email)
+        with transaction.atomic():
+            user = Users.objects.create_user(
+                username=email,
+                email=email,
+                password=validated_data["password"],
+                display=display,
+                is_active=validated_data.get("is_active", True),
+            )
+            EmailAddress.objects.create(
+                user=user,
+                email=email,
+                primary=True,
+                verified=True,
+            )
+        return user
 
 
 class TeamListSerializer(serializers.ModelSerializer):
@@ -302,7 +338,6 @@ class CurrentUserSerializer(serializers.Serializer):
     display = serializers.CharField(allow_blank=True)
     email = serializers.CharField(allow_blank=True)
     avatar_url = serializers.CharField(allow_blank=True)
-    is_workos_managed = serializers.BooleanField()
     is_superuser = serializers.BooleanField()
     is_staff = serializers.BooleanField()
     is_active = serializers.BooleanField()

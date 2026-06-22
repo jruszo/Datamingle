@@ -77,4 +77,14 @@ urlpatterns = [
         views.MetricsParseQueryView.as_view(),
         name="metrics-parse-query",
     ),
+    path(
+        "v1/prometheus/write",
+        views.PrometheusRemoteWriteIngestView.as_view(),
+        name="prometheus-remote-write-ingest",
+    ),
+    path(
+        "otlp/v1/metrics",
+        views.OTLPMetricsIngestView.as_view(),
+        name="otlp-metrics-ingest",
+    ),
 ]

@@ -13,6 +13,7 @@ from django.core.files.base import ContentFile
 from django.db import transaction
 from django.db.models import Exists, OuterRef
 from django.http import FileResponse, QueryDict
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone as django_timezone
 from rest_framework import permissions, status, views
@@ -21,6 +22,8 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 
+from api_agents.authentication import AgentAPIKeyAuthentication
+from api_agents.agent_api import IsAuthenticatedAgent
 from api_core.response import success_response
 from common.utils.openai import get_openai_config
 
@@ -49,6 +52,8 @@ DASHBOARD_ICON_MAX_PIXELS = 16_000_000
 DASHBOARD_ICON_FORMATS = {"JPEG", "PNG", "WEBP", "GIF"}
 
 PROMETHEUS_READ_BASE_PATH = "/prometheus/api/v1"
+CORTEX_WRITE_PATH = "/api/v1/push"
+CORTEX_OTLP_METRICS_PATH = "/api/v1/otlp/v1/metrics"
 TENANT_PARAM_NAMES = {
     "org_id",
     "organization_id",
@@ -70,6 +75,11 @@ def _setting_int(name, default):
 def _cortex_url(path):
     base_url = getattr(settings, "DATAMINGLE_CORTEX_URL", "http://cortex:9009")
     return f"{base_url.rstrip('/')}{PROMETHEUS_READ_BASE_PATH}{path}"
+
+
+def _cortex_direct_url(path):
+    base_url = getattr(settings, "DATAMINGLE_CORTEX_URL", "http://cortex:9009")
+    return f"{base_url.rstrip('/')}{path}"
 
 
 def _cortex_json(path, organization_id, params=None):
@@ -333,11 +343,11 @@ class CortexMetricsProxyView(views.APIView):
         org_id = str(
             auth.get("org_id")
             or getattr(request.user, "organization_id", "")
-            or getattr(request.user, "workos_claims", {}).get("org_id", "")
+            or settings.DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID
         ).strip()
         if not org_id:
             raise PermissionDenied(
-                "Authenticated metrics requests require a WorkOS org_id."
+                "Authenticated metrics requests require an organization id."
             )
         return org_id
 
@@ -395,6 +405,64 @@ class CortexMetricsProxyView(views.APIView):
             raise ValidationError(
                 {"end": f"Range queries are limited to {max_range} seconds."}
             )
+
+
+class MetricsIngestProxyView(views.APIView):
+    authentication_classes = [AgentAPIKeyAuthentication]
+    permission_classes = [IsAuthenticatedAgent]
+    throttle_classes = []
+    cortex_path = ""
+
+    def post(self, request):
+        org_id = str(settings.DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID or "").strip()
+        if not org_id:
+            raise PermissionDenied(
+                "Authenticated metrics requests require an organization id."
+            )
+        headers = {
+            "X-Scope-OrgID": org_id,
+        }
+        content_type = request.META.get("CONTENT_TYPE", "").strip()
+        if content_type:
+            headers["Content-Type"] = content_type
+        content_encoding = request.META.get("HTTP_CONTENT_ENCODING", "").strip()
+        if content_encoding:
+            headers["Content-Encoding"] = content_encoding
+        accept = request.META.get("HTTP_ACCEPT", "").strip()
+        if accept:
+            headers["Accept"] = accept
+
+        try:
+            response = requests.post(
+                _cortex_direct_url(self.cortex_path),
+                data=request.body,
+                headers=headers,
+                timeout=_setting_int(
+                    "DATAMINGLE_METRICS_PROXY_TIMEOUT_SECONDS",
+                    DEFAULT_TIMEOUT_SECONDS,
+                ),
+            )
+        except requests.RequestException:
+            logger.warning("Cortex metrics ingest request failed.", exc_info=True)
+            return Response(
+                {"status": "error", "error": "Metrics backend is unavailable."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        content_type = response.headers.get("Content-Type", "application/json")
+        return HttpResponse(
+            response.content,
+            status=response.status_code,
+            content_type=content_type,
+        )
+
+
+class PrometheusRemoteWriteIngestView(MetricsIngestProxyView):
+    cortex_path = CORTEX_WRITE_PATH
+
+
+class OTLPMetricsIngestView(MetricsIngestProxyView):
+    cortex_path = CORTEX_OTLP_METRICS_PATH
 
 
 class MetricsLabelsView(CortexMetricsProxyView):
@@ -581,10 +649,11 @@ def _request_organization_id(request):
         auth.get("org_id")
         or getattr(request.user, "organization_id", "")
         or getattr(request.user, "workos_claims", {}).get("org_id", "")
+        or settings.DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID
     ).strip()
     if not organization_id:
         raise PermissionDenied(
-            "Authenticated dashboard requests require a WorkOS org_id."
+            "Authenticated dashboard requests require an organization id."
         )
     return organization_id
 

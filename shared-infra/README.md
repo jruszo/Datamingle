@@ -1,12 +1,12 @@
 # Shared Infrastructure
 
-This stack runs local shared observability infrastructure for development and manual testing. In production, these services are expected to be shared across tenants rather than owned by an individual tenant app stack.
+This stack runs local shared observability infrastructure for development and manual testing.
 
 The Docker Compose project name is pinned to `datamingle-shared-infra`, so Docker groups these containers as a dedicated shared infrastructure stack instead of under a generic compose project.
 
 ## Services
 
-- Cortex on http://localhost:9009 for Prometheus remote-write metrics under the `local-dev` tenant.
+- Cortex on http://localhost:9009 for Prometheus remote-write metrics under the `local-dev` scope.
 - Quickwit on http://localhost:7280 with two local nodes, PostgreSQL metastore, MinIO object storage, OTLP ingest, and Jaeger storage enabled.
 - Grafana on http://localhost:3000 with anonymous admin access and provisioned Cortex, Prometheus, Quickwit, and Jaeger datasources.
 - Jaeger UI on http://localhost:16686 backed by Quickwit gRPC storage.
@@ -16,6 +16,7 @@ The Docker Compose project name is pinned to `datamingle-shared-infra`, so Docke
 ## Start
 
 ```bash
+cp shared-infra/.env.example shared-infra/.env
 docker-compose -f shared-infra/docker-compose.yml up -d
 ```
 

@@ -29,6 +29,7 @@ pandas==3.0.2
 clickhouse-driver==0.2.10
 djangorestframework==3.17.1
 djangorestframework-simplejwt==5.5.1
+django-allauth[headless]==65.18.0
 django-filter==25.2
 drf-spectacular==0.29.0
 pyotp==2.9.0
