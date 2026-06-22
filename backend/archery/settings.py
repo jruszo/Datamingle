@@ -26,14 +26,9 @@ env = environ.Env(
     ),  # Reference: https://docs.djangoproject.com/en/4.0/ref/settings/#secret-key
     DATABASE_URL=(str, "mysql://root:@127.0.0.1:3306/datamingle"),
     CACHE_URL=(str, "redis://127.0.0.1:6379/0"),
-    WORKOS_API_KEY=(str, ""),
-    WORKOS_CLIENT_ID=(str, ""),
-    WORKOS_ORGANIZATION_ID=(str, ""),
-    WORKOS_BASE_URL=(str, "https://api.workos.com/"),
-    WORKOS_JWKS_URL=(str, ""),
-    WORKOS_JWT_ISSUER=(str, ""),
     DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID=(str, "datamingle"),
-    DATAMINGLE_CORTEX_URL=(str, "http://cortex:9009"),
+    DATAMINGLE_METRICS_BACKEND_URL=(str, "http://victoriametrics-local-dev:8428"),
+    DATAMINGLE_METRICS_TENANT_URLS=(str, ""),
     DATAMINGLE_METRICS_PROXY_TIMEOUT_SECONDS=(int, 20),
     DATAMINGLE_METRICS_MAX_QUERY_LENGTH=(int, 8192),
     DATAMINGLE_METRICS_MAX_RANGE_SECONDS=(int, 2592000),
@@ -396,18 +391,14 @@ SIMPLE_JWT = {
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
-WORKOS_API_KEY = env("WORKOS_API_KEY", default="")
-WORKOS_CLIENT_ID = env("WORKOS_CLIENT_ID", default="")
-WORKOS_ORGANIZATION_ID = env("WORKOS_ORGANIZATION_ID", default="")
-WORKOS_BASE_URL = env("WORKOS_BASE_URL", default="https://api.workos.com/")
-WORKOS_JWKS_URL = env("WORKOS_JWKS_URL", default="")
-WORKOS_JWT_ISSUER = env("WORKOS_JWT_ISSUER", default="") or WORKOS_BASE_URL.rstrip("/")
 DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID = env(
     "DATAMINGLE_SINGLE_TENANT_ORGANIZATION_ID", default="datamingle"
 )
-DATAMINGLE_CORTEX_URL = env(
-    "DATAMINGLE_CORTEX_URL", default="http://cortex:9009"
+DATAMINGLE_METRICS_BACKEND_URL = env(
+    "DATAMINGLE_METRICS_BACKEND_URL",
+    default="http://victoriametrics-local-dev:8428",
 ).rstrip("/")
+DATAMINGLE_METRICS_TENANT_URLS = env("DATAMINGLE_METRICS_TENANT_URLS", default="")
 DATAMINGLE_METRICS_PROXY_TIMEOUT_SECONDS = env(
     "DATAMINGLE_METRICS_PROXY_TIMEOUT_SECONDS", default=20
 )

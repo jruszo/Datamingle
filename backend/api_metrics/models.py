@@ -4,7 +4,6 @@ from django.utils import timezone
 
 
 class MetricsDashboard(models.Model):
-    organization_id = models.CharField(max_length=128, db_index=True)
     name = models.CharField(max_length=120)
     description = models.CharField(max_length=500, blank=True, default="")
     icon = models.ImageField(upload_to="dashboard_icons/", blank=True, null=True)
@@ -29,12 +28,6 @@ class MetricsDashboard(models.Model):
     class Meta:
         db_table = "metrics_dashboard"
         ordering = ("name", "id")
-        indexes = [
-            models.Index(
-                fields=("organization_id", "name"),
-                name="metrics_dash_org_name_idx",
-            )
-        ]
 
     def __str__(self):
         return self.name

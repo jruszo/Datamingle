@@ -2,7 +2,7 @@
 
 [![Repository](https://img.shields.io/badge/GitHub-jruszo%2FDatamingle-181717?logo=github)](https://github.com/jruszo/Datamingle)
 [![version](https://img.shields.io/pypi/pyversions/django)](https://img.shields.io/pypi/pyversions/django/)
-[![version](https://img.shields.io/badge/django-4.1-brightgreen.svg)](https://docs.djangoproject.com/en/4.1/)
+[![version](https://img.shields.io/badge/django-6.0-brightgreen.svg)](https://docs.djangoproject.com/en/6.0/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
@@ -21,14 +21,15 @@ This repository is organized as a monorepo:
 
 - `backend/` contains the Django API, local Docker files, demo database compose files, and backend Python dependencies.
 - `frontend/` contains the Vue/Vite SPA.
-- `shared-infra/` contains the local shared observability stack for Cortex, Quickwit, Grafana, Jaeger, Prometheus, and MinIO.
-- `agent/` is reserved for the upcoming Datamingle agent module.
+- `shared-infra/` contains the local shared observability stack for per-tenant VictoriaMetrics, Quickwit, Grafana, Jaeger, Prometheus, and MinIO.
+- `agent/` contains the Datamingle worker that runs assigned database commands and
+  monitoring collectors near managed services.
 - `scripts/` contains repo-level helper scripts.
 - `documentation/` contains end-user documentation for the Datamingle web application.
 
 User Documentation
 ===============
-Start with the [Datamingle User Documentation](documentation/README.md) for task-oriented guides covering sign-in, inventory, agents, queries, SQL workflows, data exports, archives, permissions, audit, instance operations, and administration.
+Start with the [Datamingle User Documentation](documentation/README.md) for task-oriented guides covering sign-in, inventory, agents, queries, SQL workflows, data exports, archives, permissions, audit, instance operations, metrics, dashboards, and administration.
 
 Fork Attribution
 ===============
@@ -38,19 +39,34 @@ Original project copyright and license notices are preserved in this repository.
 Feature Matrix
 ====
 
-| Database   | Query | Review | Execute | Backup | Data Dictionary | Session Management | Account Management | Parameter Management | Data Archive |
-|------------| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| MySQL      | √ | √ | √ | √ | √ | √ | √ | √ | √ |
-| MsSQL      | √ | × | √ | × | √ | × | × | × | × |
-| Redis      | √ | × | √ | × | × | × | × | × | × |
-| PgSQL      | √ | × | √ | × | × | × | × | × | × |
-| Oracle     | √ | √ | √ | √ | √ | √ | × | × | × |
-| MongoDB    | √ | √ | √ | × | × | × | √ | √ | × | × |
-| Phoenix    | √ | × | √ | × | × | × | × | × | × | × |
-| ODPS       | √ | × | × | × | × | × | × | × | × | × |
-| ClickHouse | √ | √ | √ | × | × | × | × | × | × | × |
-| Cassandra  | √ | × | √ | × | × | × | × | × | × | × |
-| Doris      | √ | × | √ | × | × | × | √ | × | × | × |
+Datamingle is migrating database work onto the agent. The agent-backed product
+surface currently supports MySQL and PostgreSQL services. MySQL has command
+execution support. PostgreSQL is supported for inventory/monitoring workflows,
+but PostgreSQL query and SQL workflow execution are not enabled until the agent
+executor supports PostgreSQL commands.
+
+Legend: `Yes` = supported, `Partial` = supported with database-specific limits,
+`No` = not currently wired.
+
+| Database | Agent Commands | Monitoring | Online Queries | Governed DDL/DML | Data Exports | Data Dictionary | Database Management | Account Management | Parameter Management | Session Diagnostics | Archives |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| MySQL | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+| PostgreSQL | No | Yes | No | No | No | No | No | No | No | No | No |
+
+Notes:
+
+- Query, DDL/DML, and export commands are dispatched to online, command-enabled
+  Datamingle agents. The current agent command executor rejects non-MySQL
+  assignments.
+- PostgreSQL services can be registered on infrastructure nodes and monitored
+  with `postgres_exporter`.
+- Data exports are SQL-oriented offline export workflows for MySQL
+  `SELECT`/`WITH` result sets.
+- MySQL Data Dictionary, database/account/parameter operations, diagnostics,
+  and archive workflows are the currently wired database operations.
+- Some legacy backend engine connectors remain in the codebase while features
+  are moved behind agent execution; they are not listed as supported
+  agent-backed databases until the agent can run them.
 
 Quick Start
 ===============
@@ -111,12 +127,11 @@ The shared observability infrastructure lives outside the app stack in
 used to test metrics and trace ingestion. It is optional for basic demo usage:
 
 ```bash
-cp shared-infra/.env.example shared-infra/.env
 docker-compose -f shared-infra/docker-compose.yml up -d
 ```
 
-See [shared-infra/README.md](shared-infra/README.md) for service URLs, Cortex
-query headers, and reset instructions.
+See [shared-infra/README.md](shared-infra/README.md) for service URLs, VictoriaMetrics
+tenant routing, and reset instructions.
 
 Existing local Docker data directories from before the Datamingle rename may
 still have the application database under the old `archery` name. Copy that data
@@ -129,15 +144,18 @@ scripts/docker/migrate-archery-db-to-datamingle.sh
 The script defaults to the local demo app MySQL container, `datamingle-mysql`.
 
 ### Local Demo Seed
-The local ARM compose setup seeds resource groups, auth groups, workflow settings, instance tags, and demo database instances for manual UX testing.
+The local compose setup seeds teams, permission groups, workflow settings,
+instance tags, agents, agent assignments, and demo database instances for manual
+UX testing.
 
 It no longer seeds local app users. Sign-in uses django-allauth headless JWT
 email/password authentication for local Datamingle users.
 
 See [backend/src/docker-compose/LOCAL_DEMO.md](backend/src/docker-compose/LOCAL_DEMO.md) for:
 
-- demo roles and approval chains
+- demo teams, roles, and approval chains
 - demo MySQL/PostgreSQL instance credentials
+- demo agent setup and monitoring tool artifacts
 - the separate smoke-check command
 - reset and reseed instructions
 
@@ -164,10 +182,14 @@ Behavior:
   access/refresh tokens returned by allauth.
 - Public signup is closed. Superusers create local Datamingle email/password
   users through user management.
-- Datamingle keeps its own local `Users`, auth/permission groups, and resource
-  groups.
-- Superusers manage resource-group assignments and can change active/inactive state.
-- Auth groups remain permission/role levels used inside resource groups. Resource access is assigned through Datamingle resource groups. Access requests can grant temporary access to an individual user or a resource group; approved permanent requests add the user to a resource group or attach an instance to a resource group.
+- Datamingle keeps its own local `Users`, permission groups, teams, and
+  instance/team assignments.
+- Superusers manage users, permission levels, and team membership and can change
+  active/inactive state.
+- Permission groups remain role levels used inside teams. Resource access is
+  assigned through Datamingle teams. Access requests can grant temporary access
+  to an individual user or a team; approved permanent requests add the user to a
+  team or attach an instance to a team.
 
 After authentication or environment changes, rebuild the app container:
 
@@ -184,30 +206,32 @@ docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml up -d 
 Run Tests
 ===============
 ```bash
-cd backend
-python manage.py test -v 3
+docker exec -w /opt/datamingle/backend datamingle-app python manage.py test
+docker exec -w /opt/datamingle datamingle-app black --check backend
+cd frontend && npm run build
 ```
 
 Dependencies
 ===============
 ### Framework
 - [Django](https://github.com/django/django)
-- [Bootstrap](https://github.com/twbs/bootstrap)
-- [jQuery](https://github.com/jquery/jquery)
+- [Django REST framework](https://github.com/encode/django-rest-framework)
+- [django-allauth headless](https://github.com/pennersr/django-allauth)
+- [Channels](https://github.com/django/channels)
+- [Vue](https://github.com/vuejs/core)
+- [Vite](https://github.com/vitejs/vite)
 
 ### Frontend Components
-- Navigation menu [metisMenu](https://github.com/onokumus/metismenu)
-- Theme [sb-admin-2](https://github.com/BlackrockDigital/startbootstrap-sb-admin-2)
-- Editor [ace](https://github.com/ajaxorg/ace)
-- SQL formatter [sql-formatter](https://github.com/zeroturnaround/sql-formatter)
-- Table [bootstrap-table](https://github.com/wenzhixin/bootstrap-table)
-- Table editing [bootstrap-editable](https://github.com/vitalets/x-editable)
-- Dropdown [bootstrap-select](https://github.com/snapappointments/bootstrap-select)
-- File upload [bootstrap-fileinput](https://github.com/kartik-v/bootstrap-fileinput)
-- Datetime picker [bootstrap-datetimepicker](https://github.com/smalot/bootstrap-datetimepicker)
-- Date range picker [daterangepicker](https://github.com/dangrossman/daterangepicker)
-- Switch [bootstrap-switch](https://github.com/Bttstrp/bootstrap-switch)
-- Markdown rendering [marked](https://github.com/markedjs/marked)
+- UI primitives [Reka UI](https://github.com/unovue/reka-ui)
+- Icons [lucide-vue-next](https://github.com/lucide-icons/lucide)
+- State management [Pinia](https://github.com/vuejs/pinia)
+- Routing [Vue Router](https://github.com/vuejs/router)
+- SQL editor [CodeMirror](https://github.com/codemirror/dev)
+- PromQL editor support [prometheus-io/codemirror-promql](https://github.com/prometheus/prometheus)
+- SQL formatting [sql-formatter](https://github.com/sql-formatter-org/sql-formatter)
+- Charts [Apache ECharts](https://github.com/apache/echarts)
+- Dashboard layouts [GridStack](https://github.com/gridstack/gridstack.js)
+- Utilities [VueUse](https://github.com/vueuse/vueuse)
 
 ### Backend
 - Queue tasks [Celery](https://docs.celeryq.dev/)
@@ -215,22 +239,26 @@ Dependencies
 - MsSQL connector [pyodbc](https://github.com/mkleehammer/pyodbc)
 - Redis connector [redis-py](https://github.com/andymccurdy/redis-py)
 - PostgreSQL connector [psycopg2](https://github.com/psycopg/psycopg2)
-- Oracle connector [cx_Oracle](https://github.com/oracle/python-cx_Oracle)
+- Oracle connector [python-oracledb](https://github.com/oracle/python-oracledb)
 - MongoDB connector [pymongo](https://github.com/mongodb/mongo-python-driver)
 - Phoenix connector [phoenixdb](https://github.com/lalinsky/python-phoenixdb)
 - ODPS connector [pyodps](https://github.com/aliyun/aliyun-odps-python-sdk)
 - ClickHouse connector [clickhouse-driver](https://github.com/mymarilyn/clickhouse-driver)
-- SQL parse/split/type detection [sqlparse](https://github.com/andialbrecht/sqlparse)
+- Cassandra connector [cassandra-driver](https://github.com/datastax/python-driver)
+- Elasticsearch connector [elasticsearch-py](https://github.com/elastic/elasticsearch-py)
+- OpenSearch connector [opensearch-py](https://github.com/opensearch-project/opensearch-py)
+- Memcached connector [pymemcache](https://github.com/pinterest/pymemcache)
 - Serialization [simplejson](https://github.com/simplejson/simplejson)
-- Time utilities [python-dateutil](https://github.com/paxan/python-dateutil)
+- Storage integrations [django-storages](https://github.com/jschneier/django-storages)
+- OpenAI-compatible AI assistant [openai-python](https://github.com/openai/openai-python)
 
 ### Functional Dependencies
 - Visualization [pyecharts](https://github.com/pyecharts/pyecharts)
-- MySQL review/execute/backup [goInception](https://github.com/hanchuanchuan/goInception) | [inception](https://github.com/hhyo/inception)
+- MySQL review and execution [goInception](https://github.com/hanchuanchuan/goInception)
 - Large table DDL [gh-ost](https://github.com/github/gh-ost) | [pt-online-schema-change](https://www.percona.com/doc/percona-toolkit/3.0/pt-online-schema-change.html)
 - MyBatis XML parsing [mybatis-mapper2sql](https://github.com/hhyo/mybatis-mapper2sql)
-- RDS management [aliyun-openapi-python-sdk](https://github.com/aliyun/aliyun-openapi-python-sdk)
-- Data encryption [django-mirage-field](https://github.com/luojilab/django-mirage-field)
+- Field encryption [cryptography](https://github.com/pyca/cryptography)
+- Observability [VictoriaMetrics](https://github.com/VictoriaMetrics/VictoriaMetrics), [Quickwit](https://github.com/quickwit-oss/quickwit), [Grafana](https://github.com/grafana/grafana), [Prometheus](https://github.com/prometheus/prometheus), and [Jaeger](https://github.com/jaegertracing/jaeger)
 
 Contributing
 ===============

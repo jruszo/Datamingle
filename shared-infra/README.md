@@ -6,17 +6,16 @@ The Docker Compose project name is pinned to `datamingle-shared-infra`, so Docke
 
 ## Services
 
-- Cortex on http://localhost:9009 for Prometheus remote-write metrics under the `local-dev` scope.
+- VictoriaMetrics on http://localhost:8428 for Prometheus remote-write metrics in the local `local-dev` tenant installation.
 - Quickwit on http://localhost:7280 with two local nodes, PostgreSQL metastore, MinIO object storage, OTLP ingest, and Jaeger storage enabled.
-- Grafana on http://localhost:3000 with anonymous admin access and provisioned Cortex, Prometheus, Quickwit, and Jaeger datasources.
+- Grafana on http://localhost:3000 with anonymous admin access and provisioned VictoriaMetrics, Prometheus, Quickwit, and Jaeger datasources.
 - Jaeger UI on http://localhost:16686 backed by Quickwit gRPC storage.
-- Prometheus on http://localhost:9090 as a local metrics producer that remote-writes to Cortex.
+- Prometheus on http://localhost:9090 as a local metrics producer that remote-writes to the local-dev VictoriaMetrics instance.
 - MinIO console on http://localhost:9001 with `minioadmin` / `minioadmin` for inspecting local object storage.
 
 ## Start
 
 ```bash
-cp shared-infra/.env.example shared-infra/.env
 docker-compose -f shared-infra/docker-compose.yml up -d
 ```
 
@@ -26,17 +25,32 @@ docker-compose -f shared-infra/docker-compose.yml up -d
 docker-compose -f shared-infra/docker-compose.yml down
 ```
 
-Use `down -v` only when you want to delete local Cortex, Quickwit, Grafana, Prometheus, PostgreSQL, and MinIO data.
+Use `down -v` only when you want to delete local VictoriaMetrics, Quickwit, Grafana, Prometheus, PostgreSQL, and MinIO data.
 
 ## Test Metrics
 
-Prometheus remote-writes scraped metrics into Cortex with the `X-Scope-OrgID: local-dev` header. Query Cortex directly with:
+Prometheus remote-writes scraped metrics into VictoriaMetrics. Query the local-dev VictoriaMetrics instance directly with:
 
 ```bash
-curl -H "X-Scope-OrgID: local-dev" "http://localhost:9009/prometheus/api/v1/query?query=up"
+curl "http://localhost:8428/prometheus/api/v1/query?query=up"
 ```
 
-In Grafana, use the `Cortex` datasource for shared metrics and the `Prometheus Local` datasource to inspect the local scrape source.
+In Grafana, use the `VictoriaMetrics local-dev` datasource for stored metrics and the `Prometheus Local` datasource to inspect the local scrape source.
+
+## Per-Tenant Metrics
+
+Datamingle routes metrics by organization id to a tenant-specific VictoriaMetrics base URL. For local development, all unknown tenants fall back to `http://victoriametrics-local-dev:8428`.
+
+Configure backend reads and Django agent ingest proxying with:
+
+```bash
+DATAMINGLE_METRICS_BACKEND_URL=http://victoriametrics-local-dev:8428
+DATAMINGLE_METRICS_TENANT_URLS={"org_123":"http://victoriametrics-org-123:8428"}
+```
+
+Agents remote-write to Datamingle's Django endpoint at `/api/v1/prometheus/write`.
+The Django backend authenticates the Datamingle agent API key and proxies the
+ingest body to the tenant's VictoriaMetrics installation.
 
 ## Test Traces
 
