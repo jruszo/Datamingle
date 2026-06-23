@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to report this issue. Before submitting, please check the [Wiki](https://github.com/jruszo/Datamingle/wiki) and [FAQ](https://github.com/jruszo/Datamingle/wiki/FAQ) to confirm this is a bug that needs a fix. For usage questions or ideas/suggestions, please post in [Discussions](https://github.com/jruszo/Datamingle/discussions). Thanks again for contributing to Datamingle.
+        Thanks for taking the time to report this issue. Before submitting, please search existing [issues](https://github.com/jruszo/Datamingle/issues) to confirm this is a bug that needs a fix. For usage questions or ideas/suggestions, please post in [Discussions](https://github.com/jruszo/Datamingle/discussions). Thanks again for contributing to Datamingle.
   - type: textarea
     id: what-happened
     attributes:
@@ -33,9 +33,9 @@ body:
       label: Logs
       description: |
         Paste related log output here. It will be auto-formatted. Common log locations:
-        1. logs/archery.log
+        1. logs/datamingle.log
         2. logs/qcluster.log
-        3. docker logs archery -f --tail=10
+        3. docker logs datamingle-app -f --tail=10
       render: shell
     validations:
       required: false
@@ -63,9 +63,8 @@ body:
     attributes:
       label: Additional context (for example database version)
       description: |
-        Some details can be collected from the Datamingle debug API: [Example debug endpoint](https://demo.archerydms.com/api/debug?full=true)
+        Some details can be collected from the Datamingle debug API endpoint: `<your-datamingle-url>/api/debug?full=true`
         - **MySQL**: 5.7.26
         - **Browser**: Chrome
-        - **goInception**: v1.2.5-49
     validations:
       required: false
