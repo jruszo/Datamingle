@@ -272,10 +272,6 @@ class AuditV2:
         # TODO: This can be moved to engine, but config may become complex.
         if self.workflow.instance.db_type not in auto_review_db_type:
             return False
-        if not self.workflow.instance.instance_tag.filter(
-            tag_code__in=auto_review_tags
-        ).exists():
-            return False
 
         # Load regex pattern.
         auto_review_regex = self.sys_config.get(

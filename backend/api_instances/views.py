@@ -491,7 +491,7 @@ class InstanceList(generics.ListAPIView):
             super()
             .get_queryset()
             .select_related("node")
-            .prefetch_related("instance_tag", "resource_group")
+            .prefetch_related("resource_group")
         )
         search = self.request.query_params.get("search", "").strip()
         instance_type = self.request.query_params.get("type", "").strip()
@@ -525,10 +525,7 @@ class InstanceList(generics.ListAPIView):
         if db_type:
             queryset = queryset.filter(db_type=db_type)
 
-        for tag_id in tag_ids:
-            queryset = queryset.filter(instance_tag=tag_id, instance_tag__active=True)
-
-        queryset = queryset.distinct()
+            queryset = queryset.distinct()
 
         allowed_ordering = {
             "id",
@@ -639,7 +636,7 @@ class InstanceDetail(views.APIView):
         try:
             return (
                 Instance.objects.select_related("node")
-                .prefetch_related("resource_group", "instance_tag")
+                .prefetch_related("resource_group")
                 .get(pk=pk)
             )
         except Instance.DoesNotExist:

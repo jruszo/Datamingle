@@ -471,9 +471,7 @@ class QueryDescribe(views.APIView):
         data = serializer.validated_data
 
         try:
-            instance = user_instances(request.user).get(
-                pk=data["instance_id"]
-            )
+            instance = user_instances(request.user).get(pk=data["instance_id"])
         except Instance.DoesNotExist:
             raise serializers.ValidationError(
                 {"errors": "The instance is not associated with your group."}
@@ -750,9 +748,7 @@ class QueryPrivilegesApplyListCreate(views.APIView):
         user = request.user
 
         try:
-            instance = user_instances(user).get(
-                instance_name=data["instance_name"]
-            )
+            instance = user_instances(user).get(instance_name=data["instance_name"])
         except Instance.DoesNotExist:
             raise serializers.ValidationError(
                 {"errors": "Your group is not associated with this instance!"}

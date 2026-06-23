@@ -11,7 +11,6 @@ from common.utils.const import WorkflowType
 from sql.models import (
     InfrastructureNode,
     Instance,
-    InstanceTag,
     Team,
     Users,
     WorkflowAuditSetting,
@@ -162,7 +161,6 @@ DEMO_INSTANCES = OrderedDict(
             "show_db_name_regex": "^(demo_orders|demo_billing)$",
             "denied_db_name_regex": "",
             "teams": ["single_stage", "multi_stage"],
-            "tags": ["can_read", "can_write"],
             "databases": ["demo_orders", "demo_billing"],
         },
         "pgsql": {
@@ -240,9 +238,8 @@ def seed_local_demo(write_line=None):
     with transaction.atomic():
         auth_groups = _seed_auth_groups(log)
         teams = _seed_teams(log)
-        tags = _seed_instance_tags(log)
         _remove_legacy_seeded_users(log)
-        instances = _seed_instances(teams, tags, log)
+        instances = _seed_instances(teams, log)
         nodes = _seed_infrastructure_nodes(teams, instances, log)
         _seed_agent_tool_artifacts(log)
         _seed_workflow_settings(auth_groups, teams, log)
@@ -305,21 +302,6 @@ def _seed_teams(log):
     return teams
 
 
-def _seed_instance_tags(log):
-    tags = {}
-    for tag_code, tag_name in [
-        ("can_write", "Supports release"),
-        ("can_read", "Supports query"),
-    ]:
-        tag, created = InstanceTag.objects.update_or_create(
-            tag_code=tag_code,
-            defaults={"tag_name": tag_name, "active": True},
-        )
-        tags[tag_code] = tag
-        log("Instance tag {}: {}".format("created" if created else "updated", tag_code))
-    return tags
-
-
 def _remove_legacy_seeded_users(log):
     deleted_count, _ = Users.objects.filter(
         username__in=managed_demo_usernames()
@@ -330,7 +312,7 @@ def _remove_legacy_seeded_users(log):
         log("No legacy seeded demo users to remove")
 
 
-def _seed_instances(teams, tags, log):
+def _seed_instances(teams, log):
     instances = {}
     for key, config in DEMO_INSTANCES.items():
         instance, created = Instance.objects.update_or_create(
@@ -354,7 +336,6 @@ def _seed_instances(teams, tags, log):
             },
         )
         instance.resource_group.set([teams[name] for name in config["teams"]])
-        instance.instance_tag.set([tags[name] for name in config["tags"]])
         instances[key] = instance
         log(
             "Demo instance {}: {}".format(

@@ -172,8 +172,6 @@ class TwoFactorAuthConfig(models.Model):
         unique_together = ("user", "auth_type")
 
 
-
-
 DEFAULT_NODE_EXPORTER_COLLECTORS = (
     "arp",
     "bcache",

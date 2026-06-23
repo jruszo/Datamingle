@@ -159,7 +159,7 @@ class InfrastructureNodeListCreateView(generics.ListAPIView):
         return (
             user_instances(self.request.user)
             .select_related("node")
-            .prefetch_related("resource_group", "instance_tag")
+            .prefetch_related("resource_group")
         )
 
     def get_serializer_context(self):

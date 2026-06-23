@@ -384,8 +384,8 @@ watch(form, () => {
         <CardDescription>
           {{
             isCreateMode
-              ? 'Fill in the core connection details first, then optionally attach tags and teams.'
-              : 'Update the core connection details, then optionally adjust tags and teams.'
+              ? 'Fill in the core connection details first, then optionally attach teams.'
+              : 'Update the core connection details, then optionally adjust teams.'
           }}
         </CardDescription>
       </CardHeader>

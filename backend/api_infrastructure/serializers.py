@@ -112,7 +112,6 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
     role = serializers.CharField(source="type", read_only=True)
     engine = serializers.CharField(source="db_type", read_only=True)
     team_ids = serializers.SerializerMethodField()
-    service_tag_ids = serializers.SerializerMethodField()
     monitoring_collectors = serializers.SerializerMethodField()
     effective_monitoring_labels = serializers.SerializerMethodField()
     inventory_last_refresh_at = serializers.DateTimeField(
@@ -123,9 +122,6 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
         return list(
             obj.resource_group.values_list("team_id", flat=True).order_by("team_id")
         )
-
-    def get_service_tag_ids(self, obj):
-        return list(obj.instance_tag.values_list("id", flat=True).order_by("id"))
 
     def get_monitoring_collectors(self, obj):
         return normalize_service_monitoring_collectors(
@@ -159,7 +155,6 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
             "denied_db_name_regex",
             "charset",
             "team_ids",
-            "service_tag_ids",
             "inventory_status",
             "inventory_detected_hostname",
             "inventory_detected_version",
@@ -254,7 +249,7 @@ class InfrastructureNodeSerializer(serializers.ModelSerializer):
     def get_services(self, obj):
         services = getattr(obj, "visible_services", None)
         if services is None:
-            services = obj.services.prefetch_related("resource_group", "instance_tag")
+            services = obj.services.prefetch_related("resource_group")
             visible_service_ids = self.context.get("visible_service_ids")
             if visible_service_ids is not None:
                 services = services.filter(id__in=visible_service_ids)

@@ -263,10 +263,7 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                         )
                     }
                 )
-        elif actor.is_superuser or (
-            has_group_request_access
-            and instance.instance_tag.filter(tag_code="can_write", active=True).exists()
-        ):
+        elif actor.is_superuser or has_group_request_access:
             pass
         else:
             _authorize_workflow_check_dispatch(
@@ -335,14 +332,7 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
             actor, instance, check_result.syntax_type
         )
         if not (
-            actor.is_superuser
-            or (
-                has_group_request_access
-                and instance.instance_tag.filter(
-                    tag_code="can_write", active=True
-                ).exists()
-            )
-            or has_temporary_write_access
+            actor.is_superuser or has_group_request_access or has_temporary_write_access
         ):
             raise serializers.ValidationError(
                 {

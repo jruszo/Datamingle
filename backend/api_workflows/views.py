@@ -525,7 +525,7 @@ def _can_access_workflow_module(user):
             user.has_perm("sql.offline_download"),
             user.has_perm("sql.audit_user"),
             teams_for_role(user, TeamPermissionGroup.WORKFLOW_REQUESTER).exists(),
-            user_instances(user, tag_codes=["can_write"]).exists(),
+            user_instances(user).exists(),
         ]
     )
 
@@ -632,10 +632,7 @@ def _workflow_submission_scope(user):
         allowed_groups = {}
         allowed_syntax_types = set()
 
-        if (
-            can_submit_directly
-            and instance.instance_tag.filter(tag_code="can_write", active=True).exists()
-        ):
+        if can_submit_directly:
             direct_groups = {
                 team_id: {"team_name": team_name, "syntax_types": {1, 2}}
                 for team_id, team_name in instance.resource_group.filter(
@@ -1125,7 +1122,7 @@ class WorkflowMetadata(views.APIView):
             "manual_execution_enabled": bool(SysConfig().get("manual")),
             "teams": _workflow_metadata_teams(request.user),
             "instances": filter_agent_runnable_instances(
-                user_instances(request.user, tag_codes=["can_write"])
+                user_instances(request.user)
             )
             .prefetch_related("resource_group")
             .order_by("instance_name", "id"),

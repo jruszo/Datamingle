@@ -12,7 +12,6 @@ from sql.local_demo import (
 from sql.models import (
     InfrastructureNode,
     Instance,
-    InstanceTag,
     Team,
     Users,
     WorkflowAuditSetting,
@@ -48,8 +47,6 @@ class TestLocalDemoSeed(TestCase):
             ).count(),
             len(managed_demo_team_names()),
         )
-        self.assertEqual(InstanceTag.objects.filter(tag_code="can_read").count(), 1)
-        self.assertEqual(InstanceTag.objects.filter(tag_code="can_write").count(), 1)
         self.assertEqual(
             WorkflowAuditSetting.objects.filter(
                 workflow_type=WorkflowType.SQL_REVIEW

@@ -230,9 +230,7 @@ def query_priv_apply(request):
             result["msg"] = "Please fill in all required fields"
             return HttpResponse(json.dumps(result), content_type="application/json")
     try:
-        user_instances(request.user).get(
-            instance_name=instance_name
-        )
+        user_instances(request.user).get(instance_name=instance_name)
     except Instance.DoesNotExist:
         result["status"] = 1
         result["msg"] = "Your group is not associated with this instance!"

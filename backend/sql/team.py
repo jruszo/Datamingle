@@ -142,9 +142,6 @@ def instances(request):
     # db_type
     if db_type:
         filter_dict["db_type"] = db_type
-    if tag_code:
-        filter_dict["instance_tag__tag_code"] = tag_code
-        filter_dict["instance_tag__active"] = True
     ins = (
         ins.filter(**filter_dict)
         .order_by(Convert("instance_name", "gbk").asc())

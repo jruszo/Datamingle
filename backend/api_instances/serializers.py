@@ -651,8 +651,6 @@ class QueryPrivilegesApplySerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
-
-
 class TeamLookupSerializer(serializers.ModelSerializer):
     label = serializers.SerializerMethodField()
 

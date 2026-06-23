@@ -286,8 +286,6 @@ def user_has_instance_workflow_access(user, instance, syntax_type):
         and Instance.objects.filter(
             pk=instance.pk,
             resource_group__team_id__in=team_ids,
-            instance_tag__tag_code="can_write",
-            instance_tag__active=True,
         ).exists()
     ):
         return True

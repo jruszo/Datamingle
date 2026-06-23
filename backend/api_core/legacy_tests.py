@@ -4608,7 +4608,7 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
 
         config = SysConfig()
         self.assertTrue(config.get("auto_review"))
-        self.assertEqual(config.get("auto_review_tag"), "")
+        self.assertIn(config.get("auto_review_tag"), [None, ""])
         self.assertEqual(config.get("notify_phase_control"), "Apply,Execute")
         self.assertEqual(config.get("storage_type"), "sftp")
         self.assertEqual(config.get("sftp_port"), "2222")

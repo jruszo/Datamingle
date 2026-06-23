@@ -44,7 +44,7 @@ class Command(BaseCommand):
             instance.instance_name: instance
             for instance in Instance.objects.filter(
                 instance_name__in=managed_demo_instance_names()
-            ).prefetch_related("resource_group", "instance_tag")
+            ).prefetch_related("resource_group")
         }
         missing_instances = sorted(
             set(managed_demo_instance_names()) - set(instances.keys())

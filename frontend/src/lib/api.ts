@@ -759,11 +759,6 @@ export function fetchInstanceInventory(token: string, options: InstanceInventory
   if (options.ordering?.trim()) {
     params.set('ordering', options.ordering.trim())
   }
-  if (options.tag_ids?.length) {
-    for (const tagId of options.tag_ids) {
-      params.append('tags', `${tagId}`)
-    }
-  }
 
   const queryString = params.toString()
   const path = queryString ? `/v1/instance/?${queryString}` : '/v1/instance/'
