@@ -172,22 +172,6 @@ class TwoFactorAuthConfig(models.Model):
         unique_together = ("user", "auth_type")
 
 
-class InstanceTag(models.Model):
-    """Instance tag configuration."""
-
-    tag_code = models.CharField("Tag Code", max_length=20, unique=True)
-    tag_name = models.CharField("Tag Name", max_length=20, unique=True)
-    active = models.BooleanField("Active Status", default=True)
-    create_time = models.DateTimeField("Created Time", auto_now_add=True)
-
-    def __str__(self):
-        return self.tag_name
-
-    class Meta:
-        managed = True
-        db_table = "sql_instance_tag"
-        verbose_name = "Instance Tag"
-        verbose_name_plural = "Instance Tag"
 
 
 DEFAULT_NODE_EXPORTER_COLLECTORS = (
@@ -695,9 +679,6 @@ class Instance(models.Model, PasswordMixin):
     )
     sid = models.CharField("Oracle sid", max_length=50, null=True, blank=True)
     resource_group = models.ManyToManyField(Team, verbose_name="Team", blank=True)
-    instance_tag = models.ManyToManyField(
-        InstanceTag, verbose_name="Instance Tag", blank=True
-    )
     inventory_status = models.CharField(
         "Inventory Refresh Status",
         max_length=20,

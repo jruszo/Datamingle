@@ -1,13 +1,6 @@
 """Supplementary tests for models.py."""
 
 from django.conf import settings
-from sql.models import InstanceTag
-
-
-def test_instance_tag_str():
-    i = InstanceTag(tag_name="test")
-
-    assert str(i) == "test"
 
 
 def test_password_mixin_import_error():

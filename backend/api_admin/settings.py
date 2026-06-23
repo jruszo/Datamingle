@@ -19,7 +19,7 @@ from sql.inventory import (
     ensure_inventory_refresh_schedule,
 )
 from sql.engines.mysql_ddl import validate_binary_path
-from sql.models import InstanceTag, Team
+from sql.models import Team
 
 from api_core.permissions import IsStaffOrSuperuser
 from api_core.response import success_response
@@ -251,10 +251,6 @@ def save_system_settings(settings):
 
 def build_system_settings_options():
     return {
-        "instance_tags": [
-            {"value": tag.tag_code, "label": tag.tag_name}
-            for tag in InstanceTag.objects.order_by("tag_name")
-        ],
         "auth_groups": [
             {"value": group.name, "label": group.name}
             for group in Group.objects.order_by("name")
@@ -347,10 +343,6 @@ class SystemSettingsSerializer(serializers.Serializer):
         return fields
 
     def validate_auto_review_tag(self, value):
-        valid_tags = set(InstanceTag.objects.values_list("tag_code", flat=True))
-        invalid_tags = [tag for tag in value if tag not in valid_tags]
-        if invalid_tags:
-            raise serializers.ValidationError("Unknown instance tags were provided.")
         return value
 
     def validate_ddl_notify_auth_group(self, value):
