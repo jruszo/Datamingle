@@ -75,13 +75,26 @@ with team-based access (`resource_group`) for general instance access and the ne
 
 ## Test Changes
 
-- Update `sql/utils/tests.py`, `sql/test_local_demo.py`, `sql/local_demo.py`,
-  `api_core/legacy_tests.py` to remove `can_read` tag references.
-- Update any test that creates/uses InstanceTag or `instance_tag_ids`.
+- `sql/utils/tests.py`, `sql/test_local_demo.py`, `sql/local_demo.py`:
+  Remove `InstanceTag` creation, `instance_tag.add()`, and `can_read`/`can_write` assertions.
+- `api_core/legacy_tests.py` (41 occurrences): Remove all tag test methods (test_get_instance_tag_list,
+  test_create_instance_tag, etc.), remove `instance_tag_ids` from payloads and assertions, remove
+  `instance_tag.add()` calls, remove `InstanceTag` imports.
+- `api_users/tests.py`: Remove `InstanceTag` creation and `instance_tag.add()`.
+- `conftest.py`: Remove `InstanceTag` import and the `instance_tag` fixture.
+- `sql/utils/test_workflow_audit.py`: Remove `instance_tag` fixture parameter and related assertions.
+- `sql/test_model.py`: Remove `test_instance_tag_str` test and `InstanceTag` import.
+- `api_admin/settings.py`: Remove `instance_tags` from settings options, simplify `auto_review_tag` validator.
 
 ## Verification
 
 - `makemigrations sql --check` reports no drift.
 - `black --check backend` passes.
 - `npm run build` passes.
-- Django test suite passes.
+- `python manage.py test --noinput`: 826 tests pass, 0 failures.
+- **Functional:** `QueryExecute` rejects `queryable=False` instances with "This instance is not queryable."
+- **Functional:** `QueryDescribe` rejects `queryable=False` instances similarly.
+- **Functional:** `QueryInstanceList` returns only instances with `queryable=True` and an online agent assignment.
+- **Functional:** Workflow/archive submission uses team membership (`resource_group`) instead of `can_write` tag.
+- **Functional:** Instance editor form (inventory and infrastructure) no longer includes tag selectors.
+- **Functional:** Instance metadata endpoint no longer includes `tags` in its response.
