@@ -55,6 +55,8 @@ const form = reactive({
   instance_name: '',
   type: 'master',
   db_type: 'mysql',
+  monitoring_enabled: true,
+  queryable: false,
   host: '',
   port: 3306,
   user: '',
@@ -75,6 +77,8 @@ function resetForm() {
   form.instance_name = ''
   form.type = 'master'
   form.db_type = 'mysql'
+  form.monitoring_enabled = true
+  form.queryable = false
   form.host = ''
   form.port = 3306
   form.user = ''
@@ -95,6 +99,8 @@ function applyInstance(instance: InstanceEditorRecord) {
   form.instance_name = instance.instance_name
   form.type = instance.type
   form.db_type = instance.db_type
+  form.monitoring_enabled = instance.monitoring_enabled
+  form.queryable = instance.queryable
   form.host = instance.host
   form.port = instance.port
   form.user = instance.user
@@ -244,6 +250,8 @@ function buildInstancePayload(): InstanceCreatePayload | null {
     instance_name: instanceName,
     type: form.type,
     db_type: form.db_type,
+    monitoring_enabled: form.monitoring_enabled,
+    queryable: form.queryable,
     host,
     port: form.port,
     user: form.user.trim(),
@@ -529,6 +537,18 @@ watch(form, () => {
           </div>
 
           <div class="space-y-6">
+            <div class="grid gap-4 md:grid-cols-2">
+              <label class="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                <input v-model="form.monitoring_enabled" class="rounded border-slate-300" type="checkbox">
+                <span>Enable monitoring</span>
+              </label>
+
+              <label class="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                <input v-model="form.queryable" class="rounded border-slate-300" type="checkbox">
+                <span>Enable SQL queries</span>
+              </label>
+            </div>
+
             <div class="grid min-w-0 gap-2">
               <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Teams</span>
               <select :class="multiSelectClass" multiple @change="updateNumericSelections($event, 'team_ids')">
