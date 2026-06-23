@@ -266,6 +266,11 @@ class QueryExecute(views.APIView):
                 {"errors": "Your group is not associated with this instance."}
             )
 
+        if not instance.queryable:
+            raise serializers.ValidationError(
+                {"errors": "This instance is not queryable."}
+            )
+
         if not (
             user.is_superuser
             or user.has_perm("sql.query_submit")
@@ -444,7 +449,7 @@ class QueryInstanceList(views.APIView):
             db_type=db_type or None,
             tag_codes=["can_read"],
         )
-        queryset = filter_agent_runnable_instances(queryset).order_by("instance_name")
+        queryset = filter_agent_runnable_instances(queryset).filter(queryable=True).order_by("instance_name")
         serializer = QueryInstanceSerializer(queryset, many=True)
         return success_response(data=serializer.data)
 
@@ -472,6 +477,11 @@ class QueryDescribe(views.APIView):
         except Instance.DoesNotExist:
             raise serializers.ValidationError(
                 {"errors": "The instance is not associated with your group."}
+            )
+
+        if not instance.queryable:
+            raise serializers.ValidationError(
+                {"errors": "This instance is not queryable."}
             )
 
         try:
