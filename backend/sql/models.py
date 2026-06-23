@@ -663,6 +663,7 @@ class Instance(models.Model, PasswordMixin):
         verbose_name="Password", max_length=300, default="", blank=True
     )
     monitoring_enabled = models.BooleanField("Monitoring Enabled", default=True)
+    queryable = models.BooleanField("Queryable", default=False)
     monitoring_collectors = models.JSONField(
         "Monitoring Collectors",
         default=None,
