@@ -37,6 +37,7 @@ AVAILABLE_ENGINES = {
     # Replace this with your custom engine.
     "cassandra": {"path": "extras.mycassandra:MyCassandraEngine"},
     "clickhouse": {"path": "sql.engines.clickhouse:ClickHouseEngine"},
+    "goinception": {"path": "sql.engines.goinception:GoInceptionEngine"},
     "mssql": {"path": "sql.engines.mssql:MssqlEngine"},
     "redis": {"path": "sql.engines.redis:RedisEngine"},
     "pqsql": {"path": "sql.engines.pgsql:PgSQLEngine"},

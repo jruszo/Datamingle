@@ -257,6 +257,7 @@ Dependencies
 - Large table DDL [gh-ost](https://github.com/github/gh-ost) | [pt-online-schema-change](https://www.percona.com/doc/percona-toolkit/3.0/pt-online-schema-change.html)
 - MyBatis XML parsing [mybatis-mapper2sql](https://github.com/hhyo/mybatis-mapper2sql)
 - Field encryption [cryptography](https://github.com/pyca/cryptography)
+- MySQL data masking and query permission checks [goInception](https://github.com/hanchuanchuan/goInception)
 - Observability [VictoriaMetrics](https://github.com/VictoriaMetrics/VictoriaMetrics), [Quickwit](https://github.com/quickwit-oss/quickwit), [Grafana](https://github.com/grafana/grafana), [Prometheus](https://github.com/prometheus/prometheus), and [Jaeger](https://github.com/jaegertracing/jaeger)
 
 Contributing
@@ -278,3 +279,4 @@ Acknowledgements
 ===============
 - [Archery](https://github.com/hhyo/Archery) Datamingle is forked from Archery.
 - [archer](https://github.com/jly8866/archer) Archery is based on secondary development of archer.
+- [goInception](https://github.com/hanchuanchuan/goInception) A MySQL operations tool integrating review, execution, backup, and rollback SQL generation.

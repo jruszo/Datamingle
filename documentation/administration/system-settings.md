@@ -14,7 +14,7 @@ System settings control platform behavior.
 - Login, Access, And Defaults,
 - Announcements And Branding.
 
-Some sections include test actions, such as testing email or storage.
+Some sections include test actions, such as testing goInception, email, or storage.
 
 Use caution when changing system settings because they affect all users.
 
