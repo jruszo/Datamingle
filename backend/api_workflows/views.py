@@ -1121,9 +1121,7 @@ class WorkflowMetadata(views.APIView):
         payload = {
             "manual_execution_enabled": bool(SysConfig().get("manual")),
             "teams": _workflow_metadata_teams(request.user),
-            "instances": filter_agent_runnable_instances(
-                user_instances(request.user)
-            )
+            "instances": filter_agent_runnable_instances(user_instances(request.user))
             .prefetch_related("resource_group")
             .order_by("instance_name", "id"),
         }

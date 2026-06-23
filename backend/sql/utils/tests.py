@@ -151,14 +151,10 @@ class TestTemporaryAccessHelpers(TestCase):
         )
 
         read_instances = list(
-            user_instances(self.user).values_list(
-                "instance_name", flat=True
-            )
+            user_instances(self.user).values_list("instance_name", flat=True)
         )
         write_instances = list(
-            user_instances(self.user).values_list(
-                "instance_name", flat=True
-            )
+            user_instances(self.user).values_list("instance_name", flat=True)
         )
         self.assertEqual(read_instances, [self.instance.instance_name])
         self.assertEqual(write_instances, [self.instance.instance_name])
