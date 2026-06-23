@@ -400,6 +400,8 @@ export type InstanceCreatePayload = {
   instance_name: string
   type: string
   db_type: string
+  monitoring_enabled: boolean
+  queryable: boolean
   host: string
   port: number
   user: string
