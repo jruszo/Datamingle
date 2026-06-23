@@ -354,7 +354,7 @@ class InfrastructureServiceDetailView(views.APIView):
     def get_object(self, service_id):
         return get_object_or_404(
             Instance.objects.select_related("node").prefetch_related(
-                "resource_group", "instance_tag"
+                "resource_group"
             ),
             pk=service_id,
         )
