@@ -234,7 +234,6 @@ const serviceForm = reactive<DatabaseServicePayload>({
   denied_db_name_regex: '',
   charset: '',
   team_ids: [],
-  service_tag_ids: [],
 })
 
 const isAgentDialogOpen = ref(false)
@@ -476,8 +475,6 @@ function updateNumericSelections(event: Event, target: 'service_groups' | 'servi
     .filter((value) => Number.isFinite(value))
   if (target === 'service_groups') {
     serviceForm.team_ids = values
-  } else {
-    serviceForm.service_tag_ids = values
   }
 }
 
@@ -647,7 +644,6 @@ function resetServiceForm() {
   serviceForm.denied_db_name_regex = ''
   serviceForm.charset = ''
   serviceForm.team_ids = []
-  serviceForm.service_tag_ids = []
   delete serviceForm.recommendation_id
   serviceFormError.value = ''
 }
@@ -677,7 +673,6 @@ function openServiceDialog(
     serviceForm.denied_db_name_regex = service.denied_db_name_regex
     serviceForm.charset = service.charset
     serviceForm.team_ids = [...service.team_ids]
-    serviceForm.service_tag_ids = [...service.service_tag_ids]
   }
   if (recommendation) {
     serviceForm.recommendation_id = recommendation.id
@@ -1642,19 +1637,6 @@ watch(
                 :value="group.team_id"
               >
                 {{ group.team_name }}
-              </option>
-            </select>
-          </label>
-          <label class="grid gap-2 md:col-span-2">
-            <span class="text-sm font-medium text-slate-700">Tags</span>
-            <select
-              :class="multiSelectClass"
-              multiple
-              :value="serviceForm.service_tag_ids.map(String)"
-              @change="updateNumericSelections($event, 'service_tags')"
-            >
-              <option v-for="tag in metadata?.tags ?? []" :key="tag.id" :value="tag.id">
-                {{ tag.tag_name }}
               </option>
             </select>
           </label>

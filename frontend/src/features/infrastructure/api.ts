@@ -85,7 +85,6 @@ export type DatabaseServicePayload = {
   denied_db_name_regex: string
   charset: string
   team_ids: number[]
-  service_tag_ids: number[]
   recommendation_id?: number
 }
 
