@@ -239,17 +239,6 @@ def active_instance_grants(user, on_date=None):
     ).select_related("user", "instance", "team")
 
 
-def _grant_levels_for_tags(tag_codes):
-    if not tag_codes:
-        return None
-    normalized = set(tag_codes)
-    if "can_write" in normalized:
-        return WRITE_ACCESS_LEVELS
-    if "can_read" in normalized:
-        return READ_ACCESS_LEVELS
-    return set()
-
-
 def temp_instance_access_level(user, instance, on_date=None):
     grant = (
         active_instance_grants(user, on_date=on_date)
@@ -264,27 +253,20 @@ def has_any_active_instance_grant(user, on_date=None):
     return active_instance_grants(user, on_date=on_date).exists()
 
 
-def user_has_group_instance_access(user, instance, tag_codes=None):
+def user_has_group_instance_access(user, instance):
     if user.is_superuser:
         return True
-    if user.has_perm("sql.query_all_instances") and (
-        not tag_codes or "can_read" in set(tag_codes)
-    ):
+    if user.has_perm("sql.query_all_instances"):
         return True
-    queryset = Instance.objects.filter(
+    return Instance.objects.filter(
         pk=instance.pk, resource_group__in=user_groups(user)
-    )
-    if tag_codes:
-        for tag_code in tag_codes:
-            queryset = queryset.filter(
-                instance_tag__tag_code=tag_code,
-                instance_tag__active=True,
-            )
-    return queryset.distinct().exists()
+    ).exists()
 
 
 def user_has_instance_query_access(user, instance):
-    if user_has_group_instance_access(user, instance, tag_codes=["can_read"]):
+    if not instance.queryable:
+        return False
+    if user_has_group_instance_access(user, instance):
         return True
     return temp_instance_access_level(user, instance) in READ_ACCESS_LEVELS
 
@@ -337,19 +319,10 @@ def user_member_groups(user):
     return list(Team.objects.filter(memberships__user=user, is_deleted=0).distinct())
 
 
-def user_instances(user, type=None, db_type=None, tag_codes=None):
-    grant_levels = _grant_levels_for_tags(tag_codes)
-    temp_grant_instance_ids = []
-    if grant_levels is None:
-        temp_grant_instance_ids = list(
-            active_instance_grants(user).values_list("instance_id", flat=True)
-        )
-    elif grant_levels:
-        temp_grant_instance_ids = list(
-            active_instance_grants(user)
-            .filter(access_level__in=grant_levels)
-            .values_list("instance_id", flat=True)
-        )
+def user_instances(user, type=None, db_type=None):
+    temp_grant_instance_ids = list(
+        active_instance_grants(user).values_list("instance_id", flat=True)
+    )
 
     if user.has_perm("sql.query_all_instances"):
         instances = Instance.objects.all()
@@ -361,17 +334,6 @@ def user_instances(user, type=None, db_type=None, tag_codes=None):
         instances = instances.filter(type=type)
     if db_type:
         instances = instances.filter(db_type__in=db_type)
-    if tag_codes:
-        tagged_instances = Instance.objects.filter(pk__in=instances.values("pk"))
-        for tag_code in tag_codes:
-            tagged_instances = tagged_instances.filter(
-                instance_tag__tag_code=tag_code, instance_tag__active=True
-            )
-        instances = (
-            tagged_instances | Instance.objects.filter(id__in=temp_grant_instance_ids)
-            if temp_grant_instance_ids
-            else tagged_instances
-        )
     return instances.distinct()
 
 
