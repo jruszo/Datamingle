@@ -224,6 +224,7 @@ const serviceForm = reactive<DatabaseServicePayload>({
   user: '',
   password: '',
   monitoring_enabled: true,
+  queryable: false,
   monitoring_collectors: [...DEFAULT_MYSQLD_EXPORTER_COLLECTORS],
   monitoring_labels: {},
   is_ssl: false,
@@ -636,6 +637,7 @@ function resetServiceForm() {
   serviceForm.user = ''
   serviceForm.password = ''
   serviceForm.monitoring_enabled = true
+  serviceForm.queryable = false
   serviceForm.monitoring_labels = {}
   setServiceMonitoringCollectors(serviceForm)
   serviceForm.is_ssl = false
@@ -665,6 +667,7 @@ function openServiceDialog(
     serviceForm.port = service.port
     serviceForm.user = service.user
     serviceForm.monitoring_enabled = service.monitoring_enabled
+    serviceForm.queryable = service.queryable
     serviceForm.monitoring_labels = { ...service.monitoring_labels }
     setServiceMonitoringCollectors(serviceForm, service.monitoring_collectors)
     serviceForm.is_ssl = service.is_ssl
@@ -1538,6 +1541,14 @@ watch(
               class="h-4 w-4 rounded border-slate-300"
             />
             Enable monitoring
+          </label>
+          <label class="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              v-model="serviceForm.queryable"
+              type="checkbox"
+              class="h-4 w-4 rounded border-slate-300"
+            />
+            Enable SQL queries
           </label>
           <MonitoringLabelsEditor
             v-model="serviceForm.monitoring_labels"

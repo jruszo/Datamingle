@@ -526,6 +526,7 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
             "user",
             "password",
             "monitoring_enabled",
+            "queryable",
             "monitoring_collectors",
             "monitoring_labels",
             "is_ssl",
