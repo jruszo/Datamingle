@@ -693,7 +693,7 @@ def _workflow_submission_scope(user):
 
 def _export_submission_scope(user):
     instances = (
-        filter_agent_runnable_instances(user_instances(user, tag_codes=["can_read"]))
+        filter_agent_runnable_instances(user_instances(user))
         .prefetch_related("resource_group")
         .order_by("instance_name", "id")
     )
@@ -723,10 +723,7 @@ def _export_submission_scope(user):
     for instance in instances:
         allowed_groups = {}
 
-        if (
-            _can_submit_export_workflow(user)
-            and instance.instance_tag.filter(tag_code="can_read", active=True).exists()
-        ):
+        if _can_submit_export_workflow(user):
             direct_groups = {
                 team_id: team_name
                 for team_id, team_name in instance.resource_group.filter(

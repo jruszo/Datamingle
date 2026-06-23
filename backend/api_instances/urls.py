@@ -4,12 +4,6 @@ from api_instances import views
 
 urlpatterns = [
     path("v1/instance/", views.InstanceList.as_view(), name="instance-list"),
-    path("v1/instance/tag/", views.InstanceTagList.as_view(), name="instance-tag-list"),
-    path(
-        "v1/instance/tag/<int:pk>/",
-        views.InstanceTagDetail.as_view(),
-        name="instance-tag-detail",
-    ),
     path(
         "v1/instance/metadata/",
         views.InstanceMetadata.as_view(),

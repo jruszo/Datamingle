@@ -274,9 +274,6 @@ class QueryExecute(views.APIView):
         if not (
             user.is_superuser
             or user.has_perm("sql.query_submit")
-            or user_instances(user, tag_codes=["can_read"])
-            .filter(pk=instance.pk)
-            .exists()
             or temp_instance_access_level(user, instance) in READ_ACCESS_LEVELS
         ):
             raise PermissionDenied("You do not have permission to query this instance.")
@@ -447,7 +444,6 @@ class QueryInstanceList(views.APIView):
             request.user,
             type=instance_type,
             db_type=db_type or None,
-            tag_codes=["can_read"],
         )
         queryset = (
             filter_agent_runnable_instances(queryset)
@@ -475,7 +471,7 @@ class QueryDescribe(views.APIView):
         data = serializer.validated_data
 
         try:
-            instance = user_instances(request.user, tag_codes=["can_read"]).get(
+            instance = user_instances(request.user).get(
                 pk=data["instance_id"]
             )
         except Instance.DoesNotExist:
@@ -754,7 +750,7 @@ class QueryPrivilegesApplyListCreate(views.APIView):
         user = request.user
 
         try:
-            instance = user_instances(user, tag_codes=["can_read"]).get(
+            instance = user_instances(user).get(
                 instance_name=data["instance_name"]
             )
         except Instance.DoesNotExist:

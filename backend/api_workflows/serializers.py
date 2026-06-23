@@ -253,12 +253,7 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                 )
             if not (
                 actor.is_superuser
-                or (
-                    has_group_request_access
-                    and instance.instance_tag.filter(
-                        tag_code="can_read", active=True
-                    ).exists()
-                )
+                or has_group_request_access
                 or has_temporary_read_access
             ):
                 raise serializers.ValidationError(

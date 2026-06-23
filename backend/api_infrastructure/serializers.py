@@ -10,7 +10,6 @@ from sql.models import (
     DEFAULT_NODE_EXPORTER_COLLECTORS,
     InfrastructureNode,
     Instance,
-    InstanceTag,
     Team,
     ServiceRecommendation,
     normalize_service_monitoring_collectors,
@@ -395,12 +394,6 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
         many=True,
         required=False,
     )
-    service_tag_ids = serializers.PrimaryKeyRelatedField(
-        source="instance_tag",
-        queryset=InstanceTag.objects.filter(active=True),
-        many=True,
-        required=False,
-    )
     recommendation_id = serializers.PrimaryKeyRelatedField(
         source="recommendation",
         queryset=ServiceRecommendation.objects.filter(
@@ -483,12 +476,10 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         teams = validated_data.pop("resource_group", [])
-        instance_tags = validated_data.pop("instance_tag", [])
         recommendation = validated_data.pop("recommendation", None)
         with transaction.atomic():
             instance = Instance.objects.create(**validated_data)
             instance.resource_group.set(teams)
-            instance.instance_tag.set(instance_tags)
             if recommendation is not None:
                 recommendation.status = ServiceRecommendation.STATUS_ACCEPTED
                 recommendation.save(update_fields=["status", "update_time"])
@@ -496,7 +487,6 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         teams = validated_data.pop("resource_group", None)
-        instance_tags = validated_data.pop("instance_tag", None)
         recommendation = validated_data.pop("recommendation", None)
         password = validated_data.pop("password", None)
         with transaction.atomic():
@@ -507,8 +497,6 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
             instance.save()
             if teams is not None:
                 instance.resource_group.set(teams)
-            if instance_tags is not None:
-                instance.instance_tag.set(instance_tags)
             if recommendation is not None:
                 recommendation.status = ServiceRecommendation.STATUS_ACCEPTED
                 recommendation.save(update_fields=["status", "update_time"])
@@ -536,7 +524,6 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
             "denied_db_name_regex",
             "charset",
             "team_ids",
-            "service_tag_ids",
             "recommendation_id",
         )
         extra_kwargs = {"password": {"write_only": True, "required": False}}

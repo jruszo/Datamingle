@@ -5,7 +5,6 @@ from sql.models import (
     InfrastructureNode,
     Instance,
     InstanceDatabase,
-    InstanceTag,
     ParamHistory,
     QueryPrivilegesApply,
     Team,
@@ -278,7 +277,6 @@ class InstanceDiagnosticKillResultSerializer(serializers.Serializer):
 
 class InstanceListSerializer(serializers.ModelSerializer):
     team_ids = serializers.SerializerMethodField()
-    instance_tag_ids = serializers.SerializerMethodField()
     inventory_last_refresh_at = serializers.DateTimeField(
         source="inventory_last_success_at", read_only=True
     )
@@ -288,9 +286,6 @@ class InstanceListSerializer(serializers.ModelSerializer):
         return list(
             obj.resource_group.values_list("team_id", flat=True).order_by("team_id")
         )
-
-    def get_instance_tag_ids(self, obj):
-        return list(obj.instance_tag.values_list("id", flat=True).order_by("id"))
 
     class Meta:
         model = Instance
@@ -309,7 +304,6 @@ class InstanceListSerializer(serializers.ModelSerializer):
             "service_name",
             "sid",
             "team_ids",
-            "instance_tag_ids",
             "node",
             "node_name",
             "inventory_status",
@@ -321,16 +315,12 @@ class InstanceListSerializer(serializers.ModelSerializer):
 
 class InstanceEditorSerializer(serializers.ModelSerializer):
     team_ids = serializers.SerializerMethodField()
-    instance_tag_ids = serializers.SerializerMethodField()
     node_name = serializers.CharField(source="node.name", read_only=True)
 
     def get_team_ids(self, obj):
         return list(
             obj.resource_group.values_list("team_id", flat=True).order_by("team_id")
         )
-
-    def get_instance_tag_ids(self, obj):
-        return list(obj.instance_tag.values_list("id", flat=True).order_by("id"))
 
     class Meta:
         model = Instance
@@ -351,7 +341,6 @@ class InstanceEditorSerializer(serializers.ModelSerializer):
             "service_name",
             "sid",
             "team_ids",
-            "instance_tag_ids",
             "node",
             "node_name",
         )
@@ -366,12 +355,6 @@ class InstanceCreateSerializer(serializers.ModelSerializer):
     team_ids = serializers.PrimaryKeyRelatedField(
         source="resource_group",
         queryset=Team.objects.filter(is_deleted=0),
-        many=True,
-        required=False,
-    )
-    instance_tag_ids = serializers.PrimaryKeyRelatedField(
-        source="instance_tag",
-        queryset=InstanceTag.objects.filter(active=True),
         many=True,
         required=False,
     )
@@ -415,11 +398,9 @@ class InstanceCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         teams = validated_data.pop("resource_group", [])
-        instance_tags = validated_data.pop("instance_tag", [])
         with transaction.atomic():
             instance = Instance.objects.create(**validated_data)
             instance.resource_group.set(teams)
-            instance.instance_tag.set(instance_tags)
         return instance
 
     class Meta:
@@ -442,7 +423,6 @@ class InstanceCreateSerializer(serializers.ModelSerializer):
             "sid",
             "node",
             "team_ids",
-            "instance_tag_ids",
         )
         extra_kwargs = {"password": {"write_only": True, "required": False}}
 
@@ -563,12 +543,6 @@ class InstanceDetailSerializer(serializers.ModelSerializer):
         many=True,
         required=False,
     )
-    instance_tag_ids = serializers.PrimaryKeyRelatedField(
-        source="instance_tag",
-        queryset=InstanceTag.objects.filter(active=True),
-        many=True,
-        required=False,
-    )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -615,7 +589,6 @@ class InstanceDetailSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         teams = validated_data.pop("resource_group", None)
-        instance_tags = validated_data.pop("instance_tag", None)
         password = validated_data.pop("password", None)
 
         with transaction.atomic():
@@ -629,9 +602,6 @@ class InstanceDetailSerializer(serializers.ModelSerializer):
 
             if teams is not None:
                 instance.resource_group.set(teams)
-
-            if instance_tags is not None:
-                instance.instance_tag.set(instance_tags)
 
         return instance
 
@@ -655,7 +625,6 @@ class InstanceDetailSerializer(serializers.ModelSerializer):
             "sid",
             "node",
             "team_ids",
-            "instance_tag_ids",
         )
         extra_kwargs = {
             "password": {"write_only": True},
@@ -682,56 +651,6 @@ class QueryPrivilegesApplySerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
-class InstanceTagLookupSerializer(serializers.ModelSerializer):
-    label = serializers.SerializerMethodField()
-
-    def get_label(self, obj):
-        return obj.tag_name
-
-    class Meta:
-        model = InstanceTag
-        fields = ("id", "tag_name", "label")
-
-
-class InstanceTagManagementSerializer(serializers.ModelSerializer):
-    usage_count = serializers.SerializerMethodField()
-
-    def get_usage_count(self, obj):
-        return obj.instance_set.count()
-
-    class Meta:
-        model = InstanceTag
-        fields = ("id", "tag_code", "tag_name", "active", "usage_count")
-
-
-class InstanceTagCreateSerializer(serializers.ModelSerializer):
-    def validate_tag_code(self, value):
-        tag_code = value.strip()
-        if not tag_code:
-            raise serializers.ValidationError("Tag code cannot be blank.")
-        return tag_code
-
-    def validate_tag_name(self, value):
-        tag_name = value.strip()
-        if not tag_name:
-            raise serializers.ValidationError("Tag name cannot be blank.")
-        return tag_name
-
-    class Meta:
-        model = InstanceTag
-        fields = ("tag_code", "tag_name", "active")
-
-
-class InstanceTagUpdateSerializer(serializers.ModelSerializer):
-    def validate_tag_name(self, value):
-        tag_name = value.strip()
-        if not tag_name:
-            raise serializers.ValidationError("Tag name cannot be blank.")
-        return tag_name
-
-    class Meta:
-        model = InstanceTag
-        fields = ("tag_name", "active")
 
 
 class TeamLookupSerializer(serializers.ModelSerializer):
@@ -762,7 +681,6 @@ class InstanceMetadataSerializer(serializers.Serializer):
     instance_types = ChoiceOptionSerializer(many=True)
     db_types = ChoiceOptionSerializer(many=True)
     nodes = InfrastructureNodeLookupSerializer(many=True)
-    tags = InstanceTagLookupSerializer(many=True)
     teams = TeamLookupSerializer(many=True)
 
 
