@@ -2288,40 +2288,6 @@ class InstanceDraftConnectionTest(views.APIView):
         )
 
 
-
-
-def _resource_sql(db_type, resource_type, db_name, schema_name, tb_name):
-    if resource_type == "database":
-        if db_type == "mysql":
-            return "SHOW DATABASES"
-        if db_type == "pgsql":
-            return "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname"
-    elif resource_type == "schema" and db_name:
-        if db_type == "pgsql":
-            return f"SELECT schema_name FROM information_schema.schemata WHERE catalog_name = '{db_name}' ORDER BY schema_name"
-    elif resource_type == "table" and db_name:
-        if db_type == "mysql":
-            return f"SHOW TABLES IN `{db_name}`"
-        if db_type == "pgsql":
-            schema = schema_name or "public"
-            return f"SELECT table_name FROM information_schema.tables WHERE table_schema = '{schema}' ORDER BY table_name"
-    elif resource_type == "column" and db_name and tb_name:
-        if db_type == "mysql":
-            return (
-                f"SELECT COLUMN_NAME FROM information_schema.COLUMNS "
-                f"WHERE TABLE_SCHEMA = '{db_name}' AND TABLE_NAME = '{tb_name}' "
-                f"ORDER BY ORDINAL_POSITION"
-            )
-        if db_type == "pgsql":
-            schema = schema_name or "public"
-            return (
-                f"SELECT column_name FROM information_schema.columns "
-                f"WHERE table_schema = '{schema}' AND table_name = '{tb_name}' "
-                f"ORDER BY ordinal_position"
-            )
-    return None
-
-
 class InstanceResource(views.APIView):
     """
     Get resource information inside an instance: database, schema, table, column.
@@ -2387,65 +2353,46 @@ class InstanceResource(views.APIView):
                 {"errors": "This instance is not queryable."}
             )
 
-        sql = _resource_sql(instance.db_type, resource_type, db_name, schema_name, tb_name)
-        if sql is None:
-            raise serializers.ValidationError(
-                {"errors": "Unsupported resource type or incomplete parameters."}
-            )
-
-        import uuid
-        from common.config import SysConfig
-        from api_agents.models import AgentCommandType
-        from api_agents.services import (
-            AgentCommandDispatchError,
-            AgentCommandExecutionError,
-            result_set_from_agent_result,
-            run_agent_command_sync,
-        )
+        from api_agents.engine import get_engine_via_agent
 
         try:
-            command = run_agent_command_sync(
-                instance=instance,
-                command_type=AgentCommandType.QUERY_EXECUTE,
-                workflow_type="query.resource",
-                workflow_id=f"{request.user.username}:{uuid.uuid4().hex}",
-                payload={
-                    "db_name": db_name,
-                    "schema_name": schema_name,
-                    "sql": sql,
-                    "limit": 0,
-                    "max_execution_time_ms": int(
-                        SysConfig().get("max_execution_time", 60)
-                    )
-                    * 1000,
-                    "submitted_by": request.user.username,
-                },
-                timeout_seconds=int(SysConfig().get("max_execution_time", 60)),
+            query_engine = get_engine_via_agent(
+                instance, submitted_by=request.user.username
             )
-            query_result = result_set_from_agent_result(sql, command.result)
-        except (AgentCommandDispatchError, AgentCommandExecutionError) as exc:
-            raise serializers.ValidationError({"errors": str(exc)})
-        except Exception:
-            logger.exception("Agent resource query failed")
+            db_name = query_engine.escape_string(db_name)
+            schema_name = query_engine.escape_string(schema_name)
+            tb_name = query_engine.escape_string(tb_name)
+            if resource_type == "database":
+                resource = query_engine.get_all_databases()
+                resource.rows = filter_db_list(
+                    db_list=resource.rows,
+                    db_name_regex=query_engine.instance.show_db_name_regex,
+                    is_match_regex=True,
+                )
+                resource.rows = filter_db_list(
+                    db_list=resource.rows,
+                    db_name_regex=query_engine.instance.denied_db_name_regex,
+                    is_match_regex=False,
+                )
+            elif resource_type == "schema" and db_name:
+                resource = query_engine.get_all_schemas(db_name=db_name)
+            elif resource_type == "table" and db_name:
+                resource = query_engine.get_all_tables(
+                    db_name=db_name, schema_name=schema_name
+                )
+            elif resource_type == "column" and db_name and tb_name:
+                resource = query_engine.get_all_columns_by_tb(
+                    db_name=db_name, tb_name=tb_name, schema_name=schema_name
+                )
+            else:
+                raise serializers.ValidationError(
+                    {"errors": "Unsupported resource type or incomplete parameters."}
+                )
+        except Exception as msg:
             raise serializers.ValidationError({"errors": "Operation failed."})
-
-        if query_result.error:
-            raise serializers.ValidationError({"errors": query_result.error})
-
-        rows = [row[0] for row in query_result.rows if row]
-
-        if resource_type == "database":
-            rows = filter_db_list(
-                db_list=rows,
-                db_name_regex=instance.show_db_name_regex,
-                is_match_regex=True,
-            )
-            rows = filter_db_list(
-                db_list=rows,
-                db_name_regex=instance.denied_db_name_regex,
-                is_match_regex=False,
-            )
-
-        resource = {"count": len(rows), "result": rows}
-        serializer_obj = InstanceResourceListSerializer(resource)
-        return success_response(data=serializer_obj.data)
+        else:
+            if resource.error:
+                raise serializers.ValidationError({"errors": resource.error})
+            resource = {"count": len(resource.rows), "result": resource.rows}
+            serializer_obj = InstanceResourceListSerializer(resource)
+            return success_response(data=serializer_obj.data)
