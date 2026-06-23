@@ -449,7 +449,11 @@ class QueryInstanceList(views.APIView):
             db_type=db_type or None,
             tag_codes=["can_read"],
         )
-        queryset = filter_agent_runnable_instances(queryset).filter(queryable=True).order_by("instance_name")
+        queryset = (
+            filter_agent_runnable_instances(queryset)
+            .filter(queryable=True)
+            .order_by("instance_name")
+        )
         serializer = QueryInstanceSerializer(queryset, many=True)
         return success_response(data=serializer.data)
 
