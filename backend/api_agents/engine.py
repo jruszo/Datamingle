@@ -24,6 +24,7 @@ def get_engine_via_agent(instance, submitted_by="system"):
     original_query = engine.query
 
     def agent_query(
+        self,
         db_name=None,
         sql="",
         limit_num=0,
