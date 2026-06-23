@@ -96,7 +96,7 @@ This file tracks the migration work needed to remove the legacy Bootstrap/Django
 - Query privilege management: `/queryapplylist/`, `/queryapplydetail/<id>/`, `/queryuserprivileges/`, and query privilege actions are covered by `/permission-management`.
 - Archives: `/archive/`, `/archive/<id>/`, and archive actions are covered by `/archives`.
 - Inventory list/edit/test connection: `/instance/`, `/instance/list/`, `/check/instance/` are covered by `/inventory`.
-- System settings, user, permission group, resource group, profile, mailbox, login, and WorkOS flows are covered by existing SPA modules.
+- System settings, user, permission group, resource group, profile, mailbox, login, and authentication flows are covered by existing SPA modules.
 
 ### Remove Instead Of Migrate
 

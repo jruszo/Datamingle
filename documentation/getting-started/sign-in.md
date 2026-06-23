@@ -1,12 +1,12 @@
 # Sign In
 
-Datamingle uses WorkOS sign-in. Open your organization Datamingle URL and select the WorkOS sign-in option.
+Datamingle uses email/password authentication through django-allauth headless JWT endpoints. Open your organization Datamingle URL and enter your email and password.
 
-Local username and password sign-in is not used.
+Public signup is closed. Administrators create local Datamingle user accounts.
 
 ## What Happens After Sign-In
 
-After a successful WorkOS sign-in, Datamingle creates or updates your local Datamingle user. Your local user stores:
+After a successful sign-in, the SPA stores JWT access and refresh tokens. Your local Datamingle user stores:
 
 - display name,
 - email,
@@ -20,7 +20,7 @@ After a successful WorkOS sign-in, Datamingle creates or updates your local Data
 Contact a Datamingle administrator with:
 
 - the Datamingle URL,
-- the WorkOS organization you expected to use,
+- the email address you used,
 - the approximate time of the failure,
 - the displayed error message.
 

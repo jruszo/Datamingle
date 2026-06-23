@@ -11,7 +11,7 @@ Use this section when you are new to Datamingle or need to understand why the UI
 
 ## First Workflow
 
-1. Sign in with WorkOS.
+1. Sign in with email/password.
 2. Open `Dashboard` to confirm your groups and resource groups.
 3. Use `Queries` for online read queries.
 4. Use `Workflows` for DDL, DML, or export requests.

@@ -40,30 +40,30 @@ Feature Matrix
 ====
 
 Datamingle is migrating database work onto the agent. The agent-backed product
-surface currently supports MySQL and PostgreSQL services. MySQL has command
-execution support. PostgreSQL is supported for inventory/monitoring workflows,
-but PostgreSQL query and SQL workflow execution are not enabled until the agent
-executor supports PostgreSQL commands.
+surface currently supports MySQL and PostgreSQL services. MySQL has monitoring
+and basic command inspection support. PostgreSQL is supported for inventory and
+monitoring workflows. Governed DDL/DML and data export workflows have
+agent-side executor implementations but are not yet wired end-to-end.
 
 Legend: `Yes` = supported, `Partial` = supported with database-specific limits,
 `No` = not currently wired.
 
 | Database | Agent Commands | Monitoring | Online Queries | Governed DDL/DML | Data Exports | Data Dictionary | Database Management | Account Management | Parameter Management | Session Diagnostics | Archives |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| MySQL | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+| MySQL | Partial | Yes | Partial | No | No | Yes | Yes | Yes | Yes | Yes | Yes |
 | PostgreSQL | No | Yes | No | No | No | No | No | No | No | No | No |
 
 Notes:
 
-- Query, DDL/DML, and export commands are dispatched to online, command-enabled
-  Datamingle agents. The current agent command executor rejects non-MySQL
-  assignments.
+- Agent commands (connection test, inventory collection, monitoring) are
+  functional for MySQL via online, command-enabled agents. Governed DDL/DML and
+  export workflows require end-to-end agent integration that is not yet complete.
+- Online queries for MySQL execute through agents, but data masking and
+  table-level permission checks still rely on the internal goInception engine.
 - PostgreSQL services can be registered on infrastructure nodes and monitored
   with `postgres_exporter`.
-- Data exports are SQL-oriented offline export workflows for MySQL
-  `SELECT`/`WITH` result sets.
-- MySQL Data Dictionary, database/account/parameter operations, diagnostics,
-  and archive workflows are the currently wired database operations.
+- Data Dictionary, database/account/parameter operations, diagnostics, and
+  archive workflows operate through direct backend engine connections.
 - Some legacy backend engine connectors remain in the codebase while features
   are moved behind agent execution; they are not listed as supported
   agent-backed databases until the agent can run them.
@@ -76,7 +76,7 @@ Public Datamingle demo: coming soon.
 ### Local Demo Environment
 The supported local demo setup uses three compose files:
 
-- `backend/src/docker-compose/docker-compose.local-dev.yml` for Datamingle, MySQL, Redis, goInception, Celery, and the Vite frontend.
+- `backend/src/docker-compose/docker-compose.local-dev.yml` for Datamingle, MySQL, Redis, Celery, and the Vite frontend.
 - `backend/src/docker-compose/docker-compose.demo-dbs.yml` for demo MySQL and PostgreSQL databases used by seeded workflow examples.
 - `shared-infra/docker-compose.yml` for optional local observability services.
 
@@ -250,11 +250,10 @@ Dependencies
 - Memcached connector [pymemcache](https://github.com/pinterest/pymemcache)
 - Serialization [simplejson](https://github.com/simplejson/simplejson)
 - Storage integrations [django-storages](https://github.com/jschneier/django-storages)
-- OpenAI-compatible AI assistant [openai-python](https://github.com/openai/openai-python)
+- AI query and metrics assistant [openai-python](https://github.com/openai/openai-python)
 
 ### Functional Dependencies
 - Visualization [pyecharts](https://github.com/pyecharts/pyecharts)
-- MySQL review and execution [goInception](https://github.com/hanchuanchuan/goInception)
 - Large table DDL [gh-ost](https://github.com/github/gh-ost) | [pt-online-schema-change](https://www.percona.com/doc/percona-toolkit/3.0/pt-online-schema-change.html)
 - MyBatis XML parsing [mybatis-mapper2sql](https://github.com/hhyo/mybatis-mapper2sql)
 - Field encryption [cryptography](https://github.com/pyca/cryptography)
@@ -265,7 +264,6 @@ Contributing
 You can check the roadmap and dependency list in this repository, claim related issues, or submit a PR directly. Thanks for contributing to Datamingle.
 
 Contributions include but are not limited to:
-- [Wiki documentation](https://github.com/jruszo/Datamingle/wiki) (if enabled)
 - Bug fixes
 - New features
 - Code optimization
@@ -280,6 +278,3 @@ Acknowledgements
 ===============
 - [Archery](https://github.com/hhyo/Archery) Datamingle is forked from Archery.
 - [archer](https://github.com/jly8866/archer) Archery is based on secondary development of archer.
-- [goInception](https://github.com/hanchuanchuan/goInception) A MySQL operations tool integrating review, execution, backup, and rollback SQL generation.
-- [JetBrains Open Source](https://www.jetbrains.com/opensource/) for providing free IDE licenses to this project.
-  [<img src="https://resources.jetbrains.com/storage/products/company/brand/logos/jb_beam.png" width="200"/>](https://www.jetbrains.com/opensource/)

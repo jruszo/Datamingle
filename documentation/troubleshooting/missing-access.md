@@ -6,8 +6,7 @@ Ask an administrator to check:
 
 - your permission groups,
 - your resource groups,
-- whether your user is active,
-- whether WorkOS Directory Sync owns your membership.
+- whether your user is active.
 
 ## An Action Is Disabled
 
