@@ -10,7 +10,6 @@ from sql.models import (
     DEFAULT_NODE_EXPORTER_COLLECTORS,
     InfrastructureNode,
     Instance,
-    InstanceTag,
     Team,
     ServiceRecommendation,
     normalize_service_monitoring_collectors,
@@ -113,7 +112,6 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
     role = serializers.CharField(source="type", read_only=True)
     engine = serializers.CharField(source="db_type", read_only=True)
     team_ids = serializers.SerializerMethodField()
-    service_tag_ids = serializers.SerializerMethodField()
     monitoring_collectors = serializers.SerializerMethodField()
     effective_monitoring_labels = serializers.SerializerMethodField()
     inventory_last_refresh_at = serializers.DateTimeField(
@@ -124,9 +122,6 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
         return list(
             obj.resource_group.values_list("team_id", flat=True).order_by("team_id")
         )
-
-    def get_service_tag_ids(self, obj):
-        return list(obj.instance_tag.values_list("id", flat=True).order_by("id"))
 
     def get_monitoring_collectors(self, obj):
         return normalize_service_monitoring_collectors(
@@ -150,6 +145,7 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
             "port",
             "user",
             "monitoring_enabled",
+            "queryable",
             "monitoring_collectors",
             "monitoring_labels",
             "effective_monitoring_labels",
@@ -160,7 +156,6 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
             "denied_db_name_regex",
             "charset",
             "team_ids",
-            "service_tag_ids",
             "inventory_status",
             "inventory_detected_hostname",
             "inventory_detected_version",
@@ -255,7 +250,7 @@ class InfrastructureNodeSerializer(serializers.ModelSerializer):
     def get_services(self, obj):
         services = getattr(obj, "visible_services", None)
         if services is None:
-            services = obj.services.prefetch_related("resource_group", "instance_tag")
+            services = obj.services.prefetch_related("resource_group")
             visible_service_ids = self.context.get("visible_service_ids")
             if visible_service_ids is not None:
                 services = services.filter(id__in=visible_service_ids)
@@ -395,12 +390,6 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
         many=True,
         required=False,
     )
-    service_tag_ids = serializers.PrimaryKeyRelatedField(
-        source="instance_tag",
-        queryset=InstanceTag.objects.filter(active=True),
-        many=True,
-        required=False,
-    )
     recommendation_id = serializers.PrimaryKeyRelatedField(
         source="recommendation",
         queryset=ServiceRecommendation.objects.filter(
@@ -483,12 +472,10 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         teams = validated_data.pop("resource_group", [])
-        instance_tags = validated_data.pop("instance_tag", [])
         recommendation = validated_data.pop("recommendation", None)
         with transaction.atomic():
             instance = Instance.objects.create(**validated_data)
             instance.resource_group.set(teams)
-            instance.instance_tag.set(instance_tags)
             if recommendation is not None:
                 recommendation.status = ServiceRecommendation.STATUS_ACCEPTED
                 recommendation.save(update_fields=["status", "update_time"])
@@ -496,7 +483,6 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         teams = validated_data.pop("resource_group", None)
-        instance_tags = validated_data.pop("instance_tag", None)
         recommendation = validated_data.pop("recommendation", None)
         password = validated_data.pop("password", None)
         with transaction.atomic():
@@ -507,8 +493,6 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
             instance.save()
             if teams is not None:
                 instance.resource_group.set(teams)
-            if instance_tags is not None:
-                instance.instance_tag.set(instance_tags)
             if recommendation is not None:
                 recommendation.status = ServiceRecommendation.STATUS_ACCEPTED
                 recommendation.save(update_fields=["status", "update_time"])
@@ -526,6 +510,7 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
             "user",
             "password",
             "monitoring_enabled",
+            "queryable",
             "monitoring_collectors",
             "monitoring_labels",
             "is_ssl",
@@ -535,7 +520,6 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
             "denied_db_name_regex",
             "charset",
             "team_ids",
-            "service_tag_ids",
             "recommendation_id",
         )
         extra_kwargs = {"password": {"write_only": True, "required": False}}

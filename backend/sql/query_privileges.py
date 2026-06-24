@@ -55,13 +55,6 @@ def query_priv_check(user, instance, db_name, sql_content, limit_num):
             min(priv_limit, limit_num) if limit_num else priv_limit
         )
         return result
-    # Resource-group query role grants instance-level query access.
-    if user_instances(user, tag_codes=["can_read"]).filter(pk=instance.pk).exists():
-        priv_limit = int(SysConfig().get("admin_query_limit", 5000))
-        result["data"]["limit_num"] = (
-            min(priv_limit, limit_num) if limit_num else priv_limit
-        )
-        return result
 
     # Only MySQL performs table-level permission checks.
     if instance.db_type == "mysql":
@@ -237,9 +230,7 @@ def query_priv_apply(request):
             result["msg"] = "Please fill in all required fields"
             return HttpResponse(json.dumps(result), content_type="application/json")
     try:
-        user_instances(request.user, tag_codes=["can_read"]).get(
-            instance_name=instance_name
-        )
+        user_instances(request.user).get(instance_name=instance_name)
     except Instance.DoesNotExist:
         result["status"] = 1
         result["msg"] = "Your group is not associated with this instance!"

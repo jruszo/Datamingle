@@ -34,7 +34,6 @@ const sortKey = ref('id')
 const sortDirection = ref<'asc' | 'desc'>('asc')
 const selectedType = ref('')
 const selectedDbType = ref('')
-const selectedTagIds = ref<number[]>([])
 const latestRequestId = ref(0)
 const testingInstanceId = ref<number | null>(null)
 
@@ -130,7 +129,6 @@ async function loadInstances() {
       search: searchQuery.value,
       type: selectedType.value,
       db_type: selectedDbType.value,
-      tag_ids: selectedTagIds.value,
       ordering,
     })
 
@@ -183,14 +181,6 @@ function handleSearchQueryChange(value: string) {
 
 function handlePageSizeChange(value: number) {
   pageSize.value = value
-  currentPage.value = 1
-}
-
-function handleTagChange(event: Event) {
-  const target = event.target as HTMLSelectElement
-  selectedTagIds.value = Array.from(target.selectedOptions)
-    .map((option) => Number(option.value))
-    .filter((value) => Number.isFinite(value))
   currentPage.value = 1
 }
 
@@ -271,11 +261,6 @@ watch([currentPage, pageSize, sortKey, sortDirection, selectedType, selectedDbTy
   void loadInstances()
 })
 
-watch(selectedTagIds, () => {
-  feedback.value = ''
-  void loadInstances()
-})
-
 watch(searchQuery, () => {
   feedback.value = ''
   debouncedLoadInstances()
@@ -338,20 +323,6 @@ watch(searchQuery, () => {
             </select>
           </div>
 
-          <div class="grid min-w-0 gap-2">
-            <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Tag Filter</span>
-            <select :class="multiSelectClass" multiple @change="handleTagChange">
-              <option
-                v-for="tag in metadata?.tags ?? []"
-                :key="tag.id"
-                :selected="selectedTagIds.includes(tag.id)"
-                :value="tag.id"
-              >
-                {{ tag.tag_name }}
-              </option>
-            </select>
-            <span class="text-xs text-slate-500">Hold Command/Ctrl to select multiple tags.</span>
-          </div>
         </div>
 
         <DataTable

@@ -244,7 +244,7 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
         has_group_request_access = user_has_resource_role(
             actor, group, required_permission
         )
-        has_temporary_read_access = user_has_instance_query_access(actor, instance)
+        has_temporary_read_access = user_has_instance_query_access(actor, instance, require_queryable=False)
 
         if is_offline_export:
             if not (actor.is_superuser or has_group_request_access):
@@ -253,12 +253,7 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                 )
             if not (
                 actor.is_superuser
-                or (
-                    has_group_request_access
-                    and instance.instance_tag.filter(
-                        tag_code="can_read", active=True
-                    ).exists()
-                )
+                or has_group_request_access
                 or has_temporary_read_access
             ):
                 raise serializers.ValidationError(
@@ -268,10 +263,7 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                         )
                     }
                 )
-        elif actor.is_superuser or (
-            has_group_request_access
-            and instance.instance_tag.filter(tag_code="can_write", active=True).exists()
-        ):
+        elif actor.is_superuser or has_group_request_access:
             pass
         else:
             _authorize_workflow_check_dispatch(
@@ -340,14 +332,7 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
             actor, instance, check_result.syntax_type
         )
         if not (
-            actor.is_superuser
-            or (
-                has_group_request_access
-                and instance.instance_tag.filter(
-                    tag_code="can_write", active=True
-                ).exists()
-            )
-            or has_temporary_write_access
+            actor.is_superuser or has_group_request_access or has_temporary_write_access
         ):
             raise serializers.ValidationError(
                 {

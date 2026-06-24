@@ -41,11 +41,6 @@ def lists(request):
         filter_dict["db_type"] = db_type
 
     instances = Instance.objects.filter(**filter_dict)
-    # Filter by tags and return instances containing all selected tags.
-    # TODO: loop may generate multiple joins and impact large datasets.
-    if tags:
-        for tag in tags:
-            instances = instances.filter(instance_tag=tag, instance_tag__active=True)
 
     count = instances.count()
     if sortName == "instance_name":

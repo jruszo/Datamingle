@@ -6,7 +6,6 @@ from rest_framework.test import APIClient
 
 from sql.models import (
     Instance,
-    InstanceTag,
     Team,
     TeamMembership,
     TemporaryTeamGrant,
@@ -50,9 +49,6 @@ class TeamPermissionGroupTests(TestCase):
             user=self.query_user, team=self.team_b, permission_level=self.qa
         )
 
-        self.can_write = InstanceTag.objects.create(
-            tag_code="can_write", tag_name="Can Write", active=True
-        )
         self.service = Instance.objects.create(
             instance_name="service-b",
             type="master",
@@ -63,7 +59,6 @@ class TeamPermissionGroupTests(TestCase):
             password="password",
         )
         self.service.resource_group.add(self.team_b)
-        self.service.instance_tag.add(self.can_write)
 
     def _group(self, name, *codenames):
         group, _ = Group.objects.get_or_create(name=name)

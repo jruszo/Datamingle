@@ -223,7 +223,6 @@ export type InstanceInventoryRecord = {
   service_name: string | null
   sid: string | null
   team_ids: number[]
-  instance_tag_ids: number[]
   inventory_status: 'never' | 'ok' | 'stale' | 'failed'
   inventory_detected_hostname: string
   inventory_detected_version: string
@@ -232,13 +231,6 @@ export type InstanceInventoryRecord = {
 
 export type InstanceOptionRecord = {
   value: string
-  label: string
-}
-
-export type InstanceTagOptionRecord = {
-  id: number
-  tag_code?: string
-  tag_name: string
   label: string
 }
 
@@ -251,7 +243,6 @@ export type TeamOptionRecord = {
 export type InstanceInventoryMetadata = {
   instance_types: InstanceOptionRecord[]
   db_types: InstanceOptionRecord[]
-  tags: InstanceTagOptionRecord[]
   teams: TeamOptionRecord[]
 }
 
@@ -261,7 +252,6 @@ export type InstanceInventoryFilters = {
   search?: string
   type?: string
   db_type?: string
-  tag_ids?: number[]
   ordering?: string
 }
 
@@ -413,7 +403,6 @@ export type InstanceCreatePayload = {
   service_name: string
   sid: string
   team_ids: number[]
-  instance_tag_ids: number[]
 }
 
 export type InstanceEditorRecord = InstanceCreatePayload & {
@@ -769,11 +758,6 @@ export function fetchInstanceInventory(token: string, options: InstanceInventory
   }
   if (options.ordering?.trim()) {
     params.set('ordering', options.ordering.trim())
-  }
-  if (options.tag_ids?.length) {
-    for (const tagId of options.tag_ids) {
-      params.append('tags', `${tagId}`)
-    }
   }
 
   const queryString = params.toString()

@@ -68,7 +68,6 @@ const form = reactive({
   service_name: '',
   sid: '',
   team_ids: [] as number[],
-  instance_tag_ids: [] as number[],
 })
 
 function resetForm() {
@@ -88,7 +87,6 @@ function resetForm() {
   form.service_name = ''
   form.sid = ''
   form.team_ids = []
-  form.instance_tag_ids = []
 }
 
 function applyInstance(instance: InstanceEditorRecord) {
@@ -108,7 +106,6 @@ function applyInstance(instance: InstanceEditorRecord) {
   form.service_name = instance.service_name ?? ''
   form.sid = instance.sid ?? ''
   form.team_ids = [...instance.team_ids]
-  form.instance_tag_ids = [...instance.instance_tag_ids]
 }
 
 const selectClass =
@@ -153,7 +150,7 @@ function requireToken() {
 
 function updateNumericSelections(
   event: Event,
-  target: 'team_ids' | 'instance_tag_ids',
+  target: 'team_ids',
 ) {
   const element = event.target as HTMLSelectElement
   form[target] = Array.from(element.selectedOptions)
@@ -257,7 +254,6 @@ function buildInstancePayload(): InstanceCreatePayload | null {
     service_name: form.service_name.trim(),
     sid: form.sid.trim(),
     team_ids: [...form.team_ids],
-    instance_tag_ids: [...form.instance_tag_ids],
   }
 }
 
@@ -388,8 +384,8 @@ watch(form, () => {
         <CardDescription>
           {{
             isCreateMode
-              ? 'Fill in the core connection details first, then optionally attach tags and teams.'
-              : 'Update the core connection details, then optionally adjust tags and teams.'
+              ? 'Fill in the core connection details first, then optionally attach teams.'
+              : 'Update the core connection details, then optionally adjust teams.'
           }}
         </CardDescription>
       </CardHeader>
@@ -542,36 +538,6 @@ watch(form, () => {
                 </option>
               </select>
               <span class="text-xs text-slate-500">Hold Command/Ctrl to select multiple teams.</span>
-            </div>
-
-            <div class="grid min-w-0 gap-2">
-              <div class="flex items-center justify-between gap-3">
-                <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Instance Tags</span>
-                <Button as-child size="sm" variant="outline">
-                  <RouterLink
-                    :to="{
-                      name: 'settings-instance-tags-new',
-                      query: {
-                        reason: 'inventory-tag-shortcut',
-                        returnTo: route.fullPath,
-                      },
-                    }"
-                  >
-                    Add tag
-                  </RouterLink>
-                </Button>
-              </div>
-              <select :class="multiSelectClass" multiple @change="updateNumericSelections($event, 'instance_tag_ids')">
-                <option
-                  v-for="item in metadata?.tags ?? []"
-                  :key="item.id"
-                  :selected="form.instance_tag_ids.includes(item.id)"
-                  :value="item.id"
-                >
-                  {{ item.tag_name }}
-                </option>
-              </select>
-              <span class="text-xs text-slate-500">Assign the tags used by the legacy inventory filters and query access rules.</span>
             </div>
           </div>
         </div>

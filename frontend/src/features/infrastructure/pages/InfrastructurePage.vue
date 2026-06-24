@@ -224,6 +224,7 @@ const serviceForm = reactive<DatabaseServicePayload>({
   user: '',
   password: '',
   monitoring_enabled: true,
+  queryable: false,
   monitoring_collectors: [...DEFAULT_MYSQLD_EXPORTER_COLLECTORS],
   monitoring_labels: {},
   is_ssl: false,
@@ -233,7 +234,6 @@ const serviceForm = reactive<DatabaseServicePayload>({
   denied_db_name_regex: '',
   charset: '',
   team_ids: [],
-  service_tag_ids: [],
 })
 
 const isAgentDialogOpen = ref(false)
@@ -475,8 +475,6 @@ function updateNumericSelections(event: Event, target: 'service_groups' | 'servi
     .filter((value) => Number.isFinite(value))
   if (target === 'service_groups') {
     serviceForm.team_ids = values
-  } else {
-    serviceForm.service_tag_ids = values
   }
 }
 
@@ -636,6 +634,7 @@ function resetServiceForm() {
   serviceForm.user = ''
   serviceForm.password = ''
   serviceForm.monitoring_enabled = true
+  serviceForm.queryable = false
   serviceForm.monitoring_labels = {}
   setServiceMonitoringCollectors(serviceForm)
   serviceForm.is_ssl = false
@@ -645,7 +644,6 @@ function resetServiceForm() {
   serviceForm.denied_db_name_regex = ''
   serviceForm.charset = ''
   serviceForm.team_ids = []
-  serviceForm.service_tag_ids = []
   delete serviceForm.recommendation_id
   serviceFormError.value = ''
 }
@@ -665,6 +663,7 @@ function openServiceDialog(
     serviceForm.port = service.port
     serviceForm.user = service.user
     serviceForm.monitoring_enabled = service.monitoring_enabled
+    serviceForm.queryable = service.queryable
     serviceForm.monitoring_labels = { ...service.monitoring_labels }
     setServiceMonitoringCollectors(serviceForm, service.monitoring_collectors)
     serviceForm.is_ssl = service.is_ssl
@@ -674,7 +673,6 @@ function openServiceDialog(
     serviceForm.denied_db_name_regex = service.denied_db_name_regex
     serviceForm.charset = service.charset
     serviceForm.team_ids = [...service.team_ids]
-    serviceForm.service_tag_ids = [...service.service_tag_ids]
   }
   if (recommendation) {
     serviceForm.recommendation_id = recommendation.id
@@ -1539,6 +1537,14 @@ watch(
             />
             Enable monitoring
           </label>
+          <label class="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              v-model="serviceForm.queryable"
+              type="checkbox"
+              class="h-4 w-4 rounded border-slate-300"
+            />
+            Enable SQL queries
+          </label>
           <MonitoringLabelsEditor
             v-model="serviceForm.monitoring_labels"
             class="md:col-span-2"
@@ -1631,19 +1637,6 @@ watch(
                 :value="group.team_id"
               >
                 {{ group.team_name }}
-              </option>
-            </select>
-          </label>
-          <label class="grid gap-2 md:col-span-2">
-            <span class="text-sm font-medium text-slate-700">Tags</span>
-            <select
-              :class="multiSelectClass"
-              multiple
-              :value="serviceForm.service_tag_ids.map(String)"
-              @change="updateNumericSelections($event, 'service_tags')"
-            >
-              <option v-for="tag in metadata?.tags ?? []" :key="tag.id" :value="tag.id">
-                {{ tag.tag_name }}
               </option>
             </select>
           </label>

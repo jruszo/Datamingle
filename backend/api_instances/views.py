@@ -29,7 +29,6 @@ from sql.models import (
     Instance,
     InstanceAccount,
     InstanceDatabase,
-    InstanceTag,
     ParamHistory,
     ParamTemplate,
     Team,
@@ -76,9 +75,6 @@ from api_instances.serializers import (
     InstanceParamListSerializer,
     InstanceResourceListSerializer,
     InstanceResourceSerializer,
-    InstanceTagCreateSerializer,
-    InstanceTagManagementSerializer,
-    InstanceTagUpdateSerializer,
 )
 
 logger = logging.getLogger("default")
@@ -495,19 +491,12 @@ class InstanceList(generics.ListAPIView):
             super()
             .get_queryset()
             .select_related("node")
-            .prefetch_related("instance_tag", "resource_group")
+            .prefetch_related("resource_group")
         )
         search = self.request.query_params.get("search", "").strip()
         instance_type = self.request.query_params.get("type", "").strip()
         db_type = self.request.query_params.get("db_type", "").strip()
         ordering = self.request.query_params.get("ordering", "").strip()
-
-        raw_tags = self.request.query_params.getlist("tags")
-        if not raw_tags:
-            raw_tags = self.request.query_params.getlist("tags[]")
-        if not raw_tags:
-            raw_tags = self.request.query_params.get("tags", "").split(",")
-        tag_ids = [tag.strip() for tag in raw_tags if str(tag).strip()]
 
         if search:
             search_filter = (
@@ -528,11 +517,6 @@ class InstanceList(generics.ListAPIView):
 
         if db_type:
             queryset = queryset.filter(db_type=db_type)
-
-        for tag_id in tag_ids:
-            queryset = queryset.filter(instance_tag=tag_id, instance_tag__active=True)
-
-        queryset = queryset.distinct()
 
         allowed_ordering = {
             "id",
@@ -586,12 +570,6 @@ class InstanceList(generics.ListAPIView):
                 description="Database engine type.",
             ),
             OpenApiParameter(
-                name="tags",
-                type=OpenApiTypes.STR,
-                location=OpenApiParameter.QUERY,
-                description="Filter by active instance-tag IDs. Repeat the parameter to apply AND semantics.",
-            ),
-            OpenApiParameter(
                 name="ordering",
                 type=OpenApiTypes.STR,
                 location=OpenApiParameter.QUERY,
@@ -643,7 +621,7 @@ class InstanceDetail(views.APIView):
         try:
             return (
                 Instance.objects.select_related("node")
-                .prefetch_related("resource_group", "instance_tag")
+                .prefetch_related("resource_group")
                 .get(pk=pk)
             )
         except Instance.DoesNotExist:
@@ -712,7 +690,6 @@ class InstanceMetadata(views.APIView):
             "nodes": InfrastructureNode.objects.filter(enabled=True).order_by(
                 "name", "id"
             ),
-            "tags": InstanceTag.objects.filter(active=True).order_by("tag_name", "id"),
             "teams": Team.objects.filter(is_deleted=0).order_by("team_name", "team_id"),
         }
         serializer = InstanceMetadataSerializer(payload)
@@ -2235,142 +2212,6 @@ class InstanceOperationDiagnosticLocks(views.APIView):
         )
 
 
-class InstanceTagList(generics.ListAPIView):
-    """List and create instance tags for inventory management."""
-
-    pagination_class = CustomizedPagination
-    serializer_class = InstanceTagManagementSerializer
-    queryset = InstanceTag.objects.all().order_by("id")
-
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        search = self.request.query_params.get("search", "").strip()
-        ordering = self.request.query_params.get("ordering", "").strip()
-
-        if search:
-            search_filter = Q(tag_code__icontains=search) | Q(
-                tag_name__icontains=search
-            )
-            if search.isdigit():
-                search_filter |= Q(id=int(search))
-            queryset = queryset.filter(search_filter)
-
-        if ordering in {
-            "id",
-            "-id",
-            "tag_code",
-            "-tag_code",
-            "tag_name",
-            "-tag_name",
-            "active",
-            "-active",
-        }:
-            queryset = queryset.order_by(ordering, "id")
-
-        return queryset
-
-    @extend_schema(
-        summary="Instance Tag List",
-        responses={200: InstanceTagManagementSerializer},
-        parameters=[
-            OpenApiParameter(
-                name="search",
-                type=OpenApiTypes.STR,
-                location=OpenApiParameter.QUERY,
-                description="Match tag ID, code, or name.",
-            ),
-            OpenApiParameter(
-                name="ordering",
-                type=OpenApiTypes.STR,
-                location=OpenApiParameter.QUERY,
-                description="Ordering key, e.g. tag_name or -active.",
-            ),
-        ],
-        description="List instance tags available to inventory administrators.",
-    )
-    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
-    def get(self, request):
-        tags = self.filter_queryset(self.get_queryset())
-        page_tags = self.paginate_queryset(queryset=tags)
-        serializer_obj = self.get_serializer(page_tags, many=True)
-        return self.get_paginated_response(serializer_obj.data)
-
-    @extend_schema(
-        summary="Create Instance Tag",
-        request=InstanceTagCreateSerializer,
-        responses={201: InstanceTagManagementSerializer},
-        description="Create a new instance tag.",
-    )
-    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
-    def post(self, request):
-        serializer = InstanceTagCreateSerializer(data=request.data)
-        if serializer.is_valid():
-            tag = serializer.save()
-            return success_response(
-                data=InstanceTagManagementSerializer(tag).data,
-                detail="Instance tag created successfully.",
-                status_code=status.HTTP_201_CREATED,
-            )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-class InstanceTagDetail(views.APIView):
-    """Get and update a single instance tag."""
-
-    serializer_class = InstanceTagManagementSerializer
-
-    def get_object(self, pk):
-        try:
-            return InstanceTag.objects.get(pk=pk)
-        except InstanceTag.DoesNotExist:
-            raise Http404
-
-    @staticmethod
-    def _validate_deactivation(tag, next_active):
-        if next_active or tag.active is False:
-            return
-        if tag.instance_set.exists():
-            raise serializers.ValidationError(
-                {
-                    "active": (
-                        "This tag is assigned to one or more instances. "
-                        "Remove it from those instances before deactivating it."
-                    )
-                }
-            )
-
-    @extend_schema(
-        summary="Instance Tag Detail",
-        responses={200: InstanceTagManagementSerializer},
-        description="Get a single instance tag for editing.",
-    )
-    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
-    def get(self, request, pk):
-        tag = self.get_object(pk)
-        return success_response(data=InstanceTagManagementSerializer(tag).data)
-
-    @extend_schema(
-        summary="Update Instance Tag",
-        request=InstanceTagUpdateSerializer,
-        responses={200: InstanceTagManagementSerializer},
-        description="Update an instance tag. Tag code remains immutable.",
-    )
-    @method_decorator(permission_required("sql.menu_instance", raise_exception=True))
-    def put(self, request, pk):
-        tag = self.get_object(pk)
-        serializer = InstanceTagUpdateSerializer(tag, data=request.data)
-        if serializer.is_valid():
-            self._validate_deactivation(
-                tag, serializer.validated_data.get("active", True)
-            )
-            serializer.save()
-            return success_response(
-                data=InstanceTagManagementSerializer(tag).data,
-                detail="Instance tag updated successfully.",
-            )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
 class InstanceConnectionTest(views.APIView):
     """Check whether a configured instance is reachable."""
 
@@ -2492,8 +2333,17 @@ class InstanceResource(views.APIView):
             )
         instance = Instance.objects.get(pk=instance_id)
 
+        if not instance.queryable:
+            raise serializers.ValidationError(
+                {"errors": "This instance is not queryable."}
+            )
+
+        from api_agents.engine import get_engine_via_agent
+
         try:
-            query_engine = get_engine(instance=instance)
+            query_engine = get_engine_via_agent(
+                instance, submitted_by=request.user.username
+            )
             db_name = query_engine.escape_string(db_name)
             schema_name = query_engine.escape_string(schema_name)
             tb_name = query_engine.escape_string(tb_name)

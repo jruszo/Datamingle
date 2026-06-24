@@ -75,6 +75,7 @@ export type DatabaseServicePayload = {
   user: string
   password?: string
   monitoring_enabled: boolean
+  queryable: boolean
   monitoring_collectors: string[]
   monitoring_labels: Record<string, string>
   is_ssl: boolean
@@ -84,7 +85,6 @@ export type DatabaseServicePayload = {
   denied_db_name_regex: string
   charset: string
   team_ids: number[]
-  service_tag_ids: number[]
   recommendation_id?: number
 }
 

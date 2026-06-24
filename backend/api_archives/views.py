@@ -173,7 +173,7 @@ def _archive_queryset_for_user(user):
 
 def _archive_capable_instances(user):
     return (
-        user_instances(user, tag_codes=["can_write"])
+        user_instances(user)
         .filter(db_type__in=ARCHIVE_SUPPORTED_DB_TYPES)
         .prefetch_related("resource_group")
         .order_by("instance_name", "id")
@@ -212,10 +212,7 @@ def _archive_submission_scope(user):
     for instance in instances:
         allowed_groups = {}
 
-        if (
-            can_submit_directly
-            and instance.instance_tag.filter(tag_code="can_write", active=True).exists()
-        ):
+        if can_submit_directly:
             direct_groups = {
                 team_id: team_name
                 for team_id, team_name in instance.resource_group.filter(

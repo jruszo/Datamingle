@@ -493,10 +493,8 @@ def test_auto_review_non_sql_review(sql_query_apply):
     assert audit.is_auto_review() is False
 
 
-def test_auto_review_not_applicable(
-    db_instance, sql_workflow, instance_tag, setup_sys_config
-):
-    """Not enabled, db type mismatch, missing tag, regex match, row threshold."""
+def test_auto_review_not_applicable(db_instance, sql_workflow, setup_sys_config):
+    """Not enabled, db type mismatch, regex match, row threshold."""
     sql_workflow, _ = sql_workflow
     # Not enabled.
     setup_sys_config.set("auto_review", False)
@@ -509,10 +507,6 @@ def test_auto_review_not_applicable(
     audit.sys_config.set("auto_review_db_type", "mysql")
     assert audit.is_auto_review() is False
     audit.sys_config.set("auto_review_db_type", "redis")
-    # Instance has no matching tag.
-    audit.sys_config.set("auto_review_tag", instance_tag.tag_code)
-    assert audit.is_auto_review() is False
-    db_instance.instance_tag.add(instance_tag)
     # Matched risky statement.
     audit.sys_config.set("auto_review_regex", "^drop")
     audit.workflow.sqlworkflowcontent.sql_content = "drop table"
@@ -543,7 +537,6 @@ def test_auto_review_not_applicable(
 def test_auto_review_with_default_regex(
     db_instance,
     sql_workflow,
-    instance_tag,
     setup_sys_config,
     sql_command,
     expected_result,
@@ -555,9 +548,6 @@ def test_auto_review_with_default_regex(
     # Configure system without auto_review_regex to simulate default behavior.
     setup_sys_config.set("auto_review", True)
     setup_sys_config.set("auto_review_db_type", "mysql")
-    setup_sys_config.set("auto_review_tag", instance_tag.tag_code)
-
-    db_instance.instance_tag.add(instance_tag)
 
     # Create AuditV2 instance.
     audit = AuditV2(workflow=sql_workflow, sys_config=setup_sys_config)

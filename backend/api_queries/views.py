@@ -266,12 +266,14 @@ class QueryExecute(views.APIView):
                 {"errors": "Your group is not associated with this instance."}
             )
 
+        if not instance.queryable:
+            raise serializers.ValidationError(
+                {"errors": "This instance is not queryable."}
+            )
+
         if not (
             user.is_superuser
             or user.has_perm("sql.query_submit")
-            or user_instances(user, tag_codes=["can_read"])
-            .filter(pk=instance.pk)
-            .exists()
             or temp_instance_access_level(user, instance) in READ_ACCESS_LEVELS
         ):
             raise PermissionDenied("You do not have permission to query this instance.")
@@ -397,7 +399,7 @@ class QueryExecute(views.APIView):
             instance_name=instance.instance_name,
             sqllog=sql_content,
             effect_row=effect_rows,
-            cost_time=query_result.query_time,
+            cost_time=str(query_result.query_time)[:10],
             priv_check=priv_check,
             hit_rule=query_result.mask_rule_hit,
             masking=query_result.is_masked,
@@ -442,9 +444,12 @@ class QueryInstanceList(views.APIView):
             request.user,
             type=instance_type,
             db_type=db_type or None,
-            tag_codes=["can_read"],
         )
-        queryset = filter_agent_runnable_instances(queryset).order_by("instance_name")
+        queryset = (
+            filter_agent_runnable_instances(queryset)
+            .filter(queryable=True)
+            .order_by("instance_name")
+        )
         serializer = QueryInstanceSerializer(queryset, many=True)
         return success_response(data=serializer.data)
 
@@ -466,12 +471,15 @@ class QueryDescribe(views.APIView):
         data = serializer.validated_data
 
         try:
-            instance = user_instances(request.user, tag_codes=["can_read"]).get(
-                pk=data["instance_id"]
-            )
+            instance = user_instances(request.user).get(pk=data["instance_id"])
         except Instance.DoesNotExist:
             raise serializers.ValidationError(
                 {"errors": "The instance is not associated with your group."}
+            )
+
+        if not instance.queryable:
+            raise serializers.ValidationError(
+                {"errors": "This instance is not queryable."}
             )
 
         try:
@@ -740,9 +748,7 @@ class QueryPrivilegesApplyListCreate(views.APIView):
         user = request.user
 
         try:
-            instance = user_instances(user, tag_codes=["can_read"]).get(
-                instance_name=data["instance_name"]
-            )
+            instance = user_instances(user).get(instance_name=data["instance_name"])
         except Instance.DoesNotExist:
             raise serializers.ValidationError(
                 {"errors": "Your group is not associated with this instance!"}
