@@ -247,6 +247,10 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
         has_temporary_read_access = user_has_instance_query_access(actor, instance, require_queryable=False)
 
         if is_offline_export:
+            if not (actor.is_superuser or has_group_request_access):
+                raise serializers.ValidationError(
+                    {"errors": "You do not have permission to submit export workflows."}
+                )
             if not (
                 actor.is_superuser
                 or has_group_request_access
