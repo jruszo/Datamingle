@@ -145,6 +145,7 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
             "port",
             "user",
             "monitoring_enabled",
+            "queryable",
             "monitoring_collectors",
             "monitoring_labels",
             "effective_monitoring_labels",

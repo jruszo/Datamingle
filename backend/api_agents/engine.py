@@ -24,13 +24,15 @@ def get_engine_via_agent(instance, submitted_by="system"):
 
     def _max_execution_ms():
         try:
-            return int(float(SysConfig().get("max_execution_time", 60))) * 1000
+            value = int(float(SysConfig().get("max_execution_time", 60)))
+            return (value if value > 0 else 60) * 1000
         except (TypeError, ValueError):
             return 60_000
 
     def _timeout_seconds():
         try:
-            return int(float(SysConfig().get("max_execution_time", 60)))
+            value = int(float(SysConfig().get("max_execution_time", 60)))
+            return value if value > 0 else 60
         except (TypeError, ValueError):
             return 60
 
@@ -65,11 +67,7 @@ def get_engine_via_agent(instance, submitted_by="system"):
                     "Agent command completed without producing a result.",
                     command=command,
                 )
-            agent_result = result_set_from_agent_result(sql, command.result)
-            result_set.column_list = agent_result.column_list
-            result_set.column_type = agent_result.column_type
-            result_set.rows = agent_result.rows
-            result_set.affected_rows = agent_result.affected_rows
+            result_set = result_set_from_agent_result(sql, command.result)
         except (AgentCommandDispatchError, AgentCommandExecutionError) as exc:
             result_set.error = str(exc)
         except Exception as exc:

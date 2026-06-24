@@ -498,13 +498,6 @@ class InstanceList(generics.ListAPIView):
         db_type = self.request.query_params.get("db_type", "").strip()
         ordering = self.request.query_params.get("ordering", "").strip()
 
-        raw_tags = self.request.query_params.getlist("tags")
-        if not raw_tags:
-            raw_tags = self.request.query_params.getlist("tags[]")
-        if not raw_tags:
-            raw_tags = self.request.query_params.get("tags", "").split(",")
-        tag_ids = [tag.strip() for tag in raw_tags if str(tag).strip()]
-
         if search:
             search_filter = (
                 Q(instance_name__icontains=search)
@@ -524,8 +517,6 @@ class InstanceList(generics.ListAPIView):
 
         if db_type:
             queryset = queryset.filter(db_type=db_type)
-
-            queryset = queryset.distinct()
 
         allowed_ordering = {
             "id",
@@ -577,12 +568,6 @@ class InstanceList(generics.ListAPIView):
                 type=OpenApiTypes.STR,
                 location=OpenApiParameter.QUERY,
                 description="Database engine type.",
-            ),
-            OpenApiParameter(
-                name="tags",
-                type=OpenApiTypes.STR,
-                location=OpenApiParameter.QUERY,
-                description="Filter by active instance-tag IDs. Repeat the parameter to apply AND semantics.",
             ),
             OpenApiParameter(
                 name="ordering",

@@ -263,8 +263,8 @@ def user_has_group_instance_access(user, instance):
     ).exists()
 
 
-def user_has_instance_query_access(user, instance):
-    if not instance.queryable:
+def user_has_instance_query_access(user, instance, require_queryable=True):
+    if require_queryable and not instance.queryable:
         return False
     if user_has_group_instance_access(user, instance):
         return True
