@@ -399,7 +399,7 @@ class QueryExecute(views.APIView):
             instance_name=instance.instance_name,
             sqllog=sql_content,
             effect_row=effect_rows,
-            cost_time=query_result.query_time,
+            cost_time=str(query_result.query_time)[:10],
             priv_check=priv_check,
             hit_rule=query_result.mask_rule_hit,
             masking=query_result.is_masked,
