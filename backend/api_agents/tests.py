@@ -61,6 +61,9 @@ def create_instance(name="primary"):
 
 
 def create_sql_workflow(instance, status_value="workflow_review_pass", syntax_type=2):
+    if not instance.workflow_enabled:
+        instance.workflow_enabled = True
+        instance.save(update_fields=["workflow_enabled", "update_time"])
     workflow = SqlWorkflow.objects.create(
         workflow_name="agent workflow",
         team_id=1,
@@ -438,13 +441,15 @@ class AgentApiTests(APITestCase):
             command.events.filter(event_type="command.cancel_requested").exists()
         )
 
-    def test_tool_artifact_change_bumps_online_schema_agent_revision(self):
+    def test_tool_artifact_change_bumps_workflow_enabled_agent_revision(self):
         agent = Agent.objects.create(name="agent-a")
         instance = create_instance()
+        instance.workflow_enabled = True
+        instance.save(update_fields=["workflow_enabled", "update_time"])
         AgentInstanceAssignment.objects.create(
             agent=agent,
             instance=instance,
-            online_schema_enabled=True,
+            command_enabled=True,
         )
         agent.refresh_from_db()
         self.assertEqual(agent.desired_config_revision, 2)
@@ -467,6 +472,37 @@ class AgentApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         agent.refresh_from_db()
         self.assertEqual(agent.desired_config_revision, 3)
+
+    def test_tool_artifact_change_skips_legacy_online_schema_assignment(self):
+        agent = Agent.objects.create(name="agent-a")
+        instance = create_instance()
+        AgentInstanceAssignment.objects.create(
+            agent=agent,
+            instance=instance,
+            online_schema_enabled=True,
+            metrics_enabled=False,
+        )
+        agent.refresh_from_db()
+        self.assertEqual(agent.desired_config_revision, 2)
+
+        response = self.client.post(
+            "/api/v1/agents/tool-artifacts/",
+            {
+                "tool_name": AgentToolArtifact.TOOL_GHOST,
+                "version": "1.1.6",
+                "platform": "linux",
+                "architecture": "amd64",
+                "download_url": "https://example.com/gh-ost",
+                "sha256": "d459a6c4b0867e9f665a7db35f4387d11fa7fa79a00a85c2c172ba0fa4295c14",
+                "size_bytes": 10,
+                "enabled": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        agent.refresh_from_db()
+        self.assertEqual(agent.desired_config_revision, 2)
 
 
 class DjangoAgentAPIKeyTests(APITestCase):
@@ -588,7 +624,8 @@ class AgentFacingApiTests(APITestCase):
         other_agent = Agent.objects.create(name="agent-b")
         instance = create_instance("primary")
         instance.node = node
-        instance.save(update_fields=["node", "update_time"])
+        instance.workflow_enabled = True
+        instance.save(update_fields=["node", "workflow_enabled", "update_time"])
         other_instance = create_instance("secondary")
         assignment = AgentInstanceAssignment.objects.get(agent=agent, instance=instance)
         assignment.command_enabled = True
@@ -641,6 +678,9 @@ class AgentFacingApiTests(APITestCase):
         assignment = payload["assignments"][0]
         self.assertEqual(assignment["instance_id"], instance.id)
         self.assertEqual(assignment["node_id"], node.id)
+        self.assertTrue(assignment["workflow_enabled"])
+        self.assertTrue(assignment["online_schema_enabled"])
+        self.assertIn("online_schema", assignment["modules"])
         self.assertFalse(assignment["node_monitoring_enabled"])
         self.assertTrue(assignment["service_monitoring_enabled"])
         self.assertEqual(
@@ -657,6 +697,7 @@ class AgentFacingApiTests(APITestCase):
         module_names = {module["name"]: module for module in payload["modules"]}
         self.assertTrue(module_names["mysql"]["enabled"])
         self.assertTrue(module_names["metrics"]["enabled"])
+        self.assertTrue(module_names["online_schema"]["enabled"])
         self.assertFalse(module_names["node_monitoring"]["enabled"])
         self.assertTrue(module_names["service_monitoring"]["enabled"])
         self.assertEqual(

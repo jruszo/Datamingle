@@ -8,6 +8,7 @@ export {
   fetchInstance,
   fetchInstanceInventory,
   fetchInstanceInventoryMetadata,
+  fetchWorkflowPolicies,
   testDraftInstanceConnection,
   testInstanceConnection,
   updateInstance,
@@ -24,4 +25,5 @@ export {
   type InstanceInventoryMetadata,
   type InstanceInventoryRecord,
   type PaginatedResponse,
+  type WorkflowPolicyRecord,
 } from '@/lib/api'

@@ -12,6 +12,7 @@ from sql.models import (
     Instance,
     Team,
     ServiceRecommendation,
+    WorkflowPolicy,
     normalize_service_monitoring_collectors,
     service_exporter_collectors_for_engine,
 )
@@ -117,6 +118,9 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
     inventory_last_refresh_at = serializers.DateTimeField(
         source="inventory_last_success_at", read_only=True
     )
+    workflow_policy_name = serializers.CharField(
+        source="workflow_policy.name", read_only=True, default=""
+    )
 
     def get_team_ids(self, obj):
         return list(
@@ -146,6 +150,9 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
             "user",
             "monitoring_enabled",
             "queryable",
+            "workflow_enabled",
+            "workflow_policy",
+            "workflow_policy_name",
             "monitoring_collectors",
             "monitoring_labels",
             "effective_monitoring_labels",
@@ -399,11 +406,24 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
         allow_null=True,
         write_only=True,
     )
+    workflow_policy = serializers.PrimaryKeyRelatedField(
+        queryset=WorkflowPolicy.objects.filter(is_active=True),
+        required=False,
+        allow_null=True,
+    )
     monitoring_collectors = serializers.ListField(
         child=serializers.CharField(),
         required=False,
         allow_empty=True,
     )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        current_policy_id = getattr(self.instance, "workflow_policy_id", None)
+        queryset = WorkflowPolicy.objects.filter(is_active=True)
+        if current_policy_id:
+            queryset = queryset | WorkflowPolicy.objects.filter(pk=current_policy_id)
+        self.fields["workflow_policy"].queryset = queryset.distinct()
 
     def validate_service_name(self, value):
         instance_name = value.strip()
@@ -468,6 +488,20 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
                     else None
                 ),
             )
+        workflow_enabled = attrs.get(
+            "workflow_enabled", getattr(self.instance, "workflow_enabled", False)
+        )
+        workflow_policy = attrs.get(
+            "workflow_policy", getattr(self.instance, "workflow_policy", None)
+        )
+        if workflow_enabled and workflow_policy is None:
+            raise serializers.ValidationError(
+                {
+                    "workflow_policy": (
+                        "Select a workflow policy before enabling DDL/DML workflows."
+                    )
+                }
+            )
         return attrs
 
     def create(self, validated_data):
@@ -511,6 +545,8 @@ class DatabaseServiceWriteSerializer(serializers.ModelSerializer):
             "password",
             "monitoring_enabled",
             "queryable",
+            "workflow_enabled",
+            "workflow_policy",
             "monitoring_collectors",
             "monitoring_labels",
             "is_ssl",

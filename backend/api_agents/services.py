@@ -198,6 +198,7 @@ def build_agent_config(agent, datamingle_url=""):
 def serialize_assignment(assignment):
     instance = assignment.instance
     modules = assignment_modules(assignment)
+    online_schema_enabled = assignment_online_schema_enabled(assignment)
     return {
         "id": assignment.id,
         "instance_id": instance.id,
@@ -219,6 +220,7 @@ def serialize_assignment(assignment):
         "service_monitoring_enabled": (
             instance.monitoring_enabled and instance.db_type in ("mysql", "pgsql")
         ),
+        "workflow_enabled": instance.workflow_enabled,
         "service_monitoring_collectors": normalize_service_monitoring_collectors(
             instance.db_type, instance.monitoring_collectors
         ),
@@ -237,7 +239,7 @@ def serialize_assignment(assignment):
         "capabilities": assignment.capabilities,
         "command_enabled": assignment.command_enabled,
         "metrics_enabled": assignment.metrics_enabled,
-        "online_schema_enabled": assignment.online_schema_enabled,
+        "online_schema_enabled": online_schema_enabled,
         "logs_enabled": assignment.logs_enabled,
     }
 
@@ -274,11 +276,23 @@ def assignment_modules(assignment):
         modules.add("mysql")
     if assignment.metrics_enabled:
         modules.add("metrics")
-    if assignment.online_schema_enabled:
+    if assignment_online_schema_enabled(assignment):
         modules.add("online_schema")
     if assignment.logs_enabled:
         modules.add("logs")
     return sorted(modules)
+
+
+def assignment_online_schema_enabled(assignment):
+    return bool(
+        assignment.online_schema_enabled
+        or (
+            assignment.enabled
+            and assignment.command_enabled
+            and assignment.instance.db_type == "mysql"
+            and assignment.instance.workflow_enabled
+        )
+    )
 
 
 def _assignment_defaults_from_node_assignment(node_assignment):
@@ -977,6 +991,13 @@ def dispatch_sql_workflow_to_agent(workflow, user=None, executor=None):
         if existing_command is not None:
             command = existing_command
         else:
+            if (
+                not workflow.is_offline_export
+                and not workflow.instance.workflow_enabled
+            ):
+                raise AgentCommandDispatchError(
+                    "This MySQL service is not enabled for DDL/DML workflows."
+                )
             assignment = command_capable_assignment_for_instance(workflow.instance_id)
             if assignment is None:
                 raise AgentCommandDispatchError(
@@ -1216,7 +1237,9 @@ def notify_tool_artifact_changed(artifact, action="tool_artifact.changed", user=
             Q(
                 enabled=True,
                 assignments__enabled=True,
-                assignments__online_schema_enabled=True,
+                assignments__command_enabled=True,
+                assignments__instance__db_type="mysql",
+                assignments__instance__workflow_enabled=True,
             )
             | Q(
                 enabled=True,

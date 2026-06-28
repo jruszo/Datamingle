@@ -37,6 +37,7 @@ from sql.models import (
     WorkflowAudit,
     WorkflowLog,
     WorkflowAuditSetting,
+    WorkflowPolicy,
     QueryLog,
     QueryPrivileges,
     QueryPrivilegesApply,
@@ -2042,6 +2043,11 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             workflow_type=2,
             audit_auth_groups=str(self.group.id),
         )
+        self.workflow_policy = WorkflowPolicy.objects.create(
+            name="Legacy Test SQL Policy",
+            description="Policy fixture for SQL workflow tests.",
+        )
+        self.workflow_policy.steps.create(order=1, permission_group=self.group)
         can_submit = Permission.objects.get(codename="sql_submit")
         can_export_submit = Permission.objects.get(codename="sqlexport_submit")
         can_export_download = Permission.objects.get(codename="offline_download")
@@ -2089,6 +2095,9 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             port=3306,
             user="ins_user",
             password="some_str",
+            queryable=True,
+            workflow_enabled=True,
+            workflow_policy=self.workflow_policy,
         )
         self.ins.resource_group.add(self.res_group.team_id)
         self._create_agent_assignment(self.ins)
@@ -3884,6 +3893,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
 
     def test_execute_workflow_rejects_unsupported_executor(self):
         _, workflow, _, _ = self._create_mysql_workflow()
+        workflow.instance.workflow_enabled = True
+        workflow.instance.save(update_fields=["workflow_enabled"])
 
         r = self.client.post(
             f"/api/v1/workflow/{workflow.id}/executions/",
@@ -3894,7 +3905,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
         workflow.refresh_from_db()
         self.assertEqual(workflow.status, "workflow_review_pass")
-        self.assertIn("executor", json.dumps(r.json()))
+        self.assertIn("artifact is not configured", json.dumps(r.json()))
 
     @patch(
         "api_workflows.views.dispatch_sql_workflow_to_agent",

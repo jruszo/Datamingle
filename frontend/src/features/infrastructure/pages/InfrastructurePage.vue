@@ -18,6 +18,7 @@ import {
   fetchInfrastructureNodeLabelValues,
   fetchInfrastructureNodes,
   fetchInstanceInventoryMetadata,
+  fetchWorkflowPolicies,
   issueAgentInstallKey,
   testDatabaseServiceConnection,
   updateDatabaseService,
@@ -32,6 +33,7 @@ import {
   type InfrastructureNodeRecord,
   type InstanceInventoryMetadata,
   type ServiceRecommendationRecord,
+  type WorkflowPolicyRecord,
 } from '../api'
 
 const authStore = useAuthStore()
@@ -179,6 +181,7 @@ type MonitoringCollectorForm = {
 const nodes = ref<InfrastructureNodeRecord[]>([])
 const selectedNode = ref<InfrastructureNodeDetailRecord | null>(null)
 const metadata = ref<InstanceInventoryMetadata | null>(null)
+const workflowPolicies = ref<WorkflowPolicyRecord[]>([])
 const isLoading = ref(false)
 const detailLoading = ref(false)
 const totalCount = ref(0)
@@ -225,6 +228,8 @@ const serviceForm = reactive<DatabaseServicePayload>({
   password: '',
   monitoring_enabled: true,
   queryable: false,
+  workflow_enabled: false,
+  workflow_policy: null,
   monitoring_collectors: [...DEFAULT_MYSQLD_EXPORTER_COLLECTORS],
   monitoring_labels: {},
   is_ssl: false,
@@ -270,6 +275,11 @@ const recommendedServices = computed(
     selectedNode.value?.recommendations.filter(
       (recommendation: ServiceRecommendationRecord) => recommendation.status === 'recommended',
     ) ?? [],
+)
+const serviceWorkflowPolicyOptions = computed(() =>
+  workflowPolicies.value.filter(
+    (policy) => policy.is_active || policy.id === serviceForm.workflow_policy,
+  ),
 )
 
 function requireToken() {
@@ -482,6 +492,11 @@ async function loadMetadata() {
   metadata.value = await fetchInstanceInventoryMetadata(requireToken())
 }
 
+async function loadWorkflowPolicies() {
+  const payload = await fetchWorkflowPolicies(requireToken())
+  workflowPolicies.value = payload.results
+}
+
 async function loadNodeLabelNames() {
   nodeLabelNames.value = await fetchInfrastructureNodeLabelNames(requireToken())
 }
@@ -635,6 +650,8 @@ function resetServiceForm() {
   serviceForm.password = ''
   serviceForm.monitoring_enabled = true
   serviceForm.queryable = false
+  serviceForm.workflow_enabled = false
+  serviceForm.workflow_policy = null
   serviceForm.monitoring_labels = {}
   setServiceMonitoringCollectors(serviceForm)
   serviceForm.is_ssl = false
@@ -664,6 +681,8 @@ function openServiceDialog(
     serviceForm.user = service.user
     serviceForm.monitoring_enabled = service.monitoring_enabled
     serviceForm.queryable = service.queryable
+    serviceForm.workflow_enabled = service.workflow_enabled
+    serviceForm.workflow_policy = service.workflow_policy ?? null
     serviceForm.monitoring_labels = { ...service.monitoring_labels }
     setServiceMonitoringCollectors(serviceForm, service.monitoring_collectors)
     serviceForm.is_ssl = service.is_ssl
@@ -699,6 +718,10 @@ function applyEngineDefaultPort() {
 async function submitService() {
   if (!serviceForm.node_id || !serviceForm.service_name.trim() || !serviceForm.host.trim()) {
     serviceFormError.value = 'Service name, node, and host are required.'
+    return
+  }
+  if ((serviceForm.queryable || serviceForm.workflow_enabled) && !serviceForm.workflow_policy) {
+    serviceFormError.value = 'Select a workflow policy before enabling SQL queries or DDL/DML workflows.'
     return
   }
   serviceSaving.value = true
@@ -867,7 +890,7 @@ onMounted(async () => {
     error.value = 'You do not have permission to access infrastructure.'
     return
   }
-  await Promise.all([loadMetadata(), loadNodeLabelNames(), loadNodes()])
+  await Promise.all([loadMetadata(), loadWorkflowPolicies(), loadNodeLabelNames(), loadNodes()])
   refreshTimer = setInterval(() => {
     if (
       !isLoading.value &&
@@ -1239,6 +1262,7 @@ watch(
                       <th class="px-4 py-3">Engine</th>
                       <th class="px-4 py-3">Endpoint</th>
                       <th class="px-4 py-3">Monitoring</th>
+                      <th class="px-4 py-3">Workflows</th>
                       <th class="px-4 py-3">Inventory</th>
                       <th class="px-4 py-3 text-right">Actions</th>
                     </tr>
@@ -1262,6 +1286,18 @@ watch(
                           "
                         >
                           {{ service.monitoring_enabled ? 'Enabled' : 'Disabled' }}
+                        </Badge>
+                      </td>
+                      <td class="px-4 py-3">
+                        <Badge
+                          variant="secondary"
+                          :class="
+                            service.workflow_enabled
+                              ? 'bg-sky-100 text-sky-800'
+                              : 'bg-slate-100 text-slate-600'
+                          "
+                        >
+                          {{ service.workflow_enabled ? 'Enabled' : 'Disabled' }}
                         </Badge>
                       </td>
                       <td class="px-4 py-3" :title="inventoryStatusTitle(service)">
@@ -1544,6 +1580,33 @@ watch(
               class="h-4 w-4 rounded border-slate-300"
             />
             Enable SQL queries
+          </label>
+          <label class="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              v-model="serviceForm.workflow_enabled"
+              type="checkbox"
+              class="h-4 w-4 rounded border-slate-300"
+            />
+            Enable DDL/DML workflows
+          </label>
+          <label
+            v-if="serviceForm.queryable || serviceForm.workflow_enabled"
+            class="grid gap-2 md:col-span-2"
+          >
+            <span class="text-sm font-medium text-slate-700">Workflow policy</span>
+            <select v-model.number="serviceForm.workflow_policy" :class="selectClass">
+              <option :value="null">Select a workflow policy</option>
+              <option
+                v-for="policy in serviceWorkflowPolicyOptions"
+                :key="policy.id"
+                :value="policy.id"
+              >
+                {{ policy.name }}{{ policy.is_active ? '' : ' (inactive)' }}
+              </option>
+            </select>
+            <span class="text-xs text-slate-500">
+              Required for SQL query exports and DDL/DML workflow submissions.
+            </span>
           </label>
           <MonitoringLabelsEditor
             v-model="serviceForm.monitoring_labels"

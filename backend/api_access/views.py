@@ -127,11 +127,25 @@ def _request_subject_is_self(permission_request):
     return permission_request.subject_type == PermissionRequestSubject.USER
 
 
-def _subject_has_team_access(team, user, access_duration):
-    include_temporary = access_duration == PermissionRequestDuration.TEMPORARY
-    if not include_temporary:
-        return any(group.team_id == team.team_id for group in user_member_groups(user))
-    return any(group.team_id == team.team_id for group in user_groups(user))
+def _subject_has_team_access(team, user, permission_level, access_duration):
+    has_membership = TeamMembership.objects.filter(
+        user=user,
+        team=team,
+        permission_level=permission_level,
+    ).exists()
+    if has_membership:
+        return True
+
+    if access_duration != PermissionRequestDuration.TEMPORARY:
+        return False
+
+    return TemporaryTeamGrant.objects.filter(
+        user=user,
+        team=team,
+        permission_level=permission_level,
+        is_revoked=False,
+        valid_date__gte=_today(),
+    ).exists()
 
 
 def _subject_has_instance_access(instance, access_level, subject_type, user, team):
@@ -595,6 +609,7 @@ class PermissionRequestListCreate(views.APIView):
             if _subject_has_team_access(
                 data["team"],
                 user,
+                data["permission_level"],
                 access_duration,
             ):
                 raise serializers.ValidationError(
@@ -608,6 +623,7 @@ class PermissionRequestListCreate(views.APIView):
                 user_name=user.username,
                 target_type=PermissionRequestTarget.TEAM,
                 team=data["team"],
+                permission_level=data["permission_level"],
                 subject_type=subject_type,
                 access_duration=access_duration,
                 status=WorkflowStatus.WAITING,

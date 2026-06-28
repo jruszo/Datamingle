@@ -61,6 +61,20 @@ func TestApplyConfigLogsMonitoringExpectation(t *testing.T) {
 	}
 }
 
+func TestApplyConfigRequiresOnlineSchemaArtifacts(t *testing.T) {
+	runner := NewRunner(config.Config{DataDir: t.TempDir()})
+
+	err := runner.applyConfig(context.Background(), client.AgentConfig{
+		Modules: []client.ModuleConfig{
+			{Name: "online_schema", Enabled: true, Revision: 3},
+		},
+	})
+
+	if err == nil || !strings.Contains(err.Error(), "gh-ost artifact is not configured") {
+		t.Fatalf("expected missing gh-ost artifact error, got %v", err)
+	}
+}
+
 func TestHandleCommandAvailableFetchesAcksStartsAndReportsFailure(t *testing.T) {
 	var paths []string
 	var pathsMu sync.Mutex

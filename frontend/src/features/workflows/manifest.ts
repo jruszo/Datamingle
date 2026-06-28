@@ -5,6 +5,7 @@ import DdlWorkflowCreatePage from '@/features/workflows/pages/DdlWorkflowCreateP
 import DmlWorkflowCreatePage from '@/features/workflows/pages/DmlWorkflowCreatePage.vue'
 import ExportWorkflowCreatePage from '@/features/workflows/pages/ExportWorkflowCreatePage.vue'
 import WorkflowDetailPage from '@/features/workflows/pages/WorkflowDetailPage.vue'
+import WorkflowPoliciesPage from '@/features/workflows/pages/WorkflowPoliciesPage.vue'
 import WorkflowsPage from '@/features/workflows/pages/WorkflowsPage.vue'
 
 const workflowsModule: FeatureModule = {
@@ -35,6 +36,12 @@ const workflowsModule: FeatureModule = {
       meta: { title: 'New Export Request' },
     },
     {
+      path: '/workflows/policies',
+      name: 'workflow-policies',
+      component: WorkflowPoliciesPage,
+      meta: { title: 'Workflow Policies' },
+    },
+    {
       path: '/workflows/:workflowId',
       name: 'workflow-detail',
       component: WorkflowDetailPage,
@@ -49,6 +56,14 @@ const workflowsModule: FeatureModule = {
       icon: FileText,
       group: { id: 'database', label: 'Database', icon: Database, order: 25 },
       order: 90,
+    },
+    {
+      to: '/workflows/policies',
+      label: 'Workflow Policies',
+      section: 'primary',
+      icon: FileText,
+      group: { id: 'database', label: 'Database', icon: Database, order: 25 },
+      order: 91,
     },
   ],
 }

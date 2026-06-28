@@ -16,6 +16,8 @@ from sql.models import (
     SqlWorkflowContent,
     WorkflowAudit,
     WorkflowLog,
+    WorkflowPolicy,
+    WorkflowPolicyStep,
     Users,
 )
 from sql.utils.team import (
@@ -38,7 +40,100 @@ from api_agents.services import (
 logger = logging.getLogger("default")
 LOAD_DATA_PATTERN = re.compile(r"^\s*load\s+data\b", re.IGNORECASE)
 EXPORT_FORMAT_CHOICES = {"csv", "tsv", "sql", "xlsx"}
-DDL_EXECUTOR_CHOICES = ("direct",)
+DDL_EXECUTOR_CHOICES = ("direct", "gh-ost", "pt-osc")
+
+
+class WorkflowPolicyStepSerializer(serializers.ModelSerializer):
+    permission_group_name = serializers.CharField(
+        source="permission_group.name", read_only=True
+    )
+
+    class Meta:
+        model = WorkflowPolicyStep
+        fields = ("id", "order", "permission_group", "permission_group_name")
+        read_only_fields = ("id", "permission_group_name")
+
+
+class WorkflowPolicySerializer(serializers.ModelSerializer):
+    steps = WorkflowPolicyStepSerializer(many=True)
+    created_by = serializers.CharField(source="created_by.username", read_only=True)
+    updated_by = serializers.CharField(source="updated_by.username", read_only=True)
+    can_edit = serializers.SerializerMethodField()
+
+    def get_can_edit(self, obj):
+        user = self.context.get("request").user if self.context.get("request") else None
+        if not user or not user.is_authenticated:
+            return False
+        return user.is_superuser or user.is_staff or obj.created_by_id == user.id
+
+    def validate_steps(self, value):
+        if not value:
+            raise serializers.ValidationError("At least one approval step is required.")
+        permission_group_ids = []
+        for index, step in enumerate(value, start=1):
+            permission_group = step.get("permission_group")
+            if not permission_group:
+                raise serializers.ValidationError(
+                    "Each step must select a permission group."
+                )
+            if permission_group.name == "superadmin":
+                raise serializers.ValidationError(
+                    "The superadmin group cannot be used in workflow policies."
+                )
+            if permission_group.id in permission_group_ids:
+                raise serializers.ValidationError(
+                    "A permission group can only appear once in a policy."
+                )
+            permission_group_ids.append(permission_group.id)
+            step["order"] = step.get("order") or index
+        return value
+
+    def create(self, validated_data):
+        steps = validated_data.pop("steps")
+        user = self.context["request"].user
+        validated_data["created_by"] = user
+        validated_data["updated_by"] = user
+        with transaction.atomic():
+            policy = WorkflowPolicy.objects.create(**validated_data)
+            self._replace_steps(policy, steps)
+        return policy
+
+    def update(self, instance, validated_data):
+        steps = validated_data.pop("steps", None)
+        validated_data["updated_by"] = self.context["request"].user
+        with transaction.atomic():
+            for field, value in validated_data.items():
+                setattr(instance, field, value)
+            instance.save()
+            if steps is not None:
+                self._replace_steps(instance, steps)
+        return instance
+
+    @staticmethod
+    def _replace_steps(policy, steps):
+        policy.steps.all().delete()
+        for index, step in enumerate(steps, start=1):
+            WorkflowPolicyStep.objects.create(
+                policy=policy,
+                order=index,
+                permission_group=step["permission_group"],
+            )
+
+    class Meta:
+        model = WorkflowPolicy
+        fields = (
+            "id",
+            "name",
+            "description",
+            "is_active",
+            "steps",
+            "created_by",
+            "updated_by",
+            "can_edit",
+            "create_time",
+            "update_time",
+        )
+        read_only_fields = ("id", "created_by", "updated_by", "can_edit")
 
 
 def _sysconfig_int(name, default):
@@ -224,6 +319,10 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                     }
                 )
         group = self._validate_group_for_instance(instance, workflow_data["team_id"])
+        if not instance.workflow_policy_id or not instance.workflow_policy.is_active:
+            raise serializers.ValidationError(
+                {"errors": "Workflow policy is not configured for this service."}
+            )
         engineer = workflow_data.get("engineer")
 
         if actor.is_superuser and engineer:
@@ -244,9 +343,15 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
         has_group_request_access = user_has_resource_role(
             actor, group, required_permission
         )
-        has_temporary_read_access = user_has_instance_query_access(actor, instance, require_queryable=False)
+        has_temporary_read_access = user_has_instance_query_access(
+            actor, instance, require_queryable=False
+        )
 
         if is_offline_export:
+            if not instance.queryable:
+                raise serializers.ValidationError(
+                    {"errors": "This instance is not enabled for export workflows."}
+                )
             if not (actor.is_superuser or has_group_request_access):
                 raise serializers.ValidationError(
                     {"errors": "You do not have permission to submit export workflows."}
@@ -263,6 +368,10 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                         )
                     }
                 )
+        elif not instance.workflow_enabled:
+            raise serializers.ValidationError(
+                {"errors": "This instance is not enabled for DDL/DML workflows."}
+            )
         elif actor.is_superuser or has_group_request_access:
             pass
         else:
@@ -349,6 +458,8 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
             engineer_display=user.display,
             team_name=group.team_name,
             audit_auth_groups="",
+            workflow_policy=instance.workflow_policy,
+            workflow_policy_name=instance.workflow_policy.name,
         )
         try:
             with transaction.atomic():

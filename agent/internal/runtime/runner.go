@@ -41,7 +41,7 @@ type Runner struct {
 func NewRunner(cfg config.Config) *Runner {
 	return &Runner{
 		cfg:             cfg,
-		executor:        commands.NewExecutor(),
+		executor:        commands.NewExecutorWithToolCache(filepath.Join(cfg.DataDir, "tools")),
 		runningCommands: make(map[int64]context.CancelFunc),
 		modules: modules.NewManager(
 			placeholder.New("mysql", []string{"connection.test", "inventory.collect", "query.execute"}),
@@ -295,8 +295,15 @@ func (r *Runner) reconcileToolArtifacts(ctx context.Context, payload client.Agen
 		return nil
 	}
 	cacheDir := filepath.Join(r.cfg.DataDir, "tools")
+	requiredTools := map[string]bool{
+		"gh-ost":                  false,
+		"pt-online-schema-change": false,
+	}
 	for _, artifact := range payload.ToolArtifacts {
 		if artifact.Platform != stdlibRuntime.GOOS || artifact.Architecture != stdlibRuntime.GOARCH {
+			continue
+		}
+		if _, required := requiredTools[artifact.ToolName]; !required {
 			continue
 		}
 		_, err := tools.EnsureArtifact(ctx, cacheDir, tools.Artifact{
@@ -310,6 +317,12 @@ func (r *Runner) reconcileToolArtifacts(ctx context.Context, payload client.Agen
 		}, nil)
 		if err != nil {
 			return fmt.Errorf("sync tool artifact %s %s: %w", artifact.ToolName, artifact.Version, err)
+		}
+		requiredTools[artifact.ToolName] = true
+	}
+	for toolName, found := range requiredTools {
+		if !found {
+			return fmt.Errorf("%s artifact is not configured for %s/%s", toolName, stdlibRuntime.GOOS, stdlibRuntime.GOARCH)
 		}
 	}
 	return nil

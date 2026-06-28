@@ -4,7 +4,7 @@ import logging
 from typing import Optional
 
 from django.db import models
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractUser, Group
 from django.utils.translation import gettext as _
 from django.conf import settings
 
@@ -140,6 +140,75 @@ class TeamMembership(models.Model):
                 fields=("user", "permission_level"),
                 name="team_membership_user_level_idx",
             ),
+        ]
+
+
+class WorkflowPolicy(models.Model):
+    """Reusable SQL workflow approval policy."""
+
+    name = models.CharField("Policy Name", max_length=100, unique=True)
+    description = models.TextField("Description", default="", blank=True)
+    is_active = models.BooleanField("Active", default=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="created_workflow_policies",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="updated_workflow_policies",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    create_time = models.DateTimeField("Created Time", auto_now_add=True)
+    update_time = models.DateTimeField("Updated Time", auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def audit_auth_groups(self):
+        return ",".join(str(step.permission_group_id) for step in self.steps.all())
+
+    class Meta:
+        managed = True
+        db_table = "workflow_policy"
+        verbose_name = "Workflow Policy"
+        verbose_name_plural = "Workflow Policies"
+        ordering = ["name", "id"]
+
+
+class WorkflowPolicyStep(models.Model):
+    """Ordered team-role approval step for a workflow policy."""
+
+    policy = models.ForeignKey(
+        WorkflowPolicy,
+        related_name="steps",
+        on_delete=models.CASCADE,
+    )
+    order = models.PositiveIntegerField("Order")
+    permission_group = models.ForeignKey(
+        Group,
+        related_name="workflow_policy_steps",
+        on_delete=models.PROTECT,
+    )
+    create_time = models.DateTimeField("Created Time", auto_now_add=True)
+    update_time = models.DateTimeField("Updated Time", auto_now=True)
+
+    class Meta:
+        managed = True
+        db_table = "workflow_policy_step"
+        verbose_name = "Workflow Policy Step"
+        verbose_name_plural = "Workflow Policy Steps"
+        ordering = ["order", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=("policy", "order"),
+                name="workflow_policy_step_policy_order_uniq",
+            )
         ]
 
 
@@ -646,6 +715,14 @@ class Instance(models.Model, PasswordMixin):
     )
     monitoring_enabled = models.BooleanField("Monitoring Enabled", default=True)
     queryable = models.BooleanField("Queryable", default=False)
+    workflow_enabled = models.BooleanField("Workflow Enabled", default=False)
+    workflow_policy = models.ForeignKey(
+        WorkflowPolicy,
+        verbose_name="Workflow Policy",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+    )
     monitoring_collectors = models.JSONField(
         "Monitoring Collectors",
         default=None,
@@ -839,6 +916,16 @@ class SqlWorkflow(models.Model, WorkflowAuditMixin):
     )
     status = models.CharField(max_length=50, choices=SQL_WORKFLOW_CHOICES)
     audit_auth_groups = models.CharField("Audit Authorization Groups", max_length=255)
+    workflow_policy = models.ForeignKey(
+        WorkflowPolicy,
+        verbose_name="Workflow Policy",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    workflow_policy_name = models.CharField(
+        "Workflow Policy Name", max_length=100, default="", blank=True
+    )
     run_date_start = models.DateTimeField("Execution Start Time", null=True, blank=True)
     run_date_end = models.DateTimeField("Execution End Time", null=True, blank=True)
     create_time = models.DateTimeField("Created Time", auto_now_add=True)

@@ -8,6 +8,7 @@ from sql.models import (
     ParamHistory,
     QueryPrivilegesApply,
     Team,
+    WorkflowPolicy,
 )
 
 
@@ -281,6 +282,9 @@ class InstanceListSerializer(serializers.ModelSerializer):
         source="inventory_last_success_at", read_only=True
     )
     node_name = serializers.CharField(source="node.name", read_only=True)
+    workflow_policy_name = serializers.CharField(
+        source="workflow_policy.name", read_only=True, default=""
+    )
 
     def get_team_ids(self, obj):
         return list(
@@ -297,6 +301,9 @@ class InstanceListSerializer(serializers.ModelSerializer):
             "host",
             "port",
             "user",
+            "workflow_enabled",
+            "workflow_policy",
+            "workflow_policy_name",
             "is_ssl",
             "verify_ssl",
             "db_name",
@@ -316,6 +323,9 @@ class InstanceListSerializer(serializers.ModelSerializer):
 class InstanceEditorSerializer(serializers.ModelSerializer):
     team_ids = serializers.SerializerMethodField()
     node_name = serializers.CharField(source="node.name", read_only=True)
+    workflow_policy_name = serializers.CharField(
+        source="workflow_policy.name", read_only=True, default=""
+    )
 
     def get_team_ids(self, obj):
         return list(
@@ -332,6 +342,9 @@ class InstanceEditorSerializer(serializers.ModelSerializer):
             "host",
             "port",
             "user",
+            "workflow_enabled",
+            "workflow_policy",
+            "workflow_policy_name",
             "is_ssl",
             "verify_ssl",
             "db_name",
@@ -357,6 +370,11 @@ class InstanceCreateSerializer(serializers.ModelSerializer):
         queryset=Team.objects.filter(is_deleted=0),
         many=True,
         required=False,
+    )
+    workflow_policy = serializers.PrimaryKeyRelatedField(
+        queryset=WorkflowPolicy.objects.filter(is_active=True),
+        required=False,
+        allow_null=True,
     )
 
     def validate_instance_name(self, value):
@@ -396,6 +414,18 @@ class InstanceCreateSerializer(serializers.ModelSerializer):
             return value
         return value.strip()
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if attrs.get("workflow_enabled") and attrs.get("workflow_policy") is None:
+            raise serializers.ValidationError(
+                {
+                    "workflow_policy": (
+                        "Select a workflow policy before enabling DDL/DML workflows."
+                    )
+                }
+            )
+        return attrs
+
     def create(self, validated_data):
         teams = validated_data.pop("resource_group", [])
         with transaction.atomic():
@@ -413,6 +443,8 @@ class InstanceCreateSerializer(serializers.ModelSerializer):
             "port",
             "user",
             "password",
+            "workflow_enabled",
+            "workflow_policy",
             "is_ssl",
             "verify_ssl",
             "db_name",
@@ -531,6 +563,13 @@ def infrastructure_node_queryset(current_node_id=None):
     return queryset
 
 
+def workflow_policy_queryset(current_policy_id=None):
+    queryset = WorkflowPolicy.objects.filter(is_active=True)
+    if current_policy_id:
+        queryset = queryset | WorkflowPolicy.objects.filter(pk=current_policy_id)
+    return queryset.distinct()
+
+
 class InstanceDetailSerializer(serializers.ModelSerializer):
     node = serializers.PrimaryKeyRelatedField(
         queryset=InfrastructureNode.objects.filter(enabled=True),
@@ -543,11 +582,19 @@ class InstanceDetailSerializer(serializers.ModelSerializer):
         many=True,
         required=False,
     )
+    workflow_policy = serializers.PrimaryKeyRelatedField(
+        queryset=WorkflowPolicy.objects.filter(is_active=True),
+        required=False,
+        allow_null=True,
+    )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["node"].queryset = infrastructure_node_queryset(
             getattr(self.instance, "node_id", None)
+        )
+        self.fields["workflow_policy"].queryset = workflow_policy_queryset(
+            getattr(self.instance, "workflow_policy_id", None)
         )
 
     def validate_instance_name(self, value):
@@ -587,6 +634,24 @@ class InstanceDetailSerializer(serializers.ModelSerializer):
             return value
         return value.strip()
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        workflow_enabled = attrs.get(
+            "workflow_enabled", getattr(self.instance, "workflow_enabled", False)
+        )
+        workflow_policy = attrs.get(
+            "workflow_policy", getattr(self.instance, "workflow_policy", None)
+        )
+        if workflow_enabled and workflow_policy is None:
+            raise serializers.ValidationError(
+                {
+                    "workflow_policy": (
+                        "Select a workflow policy before enabling DDL/DML workflows."
+                    )
+                }
+            )
+        return attrs
+
     def update(self, instance, validated_data):
         teams = validated_data.pop("resource_group", None)
         password = validated_data.pop("password", None)
@@ -615,6 +680,8 @@ class InstanceDetailSerializer(serializers.ModelSerializer):
             "port",
             "user",
             "password",
+            "workflow_enabled",
+            "workflow_policy",
             "is_ssl",
             "verify_ssl",
             "db_name",

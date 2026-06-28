@@ -147,12 +147,12 @@ async function loadSubmissionMetadata() {
   }
 }
 
-async function loadApprovalPreview(groupId: number) {
+async function loadApprovalPreview(groupId: number, instanceId: number) {
   approvalLoading.value = true
   approvalError.value = ''
 
   try {
-    approvalPreview.value = await fetchWorkflowApprovalPreview(groupId, requireToken())
+    approvalPreview.value = await fetchWorkflowApprovalPreview(groupId, requireToken(), instanceId)
   } catch (errorValue) {
     approvalPreview.value = null
     approvalError.value = toUserFacingMessage(errorValue, 'Failed to load the approval flow.')
@@ -334,10 +334,8 @@ watch(
     invalidateCheck()
 
     const groupId = Number(groupIdValue)
-    if (groupId) {
-      void loadApprovalPreview(groupId)
-    }
     if (groupId && keepsCurrentInstance && retainedInstanceId) {
+      void loadApprovalPreview(groupId, retainedInstanceId)
       void loadDatabases(retainedInstanceId)
     }
   },
@@ -353,8 +351,12 @@ watch(
     invalidateCheck()
 
     const instanceId = Number(instanceIdValue)
+    const groupId = Number(form.groupId)
     if (instanceId) {
       void loadDatabases(instanceId)
+    }
+    if (groupId && instanceId) {
+      void loadApprovalPreview(groupId, instanceId)
     }
   },
 )
@@ -384,8 +386,8 @@ watch(
 onMounted(async () => {
   await loadSubmissionMetadata()
   restoreDraft()
-  if (form.groupId) {
-    await loadApprovalPreview(Number(form.groupId))
+  if (form.groupId && form.instanceId) {
+    await loadApprovalPreview(Number(form.groupId), Number(form.instanceId))
   }
   if (form.instanceId) {
     await loadDatabases(Number(form.instanceId))
@@ -587,7 +589,7 @@ onMounted(async () => {
           <Card class="border-slate-200">
             <CardHeader>
               <CardTitle>Approval flow</CardTitle>
-              <CardDescription>Preview the configured reviewers for this team.</CardDescription>
+              <CardDescription>Preview the selected service policy.</CardDescription>
             </CardHeader>
             <CardContent class="space-y-3">
               <p v-if="approvalError" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -597,9 +599,12 @@ onMounted(async () => {
                 Loading approval flow...
               </p>
               <p v-else-if="!approvalPreview" class="text-sm text-slate-500">
-                Select a team to preview the approval chain.
+                Select a team and instance to preview the approval chain.
               </p>
               <template v-else>
+                <p v-if="approvalPreview.workflow_policy_name" class="text-xs font-medium uppercase text-slate-500">
+                  {{ approvalPreview.workflow_policy_name }}
+                </p>
                 <p data-testid="export-approval-preview" class="text-sm text-slate-500">{{ approvalPreview.display }}</p>
                 <div class="flex flex-wrap gap-2">
                   <Badge

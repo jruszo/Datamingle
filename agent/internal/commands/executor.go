@@ -7,6 +7,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"os"
+	"os/exec"
+	"regexp"
+	stdlibRuntime "runtime"
 	"strings"
 	"time"
 	"unicode"
@@ -14,10 +18,13 @@ import (
 	"github.com/go-sql-driver/mysql"
 
 	"github.com/jruszo/datamingle/agent/internal/client"
+	"github.com/jruszo/datamingle/agent/internal/tools"
 )
 
 type Executor struct {
-	now func() time.Time
+	now          func() time.Time
+	toolCacheDir string
+	runCommand   func(ctx context.Context, name string, args ...string) ([]byte, error)
 }
 
 type Result struct {
@@ -31,8 +38,25 @@ type queryData struct {
 	Rows        [][]any
 }
 
+type alterTableStatement struct {
+	SQL         string
+	Database    string
+	Table       string
+	AlterClause string
+}
+
+var alterTablePattern = regexp.MustCompile(`(?is)^\s*alter\s+table\s+((?:` + "`[^`]+`" + `|[A-Za-z0-9_$]+)(?:\.(?:` + "`[^`]+`" + `|[A-Za-z0-9_$]+))?)\s+(.+?)\s*;?\s*$`)
+
 func NewExecutor() *Executor {
-	return &Executor{now: time.Now}
+	return NewExecutorWithToolCache("")
+}
+
+func NewExecutorWithToolCache(toolCacheDir string) *Executor {
+	executor := &Executor{now: time.Now, toolCacheDir: toolCacheDir}
+	executor.runCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return exec.CommandContext(ctx, name, args...).CombinedOutput()
+	}
+	return executor
 }
 
 func (e *Executor) Execute(ctx context.Context, command client.AgentCommand, cfg client.AgentConfig) (Result, error) {
@@ -53,11 +77,11 @@ func (e *Executor) Execute(ctx context.Context, command client.AgentCommand, cfg
 	case "query.execute":
 		return e.queryExecute(ctx, assignment, command, started)
 	case "schema.change":
-		return e.schemaChange(ctx, assignment, command, started)
+		return e.schemaChange(ctx, assignment, cfg, command, started)
 	case "workflow.check":
 		return e.workflowCheck(command, started)
 	case "workflow.execute":
-		return e.workflowExecute(ctx, assignment, command, started)
+		return e.workflowExecute(ctx, assignment, cfg, command, started)
 	case "export.check":
 		return e.exportCheck(ctx, assignment, command, started)
 	case "export.execute":
@@ -155,14 +179,27 @@ func (e *Executor) queryExecute(ctx context.Context, assignment client.Assignmen
 	}, nil
 }
 
-func (e *Executor) schemaChange(ctx context.Context, assignment client.Assignment, command client.AgentCommand, started time.Time) (Result, error) {
+func (e *Executor) schemaChange(ctx context.Context, assignment client.Assignment, cfg client.AgentConfig, command client.AgentCommand, started time.Time) (Result, error) {
 	sqlText := stringValue(command.Payload, "sql")
 	if sqlText == "" {
 		return Result{}, fmt.Errorf("schema change command payload is missing sql")
 	}
 	executor := stringValueOrDefault(command.Payload, "executor", "direct")
 	if executor != "direct" {
-		return Result{}, fmt.Errorf("%s execution requires external online schema tooling, which is not installed yet", executor)
+		statements, ok := singleSQLStatement(sqlText)
+		if !ok {
+			return Result{}, fmt.Errorf("schema.change only allows one DDL statement")
+		}
+		return e.executeOnlineSchemaStatements(
+			ctx,
+			assignment,
+			cfg,
+			command,
+			started,
+			executor,
+			stringValueOrDefault(command.Payload, "db_name", assignment.Database),
+			[]string{statements},
+		)
 	}
 	if !isSafeDDL(sqlText) {
 		return Result{}, fmt.Errorf("schema.change only allows approved single-statement DDL")
@@ -266,15 +303,12 @@ func (e *Executor) workflowCheck(command client.AgentCommand, started time.Time)
 	}, nil
 }
 
-func (e *Executor) workflowExecute(ctx context.Context, assignment client.Assignment, command client.AgentCommand, started time.Time) (Result, error) {
+func (e *Executor) workflowExecute(ctx context.Context, assignment client.Assignment, cfg client.AgentConfig, command client.AgentCommand, started time.Time) (Result, error) {
 	sqlText := stringValue(command.Payload, "sql")
 	if sqlText == "" {
 		return Result{}, fmt.Errorf("workflow execute payload is missing sql")
 	}
 	executor := stringValueOrDefault(command.Payload, "executor", "direct")
-	if executor != "direct" {
-		return Result{}, fmt.Errorf("%s execution requires external online schema tooling, which is not installed yet", executor)
-	}
 	statements, ok := splitSQLStatements(sqlText)
 	if !ok {
 		return Result{}, fmt.Errorf("workflow SQL must contain at least one complete statement")
@@ -283,6 +317,18 @@ func (e *Executor) workflowExecute(ctx context.Context, assignment client.Assign
 		if classifyWorkflowSyntax(statement) == 0 {
 			return Result{}, fmt.Errorf("workflow.execute only allows DDL and DML statements")
 		}
+	}
+	if executor != "direct" {
+		return e.executeOnlineSchemaStatements(
+			ctx,
+			assignment,
+			cfg,
+			command,
+			started,
+			executor,
+			stringValueOrDefault(command.Payload, "db_name", assignment.Database),
+			statements,
+		)
 	}
 
 	db, err := openMySQL(assignment, stringValueOrDefault(command.Payload, "db_name", assignment.Database))
@@ -434,6 +480,273 @@ func (e *Executor) exportExecute(ctx context.Context, assignment client.Assignme
 			"command_id":        command.ID,
 		},
 	}, nil
+}
+
+func (e *Executor) executeOnlineSchemaStatements(
+	ctx context.Context,
+	assignment client.Assignment,
+	cfg client.AgentConfig,
+	command client.AgentCommand,
+	started time.Time,
+	executorID string,
+	defaultDatabase string,
+	statements []string,
+) (Result, error) {
+	toolPath, err := e.onlineSchemaToolPath(executorID, cfg)
+	if err != nil {
+		return Result{}, err
+	}
+
+	credentialFile, cleanupCredentials, err := onlineSchemaCredentialFile(assignment)
+	if err != nil {
+		return Result{}, err
+	}
+	defer cleanupCredentials()
+
+	rows := make([]map[string]any, 0, len(statements))
+	for i, statement := range statements {
+		if classifyWorkflowSyntax(statement) != 1 {
+			return Result{}, fmt.Errorf("%s execution only supports DDL statements", executorID)
+		}
+		parsed, err := parseAlterTable(defaultDatabase, statement)
+		if err != nil {
+			return Result{}, err
+		}
+
+		statementStarted := e.now()
+		args, err := onlineSchemaCommandArgs(executorID, toolPath, assignment, parsed, credentialFile)
+		if err != nil {
+			return Result{}, err
+		}
+		output, err := e.runCommand(ctx, args[0], args[1:]...)
+		if err != nil {
+			message := strings.TrimSpace(string(output))
+			if message == "" {
+				message = err.Error()
+			}
+			return Result{}, fmt.Errorf("%s execution failed for %s.%s: %s", executorID, parsed.Database, parsed.Table, message)
+		}
+		row := reviewRow(
+			i+1,
+			"Agent online schema execution",
+			0,
+			"Execute Successfully",
+			"",
+			statement,
+			0,
+			e.now().Sub(statementStarted).Seconds(),
+			command.ID,
+		)
+		row["executor"] = executorID
+		row["table_name"] = parsed.Table
+		rows = append(rows, row)
+	}
+
+	finished := e.now()
+	if command.CommandType == "schema.change" {
+		return Result{
+			Message: "schema change executed",
+			Payload: map[string]any{
+				"affected_rows":     0,
+				"execution_seconds": finished.Sub(started).Seconds(),
+				"audit": map[string]any{
+					"assignment_id": assignment.ID,
+					"instance_id":   assignment.InstanceID,
+					"executor":      executorID,
+					"sql":           stringValue(command.Payload, "sql"),
+					"started_at":    started.UTC().Format(time.RFC3339Nano),
+					"finished_at":   finished.UTC().Format(time.RFC3339Nano),
+					"result":        "committed",
+					"command_id":    command.ID,
+					"rows":          rows,
+				},
+			},
+		}, nil
+	}
+	return Result{
+		Message: "workflow executed",
+		Payload: map[string]any{
+			"full_sql":             stringValue(command.Payload, "sql"),
+			"execute_rows":         rows,
+			"review_rows":          rows,
+			"affected_rows":        0,
+			"actual_affected_rows": 0,
+			"warning_count":        0,
+			"error_count":          0,
+			"status":               "Execute Successfully",
+			"execution_seconds":    finished.Sub(started).Seconds(),
+			"command_id":           command.ID,
+		},
+	}, nil
+}
+
+func (e *Executor) onlineSchemaToolPath(executorID string, cfg client.AgentConfig) (string, error) {
+	if strings.TrimSpace(e.toolCacheDir) == "" {
+		return "", fmt.Errorf("%s artifact is not available: tool cache directory is not configured", onlineSchemaToolName(executorID))
+	}
+	toolName := onlineSchemaToolName(executorID)
+	if toolName == "" {
+		return "", fmt.Errorf("unsupported online schema executor %q", executorID)
+	}
+	for _, artifact := range cfg.ToolArtifacts {
+		if artifact.ToolName != toolName {
+			continue
+		}
+		if artifact.Platform != stdlibRuntime.GOOS || artifact.Architecture != stdlibRuntime.GOARCH {
+			continue
+		}
+		path := tools.ArtifactPath(e.toolCacheDir, tools.Artifact{
+			ToolName:     artifact.ToolName,
+			Version:      artifact.Version,
+			Platform:     artifact.Platform,
+			Architecture: artifact.Architecture,
+			DownloadURL:  artifact.DownloadURL,
+			SHA256:       artifact.SHA256,
+			SizeBytes:    artifact.SizeBytes,
+		})
+		info, err := os.Stat(path)
+		if err == nil && !info.IsDir() {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("%s artifact is not available for %s/%s", toolName, stdlibRuntime.GOOS, stdlibRuntime.GOARCH)
+}
+
+func onlineSchemaToolName(executorID string) string {
+	switch executorID {
+	case "gh-ost":
+		return "gh-ost"
+	case "pt-osc":
+		return "pt-online-schema-change"
+	default:
+		return ""
+	}
+}
+
+func parseAlterTable(defaultDatabase string, sqlText string) (alterTableStatement, error) {
+	match := alterTablePattern.FindStringSubmatch(strings.TrimSpace(sqlText))
+	if match == nil {
+		return alterTableStatement{}, fmt.Errorf("online schema execution only supports ALTER TABLE statements")
+	}
+	objectName := match[1]
+	alterClause := strings.TrimSpace(match[2])
+	database := strings.TrimSpace(defaultDatabase)
+	table := objectName
+	if parts := splitQualifiedIdentifier(objectName); len(parts) == 2 {
+		database = parts[0]
+		table = parts[1]
+	}
+	database = normalizeIdentifier(database)
+	table = normalizeIdentifier(table)
+	if database == "" || table == "" {
+		return alterTableStatement{}, fmt.Errorf("ALTER TABLE statement must include a database and table")
+	}
+	return alterTableStatement{
+		SQL:         strings.TrimSpace(sqlText),
+		Database:    database,
+		Table:       table,
+		AlterClause: alterClause,
+	}, nil
+}
+
+func splitQualifiedIdentifier(value string) []string {
+	inBacktick := false
+	for index, r := range value {
+		switch r {
+		case '`':
+			inBacktick = !inBacktick
+		case '.':
+			if !inBacktick {
+				return []string{value[:index], value[index+1:]}
+			}
+		}
+	}
+	return []string{value}
+}
+
+func normalizeIdentifier(value string) string {
+	return strings.Trim(strings.TrimSpace(value), "`")
+}
+
+func onlineSchemaCommandArgs(executorID string, toolPath string, assignment client.Assignment, statement alterTableStatement, credentialFile string) ([]string, error) {
+	base := []string{
+		toolPath,
+		fmt.Sprintf("--host=%s", assignment.Host),
+		fmt.Sprintf("--port=%d", assignment.Port),
+		fmt.Sprintf("--user=%s", assignment.Username),
+	}
+	if assignment.Charset != "" {
+		base = append(base, fmt.Sprintf("--charset=%s", assignment.Charset))
+	}
+	switch executorID {
+	case "gh-ost":
+		if credentialFile != "" {
+			base = append(base, fmt.Sprintf("--conf=%s", credentialFile))
+		}
+		return append(base,
+			fmt.Sprintf("--database=%s", statement.Database),
+			fmt.Sprintf("--table=%s", statement.Table),
+			fmt.Sprintf("--alter=%s", statement.AlterClause),
+			"--allow-on-master",
+			"--assume-rbr",
+			"--exact-rowcount",
+			"--initially-drop-ghost-table",
+			"--initially-drop-old-table",
+			"--execute",
+		), nil
+	case "pt-osc":
+		dsn := fmt.Sprintf("D=%s,t=%s", statement.Database, statement.Table)
+		if credentialFile != "" {
+			dsn = fmt.Sprintf("F=%s,%s", credentialFile, dsn)
+		}
+		return append(base,
+			fmt.Sprintf("--alter=%s", statement.AlterClause),
+			"--alter-foreign-keys-method=auto",
+			"--recursion-method=none",
+			"--execute",
+			dsn,
+		), nil
+	default:
+		return nil, fmt.Errorf("unsupported online schema executor %q", executorID)
+	}
+}
+
+func onlineSchemaCredentialFile(assignment client.Assignment) (string, func(), error) {
+	if assignment.Password == "" {
+		return "", func() {}, nil
+	}
+	file, err := os.CreateTemp("", "datamingle-online-schema-*.cnf")
+	if err != nil {
+		return "", nil, err
+	}
+	path := file.Name()
+	cleanup := func() {
+		_ = os.Remove(path)
+	}
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		cleanup()
+		return "", nil, err
+	}
+	_, err = fmt.Fprintf(
+		file,
+		"[client]\nuser=%s\npassword=%s\nhost=%s\nport=%d\n",
+		assignment.Username,
+		assignment.Password,
+		assignment.Host,
+		assignment.Port,
+	)
+	if assignment.Charset != "" && err == nil {
+		_, err = fmt.Fprintf(file, "default-character-set=%s\n", assignment.Charset)
+	}
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return path, cleanup, nil
 }
 
 func queryRows(ctx context.Context, assignment client.Assignment, database string, sqlText string, limit int) (queryData, error) {
