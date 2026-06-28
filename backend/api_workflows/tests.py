@@ -115,7 +115,9 @@ class WorkflowSubmissionMetadataTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.json()["data"]["instances"], [])
 
-    def test_export_submission_metadata_requires_queryable_policy(self):
+    def test_export_submission_metadata_allows_queryable_instances_without_policy(
+        self,
+    ):
         self.team = self._team()
         policy = self._policy()
         with_policy = self._instance(
@@ -139,7 +141,7 @@ class WorkflowSubmissionMetadataTests(APITestCase):
             instance["instance_name"]
             for instance in response.json()["data"]["instances"]
         }
-        self.assertEqual(names, {"queryable-with-policy"})
+        self.assertEqual(names, {"queryable-with-policy", "queryable-without-policy"})
 
     def test_approval_preview_uses_instance_policy(self):
         self.team = self._team()
@@ -158,6 +160,33 @@ class WorkflowSubmissionMetadataTests(APITestCase):
         self.assertEqual(payload["workflow_policy_id"], policy.id)
         self.assertEqual(payload["workflow_policy_name"], "Production DDL")
         self.assertEqual(payload["review_info"][0]["team_name"], "Production DDL DBA")
+
+    def test_approval_preview_for_policy_free_export_uses_team_setting(self):
+        self.team = self._team()
+        fallback_role = Group.objects.create(name="Fallback Export DBA")
+        WorkflowAuditSetting.objects.create(
+            team_id=self.team.team_id,
+            team_name=self.team.team_name,
+            workflow_type=WorkflowType.SQL_REVIEW,
+            audit_auth_groups=str(fallback_role.id),
+        )
+        instance = self._instance(
+            "queryable-without-policy",
+            workflow_enabled=False,
+            queryable=True,
+        )
+        self._agent_for(instance)
+
+        response = self.client.get(
+            f"/api/v1/workflow/approval-preview/?team_id={self.team.team_id}&instance_id={instance.id}"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response.json()["data"]
+        self.assertIsNone(payload["workflow_policy_id"])
+        self.assertEqual(payload["workflow_policy_name"], "")
+        self.assertEqual(payload["audit_auth_groups"], str(fallback_role.id))
+        self.assertEqual(payload["review_info"][0]["team_name"], "Fallback Export DBA")
 
     @patch("api_workflows.serializers.run_agent_command_sync")
     def test_submission_creates_audit_from_service_policy(self, run_command):

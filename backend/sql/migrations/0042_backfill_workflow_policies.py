@@ -45,10 +45,8 @@ def backfill_workflow_policies(apps, schema_editor):
         setting.team_id: _chain_key(setting.audit_auth_groups)
         for setting in legacy_settings
     }
-    sql_capable_instances = Instance.objects.filter(
-        queryable=True
-    ) | Instance.objects.filter(workflow_enabled=True)
-    for instance in sql_capable_instances.distinct():
+    sql_capable_instances = Instance.objects.filter(workflow_enabled=True)
+    for instance in sql_capable_instances:
         team_ids = list(
             instance.resource_group.filter(is_deleted=0).values_list(
                 "team_id", flat=True

@@ -728,6 +728,13 @@ async function submitService() {
     serviceFormError.value = 'Select a workflow policy before enabling SQL queries or DDL/DML workflows.'
     return
   }
+  if (serviceForm.workflow_policy) {
+    const selectedPolicy = workflowPolicies.value.find((policy) => policy.id === serviceForm.workflow_policy)
+    if (!selectedPolicy?.is_active) {
+      serviceFormError.value = 'Select an active workflow policy before saving this service.'
+      return
+    }
+  }
   serviceSaving.value = true
   serviceFormError.value = ''
   try {

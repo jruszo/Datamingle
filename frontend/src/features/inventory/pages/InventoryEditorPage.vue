@@ -204,12 +204,14 @@ async function loadPage() {
       return
     }
 
-    const [inventoryMetadata, policiesPayload] = await Promise.all([
-      fetchInstanceInventoryMetadata(requireToken()),
-      fetchWorkflowPolicies(requireToken()),
-    ])
+    const inventoryMetadata = await fetchInstanceInventoryMetadata(requireToken())
     metadata.value = inventoryMetadata
-    workflowPolicies.value = policiesPayload.results
+    try {
+      const policiesPayload = await fetchWorkflowPolicies(requireToken())
+      workflowPolicies.value = policiesPayload.results
+    } catch {
+      workflowPolicies.value = []
+    }
     if (metadata.value.teams.length === 0) {
       needsTeamDialog.value = true
       return

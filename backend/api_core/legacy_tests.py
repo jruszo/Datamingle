@@ -2037,6 +2037,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
     def setUp(self):
         self.now = datetime.now()
         self.group, _ = Group.objects.get_or_create(name="DBA")
+        self.policy_group, _ = Group.objects.get_or_create(name="Workflow Policy DBA")
         self.res_group = Team.objects.create(team_id=1, team_name="test")
         self.wfs = WorkflowAuditSetting.objects.create(
             team_id=self.res_group.team_id,
@@ -2047,7 +2048,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             name="Legacy Test SQL Policy",
             description="Policy fixture for SQL workflow tests.",
         )
-        self.workflow_policy.steps.create(order=1, permission_group=self.group)
+        self.workflow_policy.steps.create(order=1, permission_group=self.policy_group)
         can_submit = Permission.objects.get(codename="sql_submit")
         can_export_submit = Permission.objects.get(codename="sqlexport_submit")
         can_export_download = Permission.objects.get(codename="offline_download")
@@ -3078,6 +3079,12 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(r_data["workflow"]["workflow_name"], "Release Workflow 1")
         self.assertEqual(r_data["workflow"]["engineer"], self.user.username)
         self.assertEqual(r_data["workflow"]["engineer_display"], self.user.display)
+        workflow = SqlWorkflow.objects.get(id=r_data["workflow"]["id"])
+        audit = WorkflowAudit.objects.get(
+            workflow_id=workflow.id, workflow_type=WorkflowType.SQL_REVIEW
+        )
+        self.assertEqual(workflow.audit_auth_groups, str(self.policy_group.id))
+        self.assertEqual(audit.current_audit, str(self.policy_group.id))
 
     @patch("api_workflows.serializers.get_engine", create=True)
     def test_submit_workflow_defaults_backup_to_false(self, mock_get_engine):

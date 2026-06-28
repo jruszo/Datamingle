@@ -781,7 +781,7 @@ def _workflow_submission_scope(user):
 def _export_submission_scope(user):
     instances = (
         filter_agent_runnable_instances(user_instances(user))
-        .filter(queryable=True, workflow_policy__is_active=True)
+        .filter(queryable=True)
         .select_related("workflow_policy")
         .prefetch_related("resource_group")
         .order_by("instance_name", "id")
@@ -1434,21 +1434,18 @@ class WorkflowApprovalPreview(views.APIView):
                 raise serializers.ValidationError(
                     {"errors": "Selected team does not belong to this instance."}
                 )
-            if not instance.workflow_policy or not instance.workflow_policy.is_active:
-                raise serializers.ValidationError(
-                    {"errors": "Workflow policy is not configured for this service."}
+            if instance.workflow_policy and instance.workflow_policy.is_active:
+                readable, review_info = _policy_review_info(instance.workflow_policy)
+                return success_response(
+                    data={
+                        "team_id": team.team_id,
+                        "team_name": team.team_name,
+                        "audit_auth_groups": instance.workflow_policy.audit_auth_groups,
+                        "display": readable,
+                        "review_info": review_info,
+                        **_workflow_policy_summary(instance.workflow_policy),
+                    }
                 )
-            readable, review_info = _policy_review_info(instance.workflow_policy)
-            return success_response(
-                data={
-                    "team_id": team.team_id,
-                    "team_name": team.team_name,
-                    "audit_auth_groups": instance.workflow_policy.audit_auth_groups,
-                    "display": readable,
-                    "review_info": review_info,
-                    **_workflow_policy_summary(instance.workflow_policy),
-                }
-            )
 
         audit_auth_groups = Audit.settings(team_id, WorkflowType.SQL_REVIEW)
         if audit_auth_groups is None:

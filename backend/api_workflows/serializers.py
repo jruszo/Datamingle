@@ -70,7 +70,7 @@ class WorkflowPolicySerializer(serializers.ModelSerializer):
         if not value:
             raise serializers.ValidationError("At least one approval step is required.")
         permission_group_ids = []
-        for index, step in enumerate(value, start=1):
+        for step in value:
             permission_group = step.get("permission_group")
             if not permission_group:
                 raise serializers.ValidationError(
