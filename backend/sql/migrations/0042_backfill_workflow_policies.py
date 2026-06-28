@@ -46,6 +46,8 @@ def backfill_workflow_policies(apps, schema_editor):
         for setting in legacy_settings
     }
     sql_capable_instances = Instance.objects.filter(workflow_enabled=True)
+    policy_assignments = []
+    unresolved_instances = []
     for instance in sql_capable_instances:
         team_ids = list(
             instance.resource_group.filter(is_deleted=0).values_list(
@@ -53,14 +55,31 @@ def backfill_workflow_policies(apps, schema_editor):
             )
         )
         if not team_ids or any(team_id not in chain_by_team_id for team_id in team_ids):
+            unresolved_instances.append((instance, team_ids))
             continue
         chains = {chain_by_team_id[team_id] for team_id in team_ids}
         if len(chains) != 1:
+            unresolved_instances.append((instance, team_ids))
             continue
         policy = policy_by_chain.get(next(iter(chains)))
         if policy is not None:
-            instance.workflow_policy_id = policy.id
-            instance.save(update_fields=["workflow_policy"])
+            policy_assignments.append((instance, policy.id))
+        else:
+            unresolved_instances.append((instance, team_ids))
+
+    if unresolved_instances:
+        details = ", ".join(
+            f"{instance.instance_name}:{instance.id} teams={team_ids or 'none'}"
+            for instance, team_ids in unresolved_instances[:20]
+        )
+        raise RuntimeError(
+            "Could not backfill workflow_policy for workflow_enabled instances "
+            f"({len(unresolved_instances)} total; first: {details})."
+        )
+
+    for instance, policy_id in policy_assignments:
+        instance.workflow_policy_id = policy_id
+        instance.save(update_fields=["workflow_policy"])
 
 
 def noop_reverse(apps, schema_editor):

@@ -260,6 +260,13 @@ function buildInstancePayload(): InstanceCreatePayload | null {
     formError.value = 'Select a workflow policy before enabling DDL/DML workflows.'
     return null
   }
+  if (
+    form.workflow_policy &&
+    !workflowPolicies.value.some((policy) => policy.id === form.workflow_policy)
+  ) {
+    formError.value = 'Reload workflow policies before saving this instance.'
+    return null
+  }
 
   formError.value = ''
   return {

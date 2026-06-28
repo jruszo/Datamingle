@@ -310,6 +310,7 @@ class WorkflowSubmissionMetadataTests(APITestCase):
         )
         self.assertIsNone(workflow.workflow_policy_id)
         self.assertEqual(workflow.workflow_policy_name, "")
+        self.assertEqual(workflow.audit_auth_groups, str(fallback_role.id))
 
 
 class WorkflowPolicyApiTests(APITestCase):
