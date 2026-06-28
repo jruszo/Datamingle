@@ -61,7 +61,7 @@ func TestApplyConfigLogsMonitoringExpectation(t *testing.T) {
 	}
 }
 
-func TestApplyConfigRequiresOnlineSchemaArtifacts(t *testing.T) {
+func TestApplyConfigAllowsOnlineSchemaModuleWithoutEveryToolArtifact(t *testing.T) {
 	runner := NewRunner(config.Config{DataDir: t.TempDir()})
 
 	err := runner.applyConfig(context.Background(), client.AgentConfig{
@@ -70,8 +70,8 @@ func TestApplyConfigRequiresOnlineSchemaArtifacts(t *testing.T) {
 		},
 	})
 
-	if err == nil || !strings.Contains(err.Error(), "gh-ost artifact is not configured") {
-		t.Fatalf("expected missing gh-ost artifact error, got %v", err)
+	if err != nil {
+		t.Fatalf("expected config without declared artifacts to apply, got %v", err)
 	}
 }
 

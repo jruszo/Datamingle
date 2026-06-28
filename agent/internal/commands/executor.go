@@ -6,12 +6,14 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
 	"regexp"
 	stdlibRuntime "runtime"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -45,6 +47,8 @@ type alterTableStatement struct {
 	AlterClause string
 }
 
+const commandOutputTailLimit = 64 * 1024
+
 var alterTablePattern = regexp.MustCompile(`(?is)^\s*alter\s+table\s+((?:` + "`[^`]+`" + `|[A-Za-z0-9_$]+)(?:\.(?:` + "`[^`]+`" + `|[A-Za-z0-9_$]+))?)\s+(.+?)\s*;?\s*$`)
 
 func NewExecutor() *Executor {
@@ -53,11 +57,54 @@ func NewExecutor() *Executor {
 
 func NewExecutorWithToolCache(toolCacheDir string) *Executor {
 	executor := &Executor{now: time.Now, toolCacheDir: toolCacheDir}
-	executor.runCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		return exec.CommandContext(ctx, name, args...).CombinedOutput()
-	}
+	executor.runCommand = runCommandStreamingTail
 	return executor
 }
+
+func runCommandStreamingTail(ctx context.Context, name string, args ...string) ([]byte, error) {
+	output := newBoundedTailWriter(commandOutputTailLimit)
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdout = output
+	cmd.Stderr = output
+	err := cmd.Run()
+	return output.Bytes(), err
+}
+
+type boundedTailWriter struct {
+	mu    sync.Mutex
+	limit int
+	buf   []byte
+}
+
+func newBoundedTailWriter(limit int) *boundedTailWriter {
+	return &boundedTailWriter{limit: limit}
+}
+
+func (w *boundedTailWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.limit <= 0 {
+		return len(p), nil
+	}
+	if len(p) >= w.limit {
+		w.buf = append(w.buf[:0], p[len(p)-w.limit:]...)
+		return len(p), nil
+	}
+	w.buf = append(w.buf, p...)
+	if len(w.buf) > w.limit {
+		copy(w.buf, w.buf[len(w.buf)-w.limit:])
+		w.buf = w.buf[:w.limit]
+	}
+	return len(p), nil
+}
+
+func (w *boundedTailWriter) Bytes() []byte {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]byte(nil), w.buf...)
+}
+
+var _ io.Writer = (*boundedTailWriter)(nil)
 
 func (e *Executor) Execute(ctx context.Context, command client.AgentCommand, cfg client.AgentConfig) (Result, error) {
 	assignment, ok := assignmentForCommand(command, cfg)
@@ -497,14 +544,8 @@ func (e *Executor) executeOnlineSchemaStatements(
 		return Result{}, err
 	}
 
-	credentialFile, cleanupCredentials, err := onlineSchemaCredentialFile(assignment)
-	if err != nil {
-		return Result{}, err
-	}
-	defer cleanupCredentials()
-
-	rows := make([]map[string]any, 0, len(statements))
-	for i, statement := range statements {
+	parsedStatements := make([]alterTableStatement, 0, len(statements))
+	for _, statement := range statements {
 		if classifyWorkflowSyntax(statement) != 1 {
 			return Result{}, fmt.Errorf("%s execution only supports DDL statements", executorID)
 		}
@@ -512,12 +553,28 @@ func (e *Executor) executeOnlineSchemaStatements(
 		if err != nil {
 			return Result{}, err
 		}
+		parsedStatements = append(parsedStatements, parsed)
+	}
 
-		statementStarted := e.now()
+	credentialFile, cleanupCredentials, err := onlineSchemaCredentialFile(assignment)
+	if err != nil {
+		return Result{}, err
+	}
+	defer cleanupCredentials()
+
+	commandArgs := make([][]string, 0, len(parsedStatements))
+	for _, parsed := range parsedStatements {
 		args, err := onlineSchemaCommandArgs(executorID, toolPath, assignment, parsed, credentialFile)
 		if err != nil {
 			return Result{}, err
 		}
+		commandArgs = append(commandArgs, args)
+	}
+
+	rows := make([]map[string]any, 0, len(statements))
+	for i, parsed := range parsedStatements {
+		statementStarted := e.now()
+		args := commandArgs[i]
 		output, err := e.runCommand(ctx, args[0], args[1:]...)
 		if err != nil {
 			message := strings.TrimSpace(string(output))
@@ -532,7 +589,7 @@ func (e *Executor) executeOnlineSchemaStatements(
 			0,
 			"Execute Successfully",
 			"",
-			statement,
+			parsed.SQL,
 			0,
 			e.now().Sub(statementStarted).Seconds(),
 			command.ID,

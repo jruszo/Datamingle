@@ -348,6 +348,8 @@ watch(
     form.schemaName = ''
     availableDatabases.value = []
     databasesError.value = ''
+    approvalPreview.value = null
+    approvalError.value = ''
     invalidateCheck()
 
     const instanceId = Number(instanceIdValue)
@@ -386,9 +388,6 @@ watch(
 onMounted(async () => {
   await loadSubmissionMetadata()
   restoreDraft()
-  if (form.groupId && form.instanceId) {
-    await loadApprovalPreview(Number(form.groupId), Number(form.instanceId))
-  }
   if (form.instanceId) {
     await loadDatabases(Number(form.instanceId))
   }

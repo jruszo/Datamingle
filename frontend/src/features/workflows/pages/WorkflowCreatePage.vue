@@ -490,6 +490,8 @@ watch(
     form.dbName = ''
     availableDatabases.value = []
     databasesError.value = ''
+    approvalPreview.value = null
+    approvalError.value = ''
     invalidateCheck()
 
     const instanceId = Number(instanceIdValue)

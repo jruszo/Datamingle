@@ -2653,7 +2653,6 @@ export async function fetchWorkflowPolicies(token: string) {
   const results: WorkflowPolicyRecord[] = []
   let count = 0
   let next: string | null = null
-  let previous: string | null = null
 
   do {
     const payload = await apiGet<unknown>(`/v1/workflow/policies/?page=${page}&size=${size}`, { token }).then(
@@ -2661,12 +2660,11 @@ export async function fetchWorkflowPolicies(token: string) {
     )
     count = payload.count
     next = payload.next
-    previous = payload.previous
     results.push(...payload.results)
     page += 1
   } while (results.length < count && next)
 
-  return { count, next, previous, results }
+  return { count, next: null, previous: null, results }
 }
 
 export function fetchWorkflowPolicyMetadata(token: string) {

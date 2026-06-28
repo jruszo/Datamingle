@@ -85,7 +85,6 @@ class WorkflowPolicySerializer(serializers.ModelSerializer):
                     "A permission group can only appear once in a policy."
                 )
             permission_group_ids.append(permission_group.id)
-            step["order"] = step.get("order") or index
         return value
 
     def create(self, validated_data):
@@ -319,7 +318,9 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                     }
                 )
         group = self._validate_group_for_instance(instance, workflow_data["team_id"])
-        if not instance.workflow_policy_id or not instance.workflow_policy.is_active:
+        if not is_offline_export and (
+            not instance.workflow_policy_id or not instance.workflow_policy.is_active
+        ):
             raise serializers.ValidationError(
                 {"errors": "Workflow policy is not configured for this service."}
             )
@@ -449,6 +450,7 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
                 }
             )
 
+        workflow_policy = instance.workflow_policy
         workflow_data.update(
             status="workflow_manreviewing",
             is_backup=False,
@@ -458,8 +460,8 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
             engineer_display=user.display,
             team_name=group.team_name,
             audit_auth_groups="",
-            workflow_policy=instance.workflow_policy,
-            workflow_policy_name=instance.workflow_policy.name,
+            workflow_policy=workflow_policy,
+            workflow_policy_name=workflow_policy.name if workflow_policy else "",
         )
         try:
             with transaction.atomic():

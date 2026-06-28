@@ -1280,6 +1280,10 @@ class WorkflowPolicyDetail(generics.RetrieveUpdateDestroyAPIView):
         instance = self.get_object()
         if not _can_edit_workflow_policy(self.request.user, instance):
             raise PermissionDenied("You cannot delete this workflow policy.")
+        if Instance.objects.filter(workflow_policy=instance).exists():
+            raise serializers.ValidationError(
+                {"errors": "Workflow policy is assigned to one or more services."}
+            )
         instance.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 

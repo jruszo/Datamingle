@@ -493,8 +493,12 @@ async function loadMetadata() {
 }
 
 async function loadWorkflowPolicies() {
-  const payload = await fetchWorkflowPolicies(requireToken())
-  workflowPolicies.value = payload.results
+  try {
+    const payload = await fetchWorkflowPolicies(requireToken())
+    workflowPolicies.value = payload.results
+  } catch {
+    workflowPolicies.value = []
+  }
 }
 
 async function loadNodeLabelNames() {

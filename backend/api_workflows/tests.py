@@ -222,6 +222,66 @@ class WorkflowSubmissionMetadataTests(APITestCase):
         self.assertEqual(workflow.workflow_policy_name, policy.name)
         self.assertEqual(workflow.audit_auth_groups, str(policy_role.id))
 
+    @patch("api_workflows.serializers.run_agent_command_sync")
+    def test_export_submission_allows_queryable_instance_without_policy(
+        self, run_command
+    ):
+        self.team = self._team()
+        fallback_role = Group.objects.create(name="Fallback Export DBA")
+        WorkflowAuditSetting.objects.create(
+            team_id=self.team.team_id,
+            team_name=self.team.team_name,
+            workflow_type=WorkflowType.SQL_REVIEW,
+            audit_auth_groups=str(fallback_role.id),
+        )
+        instance = self._instance(
+            "export-only",
+            workflow_enabled=False,
+            queryable=True,
+        )
+        self._agent_for(instance)
+        run_command.return_value = SimpleNamespace(
+            result={
+                "syntax_type": 3,
+                "review_rows": [
+                    {
+                        "id": 1,
+                        "stage": "Export review",
+                        "errlevel": 0,
+                        "stagestatus": "Audit completed",
+                        "errormessage": "",
+                        "sql": "select * from users",
+                        "affected_rows": 42,
+                    }
+                ],
+            }
+        )
+
+        response = self.client.post(
+            "/api/v1/workflow/",
+            {
+                "workflow": {
+                    "workflow_name": "Policy-free export",
+                    "demand_url": "",
+                    "team_id": self.team.team_id,
+                    "db_name": "app",
+                    "instance": instance.id,
+                    "is_offline_export": 1,
+                    "export_format": "csv",
+                },
+                "sql_content": "select * from users;",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        workflow_id = response.json()["data"]["workflow_id"]
+        workflow = Instance.objects.get(pk=instance.id).sqlworkflow_set.get(
+            pk=workflow_id
+        )
+        self.assertIsNone(workflow.workflow_policy_id)
+        self.assertEqual(workflow.workflow_policy_name, "")
+
 
 class WorkflowPolicyApiTests(APITestCase):
     def setUp(self):
@@ -301,3 +361,26 @@ class WorkflowPolicyApiTests(APITestCase):
             format="json",
         )
         self.assertEqual(admin_allowed.status_code, status.HTTP_200_OK)
+
+    def test_delete_policy_used_by_instance_returns_validation_error(self):
+        policy = WorkflowPolicy.objects.create(
+            name="Protected SQL",
+            created_by=self.creator,
+            updated_by=self.creator,
+        )
+        policy.steps.create(order=1, permission_group=self.role)
+        Instance.objects.create(
+            instance_name="protected-policy-instance",
+            type="master",
+            db_type="mysql",
+            host="127.0.0.1",
+            port=3306,
+            workflow_policy=policy,
+        )
+        self.client.force_authenticate(user=self.creator)
+
+        response = self.client.delete(f"/api/v1/workflow/policies/{policy.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("assigned", response.json()["errors"])
+        self.assertTrue(WorkflowPolicy.objects.filter(pk=policy.id).exists())
