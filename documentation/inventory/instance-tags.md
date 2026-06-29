@@ -1,10 +1,11 @@
 # Instance Tags
 
-Instance tags classify services for filtering and access behavior.
+Instance tags are a legacy classification feature still used by some settings
+and auto-review configuration.
 
 ## Common Uses
 
-Tags can identify:
+Tags can identify legacy categories such as:
 
 - read-capable services,
 - write-capable services,
@@ -13,7 +14,8 @@ Tags can identify:
 
 ## Managing Tags
 
-Administrators can create, edit, activate, or deactivate tags from `Settings > Instance Tags`.
+Administrators can create, edit, activate, or deactivate tags from
+`Settings > Instance Tags`.
 
-Use stable tag codes. Changing a tag meaning can affect query, workflow, export, and inventory behavior.
-
+Use stable tag codes. Changing a tag meaning can affect legacy auto-review
+behavior.

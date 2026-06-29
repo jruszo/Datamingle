@@ -16,8 +16,7 @@ An instance is a database service registered in Datamingle.
 - service name or SID for Oracle,
 - visible database regex,
 - denied database regex,
-- resource groups,
-- instance tags,
+- teams,
 - workflow policy,
 - query and workflow enablement.
 
@@ -26,10 +25,12 @@ An instance is a database service registered in Datamingle.
 1. Open `Inventory`.
 2. Select `Add instance`.
 3. Enter connection details.
-4. Attach at least one resource group.
-5. Add instance tags.
-6. Test the connection if you have permission.
-7. Save.
+4. Attach at least one team.
+5. Select query or workflow enablement when the service should appear in those
+   flows.
+6. Select a workflow policy when query or workflow enablement is on.
+7. Test the connection if you have permission.
+8. Save.
 
 ## Edit An Instance
 

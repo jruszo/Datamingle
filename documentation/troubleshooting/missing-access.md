@@ -5,10 +5,11 @@
 Ask an administrator to check:
 
 - your permission groups,
-- your resource groups,
+- your teams,
 - whether your user is active.
 
 ## An Action Is Disabled
 
-The action may require a more specific permission than the page itself. It may also depend on workflow status, approval step, execution window, or service agent readiness.
-
+The action may require a more specific permission than the page itself. It may
+also depend on workflow status, approval step, execution window, or service
+agent readiness.

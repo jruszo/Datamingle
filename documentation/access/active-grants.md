@@ -6,9 +6,8 @@ The `Active Access` view lists active access grants.
 
 Active grants can include:
 
-- resource group access,
+- team access,
 - instance access,
-- permanent resource-group access.
+- permanent team access.
 
 Users with management permission can revoke eligible grants.
-

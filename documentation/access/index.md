@@ -1,6 +1,7 @@
 # Access
 
-Datamingle access is controlled through identity, permission groups, resource groups, instance tags, and access requests.
+Datamingle access is controlled through identity, permission groups, teams
+(resource groups in legacy APIs), direct grants, and access requests.
 
 ## Pages
 
@@ -8,4 +9,3 @@ Datamingle access is controlled through identity, permission groups, resource gr
 - [Request Access](request-access.md)
 - [Review Access Requests](review-requests.md)
 - [Active Grants](active-grants.md)
-

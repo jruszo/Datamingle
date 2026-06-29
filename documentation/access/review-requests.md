@@ -14,5 +14,6 @@ Access request detail can show:
 
 ## Review Actions
 
-Reviewers can approve or reject. Approved temporary access becomes active until expiration. Approved permanent access updates the related resource-group or instance relationship.
-
+Reviewers can approve or reject. Approved temporary access becomes active until
+expiration. Approved permanent access updates the related team or instance
+relationship.
