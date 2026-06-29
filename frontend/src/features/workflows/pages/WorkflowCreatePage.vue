@@ -233,12 +233,12 @@ async function loadSubmissionMetadata() {
   }
 }
 
-async function loadApprovalPreview(groupId: number) {
+async function loadApprovalPreview(groupId: number, instanceId: number) {
   approvalLoading.value = true
   approvalError.value = ''
 
   try {
-    approvalPreview.value = await fetchWorkflowApprovalPreview(groupId, requireToken())
+    approvalPreview.value = await fetchWorkflowApprovalPreview(groupId, requireToken(), instanceId)
   } catch (errorValue) {
     approvalPreview.value = null
     approvalError.value = toUserFacingMessage(errorValue, 'Failed to load the approval flow.')
@@ -477,10 +477,8 @@ watch(
     invalidateCheck()
 
     const groupId = Number(groupIdValue)
-    if (groupId) {
-      void loadApprovalPreview(groupId)
-    }
     if (groupId && keepsCurrentInstance && retainedInstanceId) {
+      void loadApprovalPreview(groupId, retainedInstanceId)
       void loadDatabases(retainedInstanceId)
     }
   },
@@ -492,11 +490,17 @@ watch(
     form.dbName = ''
     availableDatabases.value = []
     databasesError.value = ''
+    approvalPreview.value = null
+    approvalError.value = ''
     invalidateCheck()
 
     const instanceId = Number(instanceIdValue)
+    const groupId = Number(form.groupId)
     if (instanceId) {
       void loadDatabases(instanceId)
+    }
+    if (groupId && instanceId) {
+      void loadApprovalPreview(groupId, instanceId)
     }
   },
 )
@@ -744,7 +748,7 @@ onMounted(() => {
           <Card class="border-slate-200">
             <CardHeader>
               <CardTitle>Approval flow</CardTitle>
-              <CardDescription>Preview the configured reviewers for this team.</CardDescription>
+              <CardDescription>Preview the selected service policy.</CardDescription>
             </CardHeader>
             <CardContent class="space-y-3">
               <p v-if="approvalError" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -760,9 +764,12 @@ onMounted(() => {
                 v-else-if="!approvalPreview"
                 class="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-sm text-slate-500"
               >
-                Select a team to preview its approval chain.
+                Select a team and instance to preview the approval chain.
               </div>
               <template v-else>
+                <p v-if="approvalPreview.workflow_policy_name" class="text-xs font-medium uppercase text-slate-500">
+                  {{ approvalPreview.workflow_policy_name }}
+                </p>
                 <p data-testid="workflow-approval-preview" class="text-sm text-slate-600">{{ approvalPreview.display }}</p>
                 <div class="space-y-2">
                   <div

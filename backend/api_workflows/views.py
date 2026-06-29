@@ -6,6 +6,7 @@ import ast
 import uuid
 from types import SimpleNamespace
 
+from django.contrib.auth.models import Group
 from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
@@ -34,6 +35,7 @@ from sql.models import (
     WorkflowAudit,
     WorkflowLog,
     TeamPermissionGroup,
+    WorkflowPolicy,
 )
 from sql.notify import notify_for_audit, notify_for_execute
 from sql.query_privileges import _query_apply_audit_call_back
@@ -78,8 +80,9 @@ from api_workflows.serializers import (
     ExecuteWorkflowSerializer,
     WorkflowContentSerializer,
     WorkflowLogListSerializer,
+    WorkflowPolicySerializer,
 )
-from api_agents.models import AgentCommandType
+from api_agents.models import AgentCommandType, AgentToolArtifact
 from api_agents.services import (
     AgentCommandDispatchError,
     AgentCommandExecutionError,
@@ -192,6 +195,8 @@ class WorkflowSummarySerializer(serializers.ModelSerializer):
             "download_available",
             "status",
             "status_label",
+            "workflow_policy",
+            "workflow_policy_name",
             "engineer",
             "engineer_display",
             "run_date_start",
@@ -210,6 +215,9 @@ class WorkflowTeamLookupSerializer(serializers.ModelSerializer):
 class WorkflowInstanceLookupSerializer(serializers.ModelSerializer):
     label = serializers.SerializerMethodField()
     teams = serializers.SerializerMethodField()
+    workflow_policy_name = serializers.CharField(
+        source="workflow_policy.name", read_only=True, default=""
+    )
 
     def get_label(self, obj):
         return f"{obj.instance_name} | {obj.db_type} | {obj.host}"
@@ -234,6 +242,8 @@ class WorkflowInstanceLookupSerializer(serializers.ModelSerializer):
             "type",
             "host",
             "label",
+            "workflow_policy",
+            "workflow_policy_name",
             "teams",
         )
 
@@ -254,7 +264,7 @@ class WorkflowScheduleSerializer(serializers.Serializer):
         ]
     )
     executor = serializers.ChoiceField(
-        choices=["direct"],
+        choices=["direct", "gh-ost", "pt-osc"],
         required=False,
         allow_null=True,
     )
@@ -418,21 +428,54 @@ def _extract_schedule_executor(schedule):
 def _get_mysql_ddl_executor_state(workflow):
     if not _is_mysql_ddl_workflow(workflow):
         return [], {}
-    if command_capable_assignment_for_instance(workflow.instance_id) is None:
+    assignment = command_capable_assignment_for_instance(workflow.instance_id)
+    if assignment is None:
         return [], {
             "direct": "No online command-capable agent is assigned to this MySQL service."
         }
-    return [{"id": "direct", "label": "Direct", "kind": "direct"}], {}
+    available = [{"id": "direct", "label": "Direct", "kind": "direct"}]
+    blockers = {}
+    for executor_id, label, tool_name in (
+        ("gh-ost", "gh-ost", AgentToolArtifact.TOOL_GHOST),
+        ("pt-osc", "pt-online-schema-change", AgentToolArtifact.TOOL_PT_OSC),
+    ):
+        if _agent_tool_artifact_available(assignment.agent, tool_name):
+            available.append({"id": executor_id, "label": label, "kind": "online"})
+        else:
+            blockers[executor_id] = (
+                f"{label} artifact is not configured for this agent platform."
+            )
+    return available, blockers
 
 
 def _resolve_mysql_ddl_executor(workflow, executor_id=None, preflight=False):
     if not _is_mysql_ddl_workflow(workflow):
         return None
-    if executor_id not in (None, "", "direct"):
+    executor_id = executor_id or "direct"
+    available, blockers = _get_mysql_ddl_executor_state(workflow)
+    available_ids = {executor["id"] for executor in available}
+    if executor_id not in available_ids:
         raise MysqlDDLExecutorError(
-            "Only direct agent execution is available for MySQL DDL workflows."
+            blockers.get(
+                executor_id,
+                "Requested executor is not compatible with this workflow.",
+            )
         )
-    return SimpleNamespace(executor_id="direct", label="Direct", kind="direct")
+    selected = next(executor for executor in available if executor["id"] == executor_id)
+    return SimpleNamespace(**selected, executor_id=selected["id"])
+
+
+def _agent_tool_artifact_available(agent, tool_name):
+    platform = (agent.platform or "").strip()
+    architecture = (agent.architecture or "").strip()
+    if not platform or not architecture:
+        return False
+    return AgentToolArtifact.objects.filter(
+        enabled=True,
+        tool_name=tool_name,
+        platform=platform,
+        architecture=architecture,
+    ).exists()
 
 
 def _serialize_workflow_detail(workflow, user):
@@ -538,6 +581,50 @@ def _can_submit_export_workflow(user):
     )
 
 
+def _can_edit_workflow_policy(user, policy):
+    return user.is_superuser or user.is_staff or policy.created_by_id == user.id
+
+
+def _workflow_policy_summary(policy):
+    if not policy:
+        return {
+            "workflow_policy_id": None,
+            "workflow_policy_name": "",
+        }
+    return {
+        "workflow_policy_id": policy.id,
+        "workflow_policy_name": policy.name,
+    }
+
+
+def _policy_review_info(policy):
+    if not policy:
+        return "No policy selected", []
+    review_info = []
+    readable_groups = []
+    for step in policy.steps.select_related("permission_group").all():
+        role_label = step.permission_group.name
+        readable_groups.append(role_label)
+        review_info.append(
+            {
+                "team_name": role_label,
+                "is_auto_pass": False,
+                "is_current_node": False,
+                "is_passed_node": False,
+            }
+        )
+    if not review_info:
+        return "No approval required", [
+            {
+                "team_name": "Auto",
+                "is_auto_pass": True,
+                "is_current_node": False,
+                "is_passed_node": True,
+            }
+        ]
+    return " -> ".join(readable_groups), review_info
+
+
 def _pending_review_workflow_ids(user):
     return list(
         WorkflowAudit.objects.filter(
@@ -595,6 +682,8 @@ def _workflow_submission_scope(user):
     )
     instances = (
         filter_agent_runnable_instances(user_instances(user))
+        .filter(workflow_enabled=True, workflow_policy__is_active=True)
+        .select_related("workflow_policy")
         .prefetch_related("resource_group")
         .order_by("instance_name", "id")
     )
@@ -665,6 +754,7 @@ def _workflow_submission_scope(user):
                 "instance_name": instance.instance_name,
                 "db_type": instance.db_type,
                 "type": instance.type,
+                **_workflow_policy_summary(instance.workflow_policy),
                 "team_ids": [team_id for team_id, _ in sorted_groups],
                 "team_names": [
                     group_info["team_name"] for _, group_info in sorted_groups
@@ -691,6 +781,8 @@ def _workflow_submission_scope(user):
 def _export_submission_scope(user):
     instances = (
         filter_agent_runnable_instances(user_instances(user))
+        .filter(queryable=True)
+        .select_related("workflow_policy")
         .prefetch_related("resource_group")
         .order_by("instance_name", "id")
     )
@@ -746,6 +838,7 @@ def _export_submission_scope(user):
                 "instance_name": instance.instance_name,
                 "db_type": instance.db_type,
                 "type": instance.type,
+                **_workflow_policy_summary(instance.workflow_policy),
                 "team_ids": [team_id for team_id, _ in sorted_groups],
                 "team_names": [team_name for _, team_name in sorted_groups],
                 "allowed_syntax_types": [3],
@@ -1122,6 +1215,8 @@ class WorkflowMetadata(views.APIView):
             "manual_execution_enabled": bool(SysConfig().get("manual")),
             "teams": _workflow_metadata_teams(request.user),
             "instances": filter_agent_runnable_instances(user_instances(request.user))
+            .filter(workflow_enabled=True, workflow_policy__is_active=True)
+            .select_related("workflow_policy")
             .prefetch_related("resource_group")
             .order_by("instance_name", "id"),
         }
@@ -1129,6 +1224,87 @@ class WorkflowMetadata(views.APIView):
             payload, context={"temporary_instance_groups": temporary_instance_groups}
         )
         return success_response(data=serializer.data)
+
+
+class WorkflowPolicyList(generics.ListCreateAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = WorkflowPolicySerializer
+    pagination_class = CustomizedPagination
+
+    def get_queryset(self):
+        return (
+            WorkflowPolicy.objects.select_related("created_by", "updated_by")
+            .prefetch_related("steps__permission_group")
+            .order_by("name", "id")
+        )
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        return success_response(
+            data=serializer.data, status_code=status.HTTP_201_CREATED
+        )
+
+
+class WorkflowPolicyDetail(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = WorkflowPolicySerializer
+    lookup_url_kwarg = "policy_id"
+
+    def get_queryset(self):
+        return (
+            WorkflowPolicy.objects.select_related("created_by", "updated_by")
+            .prefetch_related("steps__permission_group")
+            .order_by("name", "id")
+        )
+
+    def retrieve(self, request, *args, **kwargs):
+        serializer = self.get_serializer(self.get_object())
+        return success_response(data=serializer.data)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        if not _can_edit_workflow_policy(request.user, instance):
+            raise PermissionDenied("You cannot edit this workflow policy.")
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return success_response(data=serializer.data)
+
+    def perform_update(self, serializer):
+        serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if not _can_edit_workflow_policy(self.request.user, instance):
+            raise PermissionDenied("You cannot delete this workflow policy.")
+        if Instance.objects.filter(workflow_policy=instance).exists():
+            raise serializers.ValidationError(
+                {"errors": "Workflow policy is assigned to one or more services."}
+            )
+        instance.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class WorkflowPolicyMetadata(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        return success_response(
+            data={
+                "permission_groups": [
+                    {
+                        "id": group.id,
+                        "name": group.name,
+                    }
+                    for group in Group.objects.exclude(name="superadmin").order_by(
+                        "name", "id"
+                    )
+                ],
+            }
+        )
 
 
 class WorkflowSubmissionMetadata(views.APIView):
@@ -1191,7 +1367,14 @@ class WorkflowApprovalPreview(views.APIView):
                 location=OpenApiParameter.QUERY,
                 required=True,
                 description="Team ID.",
-            )
+            ),
+            OpenApiParameter(
+                name="instance_id",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Instance ID.",
+            ),
         ],
         responses={200: OpenApiTypes.OBJECT},
         description="Resolve the approval chain for a SQL workflow before submission.",
@@ -1221,6 +1404,49 @@ class WorkflowApprovalPreview(views.APIView):
             raise PermissionDenied("You do not have access to this team.")
 
         team = get_object_or_404(Team, pk=team_id, is_deleted=0)
+        instance_id = request.query_params.get("instance_id")
+        if instance_id:
+            try:
+                instance_id = int(instance_id)
+            except (TypeError, ValueError):
+                raise serializers.ValidationError(
+                    {"errors": "instance_id must be an integer."}
+                )
+            allowed_instance_ids = {
+                instance["id"]
+                for instance in _workflow_submission_scope(request.user)["instances"]
+            } | {
+                instance["id"]
+                for instance in _export_submission_scope(request.user)["instances"]
+            }
+            if (
+                not request.user.is_superuser
+                and instance_id not in allowed_instance_ids
+            ):
+                raise PermissionDenied("You do not have access to this instance.")
+            instance = get_object_or_404(
+                Instance.objects.select_related("workflow_policy").prefetch_related(
+                    "workflow_policy__steps__permission_group"
+                ),
+                pk=instance_id,
+            )
+            if not instance.resource_group.filter(pk=team.pk).exists():
+                raise serializers.ValidationError(
+                    {"errors": "Selected team does not belong to this instance."}
+                )
+            if instance.workflow_policy and instance.workflow_policy.is_active:
+                readable, review_info = _policy_review_info(instance.workflow_policy)
+                return success_response(
+                    data={
+                        "team_id": team.team_id,
+                        "team_name": team.team_name,
+                        "audit_auth_groups": instance.workflow_policy.audit_auth_groups,
+                        "display": readable,
+                        "review_info": review_info,
+                        **_workflow_policy_summary(instance.workflow_policy),
+                    }
+                )
+
         audit_auth_groups = Audit.settings(team_id, WorkflowType.SQL_REVIEW)
         if audit_auth_groups is None:
             raise serializers.ValidationError(
@@ -1260,6 +1486,8 @@ class WorkflowApprovalPreview(views.APIView):
                 "audit_auth_groups": audit_auth_groups,
                 "display": readable,
                 "review_info": review_info,
+                "workflow_policy_id": None,
+                "workflow_policy_name": "",
             }
         )
 

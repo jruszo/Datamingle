@@ -277,6 +277,9 @@ class AgentAssignmentSerializer(serializers.ModelSerializer):
     db_type = serializers.CharField(source="instance.db_type", read_only=True)
     host = serializers.CharField(source="instance.host", read_only=True)
     port = serializers.IntegerField(source="instance.port", read_only=True)
+    workflow_enabled = serializers.BooleanField(
+        source="instance.workflow_enabled", read_only=True
+    )
     node_assignment = serializers.IntegerField(
         source="node_assignment_id", read_only=True
     )
@@ -300,6 +303,7 @@ class AgentAssignmentSerializer(serializers.ModelSerializer):
             "db_type",
             "host",
             "port",
+            "workflow_enabled",
             "enabled",
             "modules",
             "capabilities",

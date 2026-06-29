@@ -301,6 +301,21 @@ class AuditV2:
         return True
 
     def generate_audit_setting(self) -> AuditSetting:
+        if self.workflow_type == WorkflowType.SQL_REVIEW and getattr(
+            self.workflow, "workflow_policy_id", None
+        ):
+            audit_groups = [
+                step.permission_group_id
+                for step in self.workflow.workflow_policy.steps.order_by("order", "id")
+            ]
+            auto_reject = self.is_auto_reject()
+            return AuditSetting(
+                auto_pass=self.is_auto_review()
+                or (not audit_groups and not auto_reject),
+                auto_reject=auto_reject,
+                audit_auth_groups=audit_groups,
+            )
+
         if self.workflow_type in [
             WorkflowType.SQL_REVIEW,
             WorkflowType.QUERY,

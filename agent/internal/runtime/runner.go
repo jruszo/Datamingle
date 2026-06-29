@@ -41,7 +41,7 @@ type Runner struct {
 func NewRunner(cfg config.Config) *Runner {
 	return &Runner{
 		cfg:             cfg,
-		executor:        commands.NewExecutor(),
+		executor:        commands.NewExecutorWithToolCache(filepath.Join(cfg.DataDir, "tools")),
 		runningCommands: make(map[int64]context.CancelFunc),
 		modules: modules.NewManager(
 			placeholder.New("mysql", []string{"connection.test", "inventory.collect", "query.execute"}),
@@ -295,8 +295,15 @@ func (r *Runner) reconcileToolArtifacts(ctx context.Context, payload client.Agen
 		return nil
 	}
 	cacheDir := filepath.Join(r.cfg.DataDir, "tools")
+	onlineSchemaTools := map[string]struct{}{
+		"gh-ost":                  {},
+		"pt-online-schema-change": {},
+	}
 	for _, artifact := range payload.ToolArtifacts {
 		if artifact.Platform != stdlibRuntime.GOOS || artifact.Architecture != stdlibRuntime.GOARCH {
+			continue
+		}
+		if _, supported := onlineSchemaTools[artifact.ToolName]; !supported {
 			continue
 		}
 		_, err := tools.EnsureArtifact(ctx, cacheDir, tools.Artifact{

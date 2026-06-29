@@ -1,23 +1,27 @@
 import {
   createAgent,
+  fetchWorkflowPolicies,
   fetchInstanceInventoryMetadata,
   issueAgentInstallKey,
   type AgentCreateResponse,
   type AgentStatus,
   type InstanceInventoryMetadata,
   type PaginatedResponse,
+  type WorkflowPolicyRecord,
 } from '@/lib/api'
 import { apiGet, apiPatch, apiPost, isRecord } from '@/shared/api/http'
 import type { LabelFilter } from '@/shared/filters/labelFilters'
 
 export {
   createAgent,
+  fetchWorkflowPolicies,
   fetchInstanceInventoryMetadata,
   issueAgentInstallKey,
   type AgentCreateResponse,
   type AgentStatus,
   type InstanceInventoryMetadata,
   type PaginatedResponse,
+  type WorkflowPolicyRecord,
 }
 
 export type InfrastructureListOptions = {
@@ -76,6 +80,8 @@ export type DatabaseServicePayload = {
   password?: string
   monitoring_enabled: boolean
   queryable: boolean
+  workflow_enabled: boolean
+  workflow_policy?: number | null
   monitoring_collectors: string[]
   monitoring_labels: Record<string, string>
   is_ssl: boolean
@@ -93,6 +99,7 @@ export type DatabaseServiceRecord = Omit<
   'password' | 'recommendation_id'
 > & {
   id: number
+  workflow_policy_name: string
   effective_monitoring_labels: Record<string, string>
   inventory_status: 'never' | 'ok' | 'stale' | 'failed'
   inventory_detected_hostname?: string

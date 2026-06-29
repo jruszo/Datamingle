@@ -37,6 +37,7 @@ from sql.models import (
     WorkflowAudit,
     WorkflowLog,
     WorkflowAuditSetting,
+    WorkflowPolicy,
     QueryLog,
     QueryPrivileges,
     QueryPrivilegesApply,
@@ -2036,12 +2037,18 @@ class TestWorkflow(CacheIsolatedAPITestCase):
     def setUp(self):
         self.now = datetime.now()
         self.group, _ = Group.objects.get_or_create(name="DBA")
+        self.policy_group, _ = Group.objects.get_or_create(name="Workflow Policy DBA")
         self.res_group = Team.objects.create(team_id=1, team_name="test")
         self.wfs = WorkflowAuditSetting.objects.create(
             team_id=self.res_group.team_id,
             workflow_type=2,
             audit_auth_groups=str(self.group.id),
         )
+        self.workflow_policy = WorkflowPolicy.objects.create(
+            name="Legacy Test SQL Policy",
+            description="Policy fixture for SQL workflow tests.",
+        )
+        self.workflow_policy.steps.create(order=1, permission_group=self.policy_group)
         can_submit = Permission.objects.get(codename="sql_submit")
         can_export_submit = Permission.objects.get(codename="sqlexport_submit")
         can_export_download = Permission.objects.get(codename="offline_download")
@@ -2089,6 +2096,9 @@ class TestWorkflow(CacheIsolatedAPITestCase):
             port=3306,
             user="ins_user",
             password="some_str",
+            queryable=True,
+            workflow_enabled=True,
+            workflow_policy=self.workflow_policy,
         )
         self.ins.resource_group.add(self.res_group.team_id)
         self._create_agent_assignment(self.ins)
@@ -3069,6 +3079,12 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(r_data["workflow"]["workflow_name"], "Release Workflow 1")
         self.assertEqual(r_data["workflow"]["engineer"], self.user.username)
         self.assertEqual(r_data["workflow"]["engineer_display"], self.user.display)
+        workflow = SqlWorkflow.objects.get(id=r_data["workflow"]["id"])
+        audit = WorkflowAudit.objects.get(
+            workflow_id=workflow.id, workflow_type=WorkflowType.SQL_REVIEW
+        )
+        self.assertEqual(workflow.audit_auth_groups, str(self.policy_group.id))
+        self.assertEqual(audit.current_audit, str(self.policy_group.id))
 
     @patch("api_workflows.serializers.get_engine", create=True)
     def test_submit_workflow_defaults_backup_to_false(self, mock_get_engine):
@@ -3884,6 +3900,8 @@ class TestWorkflow(CacheIsolatedAPITestCase):
 
     def test_execute_workflow_rejects_unsupported_executor(self):
         _, workflow, _, _ = self._create_mysql_workflow()
+        workflow.instance.workflow_enabled = True
+        workflow.instance.save(update_fields=["workflow_enabled"])
 
         r = self.client.post(
             f"/api/v1/workflow/{workflow.id}/executions/",
@@ -3894,7 +3912,7 @@ class TestWorkflow(CacheIsolatedAPITestCase):
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
         workflow.refresh_from_db()
         self.assertEqual(workflow.status, "workflow_review_pass")
-        self.assertIn("executor", json.dumps(r.json()))
+        self.assertIn("artifact is not configured", json.dumps(r.json()))
 
     @patch(
         "api_workflows.views.dispatch_sql_workflow_to_agent",

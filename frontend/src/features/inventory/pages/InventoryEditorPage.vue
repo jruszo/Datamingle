@@ -20,11 +20,13 @@ import {
   createInstance,
   fetchInstance,
   fetchInstanceInventoryMetadata,
+  fetchWorkflowPolicies,
   testDraftInstanceConnection,
   updateInstance,
   type InstanceCreatePayload,
   type InstanceEditorRecord,
   type InstanceInventoryMetadata,
+  type WorkflowPolicyRecord,
 } from '../api'
 import { useAuthStore } from '@/stores/auth'
 
@@ -33,6 +35,7 @@ const route = useRoute()
 const router = useRouter()
 
 const metadata = ref<InstanceInventoryMetadata | null>(null)
+const workflowPolicies = ref<WorkflowPolicyRecord[]>([])
 const isLoading = ref(false)
 const isSaving = ref(false)
 const isTestingConnection = ref(false)
@@ -59,6 +62,8 @@ const form = reactive({
   port: 3306,
   user: '',
   password: '',
+  workflow_enabled: false,
+  workflow_policy: null as number | null,
   is_ssl: false,
   verify_ssl: true,
   db_name: '',
@@ -78,6 +83,8 @@ function resetForm() {
   form.port = 3306
   form.user = ''
   form.password = ''
+  form.workflow_enabled = false
+  form.workflow_policy = null
   form.is_ssl = false
   form.verify_ssl = true
   form.db_name = ''
@@ -97,6 +104,8 @@ function applyInstance(instance: InstanceEditorRecord) {
   form.port = instance.port
   form.user = instance.user
   form.password = ''
+  form.workflow_enabled = instance.workflow_enabled
+  form.workflow_policy = instance.workflow_policy ?? null
   form.is_ssl = instance.is_ssl
   form.verify_ssl = instance.verify_ssl
   form.db_name = instance.db_name
@@ -126,6 +135,11 @@ const canCreateInstances = computed(() => hasPermission('sql.menu_instance'))
 const canEditInstances = computed(() => hasPermission('sql.menu_instance'))
 const canManageInstance = computed(() => (isCreateMode.value ? canCreateInstances.value : canEditInstances.value))
 const showOracleFields = computed(() => form.db_type === 'oracle')
+const workflowPolicyOptions = computed(() =>
+  workflowPolicies.value.filter(
+    (policy) => policy.is_active || policy.id === form.workflow_policy,
+  ),
+)
 
 function toUserFacingMessage(errorValue: unknown, fallback: string) {
   if (!(errorValue instanceof Error)) {
@@ -190,7 +204,14 @@ async function loadPage() {
       return
     }
 
-    metadata.value = await fetchInstanceInventoryMetadata(requireToken())
+    const inventoryMetadata = await fetchInstanceInventoryMetadata(requireToken())
+    metadata.value = inventoryMetadata
+    try {
+      const policiesPayload = await fetchWorkflowPolicies(requireToken())
+      workflowPolicies.value = policiesPayload.results
+    } catch {
+      workflowPolicies.value = []
+    }
     if (metadata.value.teams.length === 0) {
       needsTeamDialog.value = true
       return
@@ -235,6 +256,17 @@ function buildInstancePayload(): InstanceCreatePayload | null {
     formError.value = 'Port must be a positive integer.'
     return null
   }
+  if (form.workflow_enabled && !form.workflow_policy) {
+    formError.value = 'Select a workflow policy before enabling DDL/DML workflows.'
+    return null
+  }
+  if (
+    form.workflow_policy &&
+    !workflowPolicies.value.some((policy) => policy.id === form.workflow_policy)
+  ) {
+    formError.value = 'Reload workflow policies before saving this instance.'
+    return null
+  }
 
   formError.value = ''
   return {
@@ -245,6 +277,8 @@ function buildInstancePayload(): InstanceCreatePayload | null {
     port: form.port,
     user: form.user.trim(),
     password: form.password,
+    workflow_enabled: form.workflow_enabled,
+    workflow_policy: form.workflow_policy,
     is_ssl: form.is_ssl,
     verify_ssl: form.verify_ssl,
     db_name: form.db_name.trim(),
@@ -507,6 +541,21 @@ watch(form, () => {
             </div>
 
             <div class="grid gap-4 md:grid-cols-2">
+              <label class="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                <input v-model="form.workflow_enabled" class="rounded border-slate-300" type="checkbox">
+                <span>Enable DDL/DML workflows</span>
+              </label>
+
+              <label v-if="form.workflow_enabled" class="grid gap-2 md:col-span-2">
+                <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Workflow Policy</span>
+                <select v-model.number="form.workflow_policy" :class="selectClass">
+                  <option :value="null">Select a workflow policy</option>
+                  <option v-for="policy in workflowPolicyOptions" :key="policy.id" :value="policy.id">
+                    {{ policy.name }}{{ policy.is_active ? '' : ' (inactive)' }}
+                  </option>
+                </select>
+              </label>
+
               <label class="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
                 <input v-model="form.is_ssl" class="rounded border-slate-300" type="checkbox">
                 <span>Enable SSL for this instance</span>

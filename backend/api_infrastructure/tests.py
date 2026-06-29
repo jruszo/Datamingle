@@ -1,6 +1,7 @@
 from datetime import datetime
 from unittest.mock import patch
 
+from django.contrib.auth.models import Group
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -18,6 +19,7 @@ from sql.models import (
     Team,
     ServiceRecommendation,
     Users,
+    WorkflowPolicy,
 )
 
 
@@ -61,6 +63,18 @@ def create_instance(name="primary", node=None):
         user="root",
         password="secret",
     )
+
+
+def create_workflow_policy(name="Default SQL Policy", user=None):
+    role, _ = Group.objects.get_or_create(name=f"{name} DBA")
+    policy = WorkflowPolicy.objects.create(
+        name=name,
+        description="Default SQL approval flow",
+        created_by=user,
+        updated_by=user,
+    )
+    policy.steps.create(order=1, permission_group=role)
+    return policy
 
 
 class InfrastructureNodeApiTests(APITestCase):
@@ -149,6 +163,7 @@ class InfrastructureNodeApiTests(APITestCase):
 
     def test_create_service_under_node_syncs_local_agent_assignment(self):
         node = create_node()
+        policy = create_workflow_policy(user=self.user)
 
         create_agent_response = self.client.post(
             "/api/v1/agents/",
@@ -174,6 +189,8 @@ class InfrastructureNodeApiTests(APITestCase):
                 "user": "root",
                 "password": "secret",
                 "monitoring_enabled": True,
+                "workflow_enabled": True,
+                "workflow_policy": policy.id,
                 "monitoring_collectors": ["global_status", "binlog_size"],
                 "is_ssl": False,
                 "verify_ssl": True,
@@ -193,6 +210,8 @@ class InfrastructureNodeApiTests(APITestCase):
         assignment = AgentInstanceAssignment.objects.get(agent=agent, instance=service)
         self.assertEqual(assignment.local_node_id, node.id)
         self.assertTrue(assignment.command_enabled)
+        self.assertTrue(service.workflow_enabled)
+        self.assertEqual(service.workflow_policy_id, policy.id)
         self.assertTrue(service.monitoring_enabled)
         self.assertEqual(
             service.monitoring_collectors, ["global_status", "binlog_size"]
@@ -203,6 +222,9 @@ class InfrastructureNodeApiTests(APITestCase):
         self.assertFalse(config["node"]["monitoring_enabled"])
         self.assertEqual(config["assignments"][0]["instance_id"], service.id)
         self.assertEqual(config["assignments"][0]["node_id"], node.id)
+        self.assertTrue(config["assignments"][0]["workflow_enabled"])
+        self.assertTrue(config["assignments"][0]["online_schema_enabled"])
+        self.assertIn("online_schema", config["assignments"][0]["modules"])
         self.assertTrue(config["assignments"][0]["service_monitoring_enabled"])
         self.assertEqual(
             config["assignments"][0]["service_monitoring_collectors"],
@@ -219,6 +241,92 @@ class InfrastructureNodeApiTests(APITestCase):
         self.assertEqual(
             service_monitoring["raw"]["services"][0]["collectors"],
             ["global_status", "binlog_size"],
+        )
+
+    def test_create_queryable_service_allows_missing_workflow_policy(self):
+        node = create_node()
+
+        response = self.client.post(
+            "/api/v1/infrastructure/services/",
+            {
+                "node_id": node.id,
+                "service_name": "orders-query",
+                "role": "master",
+                "engine": "mysql",
+                "host": node.address,
+                "port": 3306,
+                "user": "root",
+                "password": "secret",
+                "monitoring_enabled": True,
+                "queryable": True,
+                "workflow_enabled": False,
+                "monitoring_collectors": ["global_status"],
+                "is_ssl": False,
+                "verify_ssl": True,
+                "db_name": "",
+                "show_db_name_regex": "",
+                "denied_db_name_regex": "",
+                "charset": "utf8mb4",
+                "team_ids": [],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        payload = response.json()["data"]
+        self.assertTrue(payload["queryable"])
+        self.assertFalse(payload["workflow_enabled"])
+        self.assertIsNone(payload["workflow_policy"])
+
+    def test_create_workflow_enabled_service_requires_workflow_policy(self):
+        node = create_node()
+
+        response = self.client.post(
+            "/api/v1/infrastructure/services/",
+            {
+                "node_id": node.id,
+                "service_name": "orders-workflow",
+                "role": "master",
+                "engine": "mysql",
+                "host": node.address,
+                "port": 3306,
+                "user": "root",
+                "password": "secret",
+                "monitoring_enabled": True,
+                "queryable": True,
+                "workflow_enabled": True,
+                "monitoring_collectors": ["global_status"],
+                "is_ssl": False,
+                "verify_ssl": True,
+                "db_name": "",
+                "show_db_name_regex": "",
+                "denied_db_name_regex": "",
+                "charset": "utf8mb4",
+                "team_ids": [],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("workflow_policy", response.json())
+
+    def test_service_detail_serializes_workflow_policy(self):
+        group = create_team("primary services")
+        node = create_node()
+        policy = create_workflow_policy(user=self.user)
+        service = create_instance("orders-primary", node=node)
+        service.queryable = True
+        service.workflow_policy = policy
+        service.save(update_fields=["queryable", "workflow_policy"])
+        service.resource_group.set([group])
+
+        response = self.client.get(f"/api/v1/infrastructure/nodes/{node.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response.json()["data"]
+        self.assertEqual(payload["services"][0]["workflow_policy"], policy.id)
+        self.assertEqual(
+            payload["services"][0]["workflow_policy_name"], "Default SQL Policy"
         )
 
     def test_update_node_monitoring_bumps_agent_config_revision(self):
@@ -284,6 +392,18 @@ class InfrastructureNodeApiTests(APITestCase):
             modules["service_monitoring"]["raw"]["services"][0]["labels"],
             {"dm_environment": "prod", "dm_team": "payments"},
         )
+
+    def test_service_detail_serializes_workflow_enabled(self):
+        node = create_node()
+        service = create_instance("orders-primary", node=node)
+        service.workflow_enabled = True
+        service.save(update_fields=["workflow_enabled"])
+
+        response = self.client.get(f"/api/v1/infrastructure/nodes/{node.id}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response.json()["data"]
+        self.assertTrue(payload["services"][0]["workflow_enabled"])
 
     def test_update_node_saves_monitoring_labels(self):
         node = create_node()

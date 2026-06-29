@@ -98,6 +98,43 @@ export type PermissionCategoryRecord = {
   permissions: AvailablePermissionRecord[]
 }
 
+export type WorkflowPolicyStepRecord = {
+  id: number
+  order: number
+  permission_group: number
+  permission_group_name: string
+}
+
+export type WorkflowPolicyRecord = {
+  id: number
+  name: string
+  description: string
+  is_active: boolean
+  steps: WorkflowPolicyStepRecord[]
+  created_by: string
+  updated_by: string
+  can_edit: boolean
+  create_time?: string
+  update_time?: string
+}
+
+export type WorkflowPolicyPayload = {
+  name: string
+  description: string
+  is_active: boolean
+  steps: Array<{
+    order: number
+    permission_group: number
+  }>
+}
+
+export type WorkflowPolicyMetadata = {
+  permission_groups: Array<{
+    id: number
+    name: string
+  }>
+}
+
 export type TeamUserAccessRecord = {
   user_id: number
   username?: string
@@ -291,6 +328,7 @@ export type AgentAssignmentRecord = {
   db_type: string
   host: string
   port: number
+  workflow_enabled: boolean
   enabled: boolean
   modules: string[]
   capabilities: string[]
@@ -394,6 +432,8 @@ export type InstanceCreatePayload = {
   port: number
   user: string
   password: string
+  workflow_enabled: boolean
+  workflow_policy?: number | null
   is_ssl: boolean
   verify_ssl: boolean
   db_name: string
@@ -2220,6 +2260,8 @@ export type WorkflowSubmitInstanceRecord = {
   type: string
   team_ids: number[]
   team_names: string[]
+  workflow_policy_id: number | null
+  workflow_policy_name: string
   allowed_syntax_types: WorkflowSyntaxType[]
 }
 
@@ -2233,6 +2275,8 @@ export type WorkflowApprovalPreview = {
   team_id: number
   team_name: string
   audit_auth_groups: string
+  workflow_policy_id: number | null
+  workflow_policy_name: string
   display: string
   review_info: Array<{
     team_name: string
@@ -2593,10 +2637,56 @@ export function fetchWorkflowExportSubmissionMetadata(token: string) {
   )
 }
 
-export function fetchWorkflowApprovalPreview(groupId: number, token: string) {
-  return apiGet<unknown>(`/v1/workflow/approval-preview/?team_id=${groupId}`, { token }).then(
+export function fetchWorkflowApprovalPreview(groupId: number, token: string, instanceId?: number) {
+  const params = new URLSearchParams({ team_id: `${groupId}` })
+  if (instanceId != null) {
+    params.set('instance_id', `${instanceId}`)
+  }
+  return apiGet<unknown>(`/v1/workflow/approval-preview/?${params.toString()}`, { token }).then(
     (payload) => extractData<WorkflowApprovalPreview>(payload),
   )
+}
+
+export async function fetchWorkflowPolicies(token: string) {
+  const size = 100
+  let page = 1
+  const results: WorkflowPolicyRecord[] = []
+  let count = 0
+  let next: string | null = null
+
+  do {
+    const payload = await apiGet<unknown>(`/v1/workflow/policies/?page=${page}&size=${size}`, { token }).then(
+      (responsePayload) => extractData<PaginatedResponse<WorkflowPolicyRecord>>(responsePayload),
+    )
+    count = payload.count
+    next = payload.next
+    results.push(...payload.results)
+    page += 1
+  } while (results.length < count && next)
+
+  return { count, next: null, previous: null, results }
+}
+
+export function fetchWorkflowPolicyMetadata(token: string) {
+  return apiGet<unknown>('/v1/workflow/policies/metadata/', { token }).then((payload) =>
+    extractData<WorkflowPolicyMetadata>(payload),
+  )
+}
+
+export function createWorkflowPolicy(payload: WorkflowPolicyPayload, token: string) {
+  return apiPost<unknown>('/v1/workflow/policies/', payload, { token }).then((responsePayload) =>
+    extractData<WorkflowPolicyRecord>(responsePayload),
+  )
+}
+
+export function updateWorkflowPolicy(policyId: number, payload: Partial<WorkflowPolicyPayload>, token: string) {
+  return apiPatch<unknown>(`/v1/workflow/policies/${policyId}/`, payload, { token }).then((responsePayload) =>
+    extractData<WorkflowPolicyRecord>(responsePayload),
+  )
+}
+
+export function deleteWorkflowPolicy(policyId: number, token: string) {
+  return apiDelete(`/v1/workflow/policies/${policyId}/`, { token })
 }
 
 export function fetchWorkflows(token: string, filters: WorkflowListFilters = {}) {
