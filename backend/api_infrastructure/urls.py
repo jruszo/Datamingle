@@ -19,6 +19,16 @@ urlpatterns = [
         name="infrastructure-node-label-values",
     ),
     path(
+        "v1/infrastructure/mysql-clusters/",
+        views.MysqlClusterListView.as_view(),
+        name="infrastructure-mysql-cluster-list",
+    ),
+    path(
+        "v1/infrastructure/mysql-clusters/<int:cluster_id>/",
+        views.MysqlClusterDetailView.as_view(),
+        name="infrastructure-mysql-cluster-detail",
+    ),
+    path(
         "v1/infrastructure/nodes/<int:node_id>/",
         views.InfrastructureNodeDetailView.as_view(),
         name="infrastructure-node-detail",

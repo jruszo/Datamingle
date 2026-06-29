@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -150,14 +151,229 @@ func (e *Executor) inventoryCollect(ctx context.Context, assignment client.Assig
 	if err := db.QueryRowContext(ctx, "SELECT @@hostname, VERSION()").Scan(&hostname, &version); err != nil {
 		return Result{}, err
 	}
+	mysqlTopology := collectMySQLTopology(ctx, db)
 	return Result{
 		Message: "inventory collected",
 		Payload: map[string]any{
 			"hostname":          hostname,
 			"version":           version,
+			"mysql_topology":    mysqlTopology,
 			"execution_seconds": e.now().Sub(started).Seconds(),
 		},
 	}, nil
+}
+
+func collectMySQLTopology(ctx context.Context, db *sql.DB) map[string]any {
+	warnings := []string{}
+	serverUUID, err := queryMySQLTopologyString(ctx, db, "SELECT @@server_uuid")
+	if err != nil {
+		warnings = append(warnings, fmt.Sprintf("unable to collect MySQL server_uuid: %v", err))
+	}
+	readOnly, err := queryMySQLTopologyBool(ctx, db, "SELECT @@global.read_only")
+	if err != nil {
+		warnings = append(warnings, fmt.Sprintf("unable to collect MySQL read_only: %v", err))
+	}
+	superReadOnly, err := queryMySQLTopologyBool(ctx, db, "SELECT @@global.super_read_only")
+	if err != nil {
+		warnings = append(warnings, fmt.Sprintf("unable to collect MySQL super_read_only: %v", err))
+	}
+	replicaStatus, err := queryFirstRowMap(ctx, db, "SHOW REPLICA STATUS")
+	if err != nil {
+		replicaStatus, err = queryFirstRowMap(ctx, db, "SHOW SLAVE STATUS")
+		if err != nil {
+			warnings = append(warnings, err.Error())
+		}
+	}
+	groupMembers, err := queryRowsMap(
+		ctx,
+		db,
+		"SELECT MEMBER_HOST, MEMBER_PORT, MEMBER_ROLE, MEMBER_STATE FROM performance_schema.replication_group_members",
+	)
+	if err != nil {
+		if !isMissingMySQLTableError(err) {
+			warnings = append(warnings, err.Error())
+		}
+	}
+	payload := buildMySQLTopologyPayload(serverUUID, readOnly, superReadOnly, replicaStatus, groupMembers)
+	if len(warnings) > 0 {
+		payload["warnings"] = warnings
+	}
+	return payload
+}
+
+func queryMySQLTopologyString(ctx context.Context, db *sql.DB, query string) (string, error) {
+	var value any
+	if err := db.QueryRowContext(ctx, query).Scan(&value); err != nil {
+		return "", err
+	}
+	return topologyStringFromAny(value), nil
+}
+
+func queryMySQLTopologyBool(ctx context.Context, db *sql.DB, query string) (*bool, error) {
+	var value any
+	if err := db.QueryRowContext(ctx, query).Scan(&value); err != nil {
+		return nil, err
+	}
+	parsed, ok := topologyBoolFromAny(value)
+	if !ok {
+		return nil, fmt.Errorf("unexpected boolean value %q", topologyStringFromAny(value))
+	}
+	return &parsed, nil
+}
+
+func isMissingMySQLTableError(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	if !errors.As(err, &mysqlErr) {
+		return false
+	}
+	return mysqlErr.Number == 1109 || mysqlErr.Number == 1146
+}
+
+func buildMySQLTopologyPayload(serverUUID string, readOnly *bool, superReadOnly *bool, replicaStatus map[string]string, groupMembers []map[string]string) map[string]any {
+	payload := map[string]any{}
+	if strings.TrimSpace(serverUUID) != "" {
+		payload["server_uuid"] = strings.TrimSpace(serverUUID)
+	}
+	if readOnly != nil {
+		payload["read_only"] = *readOnly
+	}
+	if superReadOnly != nil {
+		payload["super_read_only"] = *superReadOnly
+	}
+	sourceHost := firstMapString(replicaStatus, "Source_Host", "Master_Host")
+	sourcePort := intFromString(firstMapString(replicaStatus, "Source_Port", "Master_Port"))
+	if sourceHost != "" {
+		if sourcePort == 0 {
+			sourcePort = 3306
+		}
+		payload["source_host"] = sourceHost
+		payload["source_port"] = sourcePort
+	}
+	if len(replicaStatus) > 0 {
+		payload["replica_status"] = replicaStatus
+	}
+	if len(groupMembers) > 0 {
+		members := make([]map[string]string, 0, len(groupMembers))
+		for _, raw := range groupMembers {
+			members = append(members, map[string]string{
+				"member_host":  firstMapString(raw, "MEMBER_HOST", "member_host"),
+				"member_port":  firstMapString(raw, "MEMBER_PORT", "member_port"),
+				"member_role":  firstMapString(raw, "MEMBER_ROLE", "member_role"),
+				"member_state": firstMapString(raw, "MEMBER_STATE", "member_state"),
+			})
+		}
+		payload["group_replication_members"] = members
+	}
+	return payload
+}
+
+func queryFirstRowMap(ctx context.Context, db *sql.DB, query string) (map[string]string, error) {
+	rows, err := queryRowsMap(ctx, db, query)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return map[string]string{}, nil
+	}
+	return rows[0], nil
+}
+
+func queryRowsMap(ctx context.Context, db *sql.DB, query string) ([]map[string]string, error) {
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	results := []map[string]string{}
+	for rows.Next() {
+		values := make([]sql.NullString, len(columns))
+		dest := make([]any, len(columns))
+		for i := range values {
+			dest[i] = &values[i]
+		}
+		if err := rows.Scan(dest...); err != nil {
+			return nil, err
+		}
+		row := map[string]string{}
+		for i, column := range columns {
+			if values[i].Valid {
+				row[column] = values[i].String
+			}
+		}
+		results = append(results, row)
+	}
+	return results, rows.Err()
+}
+
+func firstMapString(values map[string]string, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(values[key]); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func topologyIntFromAny(value any) int {
+	switch typed := value.(type) {
+	case []byte:
+		return intFromString(string(typed))
+	case string:
+		return intFromString(typed)
+	}
+	return intFromString(fmt.Sprint(value))
+}
+
+func topologyBoolFromAny(value any) (bool, bool) {
+	switch typed := value.(type) {
+	case bool:
+		return typed, true
+	case int:
+		return typed != 0, true
+	case int64:
+		return typed != 0, true
+	case float64:
+		return typed != 0, true
+	case []byte:
+		return topologyBoolFromString(string(typed))
+	case string:
+		return topologyBoolFromString(typed)
+	default:
+		return false, false
+	}
+}
+
+func topologyBoolFromString(value string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "on", "true", "yes":
+		return true, true
+	case "0", "off", "false", "no":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func topologyStringFromAny(value any) string {
+	switch typed := value.(type) {
+	case []byte:
+		return strings.TrimSpace(string(typed))
+	case string:
+		return strings.TrimSpace(typed)
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+func intFromString(value string) int {
+	var result int
+	if _, err := fmt.Sscanf(strings.TrimSpace(value), "%d", &result); err != nil {
+		return 0
+	}
+	return result
 }
 
 func assignmentForCommand(command client.AgentCommand, cfg client.AgentConfig) (client.Assignment, bool) {

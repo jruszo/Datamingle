@@ -89,7 +89,15 @@ export const systemSettingsSections: SystemSettingsSectionDefinition[] = [
         label: 'Inventory refresh interval',
         input: 'select',
         optionSource: 'inventory_refresh_intervals',
-        defaultValue: '24h',
+        defaultValue: '1h',
+      },
+      {
+        key: 'mysql_topology_drift_policy',
+        label: 'MySQL topology drift policy',
+        input: 'select',
+        optionSource: 'mysql_topology_drift_policies',
+        defaultValue: 'notify_block',
+        description: 'Controls how scheduled MySQL topology discovery handles manually attached services when topology changes.',
       },
       {
         key: 'celery_broker_url',

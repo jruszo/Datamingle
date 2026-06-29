@@ -157,6 +157,34 @@ const selectedInstance = computed<WorkflowSubmitInstanceRecord | null>(() => {
   return eligibleInstances.value.find((instance) => instance.id === instanceId) ?? null
 })
 
+function mysqlClusterLabel(instance: WorkflowSubmitInstanceRecord) {
+  if (instance.db_type !== 'mysql') {
+    return ''
+  }
+  return instance.mysql_cluster_name || 'Standalone'
+}
+
+function mysqlClusterRoleLabel(instance: WorkflowSubmitInstanceRecord) {
+  const role = instance.mysql_cluster_role || 'standalone'
+  if (role === 'primary') {
+    return 'Master'
+  }
+  if (role === 'standalone') {
+    return 'Standalone'
+  }
+  if (role === 'replica') {
+    return 'Replica'
+  }
+  return 'Unknown'
+}
+
+function mysqlClusterClass(instance: WorkflowSubmitInstanceRecord) {
+  if (instance.mysql_ddl_dml_eligible) {
+    return 'bg-emerald-100 text-emerald-800'
+  }
+  return 'bg-slate-100 text-slate-700'
+}
+
 const filteredInstances = computed(() => {
   const groupId = Number(form.groupId)
   if (!groupId) {
@@ -719,6 +747,22 @@ onMounted(() => {
                     {{ instance.instance_name }} / {{ instance.db_type.toUpperCase() }}
                   </option>
                 </select>
+                <div
+                  v-if="selectedInstance?.db_type === 'mysql'"
+                  class="flex flex-wrap items-center gap-2 text-xs text-slate-600"
+                >
+                  <span>{{ mysqlClusterLabel(selectedInstance) }}</span>
+                  <Badge
+                    variant="secondary"
+                    class="w-fit"
+                    :class="mysqlClusterClass(selectedInstance)"
+                  >
+                    {{ mysqlClusterRoleLabel(selectedInstance) }}
+                  </Badge>
+                  <span v-if="selectedInstance.mysql_cluster_label">
+                    dm_mysql_cluster={{ selectedInstance.mysql_cluster_label }}
+                  </span>
+                </div>
               </div>
 
               <div class="space-y-2">

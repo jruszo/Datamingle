@@ -22,10 +22,17 @@ from api_infrastructure.serializers import (
     InfrastructureNodeRemoteManagerSerializer,
     InfrastructureNodeSerializer,
     InfrastructureNodeWriteSerializer,
+    MysqlClusterSerializer,
     RecommendationStatusSerializer,
     ServiceRecommendationSerializer,
 )
-from sql.models import InfrastructureNode, Instance, ServiceRecommendation
+from sql.models import (
+    InfrastructureNode,
+    Instance,
+    MysqlCluster,
+    MysqlTopologyAlert,
+    ServiceRecommendation,
+)
 from sql.inventory import refresh_instance_inventory_snapshot
 from sql.utils.team import user_groups, user_instances
 
@@ -158,7 +165,7 @@ class InfrastructureNodeListCreateView(generics.ListAPIView):
     def get_visible_services(self):
         return (
             user_instances(self.request.user)
-            .select_related("node")
+            .select_related("node", "mysql_cluster")
             .prefetch_related("resource_group")
         )
 
@@ -282,6 +289,78 @@ class InfrastructureNodeLabelValuesView(views.APIView):
         return success_response(data=sorted(values))
 
 
+class MysqlClusterListView(generics.ListAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = CustomizedPagination
+    serializer_class = MysqlClusterSerializer
+
+    def get_queryset(self):
+        return mysql_cluster_queryset_for_request(self.request)
+
+    def get(self, request):
+        _require_any_permission(request, *INFRASTRUCTURE_MENU_PERMISSIONS)
+        return super().get(request)
+
+
+def mysql_cluster_queryset_for_request(request):
+    visible_service_ids = user_instances(request.user, db_type=["mysql"]).values("id")
+    queryset = MysqlCluster.objects.select_related("primary_instance")
+    member_count = Count("instances", distinct=True)
+    active_alert_filter = Q(alerts__status=MysqlTopologyAlert.STATUS_ACTIVE)
+    active_alerts = MysqlTopologyAlert.objects.filter(
+        status=MysqlTopologyAlert.STATUS_ACTIVE
+    )
+    if not request.user.is_superuser:
+        queryset = queryset.filter(instances__id__in=visible_service_ids).distinct()
+        member_count = Count(
+            "instances",
+            filter=Q(instances__id__in=visible_service_ids),
+            distinct=True,
+        )
+        active_alert_filter &= Q(alerts__instance_id__in=visible_service_ids)
+        active_alerts = active_alerts.filter(instance_id__in=visible_service_ids)
+    return (
+        queryset.annotate(
+            member_count=member_count,
+            active_alert_count=Count(
+                "alerts",
+                filter=active_alert_filter,
+                distinct=True,
+            ),
+        )
+        .prefetch_related(
+            Prefetch(
+                "alerts",
+                queryset=active_alerts.select_related("instance"),
+                to_attr="active_alert_records",
+            )
+        )
+        .order_by("name", "id")
+    )
+
+
+class MysqlClusterDetailView(generics.RetrieveUpdateAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = MysqlClusterSerializer
+    lookup_url_kwarg = "cluster_id"
+
+    def get_queryset(self):
+        return mysql_cluster_queryset_for_request(self.request)
+
+    def retrieve(self, request, *args, **kwargs):
+        _require_any_permission(request, *INFRASTRUCTURE_MENU_PERMISSIONS)
+        serializer = self.get_serializer(self.get_object())
+        return success_response(data=serializer.data)
+
+    def patch(self, request, *args, **kwargs):
+        _require_manage_infrastructure(request)
+        cluster = self.get_object()
+        serializer = self.get_serializer(cluster, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return success_response(data=serializer.data)
+
+
 class InfrastructureNodeDetailView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -353,7 +432,9 @@ class InfrastructureServiceDetailView(views.APIView):
 
     def get_object(self, service_id):
         return get_object_or_404(
-            Instance.objects.select_related("node").prefetch_related("resource_group"),
+            Instance.objects.select_related("node", "mysql_cluster").prefetch_related(
+                "resource_group"
+            ),
             pk=service_id,
         )
 

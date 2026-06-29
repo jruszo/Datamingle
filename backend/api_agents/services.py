@@ -167,7 +167,7 @@ def build_agent_install_command(request, api_key):
 def build_agent_config(agent, datamingle_url=""):
     assignment_records = list(
         agent.assignments.filter(enabled=True).select_related(
-            "instance", "instance__node", "local_node"
+            "instance", "instance__node", "instance__mysql_cluster", "local_node"
         )
     )
     assignments = [
@@ -199,6 +199,12 @@ def serialize_assignment(assignment):
     instance = assignment.instance
     modules = assignment_modules(assignment)
     online_schema_enabled = assignment_online_schema_enabled(assignment)
+    service_monitoring_labels = dict(instance.monitoring_labels or {})
+    if instance.db_type == "mysql" and instance.mysql_cluster_id:
+        service_monitoring_labels["mysql_cluster"] = instance.mysql_cluster.label_value
+        service_monitoring_labels["mysql_cluster_role"] = (
+            instance.mysql_topology_role or "unknown"
+        )
     return {
         "id": assignment.id,
         "instance_id": instance.id,
@@ -216,7 +222,7 @@ def serialize_assignment(assignment):
         "node_monitoring_labels": (
             dict(instance.node.monitoring_labels or {}) if instance.node_id else {}
         ),
-        "service_monitoring_labels": dict(instance.monitoring_labels or {}),
+        "service_monitoring_labels": service_monitoring_labels,
         "service_monitoring_enabled": (
             instance.monitoring_enabled and instance.db_type in ("mysql", "pgsql")
         ),

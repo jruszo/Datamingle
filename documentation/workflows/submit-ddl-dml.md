@@ -24,3 +24,14 @@ Run SQL check again after changing:
 
 The request cannot be submitted if the checked syntax type does not match the request page.
 
+## MySQL Cluster Targets
+
+For MySQL clusters, Datamingle only allows DDL and DML requests against the
+detected master. Replicas are filtered from the target list or blocked with a
+topology reason if submitted directly.
+
+If the cluster master is not registered in Datamingle, or if discovery finds
+multiple possible masters, DDL and DML are blocked until topology discovery can
+identify one writable master. Add missing cluster services to Datamingle and
+wait for the next inventory refresh, or trigger a refresh from the
+infrastructure view.

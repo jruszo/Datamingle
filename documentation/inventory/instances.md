@@ -17,7 +17,9 @@ An instance is a database service registered in Datamingle.
 - visible database regex,
 - denied database regex,
 - resource groups,
-- instance tags.
+- instance tags,
+- workflow policy,
+- query and workflow enablement.
 
 ## Add An Instance
 
@@ -33,3 +35,13 @@ An instance is a database service registered in Datamingle.
 
 Open an instance from the inventory list, change the required fields, and save. Changes can affect which users can see or operate on the service.
 
+## MySQL Topology
+
+MySQL instances participate in automatic topology discovery during scheduled
+inventory refreshes. Datamingle records whether a service appears standalone,
+primary, replica, missing a master, ambiguous, or drifted from manual cluster
+membership.
+
+For DDL and DML workflows, only writable standalone services or detected cluster
+masters are eligible targets. Replicas and clusters without a clear registered
+master remain visible but are blocked for DDL/DML.

@@ -2,6 +2,7 @@ from datetime import datetime
 from unittest.mock import patch
 
 from django.contrib.auth.models import Group
+from django.contrib.auth.models import Permission
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -16,7 +17,9 @@ from sql.models import (
     DEFAULT_NODE_EXPORTER_COLLECTORS,
     InfrastructureNode,
     Instance,
+    MysqlCluster,
     Team,
+    TeamMembership,
     ServiceRecommendation,
     Users,
     WorkflowPolicy,
@@ -160,6 +163,55 @@ class InfrastructureNodeApiTests(APITestCase):
         self.assertEqual(
             payload["recommendations"][0]["service_name"], "orders-replica"
         )
+
+    def test_mysql_cluster_list_is_scoped_to_visible_services(self):
+        user = Users.objects.create_user(
+            username="infra-viewer",
+            email="infra-viewer@example.com",
+            is_active=True,
+        )
+        user.user_permissions.add(
+            Permission.objects.get(codename="menu_infrastructure")
+        )
+        permission_level = Group.objects.create(name="Visible Infra Role")
+        visible_team = create_team("visible services")
+        hidden_team = create_team("hidden services")
+        TeamMembership.objects.create(
+            user=user, team=visible_team, permission_level=permission_level
+        )
+        visible_cluster = MysqlCluster.objects.create(
+            name="visible-cluster",
+            label_value="visible_cluster",
+            cluster_key="mysql:endpoint:10.0.0.10:3306",
+        )
+        hidden_cluster = MysqlCluster.objects.create(
+            name="hidden-cluster",
+            label_value="hidden_cluster",
+            cluster_key="mysql:endpoint:10.0.0.20:3306",
+        )
+        visible_service = create_instance(
+            "visible-primary", node=create_node("visible-node", "10.0.0.10")
+        )
+        visible_service.mysql_cluster = visible_cluster
+        visible_service.save(update_fields=["mysql_cluster", "update_time"])
+        visible_service.resource_group.set([visible_team])
+        hidden_service = create_instance(
+            "hidden-primary", node=create_node("hidden-node", "10.0.0.20")
+        )
+        hidden_service.mysql_cluster = hidden_cluster
+        hidden_service.save(update_fields=["mysql_cluster", "update_time"])
+        hidden_service.resource_group.set([hidden_team])
+        self.client.force_authenticate(user=user)
+
+        response = self.client.get("/api/v1/infrastructure/mysql-clusters/")
+        hidden_response = self.client.get(
+            f"/api/v1/infrastructure/mysql-clusters/{hidden_cluster.id}/"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        names = {row["name"] for row in response.json()["data"]["results"]}
+        self.assertEqual(names, {"visible-cluster"})
+        self.assertEqual(hidden_response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_create_service_under_node_syncs_local_agent_assignment(self):
         node = create_node()

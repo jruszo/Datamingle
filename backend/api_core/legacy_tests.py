@@ -163,7 +163,7 @@ class SystemSettingsTaskBackendTest(TestCase):
         self.assertNotIn("task_backend", payload["data"]["settings"])
         self.assertNotIn("task_backends", payload["data"]["options"])
         self.assertEqual(
-            payload["data"]["settings"]["inventory_refresh_interval"], "24h"
+            payload["data"]["settings"]["inventory_refresh_interval"], "1h"
         )
         self.assertEqual(
             payload["data"]["options"]["inventory_refresh_intervals"],

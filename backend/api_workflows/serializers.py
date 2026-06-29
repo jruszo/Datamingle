@@ -29,6 +29,7 @@ from sql.utils.sql_review import can_cancel, can_execute, can_timingtask
 from sql.utils.sql_utils import generate_sql, get_syntax_type
 from sql.utils.tasks import task_info
 from sql.utils.workflow_audit import get_auditor
+from sql.mysql_topology import mysql_workflow_block_reason
 from api_agents.models import AgentCommandType
 from api_agents.services import (
     AgentCommandDispatchError,
@@ -372,6 +373,10 @@ class WorkflowContentSerializer(serializers.ModelSerializer):
         elif not instance.workflow_enabled:
             raise serializers.ValidationError(
                 {"errors": "This instance is not enabled for DDL/DML workflows."}
+            )
+        elif mysql_workflow_block_reason(instance):
+            raise serializers.ValidationError(
+                {"errors": mysql_workflow_block_reason(instance)}
             )
         elif actor.is_superuser or has_group_request_access:
             pass

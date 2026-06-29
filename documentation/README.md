@@ -37,6 +37,7 @@ Datamingle is a SQL review, query, workflow, archive, inventory, and database op
 
 - [Inventory Overview](inventory/index.md)
 - [Manage Instances](inventory/instances.md)
+- [MySQL Topology](inventory/mysql-topology.md)
 - [Data Dictionary](inventory/data-dictionary.md)
 - [Instance Tags](inventory/instance-tags.md)
 - [Agents Overview](agents/index.md)
