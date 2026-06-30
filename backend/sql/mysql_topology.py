@@ -1,4 +1,5 @@
 import re
+from collections.abc import Mapping
 
 from django.db import IntegrityError, transaction
 from django.utils import timezone
@@ -79,7 +80,7 @@ def apply_mysql_topology_snapshot(instance, snapshot, now=None):
 
 
 def normalize_mysql_topology_snapshot(snapshot):
-    payload = snapshot or {}
+    payload = snapshot if isinstance(snapshot, Mapping) else {}
     source_host = (
         payload.get("source_host")
         or payload.get("master_host")
@@ -216,9 +217,7 @@ def _apply_standalone_component(instance, now):
     writable = _is_writable(instance)
     instance.mysql_cluster = None
     instance.mysql_cluster_membership_source = MysqlCluster.SOURCE_AUTO
-    instance.mysql_topology_role = (
-        Instance.MYSQL_ROLE_STANDALONE if writable else Instance.MYSQL_ROLE_UNKNOWN
-    )
+    instance.mysql_topology_role = Instance.MYSQL_ROLE_STANDALONE
     instance.mysql_topology_status = Instance.MYSQL_STATUS_STANDALONE
     instance.mysql_ddl_dml_eligible = writable
     instance.mysql_ddl_dml_block_reason = (

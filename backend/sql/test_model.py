@@ -3,9 +3,12 @@
 import importlib
 
 from django.conf import settings
+from django.contrib.auth.models import Group
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TestCase
+
+from sql.models import Instance, Team, WorkflowAuditSetting
 
 
 def test_password_mixin_import_error():
@@ -29,10 +32,6 @@ class WorkflowPolicyBackfillMigrationTests(TestCase):
 
     def test_backfill_skips_queryable_only_instances(self):
         apps = self._migration_apps()
-        Group = apps.get_model("auth", "Group")
-        Instance = apps.get_model("sql", "Instance")
-        Team = apps.get_model("sql", "Team")
-        WorkflowAuditSetting = apps.get_model("sql", "WorkflowAuditSetting")
 
         group = Group.objects.create(name="Backfill DBA")
         team = Team.objects.create(
@@ -78,7 +77,6 @@ class WorkflowPolicyBackfillMigrationTests(TestCase):
 
     def test_backfill_fails_when_workflow_enabled_instance_has_no_policy_mapping(self):
         apps = self._migration_apps()
-        Instance = apps.get_model("sql", "Instance")
 
         instance = Instance.objects.create(
             instance_name="workflow-without-setting",
@@ -95,3 +93,86 @@ class WorkflowPolicyBackfillMigrationTests(TestCase):
             f"workflow-without-setting:{instance.id}",
         ):
             migration.backfill_workflow_policies(apps, None)
+
+
+class MysqlTopologyRolloutBackfillMigrationTests(TestCase):
+    @staticmethod
+    def _migration_apps():
+        executor = MigrationExecutor(connection)
+        return executor.loader.project_state(
+            [("sql", "0043_instance_mysql_cluster_membership_source_and_more")]
+        ).apps
+
+    @staticmethod
+    def _migration_module():
+        return importlib.import_module(
+            "sql.migrations.0044_backfill_mysql_topology_rollout"
+        )
+
+    def test_backfill_keeps_existing_workflow_enabled_mysql_targets_visible(self):
+        apps = self._migration_apps()
+        Instance = apps.get_model("sql", "Instance")
+
+        workflow_enabled = Instance.objects.create(
+            instance_name="mysql-workflow-enabled",
+            type="master",
+            db_type="mysql",
+            host="127.0.0.1",
+            port=3306,
+            workflow_enabled=True,
+            mysql_topology_status="unknown",
+            mysql_topology_role="unknown",
+            mysql_ddl_dml_eligible=False,
+        )
+        queryable_only = Instance.objects.create(
+            instance_name="mysql-queryable-only",
+            type="master",
+            db_type="mysql",
+            host="127.0.0.1",
+            port=3307,
+            queryable=True,
+            workflow_enabled=False,
+            mysql_topology_status="unknown",
+            mysql_topology_role="unknown",
+            mysql_ddl_dml_eligible=False,
+        )
+        replica = Instance.objects.create(
+            instance_name="mysql-replica",
+            type="slave",
+            db_type="mysql",
+            host="127.0.0.1",
+            port=3308,
+            workflow_enabled=True,
+            mysql_topology_status="unknown",
+            mysql_topology_role="unknown",
+            mysql_ddl_dml_eligible=False,
+        )
+        non_mysql = Instance.objects.create(
+            instance_name="pgsql-workflow-enabled",
+            type="master",
+            db_type="pgsql",
+            host="127.0.0.1",
+            port=5432,
+            workflow_enabled=True,
+            mysql_topology_status="unknown",
+            mysql_topology_role="unknown",
+            mysql_ddl_dml_eligible=False,
+        )
+
+        migration = self._migration_module()
+        migration.backfill_mysql_topology_rollout(apps, None)
+
+        workflow_enabled.refresh_from_db()
+        queryable_only.refresh_from_db()
+        replica.refresh_from_db()
+        non_mysql.refresh_from_db()
+        self.assertEqual(workflow_enabled.mysql_topology_status, "standalone")
+        self.assertEqual(workflow_enabled.mysql_topology_role, "standalone")
+        self.assertTrue(workflow_enabled.mysql_ddl_dml_eligible)
+        self.assertEqual(workflow_enabled.mysql_ddl_dml_block_reason, "")
+        self.assertEqual(queryable_only.mysql_topology_status, "unknown")
+        self.assertFalse(queryable_only.mysql_ddl_dml_eligible)
+        self.assertEqual(replica.mysql_topology_status, "unknown")
+        self.assertFalse(replica.mysql_ddl_dml_eligible)
+        self.assertEqual(non_mysql.mysql_topology_status, "unknown")
+        self.assertFalse(non_mysql.mysql_ddl_dml_eligible)

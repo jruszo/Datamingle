@@ -29,8 +29,9 @@ A service is a database endpoint attached to a node. The service editor controls
 - workflow policy,
 - teams that can see or operate on the service.
 
-Services that enable online query or DDL/DML workflows require a workflow policy.
-The selected workflow policy must be active when saving the service.
+Services that enable DDL/DML workflows require a workflow policy. The selected
+workflow policy must be active when saving a workflow-enabled service. Queryable
+services can be saved without a workflow policy.
 
 ## Agent Dependency
 

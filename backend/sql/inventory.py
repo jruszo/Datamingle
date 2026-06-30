@@ -1,5 +1,6 @@
 import datetime
 import logging
+from collections.abc import Mapping
 
 from django.db import transaction
 from django.db import close_old_connections
@@ -95,15 +96,17 @@ def _format_inventory_version(value):
 
 
 def _normalize_inventory_details(details):
-    payload = details or {}
-    mysql_topology = payload.get("mysql_topology", {})
-    if not isinstance(mysql_topology, dict):
-        mysql_topology = {}
-    return {
+    payload = details if isinstance(details, Mapping) else {}
+    normalized = {
         "hostname": str(payload.get("hostname") or "").strip(),
         "version": _format_inventory_version(payload.get("version")),
-        "mysql_topology": mysql_topology,
     }
+    if "mysql_topology" in payload:
+        mysql_topology = payload.get("mysql_topology")
+        normalized["mysql_topology"] = (
+            dict(mysql_topology) if isinstance(mysql_topology, Mapping) else {}
+        )
+    return normalized
 
 
 def collect_inventory_snapshot(instance):
@@ -144,10 +147,10 @@ def refresh_instance_inventory_snapshot(instance, now=None):
             "error": str(exc),
         }
 
-    if instance.db_type == "mysql":
+    if instance.db_type == "mysql" and "mysql_topology" in details:
         try:
             apply_mysql_topology_snapshot(
-                instance, details.get("mysql_topology") or {}, now=attempt_time
+                instance, details["mysql_topology"], now=attempt_time
             )
         except Exception as exc:
             logger.exception(
