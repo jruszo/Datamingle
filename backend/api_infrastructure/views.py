@@ -317,8 +317,13 @@ def mysql_cluster_queryset_for_request(request):
             filter=Q(instances__id__in=visible_service_ids),
             distinct=True,
         )
-        active_alert_filter &= Q(alerts__instance_id__in=visible_service_ids)
-        active_alerts = active_alerts.filter(instance_id__in=visible_service_ids)
+        visible_alert_filter = Q(alerts__instance_id__in=visible_service_ids) | Q(
+            alerts__instance_id__isnull=True
+        )
+        active_alert_filter &= visible_alert_filter
+        active_alerts = active_alerts.filter(
+            Q(instance_id__in=visible_service_ids) | Q(instance_id__isnull=True)
+        )
     return (
         queryset.annotate(
             member_count=member_count,

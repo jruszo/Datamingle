@@ -79,7 +79,7 @@ whether a database service is available through an assigned online agent.
 - [System Settings](administration/system-settings.md)
 - [User Management](administration/users.md)
 - [Permission Groups](administration/permission-groups.md)
-- [Resource Groups](administration/resource-groups.md)
+- [Teams](administration/resource-groups.md)
 
 ### Troubleshooting
 

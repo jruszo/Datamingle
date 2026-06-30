@@ -446,21 +446,56 @@ function mysqlClusterLabel(service: DatabaseServiceRecord) {
   if (service.engine !== 'mysql') {
     return 'N/A'
   }
-  return service.mysql_cluster_name || 'Standalone'
+  if (service.mysql_cluster_name) {
+    return service.mysql_cluster_name
+  }
+  if (service.mysql_topology_status === 'standalone') {
+    return 'Standalone'
+  }
+  return 'Unknown'
 }
 
 function mysqlClusterRoleLabel(service: DatabaseServiceRecord) {
-  const role = service.mysql_cluster_role || 'standalone'
+  const role = service.mysql_cluster_role || ''
   if (role === 'primary') {
     return 'Master'
   }
   if (role === 'replica') {
     return 'Replica'
   }
-  if (role === 'standalone') {
+  if (role === 'standalone' && service.mysql_topology_status === 'standalone') {
     return 'Standalone'
   }
   return 'Unknown'
+}
+
+function mysqlTopologyStatusLabel(service: DatabaseServiceRecord) {
+  const status = service.mysql_topology_status || service.mysql_cluster_status || ''
+  if (status === 'clustered' || status === 'ok') {
+    return 'Clustered'
+  }
+  if (status === 'standalone') {
+    return 'Standalone'
+  }
+  if (status === 'missing_master') {
+    return 'Missing master'
+  }
+  if (status === 'ambiguous_master') {
+    return 'Ambiguous master'
+  }
+  if (status === 'drift') {
+    return 'Drift'
+  }
+  if (status === 'unknown') {
+    return 'Not collected'
+  }
+  return 'Not collected'
+}
+
+function mysqlClusterBadgeLabel(service: DatabaseServiceRecord) {
+  const role = mysqlClusterRoleLabel(service)
+  const status = mysqlTopologyStatusLabel(service)
+  return role === status ? role : `${role} - ${status}`
 }
 
 function mysqlClusterStatusClass(service: DatabaseServiceRecord) {
@@ -498,7 +533,7 @@ function mysqlClusterTitle(service: DatabaseServiceRecord) {
     ? ` Detected unmanaged peers: ${peers.map((peer) => `${peer.host}:${peer.port}`).join(', ')}.`
     : ''
   const reason = service.mysql_ddl_dml_block_reason ? ` ${service.mysql_ddl_dml_block_reason}` : ''
-  return `${mysqlClusterLabel(service)} ${mysqlClusterRoleLabel(service)}.${reason}${peerText}`.trim()
+  return `${mysqlClusterLabel(service)} ${mysqlClusterBadgeLabel(service)}.${reason}${peerText}`.trim()
 }
 
 function formatDateTime(value: string | null) {
@@ -1402,8 +1437,9 @@ watch(
                             variant="secondary"
                             class="w-fit"
                             :class="mysqlClusterStatusClass(service)"
+                            :aria-label="mysqlClusterTitle(service)"
                           >
-                            {{ mysqlClusterRoleLabel(service) }}
+                            {{ mysqlClusterBadgeLabel(service) }}
                           </Badge>
                         </div>
                       </td>
@@ -1680,8 +1716,9 @@ watch(
                 variant="secondary"
                 class="w-fit"
                 :class="mysqlClusterStatusClass(editingService)"
+                :aria-label="mysqlClusterTitle(editingService)"
               >
-                {{ mysqlClusterRoleLabel(editingService) }}
+                {{ mysqlClusterBadgeLabel(editingService) }}
               </Badge>
               <span
                 v-if="editingService.mysql_cluster_label"

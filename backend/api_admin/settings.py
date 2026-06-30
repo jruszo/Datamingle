@@ -15,6 +15,7 @@ from common.check import (
 )
 from common.config import SysConfig
 from sql.inventory import (
+    INVENTORY_REFRESH_INTERVAL_DEFAULT,
     INVENTORY_REFRESH_INTERVAL_CHOICES,
     ensure_inventory_refresh_schedule,
 )
@@ -82,7 +83,7 @@ SYSTEM_SETTINGS_SCHEMA = (
         "name": "inventory_refresh_interval",
         "kind": "choice",
         "choices": INVENTORY_REFRESH_INTERVAL_OPTIONS,
-        "default": "1h",
+        "default": INVENTORY_REFRESH_INTERVAL_DEFAULT,
     },
     {
         "name": "mysql_topology_drift_policy",

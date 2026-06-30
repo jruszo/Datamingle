@@ -354,6 +354,41 @@ class WorkflowSubmissionMetadataTests(APITestCase):
         self.assertIn("cluster master", response.json()["errors"])
         run_command.assert_not_called()
 
+    @patch("api_workflows.views.run_agent_command_sync")
+    def test_sqlcheck_rejects_mysql_replica_before_agent_dispatch(self, run_command):
+        self.team = self._team()
+        policy = self._policy()
+        cluster = MysqlCluster.objects.create(
+            name="payments",
+            label_value="payments",
+            cluster_key="mysql:endpoint:127.0.0.1:3306",
+            topology_status=MysqlCluster.STATUS_OK,
+        )
+        replica = self._instance(
+            "payments-replica", workflow_enabled=True, policy=policy
+        )
+        replica.mysql_cluster = cluster
+        replica.mysql_topology_role = Instance.MYSQL_ROLE_REPLICA
+        replica.mysql_topology_status = Instance.MYSQL_STATUS_CLUSTERED
+        replica.mysql_ddl_dml_eligible = False
+        replica.mysql_ddl_dml_block_reason = "DDL/DML must target the cluster master."
+        replica.save()
+        self._agent_for(replica)
+
+        response = self.client.post(
+            "/api/v1/workflow/sqlcheck/",
+            {
+                "instance_id": replica.id,
+                "db_name": "app",
+                "full_sql": "update users set active = 1;",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("cluster master", response.json()["errors"])
+        run_command.assert_not_called()
+
     @patch("api_workflows.serializers.run_agent_command_sync")
     def test_export_submission_allows_queryable_instance_without_policy(
         self, run_command

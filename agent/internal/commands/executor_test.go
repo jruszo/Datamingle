@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"runtime"
 	"strings"
@@ -127,6 +128,20 @@ func TestMissingGroupReplicationTableErrorIsSuppressed(t *testing.T) {
 	}
 	if isMissingMySQLTableError(&mysql.MySQLError{Number: 1045}) {
 		t.Fatal("expected access denied errors to remain warnings")
+	}
+}
+
+func TestMySQLTopologyWarningDoesNotExposeRawError(t *testing.T) {
+	warnings := appendMySQLTopologyWarning(nil, "server_uuid_unavailable", errors.New("access denied for password=secret"))
+
+	if len(warnings) != 1 {
+		t.Fatalf("expected one warning, got %#v", warnings)
+	}
+	if warnings[0] != "server_uuid_unavailable" {
+		t.Fatalf("expected stable warning code, got %q", warnings[0])
+	}
+	if strings.Contains(warnings[0], "secret") || strings.Contains(warnings[0], "access denied") {
+		t.Fatalf("warning exposed raw database error: %q", warnings[0])
 	}
 }
 

@@ -20,7 +20,7 @@ from common.utils.const import WorkflowType
 from sql.engines import ResultSet
 from sql.engines.models import ReviewResult, ReviewSet
 from sql.mailbox import emit_execution_finished_notifications, resolve_mailbox_items
-from sql.models import DEFAULT_NODE_EXPORTER_COLLECTORS, SqlWorkflow
+from sql.models import DEFAULT_NODE_EXPORTER_COLLECTORS, Instance, SqlWorkflow
 from sql.models import MYSQLD_EXPORTER_COLLECTOR_PROFILES
 from sql.models import NODE_EXPORTER_COLLECTOR_PROFILES
 from sql.models import POSTGRES_EXPORTER_COLLECTOR_PROFILES
@@ -200,11 +200,18 @@ def serialize_assignment(assignment):
     modules = assignment_modules(assignment)
     online_schema_enabled = assignment_online_schema_enabled(assignment)
     service_monitoring_labels = dict(instance.monitoring_labels or {})
-    if instance.db_type == "mysql" and instance.mysql_cluster_id:
-        service_monitoring_labels["mysql_cluster"] = instance.mysql_cluster.label_value
-        service_monitoring_labels["mysql_cluster_role"] = (
-            instance.mysql_topology_role or "unknown"
-        )
+    if instance.db_type == "mysql":
+        if (
+            instance.mysql_topology_role
+            and instance.mysql_topology_role != Instance.MYSQL_ROLE_UNKNOWN
+        ):
+            service_monitoring_labels["mysql_cluster_role"] = (
+                instance.mysql_topology_role
+            )
+        if instance.mysql_cluster_id:
+            service_monitoring_labels["mysql_cluster"] = (
+                instance.mysql_cluster.label_value
+            )
     return {
         "id": assignment.id,
         "instance_id": instance.id,

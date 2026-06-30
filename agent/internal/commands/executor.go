@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -49,6 +50,14 @@ type alterTableStatement struct {
 }
 
 const commandOutputTailLimit = 64 * 1024
+
+const (
+	mysqlTopologyWarningServerUUID              = "server_uuid_unavailable"
+	mysqlTopologyWarningReadOnly                = "read_only_unavailable"
+	mysqlTopologyWarningSuperReadOnly           = "super_read_only_unavailable"
+	mysqlTopologyWarningReplicaStatus           = "replica_status_unavailable"
+	mysqlTopologyWarningGroupReplicationMembers = "group_replication_members_unavailable"
+)
 
 var alterTablePattern = regexp.MustCompile(`(?is)^\s*alter\s+table\s+((?:` + "`[^`]+`" + `|[A-Za-z0-9_$]+)(?:\.(?:` + "`[^`]+`" + `|[A-Za-z0-9_$]+))?)\s+(.+?)\s*;?\s*$`)
 
@@ -167,21 +176,22 @@ func collectMySQLTopology(ctx context.Context, db *sql.DB) map[string]any {
 	warnings := []string{}
 	serverUUID, err := queryMySQLTopologyString(ctx, db, "SELECT @@server_uuid")
 	if err != nil {
-		warnings = append(warnings, fmt.Sprintf("unable to collect MySQL server_uuid: %v", err))
+		warnings = appendMySQLTopologyWarning(warnings, mysqlTopologyWarningServerUUID, err)
 	}
 	readOnly, err := queryMySQLTopologyBool(ctx, db, "SELECT @@global.read_only")
 	if err != nil {
-		warnings = append(warnings, fmt.Sprintf("unable to collect MySQL read_only: %v", err))
+		warnings = appendMySQLTopologyWarning(warnings, mysqlTopologyWarningReadOnly, err)
 	}
 	superReadOnly, err := queryMySQLTopologyBool(ctx, db, "SELECT @@global.super_read_only")
 	if err != nil {
-		warnings = append(warnings, fmt.Sprintf("unable to collect MySQL super_read_only: %v", err))
+		warnings = appendMySQLTopologyWarning(warnings, mysqlTopologyWarningSuperReadOnly, err)
 	}
 	replicaStatus, err := queryFirstRowMap(ctx, db, "SHOW REPLICA STATUS")
 	if err != nil {
+		log.Printf("mysql topology warning %s via SHOW REPLICA STATUS: %v", mysqlTopologyWarningReplicaStatus, err)
 		replicaStatus, err = queryFirstRowMap(ctx, db, "SHOW SLAVE STATUS")
 		if err != nil {
-			warnings = append(warnings, err.Error())
+			warnings = appendMySQLTopologyWarning(warnings, mysqlTopologyWarningReplicaStatus, err)
 		}
 	}
 	groupMembers, err := queryRowsMap(
@@ -191,7 +201,7 @@ func collectMySQLTopology(ctx context.Context, db *sql.DB) map[string]any {
 	)
 	if err != nil {
 		if !isMissingMySQLTableError(err) {
-			warnings = append(warnings, err.Error())
+			warnings = appendMySQLTopologyWarning(warnings, mysqlTopologyWarningGroupReplicationMembers, err)
 		}
 	}
 	payload := buildMySQLTopologyPayload(serverUUID, readOnly, superReadOnly, replicaStatus, groupMembers)
@@ -199,6 +209,13 @@ func collectMySQLTopology(ctx context.Context, db *sql.DB) map[string]any {
 		payload["warnings"] = warnings
 	}
 	return payload
+}
+
+func appendMySQLTopologyWarning(warnings []string, code string, err error) []string {
+	if err != nil {
+		log.Printf("mysql topology warning %s: %v", code, err)
+	}
+	return append(warnings, code)
 }
 
 func queryMySQLTopologyString(ctx context.Context, db *sql.DB, query string) (string, error) {

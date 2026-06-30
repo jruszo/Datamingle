@@ -128,8 +128,6 @@ def _reconcile_mysql_topology(now=None):
         .filter(db_type="mysql", mysql_topology_last_seen_at__isnull=False)
         .order_by("id")
     )
-    if not instances:
-        return
 
     components = _mysql_components(instances)
     handled_instance_ids = set()
@@ -175,10 +173,7 @@ def _mysql_components(instances):
 
     components = {}
     for endpoint in dsu.items:
-        root = dsu.find(endpoint)
-        component = components.setdefault(
-            root, {"endpoints": set(), "instances": [], "source_endpoints": set()}
-        )
+        component = _component_for_endpoint(components, dsu, endpoint)
         component["endpoints"].add(endpoint)
         component["instances"].extend(known_by_endpoint.get(endpoint, []))
     for instance in instances:
@@ -186,16 +181,23 @@ def _mysql_components(instances):
             instance.mysql_source_host, instance.mysql_source_port
         )
         if source_endpoint:
-            components[dsu.find(source_endpoint)]["source_endpoints"].add(
-                source_endpoint
-            )
+            component = _component_for_endpoint(components, dsu, source_endpoint)
+            component["source_endpoints"].add(source_endpoint)
         primary_endpoint = _group_primary_endpoint(instance)
         if primary_endpoint:
-            components[dsu.find(primary_endpoint)]["source_endpoints"].add(
-                primary_endpoint
-            )
+            component = _component_for_endpoint(components, dsu, primary_endpoint)
+            component["source_endpoints"].add(primary_endpoint)
 
     return [component for component in components.values() if component["instances"]]
+
+
+def _component_for_endpoint(components, dsu, endpoint):
+    root = dsu.find(endpoint)
+    component = components.setdefault(
+        root, {"endpoints": set(), "instances": [], "source_endpoints": set()}
+    )
+    component["endpoints"].add(endpoint)
+    return component
 
 
 def _is_standalone_component(component):
@@ -330,11 +332,16 @@ def _apply_cluster_component(cluster, instances, now):
                 _mark_instance_drift(instance, instance.mysql_cluster, now=now)
                 continue
 
+        preserve_manual_membership = (
+            instance.mysql_cluster_membership_source == MysqlCluster.SOURCE_MANUAL
+            and instance.mysql_cluster_id == cluster.id
+        )
         instance_endpoint = _endpoint(instance.host, instance.port)
         is_primary = bool(primary_endpoint and instance_endpoint == primary_endpoint)
         group_role = _group_role_for_instance(instance)
         instance.mysql_cluster = cluster
-        instance.mysql_cluster_membership_source = MysqlCluster.SOURCE_AUTO
+        if not preserve_manual_membership:
+            instance.mysql_cluster_membership_source = MysqlCluster.SOURCE_AUTO
         instance.mysql_topology_role = (
             Instance.MYSQL_ROLE_PRIMARY
             if is_primary

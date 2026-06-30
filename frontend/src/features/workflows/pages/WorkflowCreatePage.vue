@@ -161,15 +161,21 @@ function mysqlClusterLabel(instance: WorkflowSubmitInstanceRecord) {
   if (instance.db_type !== 'mysql') {
     return ''
   }
-  return instance.mysql_cluster_name || 'Standalone'
+  if (instance.mysql_cluster_name) {
+    return instance.mysql_cluster_name
+  }
+  if (instance.mysql_topology_status === 'standalone') {
+    return 'Standalone'
+  }
+  return 'Unknown'
 }
 
 function mysqlClusterRoleLabel(instance: WorkflowSubmitInstanceRecord) {
-  const role = instance.mysql_cluster_role || 'standalone'
+  const role = instance.mysql_cluster_role || ''
   if (role === 'primary') {
     return 'Master'
   }
-  if (role === 'standalone') {
+  if (role === 'standalone' && instance.mysql_topology_status === 'standalone') {
     return 'Standalone'
   }
   if (role === 'replica') {
