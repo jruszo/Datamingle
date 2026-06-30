@@ -13,7 +13,9 @@ request work against that instance.
 Service-level query and workflow enablement still applies after team visibility.
 A visible service will not appear in online query, export, or DDL/DML selectors
 unless the corresponding service capability is enabled and an eligible agent is
-online.
+online. DDL/DML selectors also require the service to have an active workflow
+policy; workflow-enabled services without a live policy are hidden from
+submission metadata.
 
 ## Instance Access Levels
 

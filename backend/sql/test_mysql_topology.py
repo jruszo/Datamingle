@@ -6,7 +6,11 @@ from django.utils import timezone
 
 from common.config import SysConfig
 from sql.models import Config, Instance, MysqlCluster, MysqlTopologyAlert
-from sql.mysql_topology import apply_mysql_topology_snapshot, reconcile_mysql_topology
+from sql.mysql_topology import (
+    apply_mysql_topology_snapshot,
+    normalize_mysql_topology_snapshot,
+    reconcile_mysql_topology,
+)
 from sql.inventory import refresh_instance_inventory_snapshot
 
 
@@ -216,7 +220,18 @@ class MysqlTopologyTests(TestCase):
         self.assertEqual(
             secondary.mysql_topology_status, Instance.MYSQL_STATUS_STANDALONE
         )
+        self.assertEqual(secondary.mysql_topology_role, Instance.MYSQL_ROLE_STANDALONE)
         self.assertFalse(secondary.mysql_ddl_dml_eligible)
+
+    def test_malformed_topology_snapshot_is_normalized_as_empty_payload(self):
+        normalized = normalize_mysql_topology_snapshot("legacy-payload")
+
+        self.assertEqual(normalized["server_uuid"], "")
+        self.assertIsNone(normalized["read_only"])
+        self.assertIsNone(normalized["super_read_only"])
+        self.assertEqual(normalized["source_host"], "")
+        self.assertIsNone(normalized["source_port"])
+        self.assertEqual(normalized["details"], {})
 
     def test_group_replication_secondary_without_known_primary_is_blocked(self):
         secondary = self._mysql_instance("mysql-secondary", "10.0.0.11")
@@ -647,7 +662,7 @@ class MysqlTopologyTests(TestCase):
 
     @patch("sql.inventory.apply_mysql_topology_snapshot")
     @patch("sql.inventory.collect_inventory_snapshot")
-    def test_inventory_applies_empty_mysql_topology_snapshot(
+    def test_inventory_skips_topology_when_payload_omits_field(
         self, collect_inventory_snapshot, apply_snapshot
     ):
         instance = self._mysql_instance("mysql-primary", "10.0.0.10")
@@ -655,6 +670,24 @@ class MysqlTopologyTests(TestCase):
         collect_inventory_snapshot.return_value = {
             "hostname": "mysql-primary",
             "version": "8.0.36",
+        }
+
+        result = refresh_instance_inventory_snapshot(instance, now=now)
+
+        self.assertTrue(result["success"])
+        apply_snapshot.assert_not_called()
+
+    @patch("sql.inventory.apply_mysql_topology_snapshot")
+    @patch("sql.inventory.collect_inventory_snapshot")
+    def test_inventory_applies_explicit_empty_mysql_topology_snapshot(
+        self, collect_inventory_snapshot, apply_snapshot
+    ):
+        instance = self._mysql_instance("mysql-primary", "10.0.0.10")
+        now = timezone.now()
+        collect_inventory_snapshot.return_value = {
+            "hostname": "mysql-primary",
+            "version": "8.0.36",
+            "mysql_topology": {},
         }
 
         result = refresh_instance_inventory_snapshot(instance, now=now)

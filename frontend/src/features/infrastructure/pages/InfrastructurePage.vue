@@ -470,7 +470,7 @@ function mysqlClusterRoleLabel(service: DatabaseServiceRecord) {
 }
 
 function mysqlTopologyStatusLabel(service: DatabaseServiceRecord) {
-  const status = service.mysql_topology_status || service.mysql_cluster_status || ''
+  const status = service.mysql_cluster_status || service.mysql_topology_status || ''
   if (status === 'clustered' || status === 'ok') {
     return 'Clustered'
   }

@@ -99,31 +99,7 @@ class WorkflowSubmissionMetadataTests(APITestCase):
         )
         return agent
 
-    def test_submission_metadata_only_lists_workflow_enabled_instances(self):
-        self.team = self._team()
-        policy = self._policy()
-        enabled = self._instance(
-            "workflow-enabled", workflow_enabled=True, policy=policy
-        )
-        disabled = self._instance("workflow-disabled", workflow_enabled=False)
-        self._agent_for(enabled)
-        self._agent_for(disabled)
-
-        response = self.client.get("/api/v1/workflow/submission-metadata/")
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        names = {
-            instance["instance_name"]
-            for instance in response.json()["data"]["instances"]
-        }
-        self.assertEqual(names, {"workflow-enabled"})
-        listed = response.json()["data"]["instances"][0]
-        self.assertEqual(listed["workflow_policy_id"], policy.id)
-        self.assertEqual(listed["workflow_policy_name"], policy.name)
-
-    def test_submission_metadata_lists_only_mysql_cluster_master(self):
-        self.team = self._team()
-        policy = self._policy()
+    def _mysql_cluster_pair(self, policy):
         cluster = MysqlCluster.objects.create(
             name="payments",
             label_value="payments",
@@ -152,6 +128,36 @@ class WorkflowSubmissionMetadataTests(APITestCase):
             mysql_ddl_dml_eligible=False,
             mysql_ddl_dml_block_reason="DDL/DML must target the cluster master.",
         )
+        primary.refresh_from_db()
+        replica.refresh_from_db()
+        return cluster, primary, replica
+
+    def test_submission_metadata_only_lists_workflow_enabled_instances(self):
+        self.team = self._team()
+        policy = self._policy()
+        enabled = self._instance(
+            "workflow-enabled", workflow_enabled=True, policy=policy
+        )
+        disabled = self._instance("workflow-disabled", workflow_enabled=False)
+        self._agent_for(enabled)
+        self._agent_for(disabled)
+
+        response = self.client.get("/api/v1/workflow/submission-metadata/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        names = {
+            instance["instance_name"]
+            for instance in response.json()["data"]["instances"]
+        }
+        self.assertEqual(names, {"workflow-enabled"})
+        listed = response.json()["data"]["instances"][0]
+        self.assertEqual(listed["workflow_policy_id"], policy.id)
+        self.assertEqual(listed["workflow_policy_name"], policy.name)
+
+    def test_submission_metadata_lists_only_mysql_cluster_master(self):
+        self.team = self._team()
+        policy = self._policy()
+        _, primary, replica = self._mysql_cluster_pair(policy)
         self._agent_for(primary)
         self._agent_for(replica)
 
@@ -317,21 +323,7 @@ class WorkflowSubmissionMetadataTests(APITestCase):
     def test_submission_rejects_mysql_replica_even_with_direct_api(self, run_command):
         self.team = self._team()
         policy = self._policy()
-        cluster = MysqlCluster.objects.create(
-            name="payments",
-            label_value="payments",
-            cluster_key="mysql:endpoint:127.0.0.1:3306",
-            topology_status=MysqlCluster.STATUS_OK,
-        )
-        replica = self._instance(
-            "payments-replica", workflow_enabled=True, policy=policy
-        )
-        replica.mysql_cluster = cluster
-        replica.mysql_topology_role = Instance.MYSQL_ROLE_REPLICA
-        replica.mysql_topology_status = Instance.MYSQL_STATUS_CLUSTERED
-        replica.mysql_ddl_dml_eligible = False
-        replica.mysql_ddl_dml_block_reason = "DDL/DML must target the cluster master."
-        replica.save()
+        _, _, replica = self._mysql_cluster_pair(policy)
         self._agent_for(replica)
 
         response = self.client.post(
@@ -358,21 +350,7 @@ class WorkflowSubmissionMetadataTests(APITestCase):
     def test_sqlcheck_rejects_mysql_replica_before_agent_dispatch(self, run_command):
         self.team = self._team()
         policy = self._policy()
-        cluster = MysqlCluster.objects.create(
-            name="payments",
-            label_value="payments",
-            cluster_key="mysql:endpoint:127.0.0.1:3306",
-            topology_status=MysqlCluster.STATUS_OK,
-        )
-        replica = self._instance(
-            "payments-replica", workflow_enabled=True, policy=policy
-        )
-        replica.mysql_cluster = cluster
-        replica.mysql_topology_role = Instance.MYSQL_ROLE_REPLICA
-        replica.mysql_topology_status = Instance.MYSQL_STATUS_CLUSTERED
-        replica.mysql_ddl_dml_eligible = False
-        replica.mysql_ddl_dml_block_reason = "DDL/DML must target the cluster master."
-        replica.save()
+        _, _, replica = self._mysql_cluster_pair(policy)
         self._agent_for(replica)
 
         response = self.client.post(
