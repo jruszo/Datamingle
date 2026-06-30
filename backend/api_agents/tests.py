@@ -625,7 +625,15 @@ class AgentFacingApiTests(APITestCase):
         instance = create_instance("primary")
         instance.node = node
         instance.workflow_enabled = True
-        instance.save(update_fields=["node", "workflow_enabled", "update_time"])
+        instance.mysql_topology_role = Instance.MYSQL_ROLE_STANDALONE
+        instance.save(
+            update_fields=[
+                "node",
+                "workflow_enabled",
+                "mysql_topology_role",
+                "update_time",
+            ]
+        )
         other_instance = create_instance("secondary")
         assignment = AgentInstanceAssignment.objects.get(agent=agent, instance=instance)
         assignment.command_enabled = True
@@ -749,6 +757,8 @@ class AgentFacingApiTests(APITestCase):
             services[0]["scrape_profiles"][2]["collectors"],
             ["global_variables"],
         )
+        self.assertEqual(services[0]["labels"]["dm_mysql_cluster_role"], "standalone")
+        self.assertNotIn("dm_mysql_cluster", services[0]["labels"])
         self.assertEqual(services[0]["exporter"]["listen_address"], "127.0.0.1:9200")
         self.assertEqual(
             services[0]["exporter"]["artifact"]["tool_name"],

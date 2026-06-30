@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/go-sql-driver/mysql"
 
 	"github.com/jruszo/datamingle/agent/internal/client"
 	"github.com/jruszo/datamingle/agent/internal/tools"
@@ -46,6 +49,99 @@ func TestExecuteSupportsInventoryCollection(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "unsupported command type") {
 		t.Fatalf("inventory command was not dispatched: %v", err)
+	}
+}
+
+func TestBuildMySQLTopologyPayloadUsesReplicaStatusAliases(t *testing.T) {
+	payload := buildMySQLTopologyPayload(
+		"server-uuid",
+		boolPtr(true),
+		boolPtr(false),
+		map[string]string{
+			"Master_Host": "10.0.0.10",
+			"Master_Port": "3307",
+		},
+		[]map[string]string{
+			{
+				"MEMBER_HOST":  "10.0.0.11",
+				"MEMBER_PORT":  "3306",
+				"MEMBER_ROLE":  "SECONDARY",
+				"MEMBER_STATE": "ONLINE",
+			},
+		},
+	)
+
+	if payload["server_uuid"] != "server-uuid" {
+		t.Fatalf("expected server_uuid in payload: %#v", payload)
+	}
+	if payload["read_only"] != true {
+		t.Fatalf("expected read_only true in payload: %#v", payload)
+	}
+	if payload["super_read_only"] != false {
+		t.Fatalf("expected super_read_only false in payload: %#v", payload)
+	}
+	if payload["source_host"] != "10.0.0.10" {
+		t.Fatalf("expected source_host from Master_Host: %#v", payload)
+	}
+	if payload["source_port"] != 3307 {
+		t.Fatalf("expected source_port from Master_Port: %#v", payload)
+	}
+	members, ok := payload["group_replication_members"].([]map[string]string)
+	if !ok || len(members) != 1 || members[0]["member_role"] != "SECONDARY" {
+		t.Fatalf("expected normalized group replication members: %#v", payload)
+	}
+	if topologyStringFromAny([]byte("uuid-from-bytes")) != "uuid-from-bytes" {
+		t.Fatal("expected byte-slice string values to be normalized")
+	}
+	if topologyIntFromAny([]byte("1")) != 1 {
+		t.Fatal("expected byte-slice integer values to be normalized")
+	}
+}
+
+func TestBuildMySQLTopologyPayloadOmitsUnknownValues(t *testing.T) {
+	payload := buildMySQLTopologyPayload(
+		"",
+		nil,
+		nil,
+		map[string]string{},
+		nil,
+	)
+
+	if _, ok := payload["server_uuid"]; ok {
+		t.Fatalf("expected unknown server_uuid to be omitted: %#v", payload)
+	}
+	if _, ok := payload["read_only"]; ok {
+		t.Fatalf("expected unknown read_only to be omitted: %#v", payload)
+	}
+	if _, ok := payload["super_read_only"]; ok {
+		t.Fatalf("expected unknown super_read_only to be omitted: %#v", payload)
+	}
+}
+
+func boolPtr(value bool) *bool {
+	return &value
+}
+
+func TestMissingGroupReplicationTableErrorIsSuppressed(t *testing.T) {
+	if !isMissingMySQLTableError(&mysql.MySQLError{Number: 1146}) {
+		t.Fatal("expected missing table errors to be suppressed")
+	}
+	if isMissingMySQLTableError(&mysql.MySQLError{Number: 1045}) {
+		t.Fatal("expected access denied errors to remain warnings")
+	}
+}
+
+func TestMySQLTopologyWarningDoesNotExposeRawError(t *testing.T) {
+	warnings := appendMySQLTopologyWarning(nil, "server_uuid_unavailable", errors.New("access denied for password=secret"))
+
+	if len(warnings) != 1 {
+		t.Fatalf("expected one warning, got %#v", warnings)
+	}
+	if warnings[0] != "server_uuid_unavailable" {
+		t.Fatalf("expected stable warning code, got %q", warnings[0])
+	}
+	if strings.Contains(warnings[0], "secret") || strings.Contains(warnings[0], "access denied") {
+		t.Fatalf("warning exposed raw database error: %q", warnings[0])
 	}
 }
 

@@ -100,6 +100,15 @@ export type DatabaseServiceRecord = Omit<
 > & {
   id: number
   workflow_policy_name: string
+  mysql_cluster_id?: number | null
+  mysql_cluster_name?: string
+  mysql_cluster_label?: string
+  mysql_cluster_status?: string
+  mysql_cluster_unmanaged_peers?: Array<{ host: string; port: number; role: string }>
+  mysql_cluster_role?: string
+  mysql_topology_status?: string
+  mysql_ddl_dml_eligible?: boolean
+  mysql_ddl_dml_block_reason?: string
   effective_monitoring_labels: Record<string, string>
   inventory_status: 'never' | 'ok' | 'stale' | 'failed'
   inventory_detected_hostname?: string
@@ -125,6 +134,23 @@ export type ServiceRecommendationRecord = {
 export type InfrastructureNodeDetailRecord = InfrastructureNodeRecord & {
   services: DatabaseServiceRecord[]
   recommendations: ServiceRecommendationRecord[]
+}
+
+export type MysqlClusterPayload = {
+  name: string
+  label_value: string
+}
+
+export type MysqlClusterRecord = MysqlClusterPayload & {
+  id: number
+  topology_status: string
+  primary_instance: number | null
+  primary_instance_name: string
+  unmanaged_peers: Array<{ host: string; port: number; role: string }>
+  membership_source: string
+  member_count: number
+  active_alert_count: number
+  last_seen_at: string | null
 }
 
 function extractData<T>(payload: unknown): T {
@@ -217,6 +243,16 @@ export function updateDatabaseService(
 ) {
   return apiPatch<unknown>(`/v1/infrastructure/services/${serviceId}/`, payload, { token }).then(
     (responsePayload) => extractData<DatabaseServiceRecord>(responsePayload),
+  )
+}
+
+export function updateMysqlCluster(
+  clusterId: number,
+  payload: MysqlClusterPayload,
+  token: string,
+) {
+  return apiPatch<unknown>(`/v1/infrastructure/mysql-clusters/${clusterId}/`, payload, { token }).then(
+    (responsePayload) => extractData<MysqlClusterRecord>(responsePayload),
   )
 }
 

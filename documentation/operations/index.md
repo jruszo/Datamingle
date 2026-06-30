@@ -4,10 +4,10 @@ Instance operations are administrative tools for live database resources and ope
 
 ## Pages
 
+- [Infrastructure Nodes And Services](infrastructure.md)
 - [Database Management](databases.md)
 - [Account Management](accounts.md)
 - [Parameter Settings](parameters.md)
 - [Session Diagnostics](diagnostics.md)
 
 These features are typically limited to DBAs or operators.
-

@@ -23,6 +23,7 @@ import {
   testDatabaseServiceConnection,
   updateDatabaseService,
   updateInfrastructureNode,
+  updateMysqlCluster,
   updateServiceRecommendationStatus,
   type AgentCreateResponse,
   type DatabaseServicePayload,
@@ -240,6 +241,18 @@ const serviceForm = reactive<DatabaseServicePayload>({
   charset: '',
   team_ids: [],
 })
+const editingService = computed(() => {
+  if (!editingServiceId.value || !selectedNode.value) {
+    return null
+  }
+  return selectedNode.value.services.find((service) => service.id === editingServiceId.value) ?? null
+})
+const clusterSaving = ref(false)
+const clusterFormError = ref('')
+const clusterForm = reactive({
+  name: '',
+  label_value: '',
+})
 
 const isAgentDialogOpen = ref(false)
 const agentSaving = ref(false)
@@ -427,6 +440,100 @@ function inventoryStatusTitle(service: DatabaseServiceRecord) {
     ? ` Last successful refresh: ${formatDateTime(service.inventory_last_refresh_at)}.`
     : ''
   return `Inventory is collected by the server. Test and monitoring check connectivity from the node agent.${lastRefresh}`
+}
+
+function mysqlClusterLabel(service: DatabaseServiceRecord) {
+  if (service.engine !== 'mysql') {
+    return 'N/A'
+  }
+  if (service.mysql_cluster_name) {
+    return service.mysql_cluster_name
+  }
+  if (service.mysql_topology_status === 'standalone') {
+    return 'Standalone'
+  }
+  return 'Unknown'
+}
+
+function mysqlClusterRoleLabel(service: DatabaseServiceRecord) {
+  const role = service.mysql_cluster_role || ''
+  if (role === 'primary') {
+    return 'Master'
+  }
+  if (role === 'replica') {
+    return 'Replica'
+  }
+  if (role === 'standalone' && service.mysql_topology_status === 'standalone') {
+    return 'Standalone'
+  }
+  return 'Unknown'
+}
+
+function mysqlTopologyStatusLabel(service: DatabaseServiceRecord) {
+  const status = service.mysql_topology_status || service.mysql_cluster_status || ''
+  if (status === 'clustered' || status === 'ok') {
+    return 'Clustered'
+  }
+  if (status === 'standalone') {
+    return 'Standalone'
+  }
+  if (status === 'missing_master') {
+    return 'Missing master'
+  }
+  if (status === 'ambiguous_master') {
+    return 'Ambiguous master'
+  }
+  if (status === 'drift') {
+    return 'Drift'
+  }
+  if (status === 'unknown') {
+    return 'Not collected'
+  }
+  return 'Not collected'
+}
+
+function mysqlClusterBadgeLabel(service: DatabaseServiceRecord) {
+  const role = mysqlClusterRoleLabel(service)
+  const status = mysqlTopologyStatusLabel(service)
+  return role === status ? role : `${role} - ${status}`
+}
+
+function mysqlClusterStatusClass(service: DatabaseServiceRecord) {
+  if (service.engine !== 'mysql') {
+    return 'bg-slate-100 text-slate-600'
+  }
+  if (service.mysql_topology_status === 'drift' || service.mysql_cluster_status === 'drift') {
+    return 'bg-red-100 text-red-800'
+  }
+  if (
+    service.mysql_cluster_status === 'missing_master' ||
+    service.mysql_topology_status === 'missing_master' ||
+    service.mysql_cluster_status === 'ambiguous_master' ||
+    service.mysql_topology_status === 'ambiguous_master'
+  ) {
+    return 'bg-amber-100 text-amber-800'
+  }
+  if (service.mysql_cluster_status === 'ok' || service.mysql_topology_status === 'clustered') {
+    return 'bg-emerald-100 text-emerald-800'
+  }
+  if (service.mysql_topology_status === 'standalone') {
+    return service.mysql_ddl_dml_eligible
+      ? 'bg-emerald-100 text-emerald-800'
+      : 'bg-amber-100 text-amber-800'
+  }
+  return 'bg-slate-100 text-slate-700'
+}
+
+function mysqlClusterTitle(service: DatabaseServiceRecord) {
+  if (service.engine !== 'mysql') {
+    return 'Cluster topology applies to MySQL services.'
+  }
+  const peers = service.mysql_cluster_unmanaged_peers ?? []
+  const peerText = peers.length
+    ? ` Detected unmanaged peers: ${peers.map((peer) => `${peer.host}:${peer.port}`).join(', ')}.`
+    : ''
+  const reason = service.mysql_ddl_dml_block_reason ? ` ${service.mysql_ddl_dml_block_reason}` : ''
+  return `${mysqlClusterLabel(service)} ${mysqlClusterBadgeLabel(service)}.${reason}${peerText}`.trim()
 }
 
 function formatDateTime(value: string | null) {
@@ -667,6 +774,9 @@ function resetServiceForm() {
   serviceForm.team_ids = []
   delete serviceForm.recommendation_id
   serviceFormError.value = ''
+  clusterForm.name = ''
+  clusterForm.label_value = ''
+  clusterFormError.value = ''
 }
 
 function openServiceDialog(
@@ -696,6 +806,8 @@ function openServiceDialog(
     serviceForm.denied_db_name_regex = service.denied_db_name_regex
     serviceForm.charset = service.charset
     serviceForm.team_ids = [...service.team_ids]
+    clusterForm.name = service.mysql_cluster_name || ''
+    clusterForm.label_value = service.mysql_cluster_label || ''
   }
   if (recommendation) {
     serviceForm.recommendation_id = recommendation.id
@@ -757,6 +869,37 @@ async function submitService() {
     serviceFormError.value = toUserFacingMessage(errorValue, 'Failed to save service.')
   } finally {
     serviceSaving.value = false
+  }
+}
+
+async function submitClusterUpdate() {
+  const clusterId = editingService.value?.mysql_cluster_id
+  if (!clusterId) {
+    clusterFormError.value = 'This service is not assigned to a MySQL cluster.'
+    return
+  }
+  if (!clusterForm.name.trim() || !clusterForm.label_value.trim()) {
+    clusterFormError.value = 'Cluster name and metric label are required.'
+    return
+  }
+  clusterSaving.value = true
+  clusterFormError.value = ''
+  try {
+    await updateMysqlCluster(
+      clusterId,
+      {
+        name: clusterForm.name.trim(),
+        label_value: clusterForm.label_value.trim(),
+      },
+      requireToken(),
+    )
+    feedback.value = 'MySQL cluster updated.'
+    await loadSelectedNode()
+    await loadNodes()
+  } catch (errorValue) {
+    clusterFormError.value = toUserFacingMessage(errorValue, 'Failed to save MySQL cluster.')
+  } finally {
+    clusterSaving.value = false
   }
 }
 
@@ -1271,6 +1414,7 @@ watch(
                     <tr>
                       <th class="px-4 py-3">Service</th>
                       <th class="px-4 py-3">Engine</th>
+                      <th class="px-4 py-3">Cluster</th>
                       <th class="px-4 py-3">Endpoint</th>
                       <th class="px-4 py-3">Monitoring</th>
                       <th class="px-4 py-3">Workflows</th>
@@ -1284,6 +1428,21 @@ watch(
                         {{ service.service_name }}
                       </td>
                       <td class="px-4 py-3 text-slate-600">{{ service.engine.toUpperCase() }}</td>
+                      <td class="px-4 py-3" :title="mysqlClusterTitle(service)">
+                        <div class="flex min-w-36 flex-col gap-1">
+                          <span class="text-sm font-medium text-slate-900">
+                            {{ mysqlClusterLabel(service) }}
+                          </span>
+                          <Badge
+                            variant="secondary"
+                            class="w-fit"
+                            :class="mysqlClusterStatusClass(service)"
+                            :aria-label="mysqlClusterTitle(service)"
+                          >
+                            {{ mysqlClusterBadgeLabel(service) }}
+                          </Badge>
+                        </div>
+                      </td>
                       <td class="px-4 py-3 text-slate-600">
                         {{ service.host }}:{{ service.port }}
                       </td>
@@ -1545,6 +1704,69 @@ watch(
           >
             {{ serviceFormError }}
           </p>
+          <div
+            v-if="editingService && editingService.engine === 'mysql'"
+            class="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 md:col-span-2"
+          >
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-sm font-medium text-slate-900">
+                {{ mysqlClusterLabel(editingService) }}
+              </span>
+              <Badge
+                variant="secondary"
+                class="w-fit"
+                :class="mysqlClusterStatusClass(editingService)"
+                :aria-label="mysqlClusterTitle(editingService)"
+              >
+                {{ mysqlClusterBadgeLabel(editingService) }}
+              </Badge>
+              <span
+                v-if="editingService.mysql_cluster_label"
+                class="text-xs text-slate-500"
+              >
+                dm_mysql_cluster={{ editingService.mysql_cluster_label }}
+                  </span>
+            </div>
+            <div v-if="editingService.mysql_cluster_id" class="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+              <label class="grid gap-1">
+                <span class="text-xs font-medium uppercase text-slate-500">Cluster name</span>
+                <Input v-model="clusterForm.name" :disabled="clusterSaving" />
+              </label>
+              <label class="grid gap-1">
+                <span class="text-xs font-medium uppercase text-slate-500">Metric label</span>
+                <Input v-model="clusterForm.label_value" :disabled="clusterSaving" />
+              </label>
+              <Button
+                type="button"
+                variant="outline"
+                class="self-end"
+                :disabled="clusterSaving"
+                @click="submitClusterUpdate"
+              >
+                {{ clusterSaving ? 'Saving...' : 'Save cluster' }}
+              </Button>
+            </div>
+            <p v-if="clusterFormError" class="text-xs text-red-600">
+              {{ clusterFormError }}
+            </p>
+            <p
+              v-if="editingService.mysql_ddl_dml_block_reason"
+              class="text-xs text-amber-700"
+            >
+              {{ editingService.mysql_ddl_dml_block_reason }}
+            </p>
+            <p
+              v-if="(editingService.mysql_cluster_unmanaged_peers ?? []).length > 0"
+              class="text-xs text-slate-600"
+            >
+              Unmanaged peers:
+              {{
+                (editingService.mysql_cluster_unmanaged_peers ?? [])
+                  .map((peer) => `${peer.host}:${peer.port}`)
+                  .join(', ')
+              }}
+            </p>
+          </div>
           <label class="grid gap-2">
             <span class="text-sm font-medium text-slate-700">Service Name</span>
             <Input v-model="serviceForm.service_name" required placeholder="orders-primary" />

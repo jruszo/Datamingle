@@ -66,6 +66,7 @@ export type SystemSettingsOptions = {
   storage_types: SystemSettingsOption[]
   sms_providers: SystemSettingsOption[]
   inventory_refresh_intervals: SystemSettingsOption[]
+  mysql_topology_drift_policies: SystemSettingsOption[]
 }
 
 export type SystemSettingsPayload = {
@@ -1014,6 +1015,13 @@ export type WorkflowInstanceLookupRecord = {
   type: string
   host: string
   label: string
+  mysql_cluster_id?: number | null
+  mysql_cluster_name?: string
+  mysql_cluster_label?: string
+  mysql_cluster_role?: string
+  mysql_topology_status?: string
+  mysql_ddl_dml_eligible?: boolean
+  mysql_ddl_dml_block_reason?: string
   teams: WorkflowTeamLookupRecord[]
 }
 
@@ -2258,6 +2266,13 @@ export type WorkflowSubmitInstanceRecord = {
   instance_name: string
   db_type: string
   type: string
+  mysql_cluster_id?: number | null
+  mysql_cluster_name?: string
+  mysql_cluster_label?: string
+  mysql_cluster_role?: string
+  mysql_topology_status?: string
+  mysql_ddl_dml_eligible?: boolean
+  mysql_ddl_dml_block_reason?: string
   team_ids: number[]
   team_names: string[]
   workflow_policy_id: number | null

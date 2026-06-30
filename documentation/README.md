@@ -1,8 +1,13 @@
 # Datamingle User Documentation
 
-This is the end-user documentation set for Datamingle. It is organized as small task-focused Markdown files so the documentation can grow into a full product manual.
+This is the end-user documentation set for Datamingle. It is organized as small
+task-focused Markdown files so the documentation can grow into a full product
+manual.
 
-Datamingle is a SQL review, query, workflow, archive, inventory, and database operations platform. The UI is permission-aware: visible menus and actions depend on your Datamingle permissions, resource groups, temporary access grants, and whether a database service is available through an assigned online agent.
+Datamingle is a SQL review, query, workflow, archive, inventory, and database
+operations platform. The UI is permission-aware: visible menus and actions
+depend on your Datamingle permissions, teams, temporary access grants, and
+whether a database service is available through an assigned online agent.
 
 ## Documentation Map
 
@@ -37,6 +42,7 @@ Datamingle is a SQL review, query, workflow, archive, inventory, and database op
 
 - [Inventory Overview](inventory/index.md)
 - [Manage Instances](inventory/instances.md)
+- [MySQL Topology](inventory/mysql-topology.md)
 - [Data Dictionary](inventory/data-dictionary.md)
 - [Instance Tags](inventory/instance-tags.md)
 - [Agents Overview](agents/index.md)
@@ -57,6 +63,7 @@ Datamingle is a SQL review, query, workflow, archive, inventory, and database op
 ### Operations
 
 - [Instance Operations](operations/index.md)
+- [Infrastructure Nodes And Services](operations/infrastructure.md)
 - [Database Management](operations/databases.md)
 - [Account Management](operations/accounts.md)
 - [Parameter Settings](operations/parameters.md)
@@ -72,7 +79,7 @@ Datamingle is a SQL review, query, workflow, archive, inventory, and database op
 - [System Settings](administration/system-settings.md)
 - [User Management](administration/users.md)
 - [Permission Groups](administration/permission-groups.md)
-- [Resource Groups](administration/resource-groups.md)
+- [Teams](administration/resource-groups.md)
 
 ### Troubleshooting
 

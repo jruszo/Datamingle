@@ -10,6 +10,8 @@ from sql.models import (
     DEFAULT_NODE_EXPORTER_COLLECTORS,
     InfrastructureNode,
     Instance,
+    MysqlCluster,
+    MysqlTopologyAlert,
     Team,
     ServiceRecommendation,
     WorkflowPolicy,
@@ -112,6 +114,25 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
     service_name = serializers.CharField(source="instance_name", read_only=True)
     role = serializers.CharField(source="type", read_only=True)
     engine = serializers.CharField(source="db_type", read_only=True)
+    mysql_cluster_id = serializers.IntegerField(read_only=True)
+    mysql_cluster_name = serializers.CharField(
+        source="mysql_cluster.name", read_only=True, default=""
+    )
+    mysql_cluster_label = serializers.CharField(
+        source="mysql_cluster.label_value", read_only=True, default=""
+    )
+    mysql_cluster_status = serializers.CharField(
+        source="mysql_cluster.topology_status", read_only=True, default=""
+    )
+    mysql_cluster_unmanaged_peers = serializers.JSONField(
+        source="mysql_cluster.unmanaged_peers", read_only=True, default=list
+    )
+    mysql_cluster_role = serializers.CharField(
+        source="mysql_topology_role", read_only=True
+    )
+    mysql_topology_status = serializers.CharField(read_only=True)
+    mysql_ddl_dml_eligible = serializers.BooleanField(read_only=True)
+    mysql_ddl_dml_block_reason = serializers.CharField(read_only=True)
     team_ids = serializers.SerializerMethodField()
     monitoring_collectors = serializers.SerializerMethodField()
     effective_monitoring_labels = serializers.SerializerMethodField()
@@ -145,6 +166,15 @@ class DatabaseServiceSerializer(serializers.ModelSerializer):
             "service_name",
             "role",
             "engine",
+            "mysql_cluster_id",
+            "mysql_cluster_name",
+            "mysql_cluster_label",
+            "mysql_cluster_status",
+            "mysql_cluster_unmanaged_peers",
+            "mysql_cluster_role",
+            "mysql_topology_status",
+            "mysql_ddl_dml_eligible",
+            "mysql_ddl_dml_block_reason",
             "host",
             "port",
             "user",
@@ -376,6 +406,91 @@ class InfrastructureNodeWriteSerializer(serializers.ModelSerializer):
             "monitoring_labels",
             "team_ids",
         )
+
+
+class MysqlTopologyAlertSerializer(serializers.ModelSerializer):
+    instance_name = serializers.CharField(
+        source="instance.instance_name", read_only=True, default=""
+    )
+
+    class Meta:
+        model = MysqlTopologyAlert
+        fields = (
+            "id",
+            "alert_type",
+            "status",
+            "message",
+            "instance",
+            "instance_name",
+            "metadata",
+            "create_time",
+            "update_time",
+        )
+
+
+class MysqlClusterSerializer(serializers.ModelSerializer):
+    primary_instance_name = serializers.CharField(
+        source="primary_instance.instance_name", read_only=True, default=""
+    )
+    member_count = serializers.IntegerField(read_only=True)
+    active_alert_count = serializers.IntegerField(read_only=True)
+    active_alerts = MysqlTopologyAlertSerializer(
+        source="active_alert_records", many=True, read_only=True
+    )
+
+    class Meta:
+        model = MysqlCluster
+        fields = (
+            "id",
+            "name",
+            "label_value",
+            "cluster_key",
+            "topology_status",
+            "primary_instance",
+            "primary_instance_name",
+            "unmanaged_peers",
+            "membership_source",
+            "member_count",
+            "active_alert_count",
+            "active_alerts",
+            "last_seen_at",
+            "create_time",
+            "update_time",
+        )
+        read_only_fields = (
+            "id",
+            "cluster_key",
+            "topology_status",
+            "primary_instance",
+            "primary_instance_name",
+            "unmanaged_peers",
+            "membership_source",
+            "member_count",
+            "active_alert_count",
+            "active_alerts",
+            "last_seen_at",
+            "create_time",
+            "update_time",
+        )
+
+    def validate_name(self, value):
+        name = value.strip()
+        if not name:
+            raise serializers.ValidationError("Cluster name cannot be blank.")
+        return name
+
+    def validate_label_value(self, value):
+        label = value.strip()
+        if not re.fullmatch(r"[a-zA-Z0-9_][a-zA-Z0-9_-]{0,99}", label):
+            raise serializers.ValidationError(
+                "Cluster label must be 1-100 characters and contain only letters, numbers, underscores, or hyphens."
+            )
+        queryset = MysqlCluster.objects.filter(label_value=label)
+        if self.instance is not None:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError("Cluster label is already in use.")
+        return label
 
 
 class DatabaseServiceWriteSerializer(serializers.ModelSerializer):

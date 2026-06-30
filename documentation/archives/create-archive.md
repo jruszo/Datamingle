@@ -6,7 +6,7 @@
 2. Select `New Archive`.
 3. Enter a title.
 4. Choose one-time or scheduled execution.
-5. Select resource group, instance, database, and table.
+5. Select team, instance, database, and table.
 6. Choose an archive method.
 7. For scheduled archives, choose frequency and time.
 8. Enter the delete condition.
@@ -16,4 +16,3 @@
 ## Safety
 
 Archive workflows delete data. Write precise delete conditions and include enough context for reviewers.
-

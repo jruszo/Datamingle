@@ -9,5 +9,4 @@ Depending on configuration, administrators can view or edit:
 - active state,
 - display information,
 - permission groups,
-- resource groups.
-
+- teams.

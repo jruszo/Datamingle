@@ -8,10 +8,11 @@ from django.utils import timezone
 from common.config import SysConfig
 from common.task_queue import delete_schedule, schedule, task_info
 from sql.models import Config, Instance, TaskSchedule
+from sql.mysql_topology import apply_mysql_topology_snapshot
 
 logger = logging.getLogger("default")
 
-INVENTORY_REFRESH_INTERVAL_DEFAULT = "24h"
+INVENTORY_REFRESH_INTERVAL_DEFAULT = "1h"
 INVENTORY_REFRESH_INTERVAL_CHOICES = ("1h", "6h", "12h", "24h")
 INVENTORY_REFRESH_INTERVAL_DELTAS = {
     "1h": datetime.timedelta(hours=1),
@@ -95,9 +96,13 @@ def _format_inventory_version(value):
 
 def _normalize_inventory_details(details):
     payload = details or {}
+    mysql_topology = payload.get("mysql_topology", {})
+    if not isinstance(mysql_topology, dict):
+        mysql_topology = {}
     return {
         "hostname": str(payload.get("hostname") or "").strip(),
         "version": _format_inventory_version(payload.get("version")),
+        "mysql_topology": mysql_topology,
     }
 
 
@@ -139,6 +144,29 @@ def refresh_instance_inventory_snapshot(instance, now=None):
             "error": str(exc),
         }
 
+    if instance.db_type == "mysql":
+        try:
+            apply_mysql_topology_snapshot(
+                instance, details.get("mysql_topology") or {}, now=attempt_time
+            )
+        except Exception as exc:
+            logger.exception(
+                "Failed to refresh MySQL topology for instance_id=%s", instance.id
+            )
+            instance.inventory_last_attempt_at = attempt_time
+            instance.inventory_status = (
+                Instance.INVENTORY_STATUS_STALE
+                if instance.inventory_last_success_at
+                else Instance.INVENTORY_STATUS_FAILED
+            )
+            instance.save(update_fields=update_fields)
+            return {
+                "success": False,
+                "status": instance.inventory_status,
+                "error": str(exc),
+            }
+
+    instance.inventory_last_attempt_at = attempt_time
     instance.inventory_status = Instance.INVENTORY_STATUS_OK
     instance.inventory_last_success_at = attempt_time
     instance.inventory_detected_hostname = details["hostname"]

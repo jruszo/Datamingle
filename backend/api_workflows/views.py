@@ -37,6 +37,7 @@ from sql.models import (
     TeamPermissionGroup,
     WorkflowPolicy,
 )
+from sql.mysql_topology import mysql_workflow_block_reason, mysql_workflow_target_filter
 from sql.notify import notify_for_audit, notify_for_execute
 from sql.query_privileges import _query_apply_audit_call_back
 from sql.utils.team import (
@@ -215,6 +216,19 @@ class WorkflowTeamLookupSerializer(serializers.ModelSerializer):
 class WorkflowInstanceLookupSerializer(serializers.ModelSerializer):
     label = serializers.SerializerMethodField()
     teams = serializers.SerializerMethodField()
+    mysql_cluster_id = serializers.IntegerField(read_only=True)
+    mysql_cluster_name = serializers.CharField(
+        source="mysql_cluster.name", read_only=True, default=""
+    )
+    mysql_cluster_label = serializers.CharField(
+        source="mysql_cluster.label_value", read_only=True, default=""
+    )
+    mysql_cluster_role = serializers.CharField(
+        source="mysql_topology_role", read_only=True
+    )
+    mysql_topology_status = serializers.CharField(read_only=True)
+    mysql_ddl_dml_eligible = serializers.BooleanField(read_only=True)
+    mysql_ddl_dml_block_reason = serializers.CharField(read_only=True)
     workflow_policy_name = serializers.CharField(
         source="workflow_policy.name", read_only=True, default=""
     )
@@ -244,6 +258,13 @@ class WorkflowInstanceLookupSerializer(serializers.ModelSerializer):
             "label",
             "workflow_policy",
             "workflow_policy_name",
+            "mysql_cluster_id",
+            "mysql_cluster_name",
+            "mysql_cluster_label",
+            "mysql_cluster_role",
+            "mysql_topology_status",
+            "mysql_ddl_dml_eligible",
+            "mysql_ddl_dml_block_reason",
             "teams",
         )
 
@@ -681,9 +702,12 @@ def _workflow_submission_scope(user):
         or teams_for_role(user, TeamPermissionGroup.WORKFLOW_REQUESTER).exists()
     )
     instances = (
-        filter_agent_runnable_instances(user_instances(user))
-        .filter(workflow_enabled=True, workflow_policy__is_active=True)
-        .select_related("workflow_policy")
+        mysql_workflow_target_filter(
+            filter_agent_runnable_instances(user_instances(user)).filter(
+                workflow_enabled=True, workflow_policy__is_active=True
+            )
+        )
+        .select_related("workflow_policy", "mysql_cluster")
         .prefetch_related("resource_group")
         .order_by("instance_name", "id")
     )
@@ -754,6 +778,19 @@ def _workflow_submission_scope(user):
                 "instance_name": instance.instance_name,
                 "db_type": instance.db_type,
                 "type": instance.type,
+                "mysql_cluster_id": instance.mysql_cluster_id,
+                "mysql_cluster_name": (
+                    instance.mysql_cluster.name if instance.mysql_cluster_id else ""
+                ),
+                "mysql_cluster_label": (
+                    instance.mysql_cluster.label_value
+                    if instance.mysql_cluster_id
+                    else ""
+                ),
+                "mysql_cluster_role": instance.mysql_topology_role,
+                "mysql_topology_status": instance.mysql_topology_status,
+                "mysql_ddl_dml_eligible": instance.mysql_ddl_dml_eligible,
+                "mysql_ddl_dml_block_reason": instance.mysql_ddl_dml_block_reason,
                 **_workflow_policy_summary(instance.workflow_policy),
                 "team_ids": [team_id for team_id, _ in sorted_groups],
                 "team_names": [
@@ -918,6 +955,9 @@ class ExecuteCheck(views.APIView):
             full_sql = serializer.validated_data["full_sql"].strip()
             _ensure_no_load_data_statements(full_sql)
             _authorize_workflow_check_dispatch(request.user, instance, full_sql)
+            block_reason = mysql_workflow_block_reason(instance)
+            if block_reason:
+                raise serializers.ValidationError({"errors": block_reason})
             command = run_agent_command_sync(
                 instance=instance,
                 command_type=AgentCommandType.WORKFLOW_CHECK,
@@ -1214,9 +1254,12 @@ class WorkflowMetadata(views.APIView):
         payload = {
             "manual_execution_enabled": bool(SysConfig().get("manual")),
             "teams": _workflow_metadata_teams(request.user),
-            "instances": filter_agent_runnable_instances(user_instances(request.user))
-            .filter(workflow_enabled=True, workflow_policy__is_active=True)
-            .select_related("workflow_policy")
+            "instances": mysql_workflow_target_filter(
+                filter_agent_runnable_instances(user_instances(request.user)).filter(
+                    workflow_enabled=True, workflow_policy__is_active=True
+                )
+            )
+            .select_related("workflow_policy", "mysql_cluster")
             .prefetch_related("resource_group")
             .order_by("instance_name", "id"),
         }

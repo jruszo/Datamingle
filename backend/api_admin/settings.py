@@ -15,6 +15,7 @@ from common.check import (
 )
 from common.config import SysConfig
 from sql.inventory import (
+    INVENTORY_REFRESH_INTERVAL_DEFAULT,
     INVENTORY_REFRESH_INTERVAL_CHOICES,
     ensure_inventory_refresh_schedule,
 )
@@ -45,6 +46,11 @@ AUTO_REVIEW_DB_TYPES = (
 STORAGE_TYPE_OPTIONS = ("local", "sftp", "s3c", "azure")
 SMS_PROVIDER_OPTIONS = ("disabled", "aliyun", "tencent")
 INVENTORY_REFRESH_INTERVAL_OPTIONS = INVENTORY_REFRESH_INTERVAL_CHOICES
+MYSQL_TOPOLOGY_DRIFT_POLICY_OPTIONS = (
+    "notify_block",
+    "auto_detach",
+    "notify_only",
+)
 
 SYSTEM_SETTINGS_SCHEMA = (
     {"name": "go_inception_host", "kind": "string", "default": ""},
@@ -77,7 +83,13 @@ SYSTEM_SETTINGS_SCHEMA = (
         "name": "inventory_refresh_interval",
         "kind": "choice",
         "choices": INVENTORY_REFRESH_INTERVAL_OPTIONS,
-        "default": "24h",
+        "default": INVENTORY_REFRESH_INTERVAL_DEFAULT,
+    },
+    {
+        "name": "mysql_topology_drift_policy",
+        "kind": "choice",
+        "choices": MYSQL_TOPOLOGY_DRIFT_POLICY_OPTIONS,
+        "default": "notify_block",
     },
     {
         "name": "celery_broker_url",
@@ -288,6 +300,11 @@ def build_system_settings_options():
         "inventory_refresh_intervals": [
             {"value": interval, "label": interval}
             for interval in INVENTORY_REFRESH_INTERVAL_OPTIONS
+        ],
+        "mysql_topology_drift_policies": [
+            {"value": "notify_block", "label": "Notify and block"},
+            {"value": "auto_detach", "label": "Auto detach"},
+            {"value": "notify_only", "label": "Notify only"},
         ],
     }
 

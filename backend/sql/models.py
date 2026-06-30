@@ -656,6 +656,68 @@ class ServiceRecommendation(models.Model):
         )
 
 
+class MysqlCluster(models.Model):
+    STATUS_UNKNOWN = "unknown"
+    STATUS_OK = "ok"
+    STATUS_MISSING_MASTER = "missing_master"
+    STATUS_AMBIGUOUS_MASTER = "ambiguous_master"
+    STATUS_DRIFT = "drift"
+    STATUS_CHOICES = (
+        (STATUS_UNKNOWN, "Unknown"),
+        (STATUS_OK, "OK"),
+        (STATUS_MISSING_MASTER, "Missing Master"),
+        (STATUS_AMBIGUOUS_MASTER, "Ambiguous Master"),
+        (STATUS_DRIFT, "Topology Drift"),
+    )
+
+    SOURCE_AUTO = "auto"
+    SOURCE_MANUAL = "manual"
+    SOURCE_CHOICES = (
+        (SOURCE_AUTO, "Automatic"),
+        (SOURCE_MANUAL, "Manual"),
+    )
+
+    name = models.CharField("Cluster Name", max_length=100)
+    label_value = models.CharField("Cluster Label Value", max_length=100, unique=True)
+    cluster_key = models.CharField("Cluster Key", max_length=255, unique=True)
+    topology_status = models.CharField(
+        "Topology Status",
+        max_length=32,
+        choices=STATUS_CHOICES,
+        default=STATUS_UNKNOWN,
+    )
+    primary_instance = models.ForeignKey(
+        "Instance",
+        verbose_name="Primary Instance",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="mysql_primary_clusters",
+    )
+    unmanaged_peers = models.JSONField("Unmanaged Peers", default=list, blank=True)
+    membership_source = models.CharField(
+        "Membership Source",
+        max_length=16,
+        choices=SOURCE_CHOICES,
+        default=SOURCE_AUTO,
+    )
+    last_seen_at = models.DateTimeField("Last Seen At", null=True, blank=True)
+    create_time = models.DateTimeField(auto_now_add=True)
+    update_time = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        managed = True
+        db_table = "mysql_cluster"
+        verbose_name = "MySQL Cluster"
+        verbose_name_plural = "MySQL Clusters"
+        indexes = (
+            models.Index(fields=("topology_status",), name="mysql_cluster_status_idx"),
+        )
+
+
 DB_TYPE_CHOICES = (
     ("mysql", "MySQL"),
     ("mssql", "MsSQL"),
@@ -680,6 +742,31 @@ class Instance(models.Model, PasswordMixin):
     Production instance configuration.
     """
 
+    MYSQL_ROLE_UNKNOWN = "unknown"
+    MYSQL_ROLE_STANDALONE = "standalone"
+    MYSQL_ROLE_PRIMARY = "primary"
+    MYSQL_ROLE_REPLICA = "replica"
+    MYSQL_ROLE_CHOICES = (
+        (MYSQL_ROLE_UNKNOWN, "Unknown"),
+        (MYSQL_ROLE_STANDALONE, "Standalone"),
+        (MYSQL_ROLE_PRIMARY, "Primary"),
+        (MYSQL_ROLE_REPLICA, "Replica"),
+    )
+    MYSQL_STATUS_UNKNOWN = "unknown"
+    MYSQL_STATUS_STANDALONE = "standalone"
+    MYSQL_STATUS_CLUSTERED = "clustered"
+    MYSQL_STATUS_MISSING_MASTER = "missing_master"
+    MYSQL_STATUS_AMBIGUOUS_MASTER = "ambiguous_master"
+    MYSQL_STATUS_DRIFT = "drift"
+    MYSQL_STATUS_CHOICES = (
+        (MYSQL_STATUS_UNKNOWN, "Unknown"),
+        (MYSQL_STATUS_STANDALONE, "Standalone"),
+        (MYSQL_STATUS_CLUSTERED, "Clustered"),
+        (MYSQL_STATUS_MISSING_MASTER, "Missing Master"),
+        (MYSQL_STATUS_AMBIGUOUS_MASTER, "Ambiguous Master"),
+        (MYSQL_STATUS_DRIFT, "Topology Drift"),
+    )
+
     INVENTORY_STATUS_NEVER = "never"
     INVENTORY_STATUS_OK = "ok"
     INVENTORY_STATUS_STALE = "stale"
@@ -698,6 +785,55 @@ class Instance(models.Model, PasswordMixin):
         choices=(("master", "Primary"), ("slave", "Replica")),
     )
     db_type = models.CharField("Database Type", max_length=20, choices=DB_TYPE_CHOICES)
+    mysql_cluster = models.ForeignKey(
+        MysqlCluster,
+        verbose_name="MySQL Cluster",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="instances",
+    )
+    mysql_cluster_membership_source = models.CharField(
+        "MySQL Cluster Membership Source",
+        max_length=16,
+        choices=MysqlCluster.SOURCE_CHOICES,
+        default=MysqlCluster.SOURCE_AUTO,
+    )
+    mysql_server_uuid = models.CharField(
+        "MySQL Server UUID", max_length=64, default="", blank=True
+    )
+    mysql_topology_role = models.CharField(
+        "MySQL Topology Role",
+        max_length=16,
+        choices=MYSQL_ROLE_CHOICES,
+        default=MYSQL_ROLE_UNKNOWN,
+    )
+    mysql_topology_status = models.CharField(
+        "MySQL Topology Status",
+        max_length=32,
+        choices=MYSQL_STATUS_CHOICES,
+        default=MYSQL_STATUS_UNKNOWN,
+    )
+    mysql_read_only = models.BooleanField("MySQL Read Only", null=True, blank=True)
+    mysql_super_read_only = models.BooleanField(
+        "MySQL Super Read Only", null=True, blank=True
+    )
+    mysql_source_host = models.CharField(
+        "MySQL Source Host", max_length=200, default="", blank=True
+    )
+    mysql_source_port = models.IntegerField("MySQL Source Port", null=True, blank=True)
+    mysql_topology_last_seen_at = models.DateTimeField(
+        "MySQL Topology Last Seen At", null=True, blank=True
+    )
+    mysql_topology_details = models.JSONField(
+        "MySQL Topology Details", default=dict, blank=True
+    )
+    mysql_ddl_dml_eligible = models.BooleanField(
+        "MySQL DDL/DML Eligible", default=False
+    )
+    mysql_ddl_dml_block_reason = models.CharField(
+        "MySQL DDL/DML Block Reason", max_length=255, default="", blank=True
+    )
     mode = models.CharField(
         "Run Mode",
         max_length=10,
@@ -804,6 +940,72 @@ class Instance(models.Model, PasswordMixin):
         db_table = "sql_instance"
         verbose_name = "Instance Configuration"
         verbose_name_plural = "Instance Configuration"
+
+
+class MysqlTopologyAlert(models.Model):
+    TYPE_DRIFT = "drift"
+    TYPE_MISSING_MASTER = "missing_master"
+    TYPE_AMBIGUOUS_MASTER = "ambiguous_master"
+    TYPE_CHOICES = (
+        (TYPE_DRIFT, "Topology Drift"),
+        (TYPE_MISSING_MASTER, "Missing Master"),
+        (TYPE_AMBIGUOUS_MASTER, "Ambiguous Master"),
+    )
+    STATUS_ACTIVE = "active"
+    STATUS_RESOLVED = "resolved"
+    STATUS_CHOICES = (
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_RESOLVED, "Resolved"),
+    )
+
+    cluster = models.ForeignKey(
+        MysqlCluster,
+        verbose_name="MySQL Cluster",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="alerts",
+    )
+    instance = models.ForeignKey(
+        Instance,
+        verbose_name="Instance",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="mysql_topology_alerts",
+    )
+    alert_type = models.CharField("Alert Type", max_length=32, choices=TYPE_CHOICES)
+    status = models.CharField(
+        "Alert Status",
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_ACTIVE,
+    )
+    message = models.CharField("Message", max_length=255)
+    metadata = models.JSONField("Metadata", default=dict, blank=True)
+    create_time = models.DateTimeField(auto_now_add=True)
+    update_time = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        managed = True
+        db_table = "mysql_topology_alert"
+        verbose_name = "MySQL Topology Alert"
+        verbose_name_plural = "MySQL Topology Alerts"
+        indexes = (
+            models.Index(
+                fields=("status", "alert_type"), name="mysql_alert_status_idx"
+            ),
+            models.Index(fields=("cluster", "status"), name="mysql_alert_cluster_idx"),
+            models.Index(
+                fields=("instance", "status"), name="mysql_alert_instance_idx"
+            ),
+        )
+        constraints = (
+            models.UniqueConstraint(
+                fields=("instance", "alert_type", "status"),
+                name="mysql_alert_instance_type_status_uniq",
+            ),
+        )
 
 
 class PermissionRequestTarget(models.TextChoices):

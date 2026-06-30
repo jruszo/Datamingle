@@ -10,9 +10,8 @@ The profile page can include:
 - display name,
 - email,
 - permission groups,
-- resource groups,
+- teams,
 - profile details,
 - session information.
 
-If groups or resource groups are wrong, contact an administrator.
-
+If groups or teams are wrong, contact an administrator.

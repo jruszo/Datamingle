@@ -19,7 +19,7 @@ Datamingle only shows menus and actions that your user can access.
 
 ## Why A Menu Is Missing
 
-A menu is usually missing because your account lacks the required permission. Ask an administrator to check your permission groups and resource groups.
+A menu is usually missing because your account lacks the required permission.
+Ask an administrator to check your permission groups and teams.
 
 If you only need access to one service for a limited time, use `Permission Management` when available.
-

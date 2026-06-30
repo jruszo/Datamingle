@@ -40,24 +40,27 @@ Feature Matrix
 ====
 
 Datamingle is migrating database work onto the agent. The agent-backed product
-surface currently supports MySQL and PostgreSQL services. MySQL has monitoring
-and basic command inspection support. PostgreSQL is supported for inventory and
-monitoring workflows. Governed DDL/DML and data export workflows have
-agent-side executor implementations but are not yet wired end-to-end.
+surface currently supports MySQL and PostgreSQL services. MySQL has monitoring,
+inventory, topology discovery, online query, governed DDL/DML, and export
+command support through assigned agents. PostgreSQL is supported for inventory
+and monitoring workflows.
 
 Legend: `Yes` = supported, `Partial` = supported with database-specific limits,
 `No` = not currently wired.
 
 | Database | Agent Commands | Monitoring | Online Queries | Governed DDL/DML | Data Exports | Data Dictionary | Database Management | Account Management | Parameter Management | Session Diagnostics | Archives |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| MySQL | Partial | Yes | Partial | No | No | Yes | Yes | Yes | Yes | Yes | Yes |
+| MySQL | Partial | Yes | Partial | Partial | Partial | Yes | Yes | Yes | Yes | Yes | Yes |
 | PostgreSQL | No | Yes | No | No | No | No | No | No | No | No | No |
 
 Notes:
 
-- Agent commands (connection test, inventory collection, monitoring) are
-  functional for MySQL via online, command-enabled agents. Governed DDL/DML and
-  export workflows require end-to-end agent integration that is not yet complete.
+- Agent commands (connection test, inventory collection, monitoring, governed
+  DDL/DML checks and execution, and export checks and execution) are functional
+  for MySQL via online, command-enabled agents.
+- MySQL inventory refreshes include topology discovery. DDL/DML targets are
+  limited to writable standalone services or detected cluster masters; replicas
+  and clusters with missing or ambiguous masters are blocked.
 - Online queries for MySQL execute through agents, but data masking and
   table-level permission checks still rely on the internal goInception engine.
 - PostgreSQL services can be registered on infrastructure nodes and monitored

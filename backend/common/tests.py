@@ -143,6 +143,13 @@ class InventoryRefreshTests(TestCase):
         )
         mock_celery_execute_task.return_value.apply_async.assert_called_once()
 
+    def test_default_inventory_refresh_interval_is_hourly(self):
+        now = inventory.timezone.now()
+
+        next_run = inventory.calculate_next_inventory_refresh_run(from_time=now)
+
+        self.assertEqual(next_run - now, datetime.timedelta(hours=1))
+
     @patch("common.task_queue._refresh_celery_runtime_config")
     @patch("common.task_queue._celery_execute_task")
     def test_force_schedule_refresh_replaces_next_run_when_interval_changes(
@@ -214,7 +221,10 @@ class InventoryRefreshTests(TestCase):
 
         details = inventory.collect_inventory_snapshot(self.instance)
 
-        self.assertEqual(details, {"hostname": "agent-host", "version": "8.0.36"})
+        self.assertEqual(
+            details,
+            {"hostname": "agent-host", "version": "8.0.36", "mysql_topology": {}},
+        )
         self.assertEqual(run_command.call_args.kwargs["instance"], self.instance)
         self.assertEqual(
             run_command.call_args.kwargs["command_type"], "inventory.collect"
