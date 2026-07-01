@@ -107,15 +107,23 @@ watch(() => route.fullPath, () => void loadPage())
       </RouterLink>
     </Button>
 
-    <Card class="border-slate-200">
+    <Card class="border-slate-200" data-testid="user-management-detail">
       <CardHeader>
         <CardTitle>{{ user?.display || user?.username || 'User' }}</CardTitle>
       </CardHeader>
       <CardContent class="space-y-6">
-        <p v-if="pageError" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p
+          v-if="pageError"
+          class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+          data-testid="user-management-detail-error"
+        >
           {{ pageError }}
         </p>
-        <p v-else-if="feedback" class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+        <p
+          v-else-if="feedback"
+          class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"
+          data-testid="user-management-detail-feedback"
+        >
           {{ feedback }}
         </p>
 
@@ -130,7 +138,11 @@ watch(() => route.fullPath, () => void loadPage())
           </div>
           <div>
             <p class="text-xs font-medium uppercase text-slate-500">Status</p>
-            <Badge class="mt-1" :variant="user.is_active ? 'secondary' : 'outline'">
+            <Badge
+              class="mt-1"
+              :variant="user.is_active ? 'secondary' : 'outline'"
+              data-testid="user-management-detail-status"
+            >
               {{ user.is_active ? 'Active' : 'Inactive' }}
             </Badge>
           </div>
@@ -147,6 +159,7 @@ watch(() => route.fullPath, () => void loadPage())
               :key="team.team_id"
               :to="`/settings/teams/${team.team_id}`"
               class="flex items-center justify-between gap-4 px-4 py-3 hover:bg-slate-50"
+              :data-testid="`user-management-detail-team-${team.team_id}`"
             >
               <span class="font-medium text-slate-900">{{ team.team_name }}</span>
               <Badge variant="secondary">{{ team.permission_level_name }}</Badge>
@@ -156,10 +169,20 @@ watch(() => route.fullPath, () => void loadPage())
         </div>
       </CardContent>
       <CardFooter v-if="user" class="justify-between border-t border-slate-200 pt-6">
-        <Button variant="outline" :disabled="isTogglingStatus || isLoading" @click="toggleUserStatus">
+        <Button
+          variant="outline"
+          data-testid="user-management-detail-toggle-active"
+          :disabled="isTogglingStatus || isLoading"
+          @click="toggleUserStatus"
+        >
           {{ user.is_active ? 'Deactivate user' : 'Reactivate user' }}
         </Button>
-        <Button variant="destructive" :disabled="isDeleting || isLoading" @click="removeUser">
+        <Button
+          variant="destructive"
+          data-testid="user-management-detail-delete"
+          :disabled="isDeleting || isLoading"
+          @click="removeUser"
+        >
           <Trash2 class="h-4 w-4" />
           Delete user
         </Button>

@@ -136,6 +136,36 @@ class TestE2EEnvironmentSeed(TestCase):
             f"{pm.id},{dba.id}",
         )
 
+    def test_seed_e2e_environment_cleans_user_management_e2e_users(self):
+        call_command("seed_e2e_environment")
+
+        email = "e2e-user-mgmt-stale@datamingle.dev"
+        stale_user = Users.objects.create_user(
+            username=email,
+            email=email,
+            password="SecurePass123!",
+            display="E2E User Management Stale",
+        )
+        EmailAddress.objects.create(
+            user=stale_user,
+            email=email,
+            primary=True,
+            verified=True,
+        )
+        team = Team.objects.get(team_name="Demo Workflow Single Stage")
+        qa = Group.objects.get(name="QA")
+        membership = TeamMembership.objects.create(
+            user=stale_user,
+            team=team,
+            permission_level=qa,
+        )
+
+        call_command("seed_e2e_environment")
+
+        self.assertFalse(Users.objects.filter(username=email).exists())
+        self.assertFalse(EmailAddress.objects.filter(email=email).exists())
+        self.assertFalse(TeamMembership.objects.filter(id=membership.id).exists())
+
     def test_seed_e2e_environment_cleans_stale_permission_scenario_rows(self):
         call_command("seed_e2e_environment")
 

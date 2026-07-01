@@ -73,7 +73,11 @@ async function submitLogin() {
         <p v-if="sessionMessage" class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
           {{ sessionMessage }}
         </p>
-        <p v-if="loginError || formError" class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p
+          v-if="loginError || formError"
+          class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+          data-testid="login-error"
+        >
           {{ formError || loginError }}
         </p>
           <div class="grid gap-2">

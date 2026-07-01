@@ -105,6 +105,8 @@ E2E_SCENARIO_USERNAMES = (
     "e2e-requester@datamingle.dev",
     "e2e-reviewer@datamingle.dev",
 )
+E2E_USER_MANAGEMENT_EMAIL_PREFIX = "e2e-user-mgmt-"
+E2E_USER_MANAGEMENT_EMAIL_SUFFIX = "@datamingle.dev"
 
 
 def seed_e2e_environment(write_line=None):
@@ -119,6 +121,7 @@ def seed_e2e_environment(write_line=None):
     with transaction.atomic():
         seed_local_demo(write_line=write_line)
         _cleanup_permission_scenario(log)
+        _cleanup_user_management_scenario(log)
         users = _seed_users(log)
         _seed_demo_memberships(users, log)
         _seed_access_request_audit_settings(log)
@@ -166,11 +169,38 @@ def _cleanup_permission_scenario(log):
     )
 
 
+def _cleanup_user_management_scenario(log):
+    user_filter = _user_management_e2e_user_filter()
+    user_ids = list(Users.objects.filter(user_filter).values_list("id", flat=True))
+
+    TeamMembership.objects.filter(user_id__in=user_ids).delete()
+    EmailAddress.objects.filter(
+        Q(
+            email__startswith=E2E_USER_MANAGEMENT_EMAIL_PREFIX,
+            email__endswith=E2E_USER_MANAGEMENT_EMAIL_SUFFIX,
+        )
+        | Q(user_id__in=user_ids)
+    ).delete()
+    Users.objects.filter(id__in=user_ids).delete()
+
+    log("E2E user management reset: {} users".format(len(user_ids)))
+
+
 def _ensure_local_e2e_seed_enabled():
     if os.environ.get(LOCAL_DEMO_SEED_ENV) != "1":
         raise CommandError(
             "seed_e2e_environment can only run when " f"{LOCAL_DEMO_SEED_ENV}=1 is set."
         )
+
+
+def _user_management_e2e_user_filter():
+    return Q(
+        username__startswith=E2E_USER_MANAGEMENT_EMAIL_PREFIX,
+        username__endswith=E2E_USER_MANAGEMENT_EMAIL_SUFFIX,
+    ) | Q(
+        email__startswith=E2E_USER_MANAGEMENT_EMAIL_PREFIX,
+        email__endswith=E2E_USER_MANAGEMENT_EMAIL_SUFFIX,
+    )
 
 
 def _scenario_grant_filter(scenario_users, request_ids):

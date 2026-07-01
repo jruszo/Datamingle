@@ -310,12 +310,14 @@ watch(searchQuery, () => {
         <p
           v-if="error"
           class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+          data-testid="user-management-error"
         >
           {{ error }}
         </p>
         <p
           v-else-if="feedback"
           class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"
+          data-testid="user-management-feedback"
         >
           {{ feedback }}
         </p>
@@ -344,7 +346,7 @@ watch(searchQuery, () => {
           @update:sort-direction="sortDirection = $event"
         >
           <template #toolbar-actions>
-            <Button @click="openInviteDialog">
+            <Button data-testid="user-management-create-open" @click="openInviteDialog">
               <UserPlus class="h-4 w-4" />
               Create user
             </Button>
@@ -355,7 +357,9 @@ watch(searchQuery, () => {
           </template>
 
           <template #cell-display="{ row }">
-            <div class="font-medium text-slate-900">{{ row.display || row.username }}</div>
+            <div class="font-medium text-slate-900" data-testid="user-management-user">
+              {{ row.display || row.username }}
+            </div>
             <div class="mt-1 text-xs text-slate-500">User ID {{ row.id }}</div>
           </template>
 
@@ -403,6 +407,7 @@ watch(searchQuery, () => {
               <Badge
                 :variant="row.is_active ? 'secondary' : 'outline'"
                 :class="row.is_active ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600'"
+                data-testid="user-management-status"
               >
                 {{ row.is_active ? 'Active' : 'Inactive' }}
               </Badge>
@@ -422,11 +427,17 @@ watch(searchQuery, () => {
           <template #cell-actions="{ row }">
             <div class="flex flex-wrap gap-2">
               <Button as-child variant="outline" size="sm">
-                <RouterLink :to="`/settings/users/${row.id}`">Open</RouterLink>
+                <RouterLink
+                  :to="`/settings/users/${row.id}`"
+                  data-testid="user-management-open"
+                >
+                  Open
+                </RouterLink>
               </Button>
               <Button
                 variant="outline"
                 size="sm"
+                data-testid="user-management-toggle-active"
                 @click="toggleUserActiveState(row as UserManagementRecord)"
               >
                 {{ row.is_active ? 'Deactivate' : 'Reactivate' }}
@@ -434,6 +445,7 @@ watch(searchQuery, () => {
               <Button
                 variant="destructive"
                 size="sm"
+                data-testid="user-management-delete"
                 @click="removeUser(row as UserManagementRecord)"
               >
                 Delete
@@ -447,6 +459,7 @@ watch(searchQuery, () => {
     <div
       v-if="isInviteDialogOpen"
       class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
+      data-testid="user-management-create-dialog"
       @click.self="closeInviteDialog"
     >
       <div class="w-full max-w-2xl rounded-lg bg-white shadow-xl">
@@ -466,6 +479,7 @@ watch(searchQuery, () => {
           <p
             v-if="inviteError"
             class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+            data-testid="user-management-create-error"
           >
             {{ inviteError }}
           </p>
@@ -477,6 +491,7 @@ watch(searchQuery, () => {
               v-model="inviteEmail"
               type="email"
               autocomplete="email"
+              data-testid="user-management-create-email"
               :disabled="inviteSubmitting"
               placeholder="person@example.com"
             />
@@ -489,6 +504,7 @@ watch(searchQuery, () => {
             <Input
               id="invite-display"
               v-model="inviteDisplay"
+              data-testid="user-management-create-display"
               :disabled="inviteSubmitting"
               placeholder="Optional"
             />
@@ -502,6 +518,7 @@ watch(searchQuery, () => {
               id="invite-password"
               v-model="invitePassword"
               autocomplete="new-password"
+              data-testid="user-management-create-password"
               :disabled="inviteSubmitting"
               placeholder="At least 9 characters"
               type="password"
@@ -520,6 +537,7 @@ watch(searchQuery, () => {
             <Button
               type="submit"
               class="gap-2"
+              data-testid="user-management-create-submit"
               :disabled="inviteSubmitting"
             >
               <UserPlus class="h-4 w-4" />
