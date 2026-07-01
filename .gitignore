@@ -30,7 +30,9 @@ backend/src/docker-compose/datamingle/downloads/DataExportFile/
 backend/src/docker-compose/datamingle/downloads/dictionary/
 backend/docs/
 frontend/playwright-report/
+frontend/e2e-playwright-report/
 frontend/test-results/
+frontend/e2e-screenshots/
 /static/
 backend/static/
 /supervisord.pid

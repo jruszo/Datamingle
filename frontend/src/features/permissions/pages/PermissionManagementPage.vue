@@ -734,6 +734,7 @@ onMounted(async () => {
 
       <div class="flex flex-wrap items-center gap-2">
         <Button
+          data-testid="permission-requests-tab"
           :variant="activeSection === 'requests' ? 'default' : 'outline'"
           type="button"
           @click="activeSection = 'requests'"
@@ -741,6 +742,7 @@ onMounted(async () => {
           Requests
         </Button>
         <Button
+          data-testid="permission-active-access-tab"
           :variant="activeSection === 'grants' ? 'default' : 'outline'"
           type="button"
           @click="activeSection = 'grants'"
@@ -843,6 +845,7 @@ onMounted(async () => {
             <button
               v-for="requestItem in requestsPage.results"
               :key="requestItem.request_id"
+              data-testid="permission-request-row"
               type="button"
               class="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left transition hover:border-slate-300 hover:bg-slate-50"
               @click="void loadRequestDetail(requestItem.request_id)"
@@ -976,6 +979,7 @@ onMounted(async () => {
             <div
               v-for="grant in grantsPage.results"
               :key="`${grant.grant_type}-${grant.grant_id}`"
+              data-testid="permission-grant-row"
               class="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4"
             >
               <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -1313,6 +1317,7 @@ onMounted(async () => {
 
     <div
       v-if="isDetailDialogOpen"
+      data-testid="permission-request-detail"
       class="fixed inset-0 z-50 flex justify-end bg-slate-950/45"
       @click.self="closeDetailDialog"
     >
@@ -1358,7 +1363,9 @@ onMounted(async () => {
                   {{ selectedRequestSummary.title }}
                 </p>
                 <Badge variant="outline" :class="statusClass(selectedRequestSummary.status)">
-                  {{ statusLabel(selectedRequestSummary.status) }}
+                  <span data-testid="permission-request-detail-status">
+                    {{ statusLabel(selectedRequestSummary.status) }}
+                  </span>
                 </Badge>
               </div>
               <div class="grid gap-3 text-sm text-slate-600 md:grid-cols-2">
@@ -1422,6 +1429,7 @@ onMounted(async () => {
                 <div
                   v-for="(node, index) in selectedRequestDetail?.review_info ?? []"
                   :key="`${node.team_name}-${index}`"
+                  data-testid="permission-review-node"
                   class="rounded-2xl border p-4"
                   :class="
                     node.is_current_node
@@ -1494,6 +1502,7 @@ onMounted(async () => {
               <h3 class="font-medium text-slate-900">Review action</h3>
               <textarea
                 v-model="reviewForm.audit_remark"
+                data-testid="permission-review-remark"
                 :class="textareaClass"
                 :disabled="reviewSubmitting"
                 placeholder="Add an approval note"
@@ -1502,6 +1511,7 @@ onMounted(async () => {
                 <Button
                   type="button"
                   class="gap-2"
+                  data-testid="permission-review-approve"
                   :disabled="reviewSubmitting"
                   @click="void submitReview(1)"
                 >
@@ -1512,6 +1522,7 @@ onMounted(async () => {
                   variant="outline"
                   type="button"
                   class="gap-2 border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-700"
+                  data-testid="permission-review-reject"
                   :disabled="reviewSubmitting"
                   @click="void submitReview(2)"
                 >
