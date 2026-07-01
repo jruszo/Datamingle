@@ -1,9 +1,12 @@
 import datetime
+import os
 
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import Group
 from django.contrib.auth.models import Permission
+from django.core.management.base import CommandError
 from django.db import transaction
+from django.db.models import Q
 
 from common.utils.const import WorkflowType
 from sql.local_demo import DEMO_TEAMS, seed_local_demo
@@ -25,6 +28,7 @@ from sql.models import (
 from sql.utils.team import normalize_permission_group_sequence
 
 E2E_PASSWORD = "SecurePass123!"
+LOCAL_DEMO_SEED_ENV = "RUN_LOCAL_DEMO_SEED"
 
 E2E_USERS = (
     {
@@ -106,6 +110,8 @@ E2E_SCENARIO_USERNAMES = (
 def seed_e2e_environment(write_line=None):
     """Seed a reproducible local E2E environment after the Docker reset."""
 
+    _ensure_local_e2e_seed_enabled()
+
     def log(message):
         if write_line:
             write_line(message)
@@ -125,11 +131,10 @@ def seed_e2e_environment(write_line=None):
 
 def _cleanup_permission_scenario(log):
     scenario_users = list(Users.objects.filter(username__in=E2E_SCENARIO_USERNAMES))
-    scenario_usernames = [user.username for user in scenario_users]
     request_ids = list(
-        PermissionRequest.objects.filter(user_name__in=scenario_usernames).values_list(
-            "request_id", flat=True
-        )
+        PermissionRequest.objects.filter(
+            user_name__in=E2E_SCENARIO_USERNAMES
+        ).values_list("request_id", flat=True)
     )
     audit_ids = list(
         WorkflowAudit.objects.filter(
@@ -145,9 +150,11 @@ def _cleanup_permission_scenario(log):
     WorkflowLog.objects.filter(audit_id__in=audit_ids).delete()
     WorkflowAuditDetail.objects.filter(audit_id__in=audit_ids).delete()
     WorkflowAudit.objects.filter(audit_id__in=audit_ids).delete()
-    TemporaryTeamGrant.objects.filter(user__in=scenario_users).delete()
-    TemporaryInstanceGrant.objects.filter(user__in=scenario_users).delete()
-    PermanentTeamGrant.objects.filter(user__in=scenario_users).delete()
+    grant_filter = _scenario_grant_filter(scenario_users, request_ids)
+    if grant_filter:
+        TemporaryTeamGrant.objects.filter(grant_filter).delete()
+        TemporaryInstanceGrant.objects.filter(grant_filter).delete()
+        PermanentTeamGrant.objects.filter(grant_filter).delete()
     PermissionRequest.objects.filter(request_id__in=request_ids).delete()
     TeamMembership.objects.filter(user__in=scenario_users).delete()
 
@@ -157,6 +164,22 @@ def _cleanup_permission_scenario(log):
             len(scenario_users),
         )
     )
+
+
+def _ensure_local_e2e_seed_enabled():
+    if os.environ.get(LOCAL_DEMO_SEED_ENV) != "1":
+        raise CommandError(
+            "seed_e2e_environment can only run when " f"{LOCAL_DEMO_SEED_ENV}=1 is set."
+        )
+
+
+def _scenario_grant_filter(scenario_users, request_ids):
+    grant_filter = Q()
+    if scenario_users:
+        grant_filter |= Q(user__in=scenario_users)
+    if request_ids:
+        grant_filter |= Q(source_request_id__in=request_ids)
+    return grant_filter
 
 
 def _seed_users(log):
@@ -194,10 +217,17 @@ def _upsert_user(username, email, display, is_superuser, direct_permission_coden
             "verified": True,
         },
     )
+    direct_permission_codenames = tuple(direct_permission_codenames)
     permissions = Permission.objects.filter(
         content_type__app_label="sql",
         codename__in=direct_permission_codenames,
     )
+    resolved_codenames = set(permissions.values_list("codename", flat=True))
+    missing_codenames = sorted(set(direct_permission_codenames) - resolved_codenames)
+    if missing_codenames:
+        raise CommandError(
+            "Missing E2E direct permissions: {}".format(", ".join(missing_codenames))
+        )
     user.user_permissions.set(permissions)
     return user
 

@@ -34,7 +34,12 @@ export async function createLocalUserSession(
   const context = await browser.newContext({ acceptDownloads: true })
   const page = await context.newPage()
 
-  await loginWithLocalUser(page, email, password)
+  try {
+    await loginWithLocalUser(page, email, password)
+  } catch (error) {
+    await context.close()
+    throw error
+  }
 
   return { context, page }
 }

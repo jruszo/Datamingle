@@ -67,5 +67,5 @@ if ! verify_frontend; then
 fi
 
 cd "$FRONTEND_DIR"
-export PLAYWRIGHT_HTML_REPORT="${PLAYWRIGHT_HTML_REPORT:-$FRONTEND_DIR/e2e-playwright-report}"
+export PLAYWRIGHT_HTML_OUTPUT_DIR="${PLAYWRIGHT_HTML_OUTPUT_DIR:-$FRONTEND_DIR/e2e-playwright-report}"
 npx playwright test "$@"

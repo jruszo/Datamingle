@@ -1,11 +1,16 @@
 import datetime
+import os
+from unittest import mock
 
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import Group
+from django.core.management.base import CommandError
 from django.core.management import call_command
+from django.db import connection
 from django.test import TestCase
 
 from common.utils.const import WorkflowStatus, WorkflowType
+from sql import e2e_environment
 from sql.models import (
     MailboxCategory,
     MailboxItem,
@@ -18,12 +23,45 @@ from sql.models import (
     TemporaryTeamGrant,
     Users,
     WorkflowAudit,
+    WorkflowAuditDetail,
     WorkflowAuditSetting,
     WorkflowLog,
 )
 
 
 class TestE2EEnvironmentSeed(TestCase):
+    def setUp(self):
+        self.local_demo_seed_env = mock.patch.dict(
+            os.environ, {"RUN_LOCAL_DEMO_SEED": "1"}
+        )
+        self.local_demo_seed_env.start()
+        self.addCleanup(self.local_demo_seed_env.stop)
+
+    def test_seed_e2e_environment_requires_local_demo_seed_flag(self):
+        with mock.patch.dict(os.environ, {"RUN_LOCAL_DEMO_SEED": "0"}):
+            with self.assertRaisesMessage(CommandError, "RUN_LOCAL_DEMO_SEED=1"):
+                call_command("seed_e2e_environment")
+
+        self.assertFalse(
+            Users.objects.filter(username="e2e-admin@datamingle.dev").exists()
+        )
+
+    def test_seed_e2e_environment_rejects_missing_direct_permission_codenames(self):
+        patched_users = (
+            {
+                "username": "e2e-missing-permission@datamingle.dev",
+                "email": "e2e-missing-permission@datamingle.dev",
+                "display": "E2E Missing Permission",
+                "is_superuser": False,
+                "direct_permissions": ("missing_e2e_permission",),
+                "memberships": (),
+            },
+        )
+
+        with mock.patch.object(e2e_environment, "E2E_USERS", patched_users):
+            with self.assertRaisesMessage(CommandError, "missing_e2e_permission"):
+                call_command("seed_e2e_environment")
+
     def test_seed_e2e_environment_creates_verified_local_users_and_access_approval_settings(
         self,
     ):
@@ -180,4 +218,103 @@ class TestE2EEnvironmentSeed(TestCase):
                 user=requester,
                 team=team,
             ).exists()
+        )
+
+    def test_seed_e2e_environment_cleans_orphaned_scenario_request_rows(self):
+        call_command("seed_e2e_environment")
+
+        requester = Users.objects.get(username="e2e-requester@datamingle.dev")
+        reviewer = Users.objects.get(username="e2e-reviewer@datamingle.dev")
+        requester_id = requester.id
+        requester_username = requester.username
+        requester_display = requester.display
+        team = Team.objects.get(team_name="Demo Workflow Single Stage")
+        qa = Group.objects.get(name="QA")
+
+        requester.delete()
+
+        request = PermissionRequest.objects.create(
+            team=team,
+            permission_level=qa,
+            target_type=PermissionRequestTarget.TEAM,
+            instance=None,
+            access_level="",
+            title="E2E orphan request",
+            reason="created by test",
+            subject_type=PermissionRequestSubject.USER,
+            access_duration=PermissionRequestDuration.TEMPORARY,
+            user_name=requester_username,
+            user_display=requester_display,
+            valid_date=datetime.date.today() + datetime.timedelta(days=7),
+            status=WorkflowStatus.WAITING,
+            audit_auth_groups=str(qa.id),
+        )
+        with connection.cursor() as cursor:
+            cursor.execute("SET FOREIGN_KEY_CHECKS=0")
+            try:
+                grant = TemporaryTeamGrant.objects.create(
+                    user_id=requester_id,
+                    team=team,
+                    permission_level=qa,
+                    source_request=request,
+                    valid_date=datetime.date.today() + datetime.timedelta(days=7),
+                )
+            finally:
+                cursor.execute("SET FOREIGN_KEY_CHECKS=1")
+        audit = WorkflowAudit.objects.create(
+            team_id=team.team_id,
+            team_name=team.team_name,
+            workflow_id=request.request_id,
+            workflow_type=WorkflowType.ACCESS_REQUEST,
+            workflow_title=request.title,
+            audit_auth_groups=str(qa.id),
+            current_audit=str(qa.id),
+            next_audit="-1",
+            current_status=WorkflowStatus.WAITING,
+            create_user=requester_username,
+            create_user_display=requester_display,
+        )
+        detail = WorkflowAuditDetail.objects.create(
+            audit_id=audit.audit_id,
+            audit_user=reviewer.username,
+            audit_time=datetime.datetime.now(),
+            audit_status=WorkflowStatus.WAITING,
+            remark="stale",
+        )
+        WorkflowLog.objects.create(
+            audit_id=audit.audit_id,
+            operation_type=1,
+            operation_type_desc="Submit",
+            operation_info="stale",
+            operator=requester_username,
+            operator_display=requester_display,
+        )
+        MailboxItem.objects.create(
+            recipient=reviewer,
+            category=MailboxCategory.APPROVAL_NEEDED,
+            source_type="permission_request",
+            source_id=request.request_id,
+            title="Approval needed: E2E orphan request",
+            body="stale",
+            action_path=f"/permission-management?requestId={request.request_id}",
+            dedupe_key=f"approval_needed:permission_request:{request.request_id}",
+        )
+
+        call_command("seed_e2e_environment")
+
+        self.assertFalse(
+            PermissionRequest.objects.filter(request_id=request.request_id).exists()
+        )
+        self.assertFalse(
+            TemporaryTeamGrant.objects.filter(grant_id=grant.grant_id).exists()
+        )
+        self.assertFalse(WorkflowAudit.objects.filter(audit_id=audit.audit_id).exists())
+        self.assertFalse(
+            WorkflowAuditDetail.objects.filter(
+                audit_detail_id=detail.audit_detail_id
+            ).exists()
+        )
+        self.assertFalse(WorkflowLog.objects.filter(audit_id=audit.audit_id).exists())
+        self.assertFalse(
+            MailboxItem.objects.filter(source_id=request.request_id).exists()
         )
