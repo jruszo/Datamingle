@@ -159,7 +159,7 @@ watch(() => route.fullPath, () => void loadPage())
               :key="team.team_id"
               :to="`/settings/teams/${team.team_id}`"
               class="flex items-center justify-between gap-4 px-4 py-3 hover:bg-slate-50"
-              data-testid="user-management-detail-team"
+              :data-testid="`user-management-detail-team-${team.team_id}`"
             >
               <span class="font-medium text-slate-900">{{ team.team_name }}</span>
               <Badge variant="secondary">{{ team.permission_level_name }}</Badge>
