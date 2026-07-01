@@ -1,13 +1,21 @@
 import { execFileSync } from 'node:child_process'
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test'
+import { expect, type Browser, type BrowserContext, type Page, type TestInfo } from '@playwright/test'
 
 const POLL_INTERVAL_MS = 2_000
 const DEFAULT_TIMEOUT_MS = 120_000
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url))
+const E2E_SCREENSHOT_ROOT = join(REPO_ROOT, 'frontend', 'e2e-screenshots')
+const E2E_PASSWORD = 'SecurePass123!'
 
 export type DemoUser = 'demo_admin' | 'demo_requester' | 'demo_pm' | 'demo_dba'
+export type SeededLocalUser =
+  | 'e2e-admin@datamingle.dev'
+  | 'e2e-requester@datamingle.dev'
+  | 'e2e-reviewer@datamingle.dev'
 
 export async function createRoleSession(browser: Browser, username: DemoUser) {
   const context = await browser.newContext({ acceptDownloads: true })
@@ -16,6 +24,32 @@ export async function createRoleSession(browser: Browser, username: DemoUser) {
   await loginAs(page, username)
 
   return { context, page }
+}
+
+export async function createLocalUserSession(
+  browser: Browser,
+  email: SeededLocalUser,
+  password = E2E_PASSWORD,
+) {
+  const context = await browser.newContext({ acceptDownloads: true })
+  const page = await context.newPage()
+
+  try {
+    await loginWithLocalUser(page, email, password)
+  } catch (error) {
+    await context.close()
+    throw error
+  }
+
+  return { context, page }
+}
+
+export async function loginWithLocalUser(page: Page, email: SeededLocalUser, password = E2E_PASSWORD) {
+  await page.goto('/login')
+  await page.getByTestId('login-email').fill(email)
+  await page.getByTestId('login-password').fill(password)
+  await page.getByTestId('login-submit').click()
+  await expect(page.getByRole('link', { name: 'Workflows' })).toBeVisible()
 }
 
 export async function loginAs(page: Page, username: DemoUser) {
@@ -83,14 +117,41 @@ export function uniqueWorkflowName(prefix: string) {
 }
 
 export function seedLocalDemo() {
+  seedE2EEnvironment()
+}
+
+export function seedE2EEnvironment() {
   execFileSync(
     'docker',
-    ['exec', '-w', '/opt/datamingle/backend', 'datamingle-app', 'python', 'manage.py', 'seed_local_demo'],
+    ['exec', '-w', '/opt/datamingle/backend', 'datamingle-app', 'python', 'manage.py', 'seed_e2e_environment'],
     {
       cwd: REPO_ROOT,
       stdio: 'pipe',
     },
   )
+}
+
+export async function captureE2EScreenshot(page: Page, testInfo: TestInfo, name: string) {
+  const safeTitle = sanitizePathSegment(testInfo.title)
+  const safeName = sanitizePathSegment(name)
+  const screenshotDir = join(E2E_SCREENSHOT_ROOT, safeTitle)
+  const screenshotPath = join(screenshotDir, `${safeName}.png`)
+
+  mkdirSync(screenshotDir, { recursive: true })
+  await page.screenshot({ path: screenshotPath, fullPage: true })
+  await testInfo.attach(name, { path: screenshotPath, contentType: 'image/png' })
+  console.log(`[e2e-screenshot] ${screenshotPath}`)
+
+  return screenshotPath
+}
+
+function sanitizePathSegment(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '')
+    || 'screenshot'
 }
 
 export async function fillSqlEditor(page: Page, testId: string, sql: string) {

@@ -70,6 +70,9 @@ log "Waiting for smoke_local_demo to pass"
 for attempt in $(seq 1 40); do
   if docker exec -w /opt/datamingle/backend datamingle-app python manage.py smoke_local_demo; then
     log "Local demo smoke passed"
+    log "Seeding E2E environment"
+    docker exec -w /opt/datamingle/backend datamingle-app python manage.py seed_e2e_environment
+    log "E2E environment seed passed"
     exit 0
   fi
 

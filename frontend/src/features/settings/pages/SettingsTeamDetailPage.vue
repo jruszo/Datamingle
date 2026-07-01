@@ -563,6 +563,7 @@ watch(
           <div class="flex flex-col gap-2 sm:flex-row">
             <select
               v-model="availableUserId"
+              data-testid="team-member-add-select"
               class="h-10 flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900"
               :disabled="!canSave || availableUsers.length === 0"
             >
@@ -574,6 +575,7 @@ watch(
             <Button
               type="button"
               variant="outline"
+              data-testid="team-member-add"
               :disabled="!canSave || !availableUserId"
               @click="addMember"
             >
@@ -598,13 +600,14 @@ watch(
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-200 bg-white">
-                <tr v-for="user in assignedUsers" :key="user.id">
+                <tr v-for="user in assignedUsers" :key="user.id" data-testid="team-member-row">
                   <td class="px-4 py-3">
                     <div class="font-medium text-slate-900">{{ userLabel(user) }}</div>
                     <div class="mt-1 text-xs text-slate-500">{{ user.username }}</div>
                   </td>
                   <td class="px-4 py-3">
                     <select
+                      data-testid="team-member-role"
                       class="w-full min-w-52 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                       :value="roleForUser(user.id)"
                       :disabled="!canSave"
@@ -768,7 +771,7 @@ watch(
           <Button as-child variant="outline">
             <RouterLink to="/settings/teams">Cancel</RouterLink>
           </Button>
-          <Button :disabled="isLoading || isSaving || !canSave" @click="saveTeam">
+          <Button data-testid="team-save" :disabled="isLoading || isSaving || !canSave" @click="saveTeam">
             <Save class="h-4 w-4" />
             Save
           </Button>
