@@ -12,10 +12,6 @@ const E2E_SCREENSHOT_ROOT = join(REPO_ROOT, 'frontend', 'e2e-screenshots')
 const E2E_PASSWORD = 'SecurePass123!'
 
 export type DemoUser = 'demo_admin' | 'demo_requester' | 'demo_pm' | 'demo_dba'
-export type SeededLocalUser =
-  | 'e2e-admin@datamingle.dev'
-  | 'e2e-requester@datamingle.dev'
-  | 'e2e-reviewer@datamingle.dev'
 
 export async function createRoleSession(browser: Browser, username: DemoUser) {
   const context = await browser.newContext({ acceptDownloads: true })
@@ -28,7 +24,7 @@ export async function createRoleSession(browser: Browser, username: DemoUser) {
 
 export async function createLocalUserSession(
   browser: Browser,
-  email: SeededLocalUser,
+  email: string,
   password = E2E_PASSWORD,
 ) {
   const context = await browser.newContext({ acceptDownloads: true })
@@ -44,12 +40,13 @@ export async function createLocalUserSession(
   return { context, page }
 }
 
-export async function loginWithLocalUser(page: Page, email: SeededLocalUser, password = E2E_PASSWORD) {
+export async function loginWithLocalUser(page: Page, email: string, password = E2E_PASSWORD) {
   await page.goto('/login')
   await page.getByTestId('login-email').fill(email)
   await page.getByTestId('login-password').fill(password)
   await page.getByTestId('login-submit').click()
-  await expect(page.getByRole('link', { name: 'Workflows' })).toBeVisible()
+  await expect(page).toHaveURL(/\/$/)
+  await expect(page.getByTitle('Logout')).toBeVisible()
 }
 
 export async function loginAs(page: Page, username: DemoUser) {
