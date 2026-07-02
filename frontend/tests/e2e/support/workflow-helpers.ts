@@ -159,6 +159,10 @@ export async function fillSqlEditor(page: Page, testId: string, sql: string) {
   await page.keyboard.insertText(sql)
 }
 
+export async function expectSqlEditorToContain(page: Page, testId: string, expected: string) {
+  await expect(page.locator(`[data-testid="${testId}"] .cm-content`).first()).toContainText(expected)
+}
+
 export async function clickAndAcceptDialogIfPresent(
   page: Page,
   action: () => Promise<void>,

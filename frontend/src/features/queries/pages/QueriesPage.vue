@@ -1238,7 +1238,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="grid gap-6">
+  <section data-testid="query-console-page" class="grid gap-6">
     <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
       <div class="space-y-1">
         <p class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Queries</p>
@@ -1275,6 +1275,7 @@ onBeforeUnmount(() => {
       <div class="grid gap-6">
         <div
           v-if="!canSeeWorkspace"
+          data-testid="query-console-no-access"
           class="rounded-3xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800"
         >
           Your account does not have access to the SQL query workspace. Use the Permission Management page if you need temporary access.
@@ -1299,6 +1300,7 @@ onBeforeUnmount(() => {
                 </button>
                 <button
                   type="button"
+                  data-testid="query-console-history-tab"
                   class="rounded-t-xl border border-b-0 px-4 py-2 text-sm font-medium transition"
                   :class="
                     activeTab === 'history'
@@ -1313,6 +1315,7 @@ onBeforeUnmount(() => {
                   v-for="tab in queryTabs"
                   :key="tab.id"
                   type="button"
+                  data-testid="query-console-result-tab"
                   class="group flex items-center gap-2 rounded-t-xl border border-b-0 px-4 py-2 text-sm font-medium transition"
                   :class="
                     activeTab === tab.id
@@ -1348,6 +1351,7 @@ onBeforeUnmount(() => {
                   <label class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Common Queries</label>
                   <select
                     v-model="commonQueryId"
+                    data-testid="query-console-common-query-select"
                     class="min-w-[240px]"
                     :class="selectClass(commonQueryDisabled)"
                     :disabled="commonQueryDisabled"
@@ -1380,7 +1384,11 @@ onBeforeUnmount(() => {
                     <Sparkles class="h-4 w-4" />
                     Execution Plan
                   </Button>
-                  <Button :disabled="!canRunQueries || queryRunning" @click="void runQuery('query')">
+                  <Button
+                    data-testid="query-console-run-query"
+                    :disabled="!canRunQueries || queryRunning"
+                    @click="void runQuery('query')"
+                  >
                     <Play class="h-4 w-4" />
                     {{ queryRunning ? 'Running...' : 'Run Query' }}
                   </Button>
@@ -1402,6 +1410,7 @@ onBeforeUnmount(() => {
                 :db-type="selectedDbType"
                 :disabled="workspaceLoading"
                 :height="editorPaneHeight"
+                test-id="query-console-sql-editor"
                 @submit="void runQuery('query')"
               />
 
@@ -1449,8 +1458,17 @@ onBeforeUnmount(() => {
               <template v-else>
                 <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
                   <form class="flex flex-1 gap-3" @submit.prevent="submitHistorySearch">
-                    <Input v-model="historyFilters.search" placeholder="Search by database, instance, user, alias, or SQL text" />
-                    <Button variant="outline" type="submit" :disabled="historyLoading">
+                    <Input
+                      v-model="historyFilters.search"
+                      data-testid="query-console-history-search"
+                      placeholder="Search by database, instance, user, alias, or SQL text"
+                    />
+                    <Button
+                      data-testid="query-console-history-search-submit"
+                      variant="outline"
+                      type="submit"
+                      :disabled="historyLoading"
+                    >
                       <Search class="h-4 w-4" />
                       Search
                     </Button>
@@ -1510,15 +1528,22 @@ onBeforeUnmount(() => {
                         <tr
                           v-for="item in historyPage.results"
                           :key="item.id"
+                          data-testid="query-console-history-row"
                           class="align-top transition hover:bg-slate-50/80 cursor-pointer"
                           @click="void rerunHistoryItem(item)"
                         >
                           <td class="px-4 py-3">
                             <div class="flex gap-2">
-                              <Button variant="outline" size="sm" @click.stop="void rerunHistoryItem(item)">
+                              <Button
+                                data-testid="query-console-history-rerun"
+                                variant="outline"
+                                size="sm"
+                                @click.stop="void rerunHistoryItem(item)"
+                              >
                                 <RefreshCcw class="h-4 w-4" />
                               </Button>
                               <Button
+                                data-testid="query-console-history-favorite"
                                 :variant="item.favorite ? 'default' : 'outline'"
                                 size="sm"
                                 @click.stop="void toggleFavorite(item)"
@@ -1564,7 +1589,11 @@ onBeforeUnmount(() => {
                 {{ currentTab.error }}
               </div>
 
-              <div v-else class="overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white">
+              <div
+                v-else
+                data-testid="query-console-result-panel"
+                class="overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white"
+              >
                 <div class="flex flex-col gap-2 border-b border-slate-200 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
                     <p class="text-sm font-medium text-slate-900">

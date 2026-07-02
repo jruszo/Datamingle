@@ -11,10 +11,13 @@ from django.db.models import Q
 from common.utils.const import WorkflowType
 from sql.local_demo import DEMO_TEAMS, seed_local_demo
 from sql.models import (
+    Instance,
     MailboxItem,
     MailboxSourceType,
     PermanentTeamGrant,
     PermissionRequest,
+    QueryLog,
+    QueryPrivileges,
     Team,
     TeamMembership,
     TemporaryInstanceGrant,
@@ -44,7 +47,7 @@ E2E_USERS = (
         "email": "demo-requester@datamingle.dev",
         "display": "Demo Requester",
         "is_superuser": False,
-        "direct_permissions": (),
+        "direct_permissions": ("query_all_instances",),
         "memberships": (
             ("Demo Workflow Single Stage", "RD"),
             ("Demo Workflow Multi Stage", "RD"),
@@ -107,6 +110,13 @@ E2E_SCENARIO_USERNAMES = (
 )
 E2E_USER_MANAGEMENT_EMAIL_PREFIX = "e2e-user-mgmt-"
 E2E_USER_MANAGEMENT_EMAIL_SUFFIX = "@datamingle.dev"
+E2E_QUERY_USERNAME = "demo_requester"
+E2E_QUERY_INSTANCE_NAMES = (
+    "demo-mysql-workflow",
+    "demo-mysql-ubuntu",
+)
+E2E_QUERY_DATABASE_NAME = "demo_orders"
+E2E_QUERY_ROW_LIMIT = 100
 
 
 def seed_e2e_environment(write_line=None):
@@ -122,8 +132,10 @@ def seed_e2e_environment(write_line=None):
         seed_local_demo(write_line=write_line)
         _cleanup_permission_scenario(log)
         _cleanup_user_management_scenario(log)
+        _cleanup_query_console_scenario(log)
         users = _seed_users(log)
         _seed_demo_memberships(users, log)
+        _seed_query_console_privileges(users, log)
         _seed_access_request_audit_settings(log)
 
     return {
@@ -184,6 +196,22 @@ def _cleanup_user_management_scenario(log):
     Users.objects.filter(id__in=user_ids).delete()
 
     log("E2E user management reset: {} users".format(len(user_ids)))
+
+
+def _cleanup_query_console_scenario(log):
+    deleted_logs, _ = QueryLog.objects.filter(username=E2E_QUERY_USERNAME).delete()
+    deleted_privileges, _ = QueryPrivileges.objects.filter(
+        user_name=E2E_QUERY_USERNAME,
+        instance__instance_name__in=E2E_QUERY_INSTANCE_NAMES,
+        db_name=E2E_QUERY_DATABASE_NAME,
+    ).delete()
+
+    log(
+        "E2E query console reset: {} logs, {} privileges".format(
+            deleted_logs,
+            deleted_privileges,
+        )
+    )
 
 
 def _ensure_local_e2e_seed_enabled():
@@ -277,6 +305,34 @@ def _seed_demo_memberships(users, log):
                 defaults={"permission_level": permission_level},
             )
             log(f"E2E membership seeded: {user.username} -> {team_name} / {level_name}")
+
+
+def _seed_query_console_privileges(users, log):
+    user = users[E2E_QUERY_USERNAME]
+    for instance in Instance.objects.filter(instance_name__in=E2E_QUERY_INSTANCE_NAMES):
+        if not instance.queryable:
+            instance.queryable = True
+            instance.save(update_fields=["queryable"])
+        QueryPrivileges.objects.update_or_create(
+            user_name=user.username,
+            instance=instance,
+            db_name=E2E_QUERY_DATABASE_NAME,
+            table_name="",
+            priv_type=1,
+            defaults={
+                "user_display": user.display,
+                "valid_date": datetime.date.today() + datetime.timedelta(days=365),
+                "limit_num": E2E_QUERY_ROW_LIMIT,
+                "is_deleted": 0,
+            },
+        )
+        log(
+            "E2E query privilege seeded: {} -> {} / {}".format(
+                user.username,
+                instance.instance_name,
+                E2E_QUERY_DATABASE_NAME,
+            )
+        )
 
 
 def _seed_access_request_audit_settings(log):
