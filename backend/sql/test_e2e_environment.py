@@ -12,6 +12,9 @@ from django.test import TestCase
 from common.utils.const import WorkflowStatus, WorkflowType
 from sql import e2e_environment
 from sql.models import (
+    Instance,
+    QueryLog,
+    QueryPrivileges,
     MailboxCategory,
     MailboxItem,
     PermissionRequest,
@@ -249,6 +252,52 @@ class TestE2EEnvironmentSeed(TestCase):
                 team=team,
             ).exists()
         )
+
+    def test_seed_e2e_environment_resets_query_console_state(self):
+        call_command("seed_e2e_environment")
+
+        instance = Instance.objects.get(instance_name="demo-mysql-workflow")
+        QueryLog.objects.create(
+            username="demo_requester",
+            user_display="Demo Requester",
+            db_name="demo_orders",
+            instance_name=instance.instance_name,
+            sqllog="select 'stale query console log'",
+            effect_row=1,
+            favorite=True,
+            alias="stale favorite",
+        )
+        updated_privileges = QueryPrivileges.objects.filter(
+            user_name="demo_requester",
+            instance=instance,
+            db_name="demo_orders",
+            table_name="",
+            priv_type=1,
+        ).update(limit_num=1, is_deleted=1)
+        self.assertEqual(updated_privileges, 1)
+
+        call_command("seed_e2e_environment")
+
+        instance.refresh_from_db()
+        self.assertTrue(instance.queryable)
+        self.assertIn(
+            "sql.query_all_instances",
+            Users.objects.get(username="demo_requester").get_all_permissions(),
+        )
+        self.assertFalse(QueryLog.objects.filter(username="demo_requester").exists())
+        privileges = QueryPrivileges.objects.filter(
+            user_name="demo_requester",
+            instance=instance,
+            db_name="demo_orders",
+            table_name="",
+            priv_type=1,
+        )
+        self.assertEqual(privileges.count(), 1)
+        privilege = privileges.get()
+        self.assertEqual(privilege.user_display, "Demo Requester")
+        self.assertEqual(privilege.limit_num, 100)
+        self.assertEqual(privilege.is_deleted, 0)
+        self.assertGreaterEqual(privilege.valid_date, datetime.date.today())
 
     def test_seed_e2e_environment_cleans_orphaned_scenario_request_rows(self):
         call_command("seed_e2e_environment")

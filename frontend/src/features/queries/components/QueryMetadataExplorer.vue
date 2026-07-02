@@ -110,6 +110,31 @@ function detailsForNode(node: QueryMetadataNode) {
   }
   return props.tableDetails[node.id] || null
 }
+
+function testIdSegment(value: string | number) {
+  return `${value}`
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '')
+    || 'item'
+}
+
+function rawIdTestIdSegment(value: string) {
+  return `id-${encodeURIComponent(value)
+    .replace(/[!'()*]/g, (char) => `%${char.codePointAt(0)?.toString(16) || '00'}`)
+    .toLowerCase()}`
+}
+
+function nodeTestId(node: QueryMetadataNode) {
+  return [
+    ...[node.kind, node.dbName, node.schemaName, node.name]
+      .filter(Boolean)
+      .map(testIdSegment),
+    rawIdTestIdSegment(node.id),
+  ]
+    .join('-')
+}
 </script>
 
 <template>
@@ -123,6 +148,7 @@ function detailsForNode(node: QueryMetadataNode) {
       </div>
       <select
         :value="selectedInstanceId"
+        data-testid="query-console-instance-select"
         class="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-sky-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
         :disabled="loading"
         @change="emit('select-instance', Number(($event.target as HTMLSelectElement).value))"
@@ -180,6 +206,7 @@ function detailsForNode(node: QueryMetadataNode) {
           >
             <div
               class="flex items-center gap-2 rounded-xl px-2 py-2 text-left transition"
+              :data-testid="`query-console-node-row-${nodeTestId(row.node)}`"
               :class="
                 isSelected(row.node)
                   ? 'bg-sky-50 text-sky-900'
@@ -189,6 +216,7 @@ function detailsForNode(node: QueryMetadataNode) {
             >
               <button
                 type="button"
+                :data-testid="`query-console-node-toggle-${nodeTestId(row.node)}`"
                 class="flex h-6 w-6 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-200 hover:text-slate-900"
                 @click.stop="emit('toggle-node', row.node.id)"
               >
@@ -209,6 +237,7 @@ function detailsForNode(node: QueryMetadataNode) {
 
               <button
                 type="button"
+                :data-testid="`query-console-node-select-${nodeTestId(row.node)}`"
                 class="flex min-w-0 flex-1 items-center gap-3 text-left"
                 @click="emit('select-node', row.node.id)"
                 @dblclick="row.node.kind === 'table' ? emit('insert-node', row.node.id) : undefined"
