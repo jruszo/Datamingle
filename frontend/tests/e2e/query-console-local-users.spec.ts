@@ -12,6 +12,8 @@ import {
 const DEMO_QUERY_USER = 'demo-requester@datamingle.dev'
 const BLOCKED_QUERY_USER = 'e2e-requester@datamingle.dev'
 const QUERY_INSTANCE = 'demo-mysql-ubuntu'
+// Mirrors QueryMetadataExplorer nodeTestId's kind-dbName-name-id composition.
+// Update this prefix when nodeTestId or rawIdTestIdSegment changes.
 const QUERY_DATABASE_NODE_PREFIX = 'query-console-node-select-database-demo-orders-demo-orders-id-'
 const SQL_EDITOR = 'query-console-sql-editor'
 

@@ -121,15 +121,18 @@ function testIdSegment(value: string | number) {
 }
 
 function rawIdTestIdSegment(value: string) {
-  return `id-${Array.from(value)
-    .map((char) => char.codePointAt(0)?.toString(36) || '0')
-    .join('-')}`
+  return `id-${encodeURIComponent(value)
+    .replace(/[!'()*]/g, (char) => `%${char.codePointAt(0)?.toString(16) || '00'}`)
+    .toLowerCase()}`
 }
 
 function nodeTestId(node: QueryMetadataNode) {
-  return [node.kind, node.dbName, node.schemaName, node.name, rawIdTestIdSegment(node.id)]
-    .filter(Boolean)
-    .map(testIdSegment)
+  return [
+    ...[node.kind, node.dbName, node.schemaName, node.name]
+      .filter(Boolean)
+      .map(testIdSegment),
+    rawIdTestIdSegment(node.id),
+  ]
     .join('-')
 }
 </script>
