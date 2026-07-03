@@ -70,6 +70,20 @@ async function fulfillJson(route: Route, body: unknown) {
   })
 }
 
+async function failUnexpectedRoute(route: Route, mockName: string): Promise<never> {
+  const request = route.request()
+  const url = new URL(request.url())
+  const message = `${mockName} received unexpected ${request.method()} ${url.pathname}${url.search}`
+
+  console.error(message)
+  await route.fulfill({
+    status: 500,
+    contentType: 'application/json',
+    body: JSON.stringify({ detail: message }),
+  })
+  throw new Error(message)
+}
+
 async function mockAgentApis(page: Page) {
   const agent = {
     id: 77,
@@ -251,7 +265,7 @@ async function mockAgentApis(page: Page) {
       return
     }
 
-    await route.abort()
+    await failUnexpectedRoute(route, 'mockAgentApis')
   })
 
   return { assignmentRequests }
@@ -396,7 +410,7 @@ async function mockMetricsAndDashboards(page: Page) {
       return
     }
 
-    await route.abort()
+    await failUnexpectedRoute(route, 'mockMetricsAndDashboards')
   })
 
   return { createdPayloads, deletedDashboardIds }
@@ -518,11 +532,21 @@ test.describe.serial('observability and admin workflows', () => {
       await captureE2EScreenshot(admin.page, testInfo, 'dashboard-created-detail')
 
       await admin.page.goto('/dashboards')
-      admin.page.once('dialog', async (dialog) => {
-        expect(dialog.message()).toContain('Existing Observability')
-        await dialog.accept()
+      let dialogMessage = ''
+      const dialogHandled = new Promise<void>((resolve, reject) => {
+        admin.page.once('dialog', async (dialog) => {
+          try {
+            dialogMessage = dialog.message()
+            await dialog.accept()
+            resolve()
+          } catch (error) {
+            reject(error)
+          }
+        })
       })
       await admin.page.getByRole('row', { name: /Existing Observability/ }).getByTitle('Delete dashboard').click()
+      await dialogHandled
+      expect(dialogMessage).toContain('Existing Observability')
       await expect.poll(() => deletedDashboardIds).toContain(301)
       await expect(admin.page.getByText('Existing Observability')).toHaveCount(0)
       await captureE2EScreenshot(admin.page, testInfo, 'dashboard-deleted')
