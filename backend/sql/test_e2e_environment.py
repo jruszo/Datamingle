@@ -29,6 +29,7 @@ from sql.models import (
     WorkflowAuditDetail,
     WorkflowAuditSetting,
     WorkflowLog,
+    WorkflowPolicy,
 )
 
 
@@ -298,6 +299,49 @@ class TestE2EEnvironmentSeed(TestCase):
         self.assertEqual(privilege.limit_num, 100)
         self.assertEqual(privilege.is_deleted, 0)
         self.assertGreaterEqual(privilege.valid_date, datetime.date.today())
+
+    def test_seed_e2e_environment_cleans_inventory_scenario_instances(self):
+        call_command("seed_e2e_environment")
+
+        team = Team.objects.get(team_name="Demo Workflow Single Stage")
+        stale_instance = Instance.objects.create(
+            instance_name="e2e-inventory-stale",
+            type="master",
+            db_type="mysql",
+            host="stale-e2e.local",
+            port=3306,
+            user="stale_user",
+            password="stale_password",
+            db_name="stale_db",
+            charset="utf8mb4",
+        )
+        stale_instance.resource_group.set([team])
+
+        call_command("seed_e2e_environment")
+
+        self.assertFalse(
+            Instance.objects.filter(instance_name="e2e-inventory-stale").exists()
+        )
+        self.assertTrue(
+            Instance.objects.filter(instance_name="demo-mysql-workflow").exists()
+        )
+
+    def test_seed_e2e_environment_creates_inventory_workflow_policy(self):
+        call_command("seed_e2e_environment")
+
+        dba = Group.objects.get(name="DBA")
+        policy = WorkflowPolicy.objects.get(name="E2E Inventory Policy")
+
+        self.assertTrue(policy.is_active)
+        self.assertEqual(policy.description, "E2E workflow policy for inventory tests.")
+        self.assertEqual(
+            list(
+                policy.steps.order_by("order").values_list(
+                    "permission_group", flat=True
+                )
+            ),
+            [dba.id],
+        )
 
     def test_seed_e2e_environment_cleans_orphaned_scenario_request_rows(self):
         call_command("seed_e2e_environment")
