@@ -507,7 +507,7 @@ watch(
       </Button>
     </div>
 
-    <Card class="border-slate-200">
+    <Card class="border-slate-200" data-testid="team-detail">
       <CardHeader>
         <CardTitle>{{ isCreateMode ? 'Create Team' : 'Edit Team' }}</CardTitle>
         <CardDescription>Manage scoped resource access and server membership.</CardDescription>
@@ -518,25 +518,36 @@ watch(
           <Input
             id="team-name"
             v-model="groupName"
+            data-testid="team-name"
             :disabled="!canSave || isLoading"
             placeholder="e.g. production"
           />
         </div>
 
-        <p v-if="pageError" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p
+          v-if="pageError"
+          data-testid="team-page-error"
+          class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
           {{ pageError }}
         </p>
         <p
           v-else-if="pageNotice"
+          data-testid="team-page-notice"
           class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
         >
           {{ pageNotice }}
         </p>
-        <p v-else-if="formError" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p
+          v-else-if="formError"
+          data-testid="team-form-error"
+          class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
           {{ formError }}
         </p>
         <p
           v-else-if="formSuccess"
+          data-testid="team-feedback"
           class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"
         >
           {{ formSuccess }}
@@ -585,6 +596,7 @@ watch(
 
           <Input
             v-model="userFilter"
+            data-testid="team-member-filter"
             :disabled="isLoading"
             placeholder="Filter users"
             aria-label="Filter users"
@@ -624,6 +636,7 @@ watch(
                       type="button"
                       variant="ghost"
                       size="sm"
+                      data-testid="team-member-remove"
                       :disabled="!canSave"
                       @click="removeMember(user.id)"
                     >
@@ -649,6 +662,7 @@ watch(
             </p>
           </div>
           <select
+            data-testid="team-node-select"
             class="min-h-48 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
             multiple
             :disabled="!canSave"
@@ -686,10 +700,12 @@ watch(
               <Input
                 id="available-servers-filter"
                 v-model="availableInstanceFilter"
+                data-testid="team-service-available-filter"
                 :disabled="isLoading"
                 placeholder="Filter available servers"
               />
               <select
+                data-testid="team-service-available-select"
                 class="min-h-[18rem] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
                 multiple
                 @change="updateInstanceSelection($event, 'available-instances')"
@@ -704,6 +720,7 @@ watch(
               <Button
                 variant="outline"
                 size="icon"
+                data-testid="team-service-add-selected"
                 :disabled="!canSave || availableInstanceSelection.length === 0"
                 @click="moveSelectedInstancesToAssigned"
               >
@@ -712,6 +729,7 @@ watch(
               <Button
                 variant="outline"
                 size="icon"
+                data-testid="team-service-add-all"
                 :disabled="!canSave || availableInstances.length === 0"
                 @click="moveAllInstancesToAssigned"
               >
@@ -720,6 +738,7 @@ watch(
               <Button
                 variant="outline"
                 size="icon"
+                data-testid="team-service-remove-selected"
                 :disabled="!canSave || selectedInstanceSelection.length === 0"
                 @click="moveSelectedInstancesToAvailable"
               >
@@ -728,6 +747,7 @@ watch(
               <Button
                 variant="outline"
                 size="icon"
+                data-testid="team-service-remove-all"
                 :disabled="!canSave || assignedInstances.length === 0"
                 @click="moveAllInstancesToAvailable"
               >
@@ -740,10 +760,12 @@ watch(
               <Input
                 id="assigned-servers-filter"
                 v-model="selectedInstanceFilter"
+                data-testid="team-service-assigned-filter"
                 :disabled="isLoading"
                 placeholder="Filter assigned servers"
               />
               <select
+                data-testid="team-service-assigned-select"
                 class="min-h-[18rem] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
                 multiple
                 @change="updateInstanceSelection($event, 'selected-instances')"
@@ -759,6 +781,7 @@ watch(
       <CardFooter class="justify-between border-t border-slate-200 pt-6">
         <Button
           v-if="!isCreateMode"
+          data-testid="team-delete"
           variant="destructive"
           :disabled="isDeleting || !canDeleteTeams"
           @click="removeTeam"

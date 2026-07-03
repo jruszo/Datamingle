@@ -3,7 +3,7 @@ import os
 from unittest import mock
 
 from allauth.account.models import EmailAddress
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import Group, Permission
 from django.core.management.base import CommandError
 from django.core.management import call_command
 from django.db import connection
@@ -12,7 +12,10 @@ from django.test import TestCase
 from common.utils.const import WorkflowStatus, WorkflowType
 from sql import e2e_environment
 from sql.models import (
+    InfrastructureNode,
     Instance,
+    InstanceAccessLevel,
+    PermanentTeamGrant,
     QueryLog,
     QueryPrivileges,
     MailboxCategory,
@@ -23,6 +26,7 @@ from sql.models import (
     PermissionRequestTarget,
     Team,
     TeamMembership,
+    TemporaryInstanceGrant,
     TemporaryTeamGrant,
     Users,
     WorkflowAudit,
@@ -342,6 +346,139 @@ class TestE2EEnvironmentSeed(TestCase):
             ),
             [dba.id],
         )
+
+    def test_seed_e2e_environment_cleans_team_permission_level_scenario(self):
+        call_command("seed_e2e_environment")
+
+        query_permission = Permission.objects.get(
+            content_type__app_label="sql",
+            codename="query_submit",
+        )
+        permission_level = Group.objects.create(name="E2E Permission Level Stale")
+        permission_level.permissions.set([query_permission])
+        team = Team.objects.create(team_name="E2E Team Stale")
+        requester = Users.objects.get(username="demo_requester")
+        membership = TeamMembership.objects.create(
+            user=requester,
+            team=team,
+            permission_level=permission_level,
+        )
+        instance = Instance.objects.get(instance_name="demo-mysql-workflow")
+        node = InfrastructureNode.objects.get(name="demo-mysql-node")
+        workflow_team = Team.objects.get(team_name="Demo Workflow Single Stage")
+        qa = Group.objects.get(name="QA")
+        reviewer = Users.objects.get(username="e2e-reviewer@datamingle.dev")
+        instance.resource_group.add(team)
+        node.resource_group.add(team)
+        request = PermissionRequest.objects.create(
+            team=team,
+            permission_level=permission_level,
+            target_type=PermissionRequestTarget.TEAM,
+            instance=None,
+            access_level="",
+            title="E2E stale team request",
+            reason="created by test",
+            subject_type=PermissionRequestSubject.USER,
+            access_duration=PermissionRequestDuration.TEMPORARY,
+            user_name=requester.username,
+            user_display=requester.display,
+            valid_date=datetime.date.today() + datetime.timedelta(days=7),
+            status=WorkflowStatus.WAITING,
+            audit_auth_groups=str(permission_level.id),
+        )
+        team_grant = TemporaryTeamGrant.objects.create(
+            user=requester,
+            team=team,
+            permission_level=qa,
+            source_request=None,
+            valid_date=datetime.date.today() + datetime.timedelta(days=7),
+        )
+        permission_level_grant = PermanentTeamGrant.objects.create(
+            user=requester,
+            team=workflow_team,
+            permission_level=permission_level,
+            source_request=None,
+        )
+        source_request_grant = TemporaryInstanceGrant.objects.create(
+            user=requester,
+            team=workflow_team,
+            instance=instance,
+            access_level=InstanceAccessLevel.QUERY,
+            source_request=request,
+            valid_date=datetime.date.today() + datetime.timedelta(days=7),
+        )
+        audit = WorkflowAudit.objects.create(
+            team_id=team.team_id,
+            team_name=team.team_name,
+            workflow_id=request.request_id,
+            workflow_type=WorkflowType.ACCESS_REQUEST,
+            workflow_title=request.title,
+            audit_auth_groups=str(permission_level.id),
+            current_audit=str(permission_level.id),
+            next_audit="-1",
+            current_status=WorkflowStatus.WAITING,
+            create_user=requester.username,
+            create_user_display=requester.display,
+        )
+        detail = WorkflowAuditDetail.objects.create(
+            audit_id=audit.audit_id,
+            audit_user=reviewer.username,
+            audit_time=datetime.datetime.now(),
+            audit_status=WorkflowStatus.WAITING,
+            remark="stale",
+        )
+        WorkflowLog.objects.create(
+            audit_id=audit.audit_id,
+            operation_type=1,
+            operation_type_desc="Submit",
+            operation_info="stale",
+            operator=requester.username,
+            operator_display=requester.display,
+        )
+        MailboxItem.objects.create(
+            recipient=reviewer,
+            category=MailboxCategory.APPROVAL_NEEDED,
+            source_type="permission_request",
+            source_id=request.request_id,
+            title="Approval needed: E2E stale team request",
+            body="stale",
+            action_path=f"/permission-management?requestId={request.request_id}",
+            dedupe_key=f"approval_needed:permission_request:{request.request_id}",
+        )
+
+        call_command("seed_e2e_environment")
+
+        self.assertFalse(
+            PermissionRequest.objects.filter(request_id=request.request_id).exists()
+        )
+        self.assertFalse(WorkflowAudit.objects.filter(audit_id=audit.audit_id).exists())
+        self.assertFalse(
+            WorkflowAuditDetail.objects.filter(
+                audit_detail_id=detail.audit_detail_id
+            ).exists()
+        )
+        self.assertFalse(WorkflowLog.objects.filter(audit_id=audit.audit_id).exists())
+        self.assertFalse(
+            MailboxItem.objects.filter(source_id=request.request_id).exists()
+        )
+        self.assertFalse(
+            TemporaryTeamGrant.objects.filter(grant_id=team_grant.grant_id).exists()
+        )
+        self.assertFalse(
+            PermanentTeamGrant.objects.filter(
+                grant_id=permission_level_grant.grant_id
+            ).exists()
+        )
+        self.assertFalse(
+            TemporaryInstanceGrant.objects.filter(
+                grant_id=source_request_grant.grant_id
+            ).exists()
+        )
+        self.assertFalse(Team.objects.filter(team_id=team.team_id).exists())
+        self.assertFalse(Group.objects.filter(id=permission_level.id).exists())
+        self.assertFalse(TeamMembership.objects.filter(id=membership.id).exists())
+        self.assertFalse(instance.resource_group.filter(team_id=team.team_id).exists())
+        self.assertFalse(node.resource_group.filter(team_id=team.team_id).exists())
 
     def test_seed_e2e_environment_cleans_orphaned_scenario_request_rows(self):
         call_command("seed_e2e_environment")

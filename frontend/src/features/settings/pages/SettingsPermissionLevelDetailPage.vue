@@ -124,22 +124,38 @@ watch(() => route.fullPath, () => void loadPage())
       </RouterLink>
     </Button>
 
-    <Card class="border-slate-200">
+    <Card class="border-slate-200" data-testid="permission-level-detail">
       <CardHeader>
         <CardTitle>{{ isCreateMode ? 'Create Permission Level' : 'Edit Permission Level' }}</CardTitle>
       </CardHeader>
       <CardContent class="space-y-6">
-        <p v-if="error" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p
+          v-if="error"
+          data-testid="permission-level-form-error"
+          class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
           {{ error }}
         </p>
-        <p v-else-if="feedback" class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+        <p
+          v-else-if="feedback"
+          data-testid="permission-level-feedback"
+          class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"
+        >
           {{ feedback }}
         </p>
 
         <div class="space-y-2">
           <label for="level-name" class="text-sm font-medium text-slate-900">Name</label>
-          <Input id="level-name" v-model="name" :disabled="isLoading || isSaving" placeholder="e.g. Developer" />
-          <p v-if="!isCreateMode" class="text-xs text-slate-500">{{ membershipCount }} active team memberships</p>
+          <Input
+            id="level-name"
+            v-model="name"
+            data-testid="permission-level-name"
+            :disabled="isLoading || isSaving"
+            placeholder="e.g. Developer"
+          />
+          <p v-if="!isCreateMode" data-testid="permission-level-membership-count" class="text-xs text-slate-500">
+            {{ membershipCount }} active team memberships
+          </p>
         </div>
 
         <div class="space-y-4">
@@ -153,6 +169,7 @@ watch(() => route.fullPath, () => void loadPage())
               >
                 <input
                   type="checkbox"
+                  :data-testid="`permission-level-permission-${permission.code}`"
                   :checked="selectedCodes.includes(permission.code)"
                   :disabled="isLoading || isSaving"
                   @change="togglePermission(permission.code, ($event.target as HTMLInputElement).checked)"
@@ -169,6 +186,7 @@ watch(() => route.fullPath, () => void loadPage())
       <CardFooter class="justify-between border-t border-slate-200 pt-6">
         <Button
           v-if="!isCreateMode"
+          data-testid="permission-level-delete"
           variant="destructive"
           :disabled="isDeleting || membershipCount > 0"
           @click="removeLevel"
@@ -177,7 +195,7 @@ watch(() => route.fullPath, () => void loadPage())
           Delete
         </Button>
         <span v-else />
-        <Button :disabled="isLoading || isSaving" @click="saveLevel">
+        <Button data-testid="permission-level-save" :disabled="isLoading || isSaving" @click="saveLevel">
           <Save class="h-4 w-4" />
           Save
         </Button>

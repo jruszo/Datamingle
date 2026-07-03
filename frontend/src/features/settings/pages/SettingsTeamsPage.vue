@@ -221,11 +221,16 @@ watch(searchQuery, () => {
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-5">
-        <p v-if="error" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p
+          v-if="error"
+          data-testid="teams-error"
+          class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
           {{ error }}
         </p>
         <p
           v-else-if="feedback"
+          data-testid="teams-feedback"
           class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"
         >
           {{ feedback }}
@@ -255,12 +260,12 @@ watch(searchQuery, () => {
           @update:sort-direction="sortDirection = $event"
         >
           <template #toolbar-actions>
-            <Button variant="outline" @click="loadTeams">
+            <Button data-testid="teams-refresh" variant="outline" @click="loadTeams">
               <RefreshCw class="h-4 w-4" />
               Refresh
             </Button>
             <Button v-if="canCreateTeams" as-child>
-              <RouterLink to="/settings/teams/new">
+              <RouterLink data-testid="teams-create" to="/settings/teams/new">
                 <Plus class="h-4 w-4" />
                 Create team
               </RouterLink>
