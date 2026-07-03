@@ -46,12 +46,12 @@ onMounted(() => void loadLevels())
         </p>
       </div>
       <div class="flex gap-2">
-        <Button variant="outline" :disabled="isLoading" @click="loadLevels">
+        <Button data-testid="permission-levels-refresh" variant="outline" :disabled="isLoading" @click="loadLevels">
           <RefreshCw class="h-4 w-4" />
           Refresh
         </Button>
         <Button as-child>
-          <RouterLink to="/settings/permission-levels/new">
+          <RouterLink data-testid="permission-levels-create" to="/settings/permission-levels/new">
             <Plus class="h-4 w-4" />
             Add level
           </RouterLink>
@@ -59,7 +59,11 @@ onMounted(() => void loadLevels())
       </div>
     </div>
 
-    <p v-if="error" class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+    <p
+      v-if="error"
+      data-testid="permission-levels-error"
+      class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+    >
       {{ error }}
     </p>
 
@@ -72,6 +76,7 @@ onMounted(() => void loadLevels())
           <RouterLink
             v-for="level in levels"
             :key="level.id"
+            :data-testid="`permission-level-row-${level.id}`"
             :to="`/settings/permission-levels/${level.id}`"
             class="flex flex-wrap items-center justify-between gap-3 px-4 py-4 hover:bg-slate-50"
           >
@@ -81,7 +86,9 @@ onMounted(() => void loadLevels())
                 {{ level.permissions.length }} permissions
               </p>
             </div>
-            <Badge variant="secondary">{{ level.membership_count }} members</Badge>
+            <Badge :data-testid="`permission-level-membership-count-${level.id}`" variant="secondary">
+              {{ level.membership_count }} members
+            </Badge>
           </RouterLink>
           <p v-if="!isLoading && levels.length === 0" class="px-4 py-10 text-center text-sm text-slate-500">
             No permission levels are configured.

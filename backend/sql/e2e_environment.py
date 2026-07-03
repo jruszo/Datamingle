@@ -112,6 +112,8 @@ E2E_SCENARIO_USERNAMES = (
 )
 E2E_USER_MANAGEMENT_EMAIL_PREFIX = "e2e-user-mgmt-"
 E2E_USER_MANAGEMENT_EMAIL_SUFFIX = "@datamingle.dev"
+E2E_TEAM_NAME_PREFIX = "E2E Team "
+E2E_PERMISSION_LEVEL_NAME_PREFIX = "E2E Permission Level "
 E2E_INVENTORY_INSTANCE_PREFIX = "e2e-inventory-"
 E2E_INVENTORY_POLICY_NAME = "E2E Inventory Policy"
 E2E_QUERY_USERNAME = "demo_requester"
@@ -138,6 +140,7 @@ def seed_e2e_environment(write_line=None):
         _cleanup_user_management_scenario(log)
         _cleanup_query_console_scenario(log)
         _cleanup_inventory_scenario(log)
+        _cleanup_team_permission_level_scenario(log)
         users = _seed_users(log)
         _seed_demo_memberships(users, log)
         _seed_inventory_workflow_policy(users, log)
@@ -228,6 +231,61 @@ def _cleanup_inventory_scenario(log):
     stale_instances.delete()
 
     log("E2E inventory reset: {} instances".format(stale_count))
+
+
+def _cleanup_team_permission_level_scenario(log):
+    team_ids = list(
+        Team.objects.filter(team_name__startswith=E2E_TEAM_NAME_PREFIX).values_list(
+            "team_id", flat=True
+        )
+    )
+    permission_level_ids = list(
+        Group.objects.filter(
+            name__startswith=E2E_PERMISSION_LEVEL_NAME_PREFIX
+        ).values_list("id", flat=True)
+    )
+    request_ids = list(
+        PermissionRequest.objects.filter(
+            Q(team_id__in=team_ids) | Q(permission_level_id__in=permission_level_ids)
+        ).values_list("request_id", flat=True)
+    )
+    audit_ids = list(
+        WorkflowAudit.objects.filter(
+            workflow_type=WorkflowType.ACCESS_REQUEST,
+            workflow_id__in=request_ids,
+        ).values_list("audit_id", flat=True)
+    )
+    grant_filter = (
+        Q(team_id__in=team_ids)
+        | Q(permission_level_id__in=permission_level_ids)
+        | Q(source_request_id__in=request_ids)
+    )
+
+    MailboxItem.objects.filter(
+        source_type=MailboxSourceType.PERMISSION_REQUEST,
+        source_id__in=request_ids,
+    ).delete()
+    WorkflowLog.objects.filter(audit_id__in=audit_ids).delete()
+    WorkflowAuditDetail.objects.filter(audit_id__in=audit_ids).delete()
+    WorkflowAudit.objects.filter(audit_id__in=audit_ids).delete()
+    TemporaryTeamGrant.objects.filter(grant_filter).delete()
+    TemporaryInstanceGrant.objects.filter(
+        Q(team_id__in=team_ids) | Q(source_request_id__in=request_ids)
+    ).delete()
+    PermanentTeamGrant.objects.filter(grant_filter).delete()
+    PermissionRequest.objects.filter(request_id__in=request_ids).delete()
+    TeamMembership.objects.filter(
+        Q(team_id__in=team_ids) | Q(permission_level_id__in=permission_level_ids)
+    ).delete()
+    Team.objects.filter(team_id__in=team_ids).delete()
+    Group.objects.filter(id__in=permission_level_ids).delete()
+
+    log(
+        "E2E team permission reset: {} teams, {} permission levels".format(
+            len(team_ids),
+            len(permission_level_ids),
+        )
+    )
 
 
 def _ensure_local_e2e_seed_enabled():

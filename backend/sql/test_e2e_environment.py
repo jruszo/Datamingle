@@ -3,7 +3,7 @@ import os
 from unittest import mock
 
 from allauth.account.models import EmailAddress
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import Group, Permission
 from django.core.management.base import CommandError
 from django.core.management import call_command
 from django.db import connection
@@ -12,6 +12,7 @@ from django.test import TestCase
 from common.utils.const import WorkflowStatus, WorkflowType
 from sql import e2e_environment
 from sql.models import (
+    InfrastructureNode,
     Instance,
     QueryLog,
     QueryPrivileges,
@@ -342,6 +343,35 @@ class TestE2EEnvironmentSeed(TestCase):
             ),
             [dba.id],
         )
+
+    def test_seed_e2e_environment_cleans_team_permission_level_scenario(self):
+        call_command("seed_e2e_environment")
+
+        query_permission = Permission.objects.get(
+            content_type__app_label="sql",
+            codename="query_submit",
+        )
+        permission_level = Group.objects.create(name="E2E Permission Level Stale")
+        permission_level.permissions.set([query_permission])
+        team = Team.objects.create(team_name="E2E Team Stale")
+        requester = Users.objects.get(username="e2e-requester@datamingle.dev")
+        membership = TeamMembership.objects.create(
+            user=requester,
+            team=team,
+            permission_level=permission_level,
+        )
+        instance = Instance.objects.get(instance_name="demo-mysql-workflow")
+        node = InfrastructureNode.objects.get(name="demo-mysql-node")
+        instance.resource_group.add(team)
+        node.resource_group.add(team)
+
+        call_command("seed_e2e_environment")
+
+        self.assertFalse(Team.objects.filter(team_id=team.team_id).exists())
+        self.assertFalse(Group.objects.filter(id=permission_level.id).exists())
+        self.assertFalse(TeamMembership.objects.filter(id=membership.id).exists())
+        self.assertFalse(instance.resource_group.filter(team_id=team.team_id).exists())
+        self.assertFalse(node.resource_group.filter(team_id=team.team_id).exists())
 
     def test_seed_e2e_environment_cleans_orphaned_scenario_request_rows(self):
         call_command("seed_e2e_environment")
