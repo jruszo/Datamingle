@@ -284,11 +284,16 @@ watch(searchQuery, () => {
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-5">
-        <p v-if="error" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p
+          v-if="error"
+          data-testid="inventory-error"
+          class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
           {{ error }}
         </p>
         <p
           v-else-if="feedback"
+          data-testid="inventory-feedback"
           class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"
         >
           {{ feedback }}
@@ -297,7 +302,7 @@ watch(searchQuery, () => {
         <div class="grid gap-4 xl:grid-cols-[minmax(0,0.7fr)_minmax(0,0.9fr)_minmax(0,1.2fr)]">
           <div class="grid min-w-0 gap-2">
             <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Instance Type</span>
-            <select v-model="selectedType" :class="selectClass">
+            <select v-model="selectedType" :class="selectClass" data-testid="inventory-type-filter">
               <option value="">All types</option>
               <option
                 v-for="item in metadata?.instance_types ?? []"
@@ -311,7 +316,7 @@ watch(searchQuery, () => {
 
           <div class="grid min-w-0 gap-2">
             <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Database Type</span>
-            <select v-model="selectedDbType" :class="selectClass">
+            <select v-model="selectedDbType" :class="selectClass" data-testid="inventory-db-type-filter">
               <option value="">All databases</option>
               <option
                 v-for="item in metadata?.db_types ?? []"
@@ -350,11 +355,11 @@ watch(searchQuery, () => {
           @update:sort-direction="sortDirection = $event"
         >
           <template #toolbar-actions>
-            <Button variant="outline" @click="void refreshInventory()">
+            <Button data-testid="inventory-refresh" variant="outline" @click="void refreshInventory()">
               <RefreshCw class="h-4 w-4" />
               Refresh
             </Button>
-            <Button v-if="canCreateInstances" as-child>
+            <Button v-if="canCreateInstances" data-testid="inventory-add-instance" as-child>
               <RouterLink to="/inventory/new">
                 <Plus class="h-4 w-4" />
                 Add instance
@@ -393,7 +398,7 @@ watch(searchQuery, () => {
                 variant="outline"
                 as-child
               >
-                <RouterLink :to="`/inventory/${row.id}`">
+                <RouterLink :to="`/inventory/${row.id}`" data-testid="inventory-edit">
                   <Pencil class="h-4 w-4" />
                   Edit
                 </RouterLink>
@@ -402,6 +407,7 @@ watch(searchQuery, () => {
                 v-if="canRunConnectionTest"
                 size="sm"
                 variant="outline"
+                data-testid="inventory-row-test-connection"
                 :disabled="testingInstanceId === row.id"
                 @click="void runConnectionTest(row as InstanceInventoryRecord)"
               >

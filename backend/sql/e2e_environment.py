@@ -27,6 +27,8 @@ from sql.models import (
     WorkflowAuditDetail,
     WorkflowAuditSetting,
     WorkflowLog,
+    WorkflowPolicy,
+    WorkflowPolicyStep,
 )
 from sql.utils.team import normalize_permission_group_sequence
 
@@ -110,6 +112,8 @@ E2E_SCENARIO_USERNAMES = (
 )
 E2E_USER_MANAGEMENT_EMAIL_PREFIX = "e2e-user-mgmt-"
 E2E_USER_MANAGEMENT_EMAIL_SUFFIX = "@datamingle.dev"
+E2E_INVENTORY_INSTANCE_PREFIX = "e2e-inventory-"
+E2E_INVENTORY_POLICY_NAME = "E2E Inventory Policy"
 E2E_QUERY_USERNAME = "demo_requester"
 E2E_QUERY_INSTANCE_NAMES = (
     "demo-mysql-workflow",
@@ -133,8 +137,10 @@ def seed_e2e_environment(write_line=None):
         _cleanup_permission_scenario(log)
         _cleanup_user_management_scenario(log)
         _cleanup_query_console_scenario(log)
+        _cleanup_inventory_scenario(log)
         users = _seed_users(log)
         _seed_demo_memberships(users, log)
+        _seed_inventory_workflow_policy(users, log)
         _seed_query_console_privileges(users, log)
         _seed_access_request_audit_settings(log)
 
@@ -212,6 +218,16 @@ def _cleanup_query_console_scenario(log):
             deleted_privileges,
         )
     )
+
+
+def _cleanup_inventory_scenario(log):
+    stale_instances = Instance.objects.filter(
+        instance_name__startswith=E2E_INVENTORY_INSTANCE_PREFIX
+    )
+    stale_count = stale_instances.count()
+    stale_instances.delete()
+
+    log("E2E inventory reset: {} instances".format(stale_count))
 
 
 def _ensure_local_e2e_seed_enabled():
@@ -305,6 +321,27 @@ def _seed_demo_memberships(users, log):
                 defaults={"permission_level": permission_level},
             )
             log(f"E2E membership seeded: {user.username} -> {team_name} / {level_name}")
+
+
+def _seed_inventory_workflow_policy(users, log):
+    admin = users["demo_admin"]
+    dba = Group.objects.get(name="DBA")
+    policy, _ = WorkflowPolicy.objects.update_or_create(
+        name=E2E_INVENTORY_POLICY_NAME,
+        defaults={
+            "description": "E2E workflow policy for inventory tests.",
+            "is_active": True,
+            "created_by": admin,
+            "updated_by": admin,
+        },
+    )
+    WorkflowPolicyStep.objects.update_or_create(
+        policy=policy,
+        order=1,
+        defaults={"permission_group": dba},
+    )
+    policy.steps.exclude(order=1).delete()
+    log(f"E2E inventory workflow policy seeded: {policy.name}")
 
 
 def _seed_query_console_privileges(users, log):

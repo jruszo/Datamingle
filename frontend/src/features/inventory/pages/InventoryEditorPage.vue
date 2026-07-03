@@ -424,14 +424,23 @@ watch(form, () => {
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-6">
-        <p v-if="pageError" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p
+          v-if="pageError"
+          data-testid="inventory-page-error"
+          class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
           {{ pageError }}
         </p>
-        <p v-else-if="formError" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <p
+          v-else-if="formError"
+          data-testid="inventory-form-error"
+          class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
           {{ formError }}
         </p>
         <p
           v-if="connectionTestMessage"
+          data-testid="inventory-connection-message"
           :class="connectionTestTone === 'success'
             ? 'rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700'
             : 'rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700'"
@@ -447,17 +456,17 @@ watch(form, () => {
             <div class="grid gap-4 md:grid-cols-2">
               <div class="grid min-w-0 gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Instance Name</span>
-                <Input v-model="form.instance_name" placeholder="analytics-primary" />
+                <Input v-model="form.instance_name" data-testid="inventory-instance-name" placeholder="analytics-primary" />
               </div>
 
               <div class="grid min-w-0 gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Host</span>
-                <Input v-model="form.host" placeholder="db.internal.example.com" />
+                <Input v-model="form.host" data-testid="inventory-host" placeholder="db.internal.example.com" />
               </div>
 
               <div class="grid min-w-0 gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Instance Type</span>
-                <select v-model="form.type" :class="selectClass">
+                <select v-model="form.type" :class="selectClass" data-testid="inventory-instance-type">
                   <option
                     v-for="item in metadata?.instance_types ?? []"
                     :key="item.value"
@@ -470,7 +479,7 @@ watch(form, () => {
 
               <div class="grid min-w-0 gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Database Type</span>
-                <select v-model="form.db_type" :class="selectClass">
+                <select v-model="form.db_type" :class="selectClass" data-testid="inventory-db-type">
                   <option
                     v-for="item in metadata?.db_types ?? []"
                     :key="item.value"
@@ -483,40 +492,40 @@ watch(form, () => {
 
               <div class="grid min-w-0 gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Port</span>
-                <Input v-model.number="form.port" type="number" min="1" step="1" />
+                <Input v-model.number="form.port" data-testid="inventory-port" type="number" min="1" step="1" />
               </div>
               <div class="grid min-w-0 gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">User</span>
-                <Input v-model="form.user" placeholder="readonly_user" />
+                <Input v-model="form.user" data-testid="inventory-user" placeholder="readonly_user" />
               </div>
 
               <div class="grid min-w-0 gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Password</span>
-                <Input v-model="form.password" type="password" placeholder="Optional" />
+                <Input v-model="form.password" data-testid="inventory-password" type="password" placeholder="Optional" />
               </div>
             </div>
 
             <div class="grid gap-4 md:grid-cols-2">
               <div class="grid min-w-0 gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Default Database</span>
-                <Input v-model="form.db_name" placeholder="Optional" />
+                <Input v-model="form.db_name" data-testid="inventory-db-name" placeholder="Optional" />
               </div>
 
               <div class="grid min-w-0 gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Charset</span>
-                <Input v-model="form.charset" placeholder="utf8mb4" />
+                <Input v-model="form.charset" data-testid="inventory-charset" placeholder="utf8mb4" />
               </div>
             </div>
 
             <div v-if="showOracleFields" class="grid gap-4 md:grid-cols-2">
               <div class="grid min-w-0 gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Oracle Service Name</span>
-                <Input v-model="form.service_name" placeholder="Optional" />
+                <Input v-model="form.service_name" data-testid="inventory-service-name" placeholder="Optional" />
               </div>
 
               <div class="grid min-w-0 gap-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Oracle SID</span>
-                <Input v-model="form.sid" placeholder="Optional" />
+                <Input v-model="form.sid" data-testid="inventory-sid" placeholder="Optional" />
               </div>
             </div>
 
@@ -526,6 +535,7 @@ watch(form, () => {
                 <textarea
                   v-model="form.show_db_name_regex"
                   :class="textAreaClass"
+                  data-testid="inventory-visible-db-regex"
                   placeholder="^(app_db|analytics_.*)$"
                 />
               </div>
@@ -535,6 +545,7 @@ watch(form, () => {
                 <textarea
                   v-model="form.denied_db_name_regex"
                   :class="textAreaClass"
+                  data-testid="inventory-hidden-db-regex"
                   placeholder="^(mysql|sys)$"
                 />
               </div>
@@ -542,13 +553,13 @@ watch(form, () => {
 
             <div class="grid gap-4 md:grid-cols-2">
               <label class="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                <input v-model="form.workflow_enabled" class="rounded border-slate-300" type="checkbox">
+                <input v-model="form.workflow_enabled" data-testid="inventory-workflow-enabled" class="rounded border-slate-300" type="checkbox">
                 <span>Enable DDL/DML workflows</span>
               </label>
 
               <label v-if="form.workflow_enabled" class="grid gap-2 md:col-span-2">
                 <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Workflow Policy</span>
-                <select v-model.number="form.workflow_policy" :class="selectClass">
+                <select v-model.number="form.workflow_policy" :class="selectClass" data-testid="inventory-workflow-policy">
                   <option :value="null">Select a workflow policy</option>
                   <option v-for="policy in workflowPolicyOptions" :key="policy.id" :value="policy.id">
                     {{ policy.name }}{{ policy.is_active ? '' : ' (inactive)' }}
@@ -557,13 +568,14 @@ watch(form, () => {
               </label>
 
               <label class="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                <input v-model="form.is_ssl" class="rounded border-slate-300" type="checkbox">
+                <input v-model="form.is_ssl" data-testid="inventory-ssl-enabled" class="rounded border-slate-300" type="checkbox">
                 <span>Enable SSL for this instance</span>
               </label>
 
               <label class="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
                 <input
                   v-model="form.verify_ssl"
+                  data-testid="inventory-verify-ssl"
                   :disabled="!form.is_ssl"
                   class="rounded border-slate-300"
                   type="checkbox"
@@ -576,7 +588,7 @@ watch(form, () => {
           <div class="space-y-6">
             <div class="grid min-w-0 gap-2">
               <span class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Teams</span>
-              <select :class="multiSelectClass" multiple @change="updateNumericSelections($event, 'team_ids')">
+              <select :class="multiSelectClass" data-testid="inventory-team-select" multiple @change="updateNumericSelections($event, 'team_ids')">
                 <option
                   v-for="item in metadata?.teams ?? []"
                   :key="item.team_id"
@@ -600,12 +612,13 @@ watch(form, () => {
         <div class="flex flex-wrap items-center gap-3">
           <Button
             variant="outline"
+            data-testid="inventory-test-connection"
             :disabled="isLoading || isSaving || isTestingConnection || !!pageError"
             @click="void testConnection()"
           >
             {{ isTestingConnection ? 'Testing…' : 'Test connection' }}
           </Button>
-          <Button :disabled="isLoading || isSaving || isTestingConnection || !!pageError" @click="void saveInstance()">
+          <Button data-testid="inventory-save" :disabled="isLoading || isSaving || isTestingConnection || !!pageError" @click="void saveInstance()">
             <Save class="h-4 w-4" />
             {{ isSaving ? 'Saving…' : isCreateMode ? 'Create instance' : 'Save changes' }}
           </Button>
