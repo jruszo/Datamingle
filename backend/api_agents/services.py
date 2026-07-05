@@ -286,9 +286,12 @@ def resolve_agent_service_endpoint(instance):
     endpoint_port = endpoint.get("port")
     if endpoint_port not in (None, ""):
         try:
-            port = int(endpoint_port)
+            parsed_port = int(endpoint_port)
         except (TypeError, ValueError):
             pass
+        else:
+            if 1 <= parsed_port <= 65535:
+                port = parsed_port
 
     return host, port
 
@@ -1097,6 +1100,7 @@ def _complete_local_demo_query_command(command):
         "Executing local demo query directly in the app container.",
     )
 
+    engine = None
     try:
         engine = get_engine(instance=command.instance)
         result_set = engine.query(
@@ -1109,6 +1113,9 @@ def _complete_local_demo_query_command(command):
     except Exception as exc:
         logger.exception("Local demo direct query execution failed.")
         return _fail_local_demo_direct_command(command, str(exc))
+    finally:
+        if engine is not None:
+            engine.close()
 
     command.finished_at = timezone.now()
     command.result = _result_set_to_agent_result(result_set, sql)
@@ -1217,10 +1224,16 @@ def _local_demo_export_review_result(command):
         error_count = 1
     else:
         count_sql = f"SELECT COUNT(*) FROM ({full_sql.rstrip(';')}) t"
-        result_set = get_engine(instance=command.instance).query(
-            db_name=payload.get("db_name") or None,
-            sql=count_sql,
-        )
+        engine = None
+        try:
+            engine = get_engine(instance=command.instance)
+            result_set = engine.query(
+                db_name=payload.get("db_name") or None,
+                sql=count_sql,
+            )
+        finally:
+            if engine is not None:
+                engine.close()
         if result_set.error:
             row.update(
                 {
@@ -1284,10 +1297,14 @@ def _complete_local_demo_review_command(command):
         "Completing local demo review command directly in the app container.",
     )
 
-    if command.command_type == AgentCommandType.EXPORT_CHECK:
-        result = _local_demo_export_review_result(command)
-    else:
-        result = _local_demo_workflow_review_result(command)
+    try:
+        if command.command_type == AgentCommandType.EXPORT_CHECK:
+            result = _local_demo_export_review_result(command)
+        else:
+            result = _local_demo_workflow_review_result(command)
+    except Exception as exc:
+        logger.exception("Local demo direct review execution failed.")
+        return _fail_local_demo_direct_command(command, str(exc))
 
     command.status = AgentCommandStatus.SUCCEEDED
     command.finished_at = timezone.now()

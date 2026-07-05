@@ -39,6 +39,7 @@ from api_agents.services import (
     dispatch_agent_command,
     filter_agent_runnable_instances,
     issue_agent_api_key,
+    resolve_agent_service_endpoint,
     run_agent_command_sync,
 )
 from api_agents.time import agent_utc_now
@@ -801,6 +802,26 @@ class AgentFacingApiTests(APITestCase):
             AgentToolArtifact.TOOL_MYSQLD_EXPORTER,
         )
 
+    def test_endpoint_override_ignores_invalid_ports(self):
+        node = InfrastructureNode.objects.create(
+            name="node-a",
+            metadata={
+                "agent_service_endpoints": {
+                    "primary": {
+                        "host": "127.0.0.1",
+                        "port": 70000,
+                    },
+                },
+            },
+        )
+        instance = create_instance("primary")
+        instance.host = "mysql_demo"
+        instance.port = 3306
+        instance.node = node
+        instance.save(update_fields=["host", "port", "node", "update_time"])
+
+        self.assertEqual(resolve_agent_service_endpoint(instance), ("127.0.0.1", 3306))
+
     def test_heartbeat_updates_last_seen_revision_and_module_health(self):
         agent = Agent.objects.create(name="agent-a", install_id="ins_test_123")
         self.authenticate_agent(agent)
@@ -1100,6 +1121,7 @@ class AgentFacingApiTests(APITestCase):
             parameters=None,
             max_execution_time=5000,
         )
+        mock_get_engine.return_value.close.assert_called_once()
 
     @patch.dict(os.environ, {"RUN_LOCAL_DEMO_SEED": "1"})
     @patch("sql.engines.get_engine")
@@ -1171,6 +1193,7 @@ class AgentFacingApiTests(APITestCase):
         self.assertEqual(command.error["message"], "query failed")
         self.assertTrue(command.events.filter(event_type="command.failed").exists())
         mock_dispatch_agent_command.assert_not_called()
+        mock_get_engine.return_value.close.assert_called_once()
 
     @patch.dict(os.environ, {"RUN_LOCAL_DEMO_SEED": "1"})
     @patch("sql.engines.get_engine")
@@ -1203,6 +1226,7 @@ class AgentFacingApiTests(APITestCase):
         self.assertEqual(command.error["message"], "connection failed")
         self.assertTrue(command.events.filter(event_type="command.failed").exists())
         mock_dispatch_agent_command.assert_not_called()
+        mock_get_engine.return_value.close.assert_called_once()
 
     @patch.dict(os.environ, {"RUN_LOCAL_DEMO_SEED": "1"})
     @patch("api_agents.services.dispatch_agent_command")
@@ -1284,6 +1308,70 @@ class AgentFacingApiTests(APITestCase):
         self.assertEqual(command.result["syntax_type"], 3)
         self.assertEqual(command.result["affected_rows"], 2)
         self.assertEqual(command.result["rows"][0]["stagestatus"], "Ready")
+        mock_dispatch_agent_command.assert_not_called()
+        mock_get_engine.return_value.close.assert_called_once()
+
+    @patch.dict(os.environ, {"RUN_LOCAL_DEMO_SEED": "1"})
+    @patch("sql.engines.get_engine")
+    @patch("api_agents.services.dispatch_agent_command")
+    def test_local_demo_export_check_command_fails_terminally_on_review_exception(
+        self,
+        mock_dispatch_agent_command,
+        mock_get_engine,
+    ):
+        instance = self.create_seeded_local_demo_assignment()
+        mock_get_engine.return_value.query.side_effect = RuntimeError("count failed")
+
+        with self.assertRaises(AgentCommandExecutionError) as exc_context:
+            run_agent_command_sync(
+                instance=instance,
+                command_type=AgentCommandType.EXPORT_CHECK,
+                workflow_type="export.check",
+                workflow_id="local-demo-export-check-failed",
+                payload={
+                    "db_name": "demo_billing",
+                    "sql": "SELECT invoice_number FROM invoices;",
+                    "submitted_by": "demo_requester",
+                },
+            )
+
+        command = exc_context.exception.command
+        self.assertEqual(command.status, AgentCommandStatus.FAILED)
+        self.assertEqual(command.error["message"], "count failed")
+        self.assertTrue(command.events.filter(event_type="command.failed").exists())
+        mock_dispatch_agent_command.assert_not_called()
+        mock_get_engine.return_value.close.assert_called_once()
+
+    @patch.dict(os.environ, {"RUN_LOCAL_DEMO_SEED": "1"})
+    @patch(
+        "api_agents.services._local_demo_workflow_review_result",
+        side_effect=RuntimeError("review failed"),
+    )
+    @patch("api_agents.services.dispatch_agent_command")
+    def test_local_demo_workflow_check_command_fails_terminally_on_review_exception(
+        self,
+        mock_dispatch_agent_command,
+        _mock_review_result,
+    ):
+        instance = self.create_seeded_local_demo_assignment()
+
+        with self.assertRaises(AgentCommandExecutionError) as exc_context:
+            run_agent_command_sync(
+                instance=instance,
+                command_type=AgentCommandType.WORKFLOW_CHECK,
+                workflow_type="workflow.check",
+                workflow_id="local-demo-workflow-check-failed",
+                payload={
+                    "db_name": "demo_orders",
+                    "sql": "ALTER TABLE customers ADD COLUMN demo_col varchar(16);",
+                    "submitted_by": "demo_requester",
+                },
+            )
+
+        command = exc_context.exception.command
+        self.assertEqual(command.status, AgentCommandStatus.FAILED)
+        self.assertEqual(command.error["message"], "review failed")
+        self.assertTrue(command.events.filter(event_type="command.failed").exists())
         mock_dispatch_agent_command.assert_not_called()
 
     def test_dispatch_sql_workflow_requires_active_websocket(self):

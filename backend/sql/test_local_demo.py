@@ -111,3 +111,4 @@ class TestLocalDemoSeed(TestCase):
         self.assertEqual(pg_instance.user, "demo_datamingle")
         self.assertEqual(pg_instance.db_type, "pgsql")
         self.assertEqual(pg_instance.node.name, "demo-postgres-node")
+        self.assertFalse(pg_instance.workflow_enabled)

@@ -387,7 +387,7 @@ def _seed_instances(teams, workflow_policies, log):
                 "verify_ssl": False,
                 "service_name": None,
                 "sid": None,
-                "workflow_enabled": True,
+                "workflow_enabled": is_mysql,
                 "workflow_policy": workflow_policies[config["workflow_policy"]],
                 "mysql_topology_role": (
                     Instance.MYSQL_ROLE_STANDALONE
