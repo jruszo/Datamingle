@@ -5,6 +5,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from api_agents.models import Agent, AgentStatus, AgentToolArtifact
+from api_agents.services import agent_api_key_hash
 from common.auth import ensure_superadmin_group
 from common.team_permissions import TEAM_PERMISSION_CODES
 from common.utils.const import WorkflowType
@@ -14,10 +15,14 @@ from sql.models import (
     Team,
     Users,
     WorkflowAuditSetting,
+    WorkflowPolicy,
+    WorkflowPolicyStep,
 )
 from sql.utils.team import normalize_permission_group_sequence
 
 DEMO_DB_PASSWORD = "demo123"
+DEMO_AGENT_API_KEY = "dm_agent_local_demo_key"
+LEGACY_DEMO_AGENT_NAMES = ("demo-mysql-node-agent",)
 
 AUTH_GROUP_PERMISSION_CODES = OrderedDict(
     {
@@ -161,6 +166,7 @@ DEMO_INSTANCES = OrderedDict(
             "show_db_name_regex": "^(demo_orders|demo_billing)$",
             "denied_db_name_regex": "",
             "teams": ["single_stage", "multi_stage"],
+            "workflow_policy": "multi_stage",
             "databases": ["demo_orders", "demo_billing"],
         },
         "pgsql": {
@@ -176,6 +182,7 @@ DEMO_INSTANCES = OrderedDict(
             "show_db_name_regex": "^(workflow_pg|analytics_pg)$",
             "denied_db_name_regex": "",
             "teams": ["single_stage", "multi_stage"],
+            "workflow_policy": "multi_stage",
             "tags": ["can_read", "can_write"],
             "databases": ["workflow_pg", "analytics_pg"],
         },
@@ -188,17 +195,31 @@ DEMO_INFRASTRUCTURE_NODES = OrderedDict(
             "name": "demo-mysql-node",
             "address": "mysql_demo",
             "description": "Local demo MySQL database host.",
-            "metadata": {"environment": "demo", "provider": "docker-compose"},
+            "metadata": {
+                "environment": "demo",
+                "provider": "docker-compose",
+                "agent_service_endpoints": {
+                    "demo-mysql-workflow": {
+                        "host": "127.0.0.1",
+                        "port": 3307,
+                    },
+                },
+            },
             "teams": ["single_stage", "multi_stage"],
             "services": ["mysql"],
             "agent": {
-                "name": "demo-mysql-node-agent",
+                "name": "notebook-ubuntu",
                 "display_name": "Demo MySQL Node Agent",
-                "status": AgentStatus.OFFLINE,
+                "status": AgentStatus.ONLINE,
                 "hostname": "mysql_demo",
                 "platform": "linux",
                 "architecture": "amd64",
                 "agent_version": "demo",
+                "api_key": DEMO_AGENT_API_KEY,
+                "metadata": {
+                    "seeded": True,
+                    "active_websocket": {"channel_name": "e2e.demo.mysql.agent"},
+                },
             },
         },
         "postgres_node": {
@@ -238,8 +259,9 @@ def seed_local_demo(write_line=None):
     with transaction.atomic():
         auth_groups = _seed_auth_groups(log)
         teams = _seed_teams(log)
+        workflow_policies = _seed_workflow_policies(auth_groups, log)
         _remove_legacy_seeded_users(log)
-        instances = _seed_instances(teams, log)
+        instances = _seed_instances(teams, workflow_policies, log)
         nodes = _seed_infrastructure_nodes(teams, instances, log)
         _seed_agent_tool_artifacts(log)
         _seed_workflow_settings(auth_groups, teams, log)
@@ -302,6 +324,37 @@ def _seed_teams(log):
     return teams
 
 
+def _seed_workflow_policies(auth_groups, log):
+    policies = {}
+    for key, config in DEMO_TEAMS.items():
+        policy, created = WorkflowPolicy.objects.update_or_create(
+            name=f"Demo Workflow Policy - {config['team_name']}",
+            defaults={
+                "description": (
+                    "Local demo SQL workflow approval policy for "
+                    f"{config['team_name']}."
+                ),
+                "is_active": True,
+            },
+        )
+        WorkflowPolicyStep.objects.filter(policy=policy).delete()
+        for index, group_name in enumerate(config["approval_groups"], start=1):
+            WorkflowPolicyStep.objects.create(
+                policy=policy,
+                order=index,
+                permission_group=auth_groups[group_name],
+            )
+        policies[key] = policy
+        log(
+            "Workflow policy {}: {} -> {}".format(
+                "created" if created else "updated",
+                policy.name,
+                " -> ".join(config["approval_groups"]),
+            )
+        )
+    return policies
+
+
 def _remove_legacy_seeded_users(log):
     deleted_count, _ = Users.objects.filter(
         username__in=managed_demo_usernames()
@@ -312,9 +365,10 @@ def _remove_legacy_seeded_users(log):
         log("No legacy seeded demo users to remove")
 
 
-def _seed_instances(teams, log):
+def _seed_instances(teams, workflow_policies, log):
     instances = {}
     for key, config in DEMO_INSTANCES.items():
+        is_mysql = config["db_type"] == "mysql"
         instance, created = Instance.objects.update_or_create(
             instance_name=config["instance_name"],
             defaults={
@@ -333,6 +387,20 @@ def _seed_instances(teams, log):
                 "verify_ssl": False,
                 "service_name": None,
                 "sid": None,
+                "workflow_enabled": True,
+                "workflow_policy": workflow_policies[config["workflow_policy"]],
+                "mysql_topology_role": (
+                    Instance.MYSQL_ROLE_STANDALONE
+                    if is_mysql
+                    else Instance.MYSQL_ROLE_UNKNOWN
+                ),
+                "mysql_topology_status": (
+                    Instance.MYSQL_STATUS_STANDALONE
+                    if is_mysql
+                    else Instance.MYSQL_STATUS_UNKNOWN
+                ),
+                "mysql_ddl_dml_eligible": is_mysql,
+                "mysql_ddl_dml_block_reason": "",
             },
         )
         instance.resource_group.set([teams[name] for name in config["teams"]])
@@ -366,6 +434,7 @@ def _seed_infrastructure_nodes(teams, instances, log):
 
         agent_config = config["agent"]
         if agent_config:
+            _migrate_legacy_demo_agent(agent_config["name"], log)
             Agent.objects.update_or_create(
                 name=agent_config["name"],
                 defaults={
@@ -375,10 +444,13 @@ def _seed_infrastructure_nodes(teams, instances, log):
                     "platform": agent_config["platform"],
                     "architecture": agent_config["architecture"],
                     "agent_version": agent_config["agent_version"],
+                    "api_key_hash": agent_api_key_hash(agent_config["api_key"]),
+                    "api_key_prefix": agent_config["api_key"][:16],
+                    "workos_api_key_id": "",
                     "last_seen_at": timezone.now(),
                     "local_node": node,
                     "enabled": True,
-                    "metadata": {"seeded": True},
+                    "metadata": agent_config["metadata"],
                 },
             )
 
@@ -391,6 +463,26 @@ def _seed_infrastructure_nodes(teams, instances, log):
             )
         )
     return nodes
+
+
+def _migrate_legacy_demo_agent(target_name, log):
+    legacy_agents = Agent.objects.filter(name__in=LEGACY_DEMO_AGENT_NAMES)
+    if not legacy_agents.exists():
+        return
+
+    target_agent = Agent.objects.filter(name=target_name).first()
+    if target_agent is None:
+        legacy_agent = legacy_agents.order_by("id").first()
+        old_name = legacy_agent.name
+        legacy_agent.name = target_name
+        legacy_agent.save(update_fields=["name", "update_time"])
+        legacy_agents.exclude(pk=legacy_agent.pk).delete()
+        log(f"Demo agent renamed: {old_name} -> {target_name}")
+        return
+
+    stale_count, _ = legacy_agents.exclude(pk=target_agent.pk).delete()
+    if stale_count:
+        log(f"Removed stale legacy demo agent rows: {stale_count}")
 
 
 def _seed_agent_tool_artifacts(log):

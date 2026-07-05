@@ -1,4 +1,5 @@
 import asyncio
+import os
 from datetime import datetime, timedelta, timezone as datetime_timezone
 from unittest.mock import patch
 
@@ -36,6 +37,7 @@ from api_agents.services import (
     dispatch_agent_command,
     filter_agent_runnable_instances,
     issue_agent_api_key,
+    run_agent_command_sync,
 )
 from api_agents.time import agent_utc_now
 from common.utils.const import WorkflowStatus, WorkflowType
@@ -45,6 +47,7 @@ from sql.models import (
     SqlWorkflowContent,
     WorkflowAudit,
 )
+from sql.engines.models import ResultSet
 from sql.models import InfrastructureNode, Instance, Users
 
 
@@ -619,15 +622,27 @@ class AgentFacingApiTests(APITestCase):
             name="node-a",
             address="10.0.0.10",
             monitoring_enabled=False,
+            metadata={
+                "agent_service_endpoints": {
+                    "primary": {
+                        "host": "127.0.0.1",
+                        "port": 3307,
+                    },
+                },
+            },
         )
         agent = Agent.objects.create(name="agent-a", local_node=node)
         other_agent = Agent.objects.create(name="agent-b")
         instance = create_instance("primary")
+        instance.host = "mysql_demo"
+        instance.port = 3306
         instance.node = node
         instance.workflow_enabled = True
         instance.mysql_topology_role = Instance.MYSQL_ROLE_STANDALONE
         instance.save(
             update_fields=[
+                "host",
+                "port",
                 "node",
                 "workflow_enabled",
                 "mysql_topology_role",
@@ -695,6 +710,8 @@ class AgentFacingApiTests(APITestCase):
             assignment["service_monitoring_collectors"],
             ["global_status", "global_variables", "slave_status"],
         )
+        self.assertEqual(assignment["host"], "127.0.0.1")
+        self.assertEqual(assignment["port"], 3307)
         self.assertEqual(
             assignment["node_monitoring_collectors"],
             list(DEFAULT_NODE_EXPORTER_COLLECTORS),
@@ -736,6 +753,8 @@ class AgentFacingApiTests(APITestCase):
         services = module_names["service_monitoring"]["raw"]["services"]
         self.assertEqual(len(services), 1)
         self.assertEqual(services[0]["db_type"], "mysql")
+        self.assertEqual(services[0]["host"], "127.0.0.1")
+        self.assertEqual(services[0]["port"], 3307)
         self.assertEqual(services[0]["username"], "root")
         self.assertEqual(services[0]["password"], "secret")
         self.assertEqual(
@@ -1009,6 +1028,143 @@ class AgentFacingApiTests(APITestCase):
 
         self.assertNotIn(offline_instance.id, runnable_ids)
         self.assertIn(online_instance.id, runnable_ids)
+
+    @patch.dict(os.environ, {"RUN_LOCAL_DEMO_SEED": "1"})
+    @patch("sql.engines.get_engine")
+    @patch("api_agents.services.dispatch_agent_command")
+    def test_local_demo_query_command_uses_direct_engine(
+        self,
+        mock_dispatch_agent_command,
+        mock_get_engine,
+    ):
+        agent = Agent.objects.create(
+            name="notebook-ubuntu",
+            status=AgentStatus.ONLINE,
+            metadata={"seeded": True},
+        )
+        mark_agent_websocket(agent, channel_name="e2e.demo.mysql.agent")
+        instance = create_instance("demo-mysql-workflow")
+        AgentInstanceAssignment.objects.create(
+            agent=agent,
+            instance=instance,
+            command_enabled=True,
+        )
+        mock_get_engine.return_value.query.return_value = ResultSet(
+            full_sql="select 1",
+            rows=[(1,)],
+            column_list=["one"],
+            column_type=["LONGLONG"],
+            affected_rows=1,
+        )
+
+        command = run_agent_command_sync(
+            instance=instance,
+            command_type=AgentCommandType.QUERY_EXECUTE,
+            workflow_type="query",
+            workflow_id="local-demo-query",
+            payload={
+                "db_name": "demo_orders",
+                "sql": "select 1",
+                "limit": 10,
+                "max_execution_time_ms": 5000,
+                "submitted_by": "demo_requester",
+            },
+        )
+
+        self.assertEqual(command.status, AgentCommandStatus.SUCCEEDED)
+        self.assertEqual(command.result["rows"], [[1]])
+        self.assertEqual(command.result["column_list"], ["one"])
+        self.assertEqual(command.result["affected_rows"], 1)
+        mock_dispatch_agent_command.assert_not_called()
+        mock_get_engine.return_value.query.assert_called_once_with(
+            db_name="demo_orders",
+            sql="select 1",
+            limit_num=10,
+            parameters=None,
+            max_execution_time=5000,
+        )
+
+    @patch.dict(os.environ, {"RUN_LOCAL_DEMO_SEED": "1"})
+    @patch("api_agents.services.dispatch_agent_command")
+    def test_local_demo_workflow_check_command_completes_directly(
+        self,
+        mock_dispatch_agent_command,
+    ):
+        agent = Agent.objects.create(
+            name="notebook-ubuntu",
+            status=AgentStatus.ONLINE,
+            metadata={"seeded": True},
+        )
+        mark_agent_websocket(agent, channel_name="e2e.demo.mysql.agent")
+        instance = create_instance("demo-mysql-workflow")
+        AgentInstanceAssignment.objects.create(
+            agent=agent,
+            instance=instance,
+            command_enabled=True,
+        )
+
+        command = run_agent_command_sync(
+            instance=instance,
+            command_type=AgentCommandType.WORKFLOW_CHECK,
+            workflow_type="workflow.check",
+            workflow_id="local-demo-workflow-check",
+            payload={
+                "db_name": "demo_orders",
+                "sql": "ALTER TABLE customers ADD COLUMN demo_col varchar(16);",
+                "submitted_by": "demo_requester",
+            },
+        )
+
+        self.assertEqual(command.status, AgentCommandStatus.SUCCEEDED)
+        self.assertEqual(command.result["syntax_type"], 1)
+        self.assertEqual(command.result["error_count"], 0)
+        self.assertEqual(command.result["rows"][0]["stagestatus"], "Audit completed")
+        mock_dispatch_agent_command.assert_not_called()
+
+    @patch.dict(os.environ, {"RUN_LOCAL_DEMO_SEED": "1"})
+    @patch("sql.engines.get_engine")
+    @patch("api_agents.services.dispatch_agent_command")
+    def test_local_demo_export_check_command_completes_directly(
+        self,
+        mock_dispatch_agent_command,
+        mock_get_engine,
+    ):
+        agent = Agent.objects.create(
+            name="notebook-ubuntu",
+            status=AgentStatus.ONLINE,
+            metadata={"seeded": True},
+        )
+        mark_agent_websocket(agent, channel_name="e2e.demo.mysql.agent")
+        instance = create_instance("demo-mysql-workflow")
+        AgentInstanceAssignment.objects.create(
+            agent=agent,
+            instance=instance,
+            command_enabled=True,
+        )
+        mock_get_engine.return_value.query.return_value = ResultSet(
+            full_sql="SELECT COUNT(*) FROM (SELECT 1) t",
+            rows=[(2,)],
+            column_list=["count"],
+            affected_rows=1,
+        )
+
+        command = run_agent_command_sync(
+            instance=instance,
+            command_type=AgentCommandType.EXPORT_CHECK,
+            workflow_type="export.check",
+            workflow_id="local-demo-export-check",
+            payload={
+                "db_name": "demo_billing",
+                "sql": "SELECT invoice_number FROM invoices;",
+                "submitted_by": "demo_requester",
+            },
+        )
+
+        self.assertEqual(command.status, AgentCommandStatus.SUCCEEDED)
+        self.assertEqual(command.result["syntax_type"], 3)
+        self.assertEqual(command.result["affected_rows"], 2)
+        self.assertEqual(command.result["rows"][0]["stagestatus"], "Ready")
+        mock_dispatch_agent_command.assert_not_called()
 
     def test_dispatch_sql_workflow_requires_active_websocket(self):
         agent = Agent.objects.create(name="agent-a", status=AgentStatus.ONLINE)
