@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { Buffer } from 'node:buffer'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -7,6 +8,7 @@ import { expect, type Browser, type BrowserContext, type Page, type TestInfo } f
 
 const POLL_INTERVAL_MS = 2_000
 const DEFAULT_TIMEOUT_MS = 120_000
+const DOCKER_EXEC_TIMEOUT_MS = DEFAULT_TIMEOUT_MS
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url))
 const E2E_SCREENSHOT_ROOT = join(REPO_ROOT, 'frontend', 'e2e-screenshots')
 const E2E_PASSWORD = 'SecurePass123!'
@@ -104,6 +106,7 @@ function issueDemoTokens(username: DemoUser) {
       cwd: REPO_ROOT,
       encoding: 'utf8',
       stdio: 'pipe',
+      timeout: DOCKER_EXEC_TIMEOUT_MS,
     },
   )
 
@@ -140,6 +143,7 @@ export function seedE2EEnvironment() {
     {
       cwd: REPO_ROOT,
       stdio: 'pipe',
+      timeout: DOCKER_EXEC_TIMEOUT_MS,
     },
   )
 }
@@ -205,7 +209,11 @@ export async function mockDemoWorkflowAgentSetup(page: Page) {
   })
 }
 
-export function completePendingWorkflowChecks(sql: string, syntaxType: 1 | 2) {
+export function completePendingWorkflowChecks(
+  sql: string,
+  syntaxType: 1 | 2,
+  submittedBy: DemoUser = 'demo_requester',
+) {
   const script = `
 import json
 import time
@@ -216,6 +224,7 @@ from api_agents.models import AgentCommand, AgentCommandStatus, AgentCommandType
 
 sql = ${JSON.stringify(sql)}
 syntax_type = ${JSON.stringify(syntaxType)}
+submitted_by = ${JSON.stringify(submittedBy)}
 active_statuses = [
     AgentCommandStatus.QUEUED,
     AgentCommandStatus.DISPATCHED,
@@ -252,7 +261,7 @@ while time.time() < deadline:
     commands = list(
         AgentCommand.objects.filter(
             command_type=AgentCommandType.WORKFLOW_CHECK,
-            payload__submitted_by="demo_requester",
+            payload__submitted_by=submitted_by,
             payload__sql=sql,
             status__in=active_statuses,
         ).order_by("create_time")
@@ -273,7 +282,7 @@ while time.time() < deadline:
         succeeded_ids = list(
             AgentCommand.objects.filter(
                 command_type=AgentCommandType.WORKFLOW_CHECK,
-                payload__submitted_by="demo_requester",
+                payload__submitted_by=submitted_by,
                 payload__sql=sql,
                 status=AgentCommandStatus.SUCCEEDED,
             ).values_list("id", flat=True)
@@ -295,6 +304,7 @@ print(json.dumps({"command_ids": completed_ids, "status": "succeeded"}))
     {
       cwd: REPO_ROOT,
       stdio: 'pipe',
+      timeout: DOCKER_EXEC_TIMEOUT_MS,
     },
   )
 }
@@ -401,12 +411,13 @@ function runDemoMysql(dbName: string, sql: string) {
       cwd: REPO_ROOT,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: DOCKER_EXEC_TIMEOUT_MS,
     },
   ).trim()
 }
 
 function quoteMysqlString(value: string) {
-  return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
+  return `CONVERT(X'${Buffer.from(value, 'utf8').toString('hex')}' USING utf8mb4)`
 }
 
 function quoteMysqlIdentifier(value: string) {
@@ -553,7 +564,6 @@ elif workflow.syntax_type == 2 and workflow.instance.db_type == "mysql":
         for index, statement in enumerate(statements, start=1):
             start = time.monotonic()
             cursor.execute(statement)
-            conn.commit()
             rowcount = getattr(cursor, "rowcount", 0)
             result.rows.append(
                 ReviewResult(
@@ -567,6 +577,7 @@ elif workflow.syntax_type == 2 and workflow.instance.db_type == "mysql":
                     executor=executor,
                 )
             )
+        conn.commit()
     except Exception as exc:
         if conn:
             try:
@@ -594,9 +605,10 @@ else:
         workflow,
         execution_options={"executor": executor},
     )
+execution_error = str(getattr(result, "error", "") or "")
 task = SimpleNamespace(
-    result=result,
-    success=True,
+    result=result if not execution_error else execution_error,
+    success=not bool(execution_error),
     args=[workflow_id],
     stopped=timezone.now(),
 )
@@ -634,6 +646,7 @@ print(json.dumps({
       cwd: REPO_ROOT,
       encoding: 'utf8',
       stdio: 'pipe',
+      timeout: DOCKER_EXEC_TIMEOUT_MS,
     },
   )
   const result = parseJsonLine<{ error: string; status: string; workflow_id: number }>(output)
@@ -766,6 +779,7 @@ export function setSystemConfigValues(values: Record<string, boolean | number | 
     {
       cwd: REPO_ROOT,
       stdio: 'pipe',
+      timeout: DOCKER_EXEC_TIMEOUT_MS,
     },
   )
 }
@@ -799,6 +813,7 @@ for tool_name, url in (
     {
       cwd: REPO_ROOT,
       stdio: 'pipe',
+      timeout: DOCKER_EXEC_TIMEOUT_MS,
     },
   )
 }
@@ -821,6 +836,7 @@ AgentToolArtifact.objects.filter(
     {
       cwd: REPO_ROOT,
       stdio: 'pipe',
+      timeout: DOCKER_EXEC_TIMEOUT_MS,
     },
   )
 }

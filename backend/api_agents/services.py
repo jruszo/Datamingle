@@ -11,6 +11,7 @@ from urllib.parse import quote
 from django_redis import get_redis_connection
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -960,15 +961,29 @@ def run_agent_command_sync(
         idempotency_key=idempotency_key,
     )
     if _is_local_demo_direct_query_command(command):
-        return _complete_local_demo_query_command(command)
+        return _ensure_agent_command_succeeded(
+            _complete_local_demo_query_command(command)
+        )
     if _is_local_demo_direct_review_command(command):
-        return _complete_local_demo_review_command(command)
+        return _ensure_agent_command_succeeded(
+            _complete_local_demo_review_command(command)
+        )
     dispatch_agent_command(command)
     command = wait_for_agent_command(command, timeout_seconds=timeout_seconds)
+    return _ensure_agent_command_succeeded(command)
+
+
+def _agent_command_error_message(command):
     if command.status != AgentCommandStatus.SUCCEEDED:
-        message = (
+        return (
             command.error.get("message") if isinstance(command.error, dict) else ""
         ) or (command.result.get("message") if isinstance(command.result, dict) else "")
+    return ""
+
+
+def _ensure_agent_command_succeeded(command):
+    if command.status != AgentCommandStatus.SUCCEEDED:
+        message = _agent_command_error_message(command)
         raise AgentCommandExecutionError(
             message or f"Agent command {command.status}.", command=command
         )
@@ -993,16 +1008,24 @@ def result_set_from_agent_result(full_sql, result):
     return result_set
 
 
+def _json_safe_value(value):
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError:
+            return value.hex()
+    if isinstance(value, dict):
+        return {str(key): _json_safe_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_value(item) for item in value]
+    try:
+        return json.loads(json.dumps(value, cls=DjangoJSONEncoder))
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def _json_safe_rows(rows):
-    safe_rows = []
-    for row in rows or []:
-        if isinstance(row, dict):
-            safe_rows.append(row)
-        elif isinstance(row, (list, tuple)):
-            safe_rows.append(list(row))
-        else:
-            safe_rows.append(row)
-    return safe_rows
+    return [_json_safe_value(row) for row in rows or []]
 
 
 def _result_set_to_agent_result(result_set, full_sql):
@@ -1074,18 +1097,31 @@ def _complete_local_demo_query_command(command):
         "Executing local demo query directly in the app container.",
     )
 
-    engine = get_engine(instance=command.instance)
-    result_set = engine.query(
-        db_name=payload.get("db_name") or None,
-        sql=sql,
-        limit_num=payload.get("limit") or 0,
-        parameters=payload.get("parameters") or None,
-        max_execution_time=max_execution_time,
-    )
-    command.status = AgentCommandStatus.SUCCEEDED
+    try:
+        engine = get_engine(instance=command.instance)
+        result_set = engine.query(
+            db_name=payload.get("db_name") or None,
+            sql=sql,
+            limit_num=payload.get("limit") or 0,
+            parameters=payload.get("parameters") or None,
+            max_execution_time=max_execution_time,
+        )
+    except Exception as exc:
+        logger.exception("Local demo direct query execution failed.")
+        return _fail_local_demo_direct_command(command, str(exc))
+
     command.finished_at = timezone.now()
     command.result = _result_set_to_agent_result(result_set, sql)
-    command.error = {}
+    if result_set.error:
+        command.status = AgentCommandStatus.FAILED
+        command.error = {"message": str(result_set.error)}
+        event_type = "command.failed"
+        event_message = "Local demo direct query execution failed."
+    else:
+        command.status = AgentCommandStatus.SUCCEEDED
+        command.error = {}
+        event_type = "command.succeeded"
+        event_message = "Completed by local demo direct query execution."
     command.save(
         update_fields=[
             "status",
@@ -1095,10 +1131,25 @@ def _complete_local_demo_query_command(command):
             "update_time",
         ]
     )
-    command.append_event(
-        "command.succeeded",
-        "Completed by local demo direct query execution.",
+    command.append_event(event_type, event_message)
+    return command
+
+
+def _fail_local_demo_direct_command(command, message):
+    command.status = AgentCommandStatus.FAILED
+    command.finished_at = timezone.now()
+    command.result = {}
+    command.error = {"message": message}
+    command.save(
+        update_fields=[
+            "status",
+            "finished_at",
+            "result",
+            "error",
+            "update_time",
+        ]
     )
+    command.append_event("command.failed", message)
     return command
 
 

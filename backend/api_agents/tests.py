@@ -1,5 +1,6 @@
 import asyncio
 import os
+from decimal import Decimal
 from datetime import datetime, timedelta, timezone as datetime_timezone
 from unittest.mock import patch
 
@@ -30,6 +31,7 @@ from api_agents.models import (
 )
 from api_agents.services import (
     AgentCommandDispatchError,
+    AgentCommandExecutionError,
     AgentAPIKeyRejected,
     agent_api_key_hash,
     authenticate_agent_api_key,
@@ -546,6 +548,21 @@ class AgentFacingApiTests(APITestCase):
         api_key = assign_agent_api_key(agent)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {api_key}")
         return api_key
+
+    def create_seeded_local_demo_assignment(self):
+        agent = Agent.objects.create(
+            name="notebook-ubuntu",
+            status=AgentStatus.ONLINE,
+            metadata={"seeded": True},
+        )
+        mark_agent_websocket(agent, channel_name="e2e.demo.mysql.agent")
+        instance = create_instance("demo-mysql-workflow")
+        AgentInstanceAssignment.objects.create(
+            agent=agent,
+            instance=instance,
+            command_enabled=True,
+        )
+        return instance
 
     def test_register_binds_install_id_and_marks_agent_online(self):
         node = InfrastructureNode.objects.create(name="db-node-01", address="")
@@ -1083,6 +1100,109 @@ class AgentFacingApiTests(APITestCase):
             parameters=None,
             max_execution_time=5000,
         )
+
+    @patch.dict(os.environ, {"RUN_LOCAL_DEMO_SEED": "1"})
+    @patch("sql.engines.get_engine")
+    @patch("api_agents.services.dispatch_agent_command")
+    def test_local_demo_query_command_serializes_json_unsafe_values(
+        self,
+        mock_dispatch_agent_command,
+        mock_get_engine,
+    ):
+        instance = self.create_seeded_local_demo_assignment()
+        mock_get_engine.return_value.query.return_value = ResultSet(
+            full_sql="select created_at, amount, payload",
+            rows=[(datetime(2026, 1, 2, 3, 4, 5), Decimal("1.23"), b"hello")],
+            column_list=["created_at", "amount", "payload"],
+            affected_rows=1,
+        )
+
+        command = run_agent_command_sync(
+            instance=instance,
+            command_type=AgentCommandType.QUERY_EXECUTE,
+            workflow_type="query",
+            workflow_id="local-demo-query-json",
+            payload={
+                "db_name": "demo_orders",
+                "sql": "select created_at, amount, payload",
+                "submitted_by": "demo_requester",
+            },
+        )
+
+        self.assertEqual(command.status, AgentCommandStatus.SUCCEEDED)
+        self.assertEqual(
+            command.result["rows"],
+            [["2026-01-02T03:04:05", "1.23", "hello"]],
+        )
+        mock_dispatch_agent_command.assert_not_called()
+
+    @patch.dict(os.environ, {"RUN_LOCAL_DEMO_SEED": "1"})
+    @patch("sql.engines.get_engine")
+    @patch("api_agents.services.dispatch_agent_command")
+    def test_local_demo_query_command_fails_on_result_error(
+        self,
+        mock_dispatch_agent_command,
+        mock_get_engine,
+    ):
+        instance = self.create_seeded_local_demo_assignment()
+        mock_get_engine.return_value.query.return_value = ResultSet(
+            full_sql="select broken",
+            rows=[],
+            column_list=[],
+            affected_rows=0,
+        )
+        mock_get_engine.return_value.query.return_value.error = "query failed"
+
+        with self.assertRaises(AgentCommandExecutionError) as exc_context:
+            run_agent_command_sync(
+                instance=instance,
+                command_type=AgentCommandType.QUERY_EXECUTE,
+                workflow_type="query",
+                workflow_id="local-demo-query-failed",
+                payload={
+                    "db_name": "demo_orders",
+                    "sql": "select broken",
+                    "submitted_by": "demo_requester",
+                },
+            )
+
+        command = exc_context.exception.command
+        self.assertEqual(command.status, AgentCommandStatus.FAILED)
+        self.assertEqual(command.error["message"], "query failed")
+        self.assertTrue(command.events.filter(event_type="command.failed").exists())
+        mock_dispatch_agent_command.assert_not_called()
+
+    @patch.dict(os.environ, {"RUN_LOCAL_DEMO_SEED": "1"})
+    @patch("sql.engines.get_engine")
+    @patch("api_agents.services.dispatch_agent_command")
+    def test_local_demo_query_command_fails_on_exception(
+        self,
+        mock_dispatch_agent_command,
+        mock_get_engine,
+    ):
+        instance = self.create_seeded_local_demo_assignment()
+        mock_get_engine.return_value.query.side_effect = RuntimeError(
+            "connection failed"
+        )
+
+        with self.assertRaises(AgentCommandExecutionError) as exc_context:
+            run_agent_command_sync(
+                instance=instance,
+                command_type=AgentCommandType.QUERY_EXECUTE,
+                workflow_type="query",
+                workflow_id="local-demo-query-exception",
+                payload={
+                    "db_name": "demo_orders",
+                    "sql": "select 1",
+                    "submitted_by": "demo_requester",
+                },
+            )
+
+        command = exc_context.exception.command
+        self.assertEqual(command.status, AgentCommandStatus.FAILED)
+        self.assertEqual(command.error["message"], "connection failed")
+        self.assertTrue(command.events.filter(event_type="command.failed").exists())
+        mock_dispatch_agent_command.assert_not_called()
 
     @patch.dict(os.environ, {"RUN_LOCAL_DEMO_SEED": "1"})
     @patch("api_agents.services.dispatch_agent_command")
