@@ -689,40 +689,6 @@ watch(selectedDbName, () => {
           </CardContent>
         </Card>
 
-        <Card v-if="activeFormMode" class="border-slate-200">
-          <CardHeader>
-            <CardTitle>{{ activeFormMode === 'create' ? 'Create database' : 'Edit metadata' }}</CardTitle>
-            <CardDescription>
-              {{ activeFormMode === 'create' ? 'Create a database and save ownership metadata.' : 'Update ownership metadata for an existing database.' }}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form class="grid gap-4" @submit.prevent="void submitDatabaseForm()">
-              <label class="grid gap-2">
-                <span class="text-sm font-medium text-slate-700">Database name</span>
-                <Input v-model="form.dbName" :disabled="activeFormMode === 'edit'" placeholder="appdb" />
-              </label>
-              <label class="grid gap-2">
-                <span class="text-sm font-medium text-slate-700">Owner username</span>
-                <Input v-model="form.owner" placeholder="jane.doe" />
-              </label>
-              <label class="grid gap-2">
-                <span class="text-sm font-medium text-slate-700">Remark</span>
-                <Input v-model="form.remark" placeholder="Business owner, lifecycle, or notes" />
-              </label>
-              <div class="flex flex-wrap justify-end gap-2">
-                <Button variant="outline" type="button" class="gap-2" @click="closeForm">
-                  <X class="h-4 w-4" />
-                  Cancel
-                </Button>
-                <Button type="submit" class="gap-2" :disabled="submitting">
-                  <Save class="h-4 w-4" />
-                  {{ submitting ? 'Saving...' : 'Save' }}
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
       </div>
 
       <Card class="border-slate-200">
@@ -866,5 +832,58 @@ watch(selectedDbName, () => {
         </CardContent>
       </Card>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="activeFormMode"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 py-6"
+        @click.self="closeForm"
+      >
+        <section
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="database-form-title"
+          class="max-h-full w-full max-w-lg overflow-y-auto rounded-md border border-slate-200 bg-white shadow-xl"
+        >
+          <div class="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+            <div class="space-y-1">
+              <h3 id="database-form-title" class="text-lg font-semibold text-slate-900">
+                {{ activeFormMode === 'create' ? 'Create database' : 'Edit metadata' }}
+              </h3>
+              <p class="text-sm text-slate-600">
+                {{ activeFormMode === 'create' ? 'Create a database and save ownership metadata.' : 'Update ownership metadata for an existing database.' }}
+              </p>
+            </div>
+            <Button variant="ghost" size="icon" type="button" @click="closeForm">
+              <X class="h-4 w-4" />
+            </Button>
+          </div>
+          <form class="grid gap-4 px-5 py-5" @submit.prevent="void submitDatabaseForm()">
+            <label class="grid gap-2">
+              <span class="text-sm font-medium text-slate-700">Database name</span>
+              <Input v-model="form.dbName" :disabled="activeFormMode === 'edit'" placeholder="appdb" />
+            </label>
+            <label class="grid gap-2">
+              <span class="text-sm font-medium text-slate-700">Owner username</span>
+              <Input v-model="form.owner" placeholder="jane.doe" />
+            </label>
+            <label class="grid gap-2">
+              <span class="text-sm font-medium text-slate-700">Remark</span>
+              <Input v-model="form.remark" placeholder="Business owner, lifecycle, or notes" />
+            </label>
+            <div class="flex flex-wrap justify-end gap-2">
+              <Button variant="outline" type="button" class="gap-2" @click="closeForm">
+                <X class="h-4 w-4" />
+                Cancel
+              </Button>
+              <Button type="submit" class="gap-2" :disabled="submitting">
+                <Save class="h-4 w-4" />
+                {{ submitting ? 'Saving...' : 'Save' }}
+              </Button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </Teleport>
   </section>
 </template>

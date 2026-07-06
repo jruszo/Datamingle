@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   getFeatureModules,
+  getFeatureRoutes,
   getFirstVisibleSettingsItem,
   getNavigationItems,
   getVisibleNavigationItems,
@@ -93,6 +94,15 @@ describe('feature registry', () => {
 
     expect(labels).toContain('Data Dictionary')
     expect(labels).not.toContain('Databases')
+  })
+
+  it('keeps legacy database management redirects free of duplicate route metadata', () => {
+    const redirectRoute = getFeatureRoutes().find(
+      (route) => route.path === '/instance-operations/databases',
+    )
+
+    expect(redirectRoute?.redirect).toBe('/inventory/data-dictionary')
+    expect(redirectRoute?.meta).toBeUndefined()
   })
 
   it('resolves the first settings route from visible settings entries', () => {

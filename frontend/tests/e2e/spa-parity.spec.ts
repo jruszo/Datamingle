@@ -213,12 +213,14 @@ test.describe.serial('SPA bootstrap parity surfaces', () => {
       await expect(admin.page.getByRole('button', { name: /accounts/ })).toBeVisible()
 
       await admin.page.getByRole('button', { name: 'New database' }).click()
+      await expect(admin.page.getByRole('dialog', { name: 'Create database' })).toBeVisible()
       await admin.page.getByPlaceholder('appdb').fill('newdb')
       await admin.page.getByPlaceholder('jane.doe').fill('demo_admin')
       await admin.page.getByRole('button', { name: /^Save$/ }).click()
       await expect(admin.page.getByText('Database "newdb" created.')).toBeVisible()
 
       await admin.page.getByRole('button', { name: /^Edit$/ }).click()
+      await expect(admin.page.getByRole('dialog', { name: 'Edit metadata' })).toBeVisible()
       await admin.page.getByPlaceholder('jane.doe').fill('demo_admin')
       await admin.page.getByPlaceholder('Business owner, lifecycle, or notes').fill('Owned by analytics')
       await admin.page.getByRole('button', { name: /^Save$/ }).click()

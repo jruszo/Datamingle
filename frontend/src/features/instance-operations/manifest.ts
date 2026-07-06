@@ -12,10 +12,6 @@ const instanceOperationsModule: FeatureModule = {
       path: '/instance-operations/databases',
       name: 'instance-operation-databases',
       redirect: '/inventory/data-dictionary',
-      meta: {
-        title: 'Data Dictionary',
-        access: { anyPermissions: ['sql.menu_data_dictionary', 'sql.menu_database'] },
-      },
     },
     {
       path: '/instance-operations/accounts',
