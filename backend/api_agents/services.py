@@ -11,6 +11,7 @@ from urllib.parse import quote
 from django_redis import get_redis_connection
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -46,6 +47,10 @@ METRICS_SCRAPE_PROFILE_INTERVALS = {
 }
 ACTIVE_WEBSOCKET_METADATA_KEY = "active_websocket"
 WEBSOCKET_CHANNEL_METADATA_KEY = "channel_name"
+AGENT_SERVICE_ENDPOINTS_METADATA_KEY = "agent_service_endpoints"
+LOCAL_DEMO_SEED_ENV = "RUN_LOCAL_DEMO_SEED"
+LOCAL_DEMO_AGENT_NAME = "notebook-ubuntu"
+LOCAL_DEMO_INSTANCE_NAME = "demo-mysql-workflow"
 TERMINAL_COMMAND_STATUSES = {
     AgentCommandStatus.SUCCEEDED,
     AgentCommandStatus.FAILED,
@@ -197,6 +202,7 @@ def build_agent_config(agent, datamingle_url=""):
 
 def serialize_assignment(assignment):
     instance = assignment.instance
+    host, port = resolve_agent_service_endpoint(instance)
     modules = assignment_modules(assignment)
     online_schema_enabled = assignment_online_schema_enabled(assignment)
     service_monitoring_labels = dict(instance.monitoring_labels or {})
@@ -238,8 +244,8 @@ def serialize_assignment(assignment):
             instance.db_type, instance.monitoring_collectors
         ),
         "db_type": instance.db_type,
-        "host": instance.host,
-        "port": instance.port,
+        "host": host,
+        "port": port,
         "username": instance.user,
         "password": instance.password,
         "database": instance.db_name,
@@ -255,6 +261,39 @@ def serialize_assignment(assignment):
         "online_schema_enabled": online_schema_enabled,
         "logs_enabled": assignment.logs_enabled,
     }
+
+
+def resolve_agent_service_endpoint(instance):
+    host = instance.host
+    port = instance.port
+    node = getattr(instance, "node", None)
+    metadata = getattr(node, "metadata", None) if node is not None else None
+    endpoints = (
+        metadata.get(AGENT_SERVICE_ENDPOINTS_METADATA_KEY, {})
+        if isinstance(metadata, dict)
+        else {}
+    )
+    endpoint = (
+        endpoints.get(instance.instance_name) if isinstance(endpoints, dict) else None
+    )
+    if not isinstance(endpoint, dict):
+        return host, port
+
+    endpoint_host = str(endpoint.get("host") or "").strip()
+    if endpoint_host:
+        host = endpoint_host
+
+    endpoint_port = endpoint.get("port")
+    if endpoint_port not in (None, ""):
+        try:
+            parsed_port = int(endpoint_port)
+        except (TypeError, ValueError):
+            pass
+        else:
+            if 1 <= parsed_port <= 65535:
+                port = parsed_port
+
+    return host, port
 
 
 def serialize_node(node):
@@ -924,12 +963,30 @@ def run_agent_command_sync(
         payload=payload,
         idempotency_key=idempotency_key,
     )
+    if _is_local_demo_direct_query_command(command):
+        return _ensure_agent_command_succeeded(
+            _complete_local_demo_query_command(command)
+        )
+    if _is_local_demo_direct_review_command(command):
+        return _ensure_agent_command_succeeded(
+            _complete_local_demo_review_command(command)
+        )
     dispatch_agent_command(command)
     command = wait_for_agent_command(command, timeout_seconds=timeout_seconds)
+    return _ensure_agent_command_succeeded(command)
+
+
+def _agent_command_error_message(command):
     if command.status != AgentCommandStatus.SUCCEEDED:
-        message = (
+        return (
             command.error.get("message") if isinstance(command.error, dict) else ""
         ) or (command.result.get("message") if isinstance(command.result, dict) else "")
+    return ""
+
+
+def _ensure_agent_command_succeeded(command):
+    if command.status != AgentCommandStatus.SUCCEEDED:
+        message = _agent_command_error_message(command)
         raise AgentCommandExecutionError(
             message or f"Agent command {command.status}.", command=command
         )
@@ -952,6 +1009,321 @@ def result_set_from_agent_result(full_sql, result):
     result_set.warning = result.get("warning")
     result_set.error = result.get("error")
     return result_set
+
+
+def _json_safe_value(value):
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError:
+            return value.hex()
+    if isinstance(value, dict):
+        return {str(key): _json_safe_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_value(item) for item in value]
+    try:
+        return json.loads(json.dumps(value, cls=DjangoJSONEncoder))
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _json_safe_rows(rows):
+    return [_json_safe_value(row) for row in rows or []]
+
+
+def _result_set_to_agent_result(result_set, full_sql):
+    rows = _json_safe_rows(result_set.rows)
+    return {
+        "rows": rows,
+        "columns": list(result_set.column_list or []),
+        "column_list": list(result_set.column_list or []),
+        "column_type": list(result_set.column_type or []),
+        "full_sql": result_set.full_sql or full_sql,
+        "row_count": len(rows),
+        "affected_rows": result_set.affected_rows,
+        "execution_seconds": result_set.query_time,
+        "status": result_set.status,
+        "warning": result_set.warning,
+        "error": result_set.error,
+        "seconds_behind_master": "",
+    }
+
+
+def _is_local_demo_direct_query_command(command):
+    if os.environ.get(LOCAL_DEMO_SEED_ENV) != "1":
+        return False
+    if command.command_type != AgentCommandType.QUERY_EXECUTE:
+        return False
+    if not str(command.workflow_type or "").startswith("query"):
+        return False
+    if command.instance.instance_name != LOCAL_DEMO_INSTANCE_NAME:
+        return False
+    if command.agent.name != LOCAL_DEMO_AGENT_NAME:
+        return False
+    return bool((command.agent.metadata or {}).get("seeded"))
+
+
+def _is_local_demo_agent_command(command):
+    if os.environ.get(LOCAL_DEMO_SEED_ENV) != "1":
+        return False
+    if command.instance.instance_name != LOCAL_DEMO_INSTANCE_NAME:
+        return False
+    if command.agent.name != LOCAL_DEMO_AGENT_NAME:
+        return False
+    return bool((command.agent.metadata or {}).get("seeded"))
+
+
+def _is_local_demo_direct_review_command(command):
+    if not _is_local_demo_agent_command(command):
+        return False
+    return (
+        command.command_type == AgentCommandType.WORKFLOW_CHECK
+        and command.workflow_type == "workflow.check"
+    ) or (
+        command.command_type == AgentCommandType.EXPORT_CHECK
+        and command.workflow_type == "export.check"
+    )
+
+
+def _complete_local_demo_query_command(command):
+    from sql.engines import get_engine
+
+    payload = command.payload or {}
+    sql = payload.get("sql") or ""
+    max_execution_time = payload.get("max_execution_time_ms") or 0
+
+    command.status = AgentCommandStatus.RUNNING
+    command.started_at = timezone.now()
+    command.save(update_fields=["status", "started_at", "update_time"])
+    command.append_event(
+        "command.local_demo_direct",
+        "Executing local demo query directly in the app container.",
+    )
+
+    engine = None
+    try:
+        engine = get_engine(instance=command.instance)
+        result_set = engine.query(
+            db_name=payload.get("db_name") or None,
+            sql=sql,
+            limit_num=payload.get("limit") or 0,
+            parameters=payload.get("parameters") or None,
+            max_execution_time=max_execution_time,
+        )
+    except Exception as exc:
+        logger.exception("Local demo direct query execution failed.")
+        return _fail_local_demo_direct_command(command, str(exc))
+    finally:
+        if engine is not None:
+            engine.close()
+
+    command.finished_at = timezone.now()
+    command.result = _result_set_to_agent_result(result_set, sql)
+    if result_set.error:
+        command.status = AgentCommandStatus.FAILED
+        command.error = {"message": str(result_set.error)}
+        event_type = "command.failed"
+        event_message = "Local demo direct query execution failed."
+    else:
+        command.status = AgentCommandStatus.SUCCEEDED
+        command.error = {}
+        event_type = "command.succeeded"
+        event_message = "Completed by local demo direct query execution."
+    command.save(
+        update_fields=[
+            "status",
+            "finished_at",
+            "result",
+            "error",
+            "update_time",
+        ]
+    )
+    command.append_event(event_type, event_message)
+    return command
+
+
+def _fail_local_demo_direct_command(command, message):
+    command.status = AgentCommandStatus.FAILED
+    command.finished_at = timezone.now()
+    command.result = {}
+    command.error = {"message": message}
+    command.save(
+        update_fields=[
+            "status",
+            "finished_at",
+            "result",
+            "error",
+            "update_time",
+        ]
+    )
+    command.append_event("command.failed", message)
+    return command
+
+
+def _classify_local_demo_statement(statement, db_type="mysql"):
+    from sql.utils.sql_utils import get_syntax_type
+
+    syntax_name = get_syntax_type(statement, parser=True, db_type=db_type)
+    if syntax_name not in {"DDL", "DML"}:
+        syntax_name = get_syntax_type(statement, parser=False, db_type=db_type)
+    if syntax_name == "DDL":
+        return 1
+    if syntax_name == "DML":
+        return 2
+    return 0
+
+
+def _local_demo_review_rows(sql, db_type="mysql"):
+    from sql.utils.sql_utils import generate_sql
+
+    statements = [row["sql"] for row in generate_sql(sql)] or [sql]
+    rows = []
+    syntax_types = set()
+    for index, statement in enumerate(statements, start=1):
+        syntax_type = _classify_local_demo_statement(statement, db_type=db_type)
+        if syntax_type:
+            syntax_types.add(syntax_type)
+        rows.append(
+            {
+                "id": index,
+                "errlevel": 0,
+                "stagestatus": "Audit completed",
+                "errormessage": "None",
+                "sql": statement,
+            }
+        )
+    summary_syntax_type = next(iter(syntax_types)) if len(syntax_types) == 1 else 0
+    return rows, summary_syntax_type
+
+
+def _local_demo_export_review_result(command):
+    from sql.engines import get_engine
+
+    payload = command.payload or {}
+    full_sql = (payload.get("sql") or "").strip()
+    clean_sql = full_sql.lower()
+    row = {
+        "id": 1,
+        "errlevel": 0,
+        "stagestatus": "Ready",
+        "errormessage": "None",
+        "sql": full_sql,
+        "affected_rows": 0,
+    }
+    error_count = 0
+    affected_rows = 0
+
+    if not clean_sql.startswith(("select", "with")):
+        row.update(
+            {
+                "errlevel": 2,
+                "stagestatus": "Check failed!",
+                "errormessage": "Disallowed statement!",
+            }
+        )
+        error_count = 1
+    else:
+        count_sql = f"SELECT COUNT(*) FROM ({full_sql.rstrip(';')}) t"
+        engine = None
+        try:
+            engine = get_engine(instance=command.instance)
+            result_set = engine.query(
+                db_name=payload.get("db_name") or None,
+                sql=count_sql,
+            )
+        finally:
+            if engine is not None:
+                engine.close()
+        if result_set.error:
+            row.update(
+                {
+                    "errlevel": 2,
+                    "stagestatus": "Check failed!",
+                    "errormessage": result_set.error,
+                }
+            )
+            error_count = 1
+        elif result_set.rows:
+            affected_rows = int(result_set.rows[0][0])
+            row["affected_rows"] = affected_rows
+
+    return {
+        "full_sql": full_sql,
+        "checked": True,
+        "warning": None,
+        "error": None,
+        "warning_count": 0,
+        "error_count": error_count,
+        "is_critical": False,
+        "syntax_type": 3,
+        "rows": [row],
+        "review_rows": [row],
+        "column_list": ["id", "errlevel", "stagestatus", "errormessage", "sql"],
+        "status": "Ready" if error_count == 0 else "Check failed!",
+        "affected_rows": affected_rows,
+    }
+
+
+def _local_demo_workflow_review_result(command):
+    payload = command.payload or {}
+    full_sql = (payload.get("sql") or "").strip()
+    rows, syntax_type = _local_demo_review_rows(
+        full_sql,
+        db_type=command.instance.db_type,
+    )
+    return {
+        "full_sql": full_sql,
+        "checked": True,
+        "warning": None,
+        "error": None,
+        "warning_count": 0,
+        "error_count": 0,
+        "is_critical": False,
+        "syntax_type": syntax_type,
+        "rows": rows,
+        "review_rows": rows,
+        "column_list": ["id", "errlevel", "stagestatus", "errormessage", "sql"],
+        "status": "Audit completed",
+        "affected_rows": 0,
+    }
+
+
+def _complete_local_demo_review_command(command):
+    command.status = AgentCommandStatus.RUNNING
+    command.started_at = timezone.now()
+    command.save(update_fields=["status", "started_at", "update_time"])
+    command.append_event(
+        "command.local_demo_direct",
+        "Completing local demo review command directly in the app container.",
+    )
+
+    try:
+        if command.command_type == AgentCommandType.EXPORT_CHECK:
+            result = _local_demo_export_review_result(command)
+        else:
+            result = _local_demo_workflow_review_result(command)
+    except Exception as exc:
+        logger.exception("Local demo direct review execution failed.")
+        return _fail_local_demo_direct_command(command, str(exc))
+
+    command.status = AgentCommandStatus.SUCCEEDED
+    command.finished_at = timezone.now()
+    command.result = result
+    command.error = {}
+    command.save(
+        update_fields=[
+            "status",
+            "finished_at",
+            "result",
+            "error",
+            "update_time",
+        ]
+    )
+    command.append_event(
+        "command.succeeded",
+        "Completed by local demo direct review execution.",
+    )
+    return command
 
 
 def review_set_from_agent_result(full_sql, result):

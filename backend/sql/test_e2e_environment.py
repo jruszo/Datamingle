@@ -77,6 +77,7 @@ class TestE2EEnvironmentSeed(TestCase):
         call_command("seed_e2e_environment")
 
         expected_users = {
+            "local-admin@datamingle.dev": "local-admin@datamingle.dev",
             "demo_admin": "demo-admin@datamingle.dev",
             "demo_requester": "demo-requester@datamingle.dev",
             "demo_pm": "demo-pm@datamingle.dev",
@@ -95,7 +96,12 @@ class TestE2EEnvironmentSeed(TestCase):
             user = users[username]
             self.assertEqual(user.email, email)
             self.assertTrue(user.is_active)
-            self.assertTrue(user.check_password("SecurePass123!"))
+            expected_password = (
+                "DatamingleLocal123!"
+                if username == "local-admin@datamingle.dev"
+                else "SecurePass123!"
+            )
+            self.assertTrue(user.check_password(expected_password))
             self.assertTrue(
                 EmailAddress.objects.filter(
                     user=user,
@@ -105,6 +111,7 @@ class TestE2EEnvironmentSeed(TestCase):
                 ).exists()
             )
 
+        self.assertTrue(users["local-admin@datamingle.dev"].is_superuser)
         self.assertTrue(users["demo_admin"].is_superuser)
         self.assertTrue(users["e2e-admin@datamingle.dev"].is_superuser)
         self.assertIn(

@@ -133,8 +133,8 @@ test.describe.serial('SPA bootstrap parity surfaces', () => {
       await expect(
         admin.page.getByRole('heading', { name: 'Data Dictionary', level: 2 }),
       ).toBeVisible()
-      await expect(admin.page.getByLabel('Instance')).toHaveValue('101')
-      await expect(admin.page.getByLabel('Database')).toHaveValue('appdb')
+      await expect(admin.page.getByRole('combobox', { name: 'Instance' })).toHaveValue('101')
+      await expect(admin.page.getByRole('combobox', { name: 'Database' })).toHaveValue('appdb')
       await expect(admin.page.getByRole('button', { name: /accounts/ })).toBeVisible()
 
       await admin.page.getByPlaceholder('Search tables or comments').fill('account')

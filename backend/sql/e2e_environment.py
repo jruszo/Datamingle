@@ -33,9 +33,19 @@ from sql.models import (
 from sql.utils.team import normalize_permission_group_sequence
 
 E2E_PASSWORD = "SecurePass123!"
+LOCAL_ADMIN_PASSWORD = "DatamingleLocal123!"
 LOCAL_DEMO_SEED_ENV = "RUN_LOCAL_DEMO_SEED"
 
 E2E_USERS = (
+    {
+        "username": "local-admin@datamingle.dev",
+        "email": "local-admin@datamingle.dev",
+        "display": "Local Admin",
+        "is_superuser": True,
+        "password": LOCAL_ADMIN_PASSWORD,
+        "direct_permissions": (),
+        "memberships": (),
+    },
     {
         "username": "demo_admin",
         "email": "demo-admin@datamingle.dev",
@@ -322,6 +332,7 @@ def _seed_users(log):
             email=user_config["email"],
             display=user_config["display"],
             is_superuser=user_config["is_superuser"],
+            password=user_config.get("password", E2E_PASSWORD),
             direct_permission_codenames=user_config["direct_permissions"],
         )
         users[user.username] = user
@@ -329,15 +340,22 @@ def _seed_users(log):
     return users
 
 
-def _upsert_user(username, email, display, is_superuser, direct_permission_codenames):
+def _upsert_user(
+    username,
+    email,
+    display,
+    is_superuser,
+    password,
+    direct_permission_codenames,
+):
     user, _ = Users.objects.get_or_create(username=username)
     user.email = email
     user.display = display
     user.is_active = True
     user.is_staff = is_superuser
     user.is_superuser = is_superuser
-    if not user.check_password(E2E_PASSWORD):
-        user.set_password(E2E_PASSWORD)
+    if not user.check_password(password):
+        user.set_password(password)
     user.save()
 
     EmailAddress.objects.filter(user=user).exclude(email=email).delete()

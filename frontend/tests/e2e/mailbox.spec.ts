@@ -19,7 +19,7 @@ test.describe.serial('mailbox', () => {
 
   test('shows approval notifications in the bell dropdown and full mailbox page', async ({ browser }) => {
     const requester = await createRoleSession(browser, 'demo_requester')
-    let dba: RoleSession | undefined
+    let pm: RoleSession | undefined
 
     try {
       const workflowName = uniqueWorkflowName('mailbox notification')
@@ -27,7 +27,7 @@ test.describe.serial('mailbox', () => {
 
       await requester.page.goto('/workflows/ddl/new')
       await requester.page.getByTestId('workflow-name').fill(workflowName)
-      await requester.page.getByTestId('workflow-group').selectOption({ label: 'Demo Workflow Single Stage' })
+      await requester.page.getByTestId('workflow-group').selectOption({ label: 'Demo Workflow Multi Stage' })
       await requester.page.getByTestId('workflow-instance').selectOption({ label: 'demo-mysql-workflow / MYSQL' })
       await requester.page.getByTestId('workflow-db').selectOption('demo_orders')
       await fillSqlEditor(
@@ -46,31 +46,31 @@ test.describe.serial('mailbox', () => {
       await requester.page.waitForURL(/\/workflows\/\d+$/)
       const workflowId = workflowIdFromUrl(requester.page)
 
-      dba = await createRoleSession(browser, 'demo_dba')
+      pm = await createRoleSession(browser, 'demo_pm')
 
-      await dba.page.getByTestId('app-mailbox-button').click()
-      await expect(dba.page.getByTestId('app-mailbox-menu')).toBeVisible()
-      await expect(dba.page.getByTestId('app-mailbox-menu')).toContainText(workflowName)
-      await expect(dba.page.getByTestId('app-mailbox-menu')).toContainText('Approval needed')
+      await pm.page.getByTestId('app-mailbox-button').click()
+      await expect(pm.page.getByTestId('app-mailbox-menu')).toBeVisible()
+      await expect(pm.page.getByTestId('app-mailbox-menu')).toContainText(workflowName)
+      await expect(pm.page.getByTestId('app-mailbox-menu')).toContainText('Approval needed')
 
-      await dba.page.getByTestId('app-mailbox-view-all').click()
-      await dba.page.waitForURL('/mailbox')
-      await expect(dba.page.getByTestId('mailbox-page-title')).toBeVisible()
+      await pm.page.getByTestId('app-mailbox-view-all').click()
+      await pm.page.waitForURL('/mailbox')
+      await expect(pm.page.getByTestId('mailbox-page-title')).toBeVisible()
 
-      const mailboxItem = dba.page.getByTestId(/mailbox-item-\d+/).filter({ hasText: workflowName }).first()
+      const mailboxItem = pm.page.getByTestId(/mailbox-item-\d+/).filter({ hasText: workflowName }).first()
       await expect(mailboxItem).toBeVisible()
       await mailboxItem.focus()
-      await dba.page.keyboard.press('Space')
+      await pm.page.keyboard.press('Space')
 
-      await dba.page.waitForURL(new RegExp(`/workflows/${workflowId}$`))
-      await expect(dba.page.getByTestId('workflow-detail-refresh')).toBeVisible()
+      await pm.page.waitForURL(new RegExp(`/workflows/${workflowId}$`))
+      await expect(pm.page.getByTestId('workflow-detail-refresh')).toBeVisible()
 
-      await dba.page.goto('/mailbox')
-      await expect(dba.page.getByTestId('mailbox-page-title')).toBeVisible()
-      await dba.page.getByTestId('mailbox-filter-state').selectOption('unread')
-      await expect(dba.page.getByText(workflowName)).toHaveCount(0)
+      await pm.page.goto('/mailbox')
+      await expect(pm.page.getByTestId('mailbox-page-title')).toBeVisible()
+      await pm.page.getByTestId('mailbox-filter-state').selectOption('unread')
+      await expect(pm.page.getByText(workflowName)).toHaveCount(0)
     } finally {
-      await closeRoleSessions(requester.context, dba?.context)
+      await closeRoleSessions(requester.context, pm?.context)
     }
   })
 })

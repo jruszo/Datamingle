@@ -346,6 +346,7 @@ onMounted(async () => {
               :db-type="selectedInstance?.db_type ?? ''"
               :min-height="460"
               placeholder="Paste DDL or DML statements here. Run SQL check before submitting."
+              test-id="workflow-sql-editor"
               @submit="void runSqlCheck()"
             />
             <div class="flex flex-wrap gap-2">
@@ -378,7 +379,7 @@ onMounted(async () => {
             <div class="grid gap-4">
               <div class="space-y-2">
                 <label class="text-sm font-medium text-slate-700" for="workflow-name">Workflow name</label>
-                <Input id="workflow-name" v-model="form.workflowName" placeholder="Describe the change briefly" />
+                <Input id="workflow-name" v-model="form.workflowName" data-testid="workflow-name" placeholder="Describe the change briefly" />
               </div>
 
               <div class="space-y-2">
@@ -388,7 +389,7 @@ onMounted(async () => {
 
               <div class="space-y-2">
                 <label class="text-sm font-medium text-slate-700" for="workflow-group">Team</label>
-                <select id="workflow-group" v-model="form.groupId" :class="selectClass" :disabled="metadataLoading">
+                <select id="workflow-group" v-model="form.groupId" data-testid="workflow-group" :class="selectClass" :disabled="metadataLoading">
                   <option value="">Select group</option>
                   <option
                     v-for="group in metadata?.teams ?? []"
@@ -402,7 +403,7 @@ onMounted(async () => {
 
               <div class="space-y-2">
                 <label class="text-sm font-medium text-slate-700" for="workflow-instance">Target instance</label>
-                <select id="workflow-instance" v-model="form.instanceId" :class="selectClass" :disabled="metadataLoading">
+                <select id="workflow-instance" v-model="form.instanceId" data-testid="workflow-instance" :class="selectClass" :disabled="metadataLoading">
                   <option value="">Select instance</option>
                   <option
                     v-for="instance in filteredInstances"
@@ -416,7 +417,7 @@ onMounted(async () => {
 
               <div class="space-y-2">
                 <label class="text-sm font-medium text-slate-700" for="workflow-db">Target database</label>
-                <select id="workflow-db" v-model="form.dbName" :class="selectClass" :disabled="databasesLoading || !form.instanceId">
+                <select id="workflow-db" v-model="form.dbName" data-testid="workflow-db" :class="selectClass" :disabled="databasesLoading || !form.instanceId">
                   <option value="">{{ databasesLoading ? 'Loading databases...' : 'Select database' }}</option>
                   <option v-for="dbName in databaseOptions" :key="dbName" :value="dbName">
                     {{ dbName }}
@@ -447,7 +448,7 @@ onMounted(async () => {
             </div>
 
             <div class="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
-              <Button type="button" :disabled="submitting || checkLoading" @click="void submitWorkflowForm()">
+              <Button type="button" data-testid="workflow-submit" :disabled="submitting || checkLoading" @click="void submitWorkflowForm()">
                 Submit workflow
               </Button>
               <Button type="button" variant="outline" class="gap-2" :disabled="metadataLoading" @click="void loadMetadata()">
