@@ -233,8 +233,8 @@ watch([selectedInstanceId, editableFilter], () => {
     <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
       <div class="space-y-1">
         <div class="flex flex-wrap items-center gap-2">
-          <RouterLink to="/instance-operations/databases" class="text-sm font-medium text-slate-500 hover:text-slate-900">
-            Databases
+          <RouterLink to="/inventory/data-dictionary" class="text-sm font-medium text-slate-500 hover:text-slate-900">
+            Data Dictionary
           </RouterLink>
           <span class="text-slate-300">/</span>
           <RouterLink to="/instance-operations/accounts" class="text-sm font-medium text-slate-500 hover:text-slate-900">

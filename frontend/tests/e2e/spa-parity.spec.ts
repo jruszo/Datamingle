@@ -24,7 +24,6 @@ test.describe.serial('SPA bootstrap parity surfaces', () => {
       const pages = [
         { path: '/inventory/data-dictionary', heading: 'Data Dictionary' },
         { path: '/audit', heading: 'Audit' },
-        { path: '/instance-operations/databases', heading: 'Database Management' },
         { path: '/instance-operations/accounts', heading: 'Instance Accounts' },
         { path: '/instance-operations/parameters', heading: 'Parameter Settings' },
         { path: '/instance-operations/diagnostics', heading: 'Session Diagnostics' },
@@ -40,7 +39,7 @@ test.describe.serial('SPA bootstrap parity surfaces', () => {
       const navigation = admin.page.getByRole('navigation')
       await expect(navigation.getByRole('link', { name: 'Data Dictionary' })).toBeVisible()
       await expect(navigation.getByRole('link', { name: 'Audit' })).toBeVisible()
-      await expect(navigation.getByRole('link', { name: 'Databases' })).toBeVisible()
+      await expect(navigation.getByRole('link', { name: 'Databases' })).toHaveCount(0)
       await expect(navigation.getByRole('link', { name: 'Accounts' })).toBeVisible()
       await expect(navigation.getByRole('link', { name: 'Parameters' })).toBeVisible()
       await expect(navigation.getByRole('link', { name: 'Diagnostics' })).toBeVisible()
@@ -128,14 +127,102 @@ test.describe.serial('SPA bootstrap parity surfaces', () => {
           body: '<html><body>dictionary</body></html>',
         })
       })
+      await admin.page.route(
+        '**/api/v1/instance-operations/database/instances/',
+        async (route) => {
+          await route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify(
+              envelope([
+                {
+                  id: 101,
+                  instance_name: 'mock-mysql',
+                  db_type: 'mysql',
+                  label: 'mock-mysql (mysql)',
+                },
+              ]),
+            ),
+          })
+        },
+      )
+      const handleDatabaseRoute = async (route: Route) => {
+        if (route.request().method() === 'POST') {
+          await route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify(
+              envelope(
+                { id: 1, db_name: 'newdb', owner: 'demo_admin', remark: 'Created', saved: true },
+                'Database created successfully.',
+              ),
+            ),
+          })
+          return
+        }
+
+        await route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify(
+            envelope({
+              count: 1,
+              results: [
+                {
+                  db_name: 'appdb',
+                  owner: '',
+                  owner_display: '',
+                  remark: '',
+                  saved: false,
+                  table_rows: 12,
+                  data_total: 4096,
+                },
+              ],
+            }),
+          ),
+        })
+      }
+      await admin.page.route('**/api/v1/instance-operations/database/', handleDatabaseRoute)
+      await admin.page.route('**/api/v1/instance-operations/database/?*', handleDatabaseRoute)
+      await admin.page.route(
+        '**/api/v1/instance-operations/database/metadata/',
+        async (route) => {
+          await route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify(
+              envelope(
+                {
+                  id: 1,
+                  db_name: 'appdb',
+                  owner: 'demo_admin',
+                  owner_display: 'Demo Admin',
+                  remark: 'Owned by analytics',
+                  saved: true,
+                },
+                'Database metadata updated.',
+              ),
+            ),
+          })
+        },
+      )
 
       await admin.page.goto('/inventory/data-dictionary')
       await expect(
         admin.page.getByRole('heading', { name: 'Data Dictionary', level: 2 }),
       ).toBeVisible()
       await expect(admin.page.getByRole('combobox', { name: 'Instance' })).toHaveValue('101')
-      await expect(admin.page.getByRole('combobox', { name: 'Database' })).toHaveValue('appdb')
+      await expect(admin.page.getByText('Saved metadata only')).toHaveCount(0)
+      await expect(admin.page.getByRole('button', { name: /appdb/ })).toBeVisible()
       await expect(admin.page.getByRole('button', { name: /accounts/ })).toBeVisible()
+
+      await admin.page.getByRole('button', { name: 'New database' }).click()
+      await admin.page.getByPlaceholder('appdb').fill('newdb')
+      await admin.page.getByPlaceholder('jane.doe').fill('demo_admin')
+      await admin.page.getByRole('button', { name: /^Save$/ }).click()
+      await expect(admin.page.getByText('Database "newdb" created.')).toBeVisible()
+
+      await admin.page.getByRole('button', { name: /^Edit$/ }).click()
+      await admin.page.getByPlaceholder('jane.doe').fill('demo_admin')
+      await admin.page.getByPlaceholder('Business owner, lifecycle, or notes').fill('Owned by analytics')
+      await admin.page.getByRole('button', { name: /^Save$/ }).click()
+      await expect(admin.page.getByText('Database "appdb" metadata updated.')).toBeVisible()
 
       await admin.page.getByPlaceholder('Search tables or comments').fill('account')
       await expect(admin.page.getByRole('button', { name: /accounts/ })).toBeVisible()
@@ -148,6 +235,12 @@ test.describe.serial('SPA bootstrap parity surfaces', () => {
       const download = await downloadPromise
       expect(download.suggestedFilename()).toBe('mock-mysql_appdb.html')
       await expect(admin.page.getByText('Data dictionary export prepared.')).toBeVisible()
+
+      await admin.page.goto('/instance-operations/databases')
+      await expect(admin.page).toHaveURL(/\/inventory\/data-dictionary$/)
+      await expect(
+        admin.page.getByRole('heading', { name: 'Data Dictionary', level: 2 }),
+      ).toBeVisible()
     } finally {
       await closeRoleSessions(admin.context)
     }
@@ -272,53 +365,6 @@ test.describe.serial('SPA bootstrap parity surfaces', () => {
     const calls: string[] = []
 
     try {
-      await admin.page.route('**/api/v1/instance-operations/database/instances/', async (route) => {
-        await route.fulfill({
-          contentType: 'application/json',
-          body: JSON.stringify(
-            envelope([
-              { id: 201, instance_name: 'ops-mysql', db_type: 'mysql', label: 'ops-mysql (mysql)' },
-            ]),
-          ),
-        })
-      })
-      const handleDatabaseRoute = async (route: Route) => {
-        calls.push(`database-${route.request().method()}`)
-        if (route.request().method() === 'POST') {
-          await route.fulfill({
-            contentType: 'application/json',
-            body: JSON.stringify(
-              envelope(
-                { id: 1, db_name: 'newdb', owner: 'demo_admin', remark: 'Created', saved: true },
-                'Database created successfully.',
-              ),
-            ),
-          })
-          return
-        }
-        await route.fulfill({
-          contentType: 'application/json',
-          body: JSON.stringify(
-            envelope({
-              count: 1,
-              results: [{ db_name: 'appdb', owner: '', remark: '', saved: false }],
-            }),
-          ),
-        })
-      }
-      await admin.page.route('**/api/v1/instance-operations/database/', handleDatabaseRoute)
-      await admin.page.route('**/api/v1/instance-operations/database/?*', handleDatabaseRoute)
-
-      await admin.page.goto('/instance-operations/databases')
-      await expect(
-        admin.page.getByRole('heading', { name: 'Database Management', level: 2 }),
-      ).toBeVisible()
-      await admin.page.getByRole('button', { name: 'New database' }).click()
-      await admin.page.getByPlaceholder('appdb').fill('newdb')
-      await admin.page.getByPlaceholder('jane.doe').fill('demo_admin')
-      await admin.page.getByRole('button', { name: /^Save$/ }).click()
-      await expect(admin.page.getByText('Database "newdb" created.')).toBeVisible()
-
       await admin.page.route('**/api/v1/instance-operations/account/instances/', async (route) => {
         await route.fulfill({
           contentType: 'application/json',
@@ -493,7 +539,6 @@ test.describe.serial('SPA bootstrap parity surfaces', () => {
       await admin.page.getByRole('button', { name: 'Kill sessions' }).click()
       await expect(admin.page.getByText('Selected sessions terminated.')).toBeVisible()
 
-      expect(calls).toContain('database-POST')
       expect(calls).toContain('account-POST')
       expect(calls).toContain('param-edit')
       expect(calls).toContain('kill-preview')

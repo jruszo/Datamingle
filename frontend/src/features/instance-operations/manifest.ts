@@ -2,7 +2,6 @@ import { Database, SlidersHorizontal, SquareActivity, UserRound } from 'lucide-v
 
 import type { FeatureModule } from '@/app/feature-contract'
 import AccountManagementPage from '@/features/instance-operations/pages/AccountManagementPage.vue'
-import DatabaseManagementPage from '@/features/instance-operations/pages/DatabaseManagementPage.vue'
 import ParameterSettingsPage from '@/features/instance-operations/pages/ParameterSettingsPage.vue'
 import SessionDiagnosticsPage from '@/features/instance-operations/pages/SessionDiagnosticsPage.vue'
 
@@ -12,8 +11,11 @@ const instanceOperationsModule: FeatureModule = {
     {
       path: '/instance-operations/databases',
       name: 'instance-operation-databases',
-      component: DatabaseManagementPage,
-      meta: { title: 'Database Management', access: { anyPermissions: ['sql.menu_database'] } },
+      redirect: '/inventory/data-dictionary',
+      meta: {
+        title: 'Data Dictionary',
+        access: { anyPermissions: ['sql.menu_data_dictionary', 'sql.menu_database'] },
+      },
     },
     {
       path: '/instance-operations/accounts',
@@ -38,15 +40,6 @@ const instanceOperationsModule: FeatureModule = {
     },
   ],
   navigation: [
-    {
-      to: '/instance-operations/databases',
-      label: 'Databases',
-      section: 'primary',
-      icon: Database,
-      group: { id: 'database', label: 'Database', icon: Database, order: 25 },
-      order: 30,
-      access: { anyPermissions: ['sql.menu_database'] },
-    },
     {
       to: '/instance-operations/accounts',
       label: 'Accounts',
