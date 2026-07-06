@@ -319,37 +319,28 @@ class TestMysql(TestCase):
         check_result = new_engine.filter_sql(sql=sql_without_limit, limit_num=1)
         self.assertEqual(check_result, "show create table usertable;")
 
-    @patch("sql.engines.mysql.data_masking", return_value=ResultSet())
-    def test_query_masking(self, _data_masking):
+    @patch("sql.engines.mysql.simple_column_mask", return_value=ResultSet())
+    def test_query_masking(self, simple_column_mask):
         query_result = ResultSet()
         new_engine = MysqlEngine(instance=self.ins1)
         masking_result = new_engine.query_masking(
             db_name="archery", sql="select 1", resultset=query_result
         )
         self.assertIsInstance(masking_result, ResultSet)
+        simple_column_mask.assert_called_once_with(self.ins1, query_result)
 
-    @patch("sql.engines.mysql.data_masking", return_value=ResultSet())
-    def test_query_masking_not_select(self, _data_masking):
+    @patch("sql.engines.mysql.simple_column_mask", return_value=ResultSet())
+    def test_query_masking_not_select(self, simple_column_mask):
         query_result = ResultSet()
         new_engine = MysqlEngine(instance=self.ins1)
         masking_result = new_engine.query_masking(
             db_name="archery", sql="explain select 1", resultset=query_result
         )
         self.assertEqual(masking_result, query_result)
+        simple_column_mask.assert_not_called()
 
-    @patch("sql.engines.mysql.GoInceptionEngine")
-    def test_execute_check_select_sql(self, _inception_engine):
-        self.sys_config.set("goinception", "true")
+    def test_execute_check_select_sql(self):
         sql = "select * from user"
-        inc_row = ReviewResult(
-            id=1,
-            errlevel=0,
-            stagestatus="Audit completed",
-            errormessage="None",
-            sql=sql,
-            affected_rows=0,
-            execute_time="",
-        )
         row = ReviewResult(
             id=1,
             errlevel=2,
@@ -360,29 +351,15 @@ class TestMysql(TestCase):
             ),
             sql=sql,
         )
-        _inception_engine.return_value.execute_check.return_value = ReviewSet(
-            full_sql=sql, rows=[inc_row]
-        )
         new_engine = MysqlEngine(instance=self.ins1)
         check_result = new_engine.execute_check(db_name="archery", sql=sql)
         self.assertIsInstance(check_result, ReviewSet)
         self.assertEqual(check_result.rows[0].__dict__, row.__dict__)
 
-    @patch("sql.engines.mysql.GoInceptionEngine")
-    def test_execute_check_critical_sql(self, _inception_engine):
-        self.sys_config.set("goinception", "true")
+    def test_execute_check_critical_sql(self):
         self.sys_config.set("critical_ddl_regex", "^|update")
         self.sys_config.get_all_config()
         sql = "update user set id=1"
-        inc_row = ReviewResult(
-            id=1,
-            errlevel=0,
-            stagestatus="Audit completed",
-            errormessage="None",
-            sql=sql,
-            affected_rows=0,
-            execute_time="",
-        )
         row = ReviewResult(
             id=1,
             errlevel=2,
@@ -392,17 +369,12 @@ class TestMysql(TestCase):
             ),
             sql=sql,
         )
-        _inception_engine.return_value.execute_check.return_value = ReviewSet(
-            full_sql=sql, rows=[inc_row]
-        )
         new_engine = MysqlEngine(instance=self.ins1)
         check_result = new_engine.execute_check(db_name="archery", sql=sql)
         self.assertIsInstance(check_result, ReviewSet)
         self.assertEqual(check_result.rows[0].__dict__, row.__dict__)
 
-    @patch("sql.engines.mysql.GoInceptionEngine")
-    def test_execute_check_normal_sql(self, _inception_engine):
-        self.sys_config.set("goinception", "true")
+    def test_execute_check_normal_sql(self):
         sql = "update user set id=1"
         row = ReviewResult(
             id=1,
@@ -413,32 +385,58 @@ class TestMysql(TestCase):
             affected_rows=0,
             execute_time=0,
         )
-        _inception_engine.return_value.execute_check.return_value = ReviewSet(
-            full_sql=sql, rows=[row]
-        )
         new_engine = MysqlEngine(instance=self.ins1)
         check_result = new_engine.execute_check(db_name="archery", sql=sql)
         self.assertIsInstance(check_result, ReviewSet)
         self.assertEqual(check_result.rows[0].__dict__, row.__dict__)
+        self.assertEqual(check_result.syntax_type, 2)
 
-    @patch("sql.engines.mysql.GoInceptionEngine")
-    def test_execute_check_normal_sql_with_Exception(self, _inception_engine):
-        sql = "update user set id=1"
-        _inception_engine.return_value.execute_check.side_effect = RuntimeError()
+    def test_execute_check_rejects_unsupported_statement(self):
+        sql = "grant select on *.* to demo@'%'"
         new_engine = MysqlEngine(instance=self.ins1)
-        with self.assertRaises(RuntimeError):
-            new_engine.execute_check(db_name=0, sql=sql)
+        check_result = new_engine.execute_check(db_name=0, sql=sql)
 
+        self.assertEqual(check_result.error_count, 1)
+        self.assertEqual(
+            check_result.rows[0].stagestatus, "Rejected unsupported statement"
+        )
+
+    @patch.object(MysqlEngine, "get_connection")
     @patch.object(MysqlEngine, "query")
-    @patch("sql.engines.mysql.GoInceptionEngine")
-    def test_execute_workflow(self, _inception_engine, _query):
-        self.sys_config.set("goinception", "true")
-        sql = "update user set id=1"
-        _inception_engine.return_value.execute.return_value = ReviewSet(full_sql=sql)
-        _query.return_value.rows = (("0",),)
+    def test_execute_workflow_direct_for_dml(self, mock_query, mock_get_connection):
+        self.wf.syntax_type = 2
+        self.wf.sqlworkflowcontent.sql_content = "update user set id=1;"
+        self.wf.sqlworkflowcontent.review_content = json.dumps(
+            [
+                {
+                    "id": 1,
+                    "errlevel": 0,
+                    "stagestatus": "Audit completed",
+                    "errormessage": "None",
+                    "sql": "update user set id=1",
+                    "affected_rows": 0,
+                    "execute_time": 0,
+                }
+            ]
+        )
+        self.wf.save(update_fields=["syntax_type"])
+        self.wf.sqlworkflowcontent.save(update_fields=["sql_content", "review_content"])
+
+        mock_query.return_value.rows = ((0,),)
+        mock_conn = Mock()
+        mock_cursor = Mock()
+        mock_cursor.rowcount = 3
+        mock_conn.cursor.return_value = mock_cursor
+        mock_get_connection.return_value = mock_conn
+
         new_engine = MysqlEngine(instance=self.ins1)
         execute_result = new_engine.execute_workflow(self.wf)
+
+        mock_cursor.execute.assert_called_once_with("update user set id=1")
         self.assertIsInstance(execute_result, ReviewSet)
+        self.assertEqual(execute_result.error, None)
+        self.assertEqual(execute_result.rows[0].stagestatus, "Execute Successfully")
+        self.assertEqual(execute_result.rows[0].affected_rows, 3)
 
     @patch.object(MysqlEngine, "get_connection")
     @patch.object(MysqlEngine, "query")
@@ -517,23 +515,10 @@ class TestMysql(TestCase):
         new_engine.set_variable("binlog_format", "ROW")
         _query.assert_called_once_with(sql="set global binlog_format=ROW;")
 
-    @patch("sql.engines.mysql.GoInceptionEngine")
-    def test_osc_go_inception(self, _inception_engine):
-        self.sys_config.set("goinception", "false")
-        _inception_engine.return_value.osc_control.return_value = ReviewSet()
-        command = "get"
-        sqlsha1 = "xxxxx"
+    def test_mysql_auto_backup_is_disabled_without_goinception(self):
         new_engine = MysqlEngine(instance=self.ins1)
-        new_engine.osc_control(sqlsha1=sqlsha1, command=command)
 
-    @patch("sql.engines.mysql.GoInceptionEngine")
-    def test_osc_inception(self, _inception_engine):
-        self.sys_config.set("goinception", "true")
-        _inception_engine.return_value.osc_control.return_value = ReviewSet()
-        command = "get"
-        sqlsha1 = "xxxxx"
-        new_engine = MysqlEngine(instance=self.ins1)
-        new_engine.osc_control(sqlsha1=sqlsha1, command=command)
+        self.assertFalse(new_engine.auto_backup)
 
     @patch.object(MysqlEngine, "query")
     def test_kill_connection(self, _query):

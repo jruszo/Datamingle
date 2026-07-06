@@ -100,6 +100,21 @@ class TestQueryPrivilegesApply(TestCase):
                 1,
             )
 
+    def test_table_ref_uses_local_sql_parser_and_defaults_schema(self):
+        table_ref = sql.query_privileges._table_ref(
+            "select u.id from users u join analytics.events e on e.user_id = u.id",
+            self.slave,
+            "appdb",
+        )
+
+        self.assertEqual(
+            table_ref,
+            [
+                {"schema": "appdb", "name": "users"},
+                {"schema": "analytics", "name": "events"},
+            ],
+        )
+
         sql.query_privileges._query_apply_audit_call_back(
             self.query_apply_2.apply_id, 1
         )

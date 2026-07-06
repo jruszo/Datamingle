@@ -1,7 +1,6 @@
 # -*- coding: UTF-8 -*-
 import json
 import logging
-import traceback
 import MySQLdb
 import pymysql
 import re
@@ -14,12 +13,11 @@ from MySQLdb.constants import FIELD_TYPE
 from schemaobject.connection import build_database_url
 
 from common.utils.timer import FuncTimer
-from sql.engines.goinception import GoInceptionEngine
 from sql.utils.sql_utils import get_syntax_type, remove_comments
 from . import EngineBase
 from .models import ResultSet, ReviewResult, ReviewSet
 from .mysql_ddl import MysqlDDLExecutorError, MysqlDDLExecutorService
-from sql.utils.data_masking import data_masking
+from sql.utils.data_masking import simple_column_mask
 from common.config import SysConfig
 
 logger = logging.getLogger("default")
@@ -76,7 +74,6 @@ class MysqlEngine(EngineBase):
     def __init__(self, instance=None):
         super().__init__(instance=instance)
         self.config = SysConfig()
-        self.inc_engine = GoInceptionEngine()
 
     def get_connection(self, db_name=None):
         # https://stackoverflow.com/questions/19256155/python-mysqldb-returning-x01-for-bit-values
@@ -116,7 +113,7 @@ class MysqlEngine(EngineBase):
     @property
     def auto_backup(self):
         """Whether backup is supported."""
-        return True
+        return False
 
     @property
     def seconds_behind_master(self):
@@ -656,79 +653,96 @@ class MysqlEngine(EngineBase):
         """Given SQL, DB name, and result set, return masked result set."""
         # Only mask SELECT statements.
         if re.match(r"^select", sql, re.I):
-            mask_result = data_masking(self.instance, db_name, sql, resultset)
+            mask_result = simple_column_mask(self.instance, resultset)
+            mask_result.is_masked = True
         else:
             mask_result = resultset
         return mask_result
 
     def execute_check(self, db_name=None, sql=""):
         """Pre-check before workflow execution, return ReviewSet."""
-        # Run Inception check and get result.
-        try:
-            check_result = self.inc_engine.execute_check(
-                instance=self.instance, db_name=db_name, sql=sql
-            )
-        except Exception as e:
-            logger.debug(
-                f"{self.inc_engine.name} check failed, "
-                f"error: {traceback.format_exc()}"
-            )
-            raise RuntimeError(
-                f"{self.inc_engine.name} check failed, please verify "
-                f"{self.inc_engine.name} settings in system config, "
-                f"error:\n{e}"
-            )
-
-        # Check Inception result.
-        if check_result.error:
-            logger.debug(
-                f"{self.inc_engine.name} check failed, error: {check_result.error}"
-            )
-            raise RuntimeError(
-                f"{self.inc_engine.name} check failed, error:\n{check_result.error}"
-            )
-
-        # Unsupported/high-risk statement checks.
+        check_result = ReviewSet(full_sql=sql)
         critical_ddl_regex = self.config.get("critical_ddl_regex", "")
         ddl_dml_separation = self.config.get("ddl_dml_separation", False)
-        p = re.compile(critical_ddl_regex)
-        # Get statement type: DDL or DML.
+        p = re.compile(critical_ddl_regex) if critical_ddl_regex else None
         ddl_dml_flag = ""
-        for row in check_result.rows:
-            statement = row.sql
-            # Remove comments.
-            statement = remove_comments(statement, db_type="mysql")
-            # Get syntax type.
+        line = 1
+
+        for statement in sqlparse.split(sql):
+            statement = remove_comments(statement, db_type="mysql").strip()
+            statement = statement.rstrip(";")
+            if not statement:
+                continue
+
             syntax_type = get_syntax_type(statement, parser=False, db_type="mysql")
-            # Unsupported statements.
             if re.match(r"^select", statement.lower()):
-                check_result.error_count += 1
-                row.stagestatus = "Rejected unsupported statement"
-                row.errlevel = 2
-                row.errormessage = (
-                    "Only DML and DDL statements are supported. "
-                    "Use SQL query feature for SELECT statements!"
+                row = ReviewResult(
+                    id=line,
+                    errlevel=2,
+                    stagestatus="Rejected unsupported statement",
+                    errormessage=(
+                        "Only DML and DDL statements are supported. "
+                        "Use SQL query feature for SELECT statements!"
+                    ),
+                    sql=statement,
                 )
-            # High-risk statements.
             elif critical_ddl_regex and p.match(statement.strip().lower()):
-                check_result.error_count += 1
-                row.stagestatus = "Rejected high-risk SQL"
-                row.errlevel = 2
-                row.errormessage = (
-                    "Submitting statements matching "
-                    + critical_ddl_regex
-                    + " is prohibited!"
+                row = ReviewResult(
+                    id=line,
+                    errlevel=2,
+                    stagestatus="Rejected high-risk SQL",
+                    errormessage=(
+                        "Submitting statements matching "
+                        + critical_ddl_regex
+                        + " is prohibited!"
+                    ),
+                    sql=statement,
                 )
-            elif ddl_dml_separation and syntax_type in ("DDL", "DML"):
-                if ddl_dml_flag == "":
-                    ddl_dml_flag = syntax_type
-                elif ddl_dml_flag != syntax_type:
-                    check_result.error_count += 1
-                    row.stagestatus = "Rejected unsupported statement"
-                    row.errlevel = 2
-                    row.errormessage = (
-                        "DDL and DML statements cannot be executed together!"
-                    )
+            elif syntax_type not in ("DDL", "DML"):
+                row = ReviewResult(
+                    id=line,
+                    errlevel=2,
+                    stagestatus="Rejected unsupported statement",
+                    errormessage=(
+                        "Only DML and DDL statements are supported. "
+                        "Use SQL query feature for SELECT statements!"
+                    ),
+                    sql=statement,
+                )
+            else:
+                row = ReviewResult(
+                    id=line,
+                    errlevel=0,
+                    stagestatus="Audit completed",
+                    errormessage="None",
+                    sql=statement,
+                    affected_rows=0,
+                    execute_time=0,
+                )
+
+                if ddl_dml_separation and syntax_type in ("DDL", "DML"):
+                    if ddl_dml_flag == "":
+                        ddl_dml_flag = syntax_type
+                    elif ddl_dml_flag != syntax_type:
+                        row.stagestatus = "Rejected unsupported statement"
+                        row.errlevel = 2
+                        row.errormessage = (
+                            "DDL and DML statements cannot be executed together!"
+                        )
+
+            if syntax_type == "DDL":
+                check_result.syntax_type = 1
+            elif syntax_type == "DML" and check_result.syntax_type == 0:
+                check_result.syntax_type = 2
+            check_result.rows.append(row)
+            line += 1
+
+        check_result.checked = True
+        for row in check_result.rows:
+            if row.errlevel == 1:
+                check_result.warning_count += 1
+            elif row.errlevel == 2:
+                check_result.error_count += 1
         return check_result
 
     def execute_workflow(self, workflow, execution_options=None):
@@ -759,8 +773,7 @@ class MysqlEngine(EngineBase):
             return self.execute_ddl_workflow(
                 workflow=workflow, execution_options=execution_options or {}
             )
-        # DML and other workflow types continue through the existing review engine.
-        return self.inc_engine.execute(workflow)
+        return self.execute_direct_workflow(workflow=workflow, executor_id="direct")
 
     def get_ddl_executor_inspection(self, workflow):
         statements = self._ddl_executor_statements(workflow)
@@ -1033,11 +1046,6 @@ class MysqlEngine(EngineBase):
             self.close()
         return result
 
-    def get_rollback(self, workflow):
-        """Get rollback SQL list via inception."""
-        inception_engine = GoInceptionEngine()
-        return inception_engine.get_rollback(workflow)
-
     def get_variables(self, variables=None):
         """Get instance variables."""
         if variables:
@@ -1060,12 +1068,6 @@ class MysqlEngine(EngineBase):
         """Set instance variable value."""
         sql = f"""set global {variable_name}={variable_value};"""
         return self.query(sql=sql)
-
-    def osc_control(self, **kwargs):
-        """Control OSC execution: get progress, kill, pause, resume.
-        get, kill, pause, resume
-        """
-        return self.inc_engine.osc_control(**kwargs)
 
     def processlist(
         self,

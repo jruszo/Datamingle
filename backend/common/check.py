@@ -1,8 +1,6 @@
 # -*- coding: UTF-8 -*-
 import logging
-import traceback
 
-import MySQLdb
 import simplejson as json
 from common.utils.sendmsg import MsgSender
 from sql.storage import DynamicStorage
@@ -15,35 +13,6 @@ def _parse_bool(value):
     if isinstance(value, bool):
         return value
     return str(value).lower() == "true"
-
-
-def validate_go_inception_payload(payload):
-    result = {"status": 0, "msg": "ok", "data": []}
-    go_inception_host = payload.get("go_inception_host", "")
-    go_inception_port = payload.get("go_inception_port", "")
-    go_inception_user = payload.get("go_inception_user", "")
-    go_inception_password = payload.get("go_inception_password", "")
-
-    try:
-        conn = MySQLdb.connect(
-            host=go_inception_host,
-            port=int(go_inception_port),
-            user=go_inception_user,
-            password=go_inception_password,
-            charset="utf8mb4",
-            connect_timeout=5,
-        )
-        cur = conn.cursor()
-    except Exception:
-        logger.error(traceback.format_exc())
-        result["status"] = 1
-        result["msg"] = "Unable to connect to goInception"
-        return result
-    else:
-        cur.close()
-        conn.close()
-
-    return result
 
 
 def validate_email_payload(payload, user_email):

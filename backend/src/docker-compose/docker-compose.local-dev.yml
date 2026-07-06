@@ -31,16 +31,6 @@ services:
       timeout: 5s
       retries: 20
 
-  goinception:
-    image: hanchuanchuan/goinception
-    platform: linux/amd64
-    container_name: datamingle-goinception
-    restart: always
-    ports:
-      - "4000:4000"
-    volumes:
-      - "./inception/config.toml:/etc/config.toml"
-
   datamingle:
     image: datamingle-app:local-dev
     container_name: datamingle-app
@@ -53,8 +43,6 @@ services:
         condition: service_healthy
       mysql:
         condition: service_healthy
-      goinception:
-        condition: service_started
     ports:
       - "9123:9123"
     volumes:

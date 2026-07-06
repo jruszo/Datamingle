@@ -28,7 +28,7 @@ export type SystemSettingsSectionDefinition = {
   id: string
   title: string
   description: string
-  testAction?: 'goInception' | 'email' | 'storage'
+  testAction?: 'email' | 'storage'
   fields: SystemSettingsFieldDefinition[]
 }
 
@@ -36,18 +36,6 @@ const DEFAULT_QUERY_TEMPLATE =
   'You are an engineer familiar with {{db_type}}. I will give you basic information and requirements. Generate one query for me. Do not return comments or numbering. Return only the query: {{table_schema}} \n {{user_input}}'
 
 export const systemSettingsSections: SystemSettingsSectionDefinition[] = [
-  {
-    id: 'sql-review',
-    title: 'SQL Review Engine',
-    description: 'Configure goInception connectivity used for MySQL SQL review and execution checks.',
-    testAction: 'goInception',
-    fields: [
-      { key: 'go_inception_host', label: 'goInception host', input: 'text', placeholder: 'goInception host' },
-      { key: 'go_inception_port', label: 'goInception port', input: 'number', placeholder: 'goInception port' },
-      { key: 'go_inception_user', label: 'goInception user', input: 'text', placeholder: 'Optional if auth is disabled' },
-      { key: 'go_inception_password', label: 'goInception password', input: 'password', placeholder: 'Optional if auth is disabled' },
-    ],
-  },
   {
     id: 'sql-release',
     title: 'SQL Release Controls',

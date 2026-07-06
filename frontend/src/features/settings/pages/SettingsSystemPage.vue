@@ -8,7 +8,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import {
   fetchSystemSettings,
   testSystemSettingsEmail,
-  testSystemSettingsGoInception,
   testSystemSettingsStorage,
   type SystemSettings,
   type SystemSettingsOptions,
@@ -223,25 +222,12 @@ function buildPayload(keys: string[]) {
   }, {})
 }
 
-async function runSectionTest(action: 'goInception' | 'email' | 'storage') {
+async function runSectionTest(action: 'email' | 'storage') {
   pageError.value = ''
   feedback.value = ''
   activeSectionTest.value = action
 
   try {
-    if (action === 'goInception') {
-      feedback.value = await testSystemSettingsGoInception(
-        buildPayload([
-          'go_inception_host',
-          'go_inception_port',
-          'go_inception_user',
-          'go_inception_password',
-        ]),
-        requireToken(),
-      )
-      return
-    }
-
     if (action === 'email') {
       feedback.value = await testSystemSettingsEmail(
         buildPayload([

@@ -561,12 +561,6 @@ export function updateSystemSettings(settings: SystemSettings, token: string) {
   )
 }
 
-export function testSystemSettingsGoInception(payload: Record<string, unknown>, token: string) {
-  return apiPost<unknown>('/v1/system-settings/tests/go-inception/', payload, { token }).then(
-    (responsePayload) => extractDetail(responsePayload, 'goInception connection test succeeded.'),
-  )
-}
-
 export function testSystemSettingsEmail(payload: Record<string, unknown>, token: string) {
   return apiPost<unknown>('/v1/system-settings/tests/email/', payload, { token }).then(
     (responsePayload) => extractDetail(responsePayload, 'Email connection test succeeded.'),

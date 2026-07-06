@@ -1,7 +1,6 @@
 from api_admin.dashboard import DashboardOverview
 from api_admin.settings import (
     SystemSettingsEmailTestView,
-    SystemSettingsGoInceptionTestView,
     SystemSettingsStorageTestView,
     SystemSettingsView,
 )
@@ -9,7 +8,6 @@ from api_admin.settings import (
 __all__ = [
     "DashboardOverview",
     "SystemSettingsEmailTestView",
-    "SystemSettingsGoInceptionTestView",
     "SystemSettingsStorageTestView",
     "SystemSettingsView",
 ]

@@ -23,7 +23,6 @@ from common.config import SysConfig
 from common.utils.const import WorkflowStatus, WorkflowType, WorkflowAction
 from common.utils.extend_json_encoder import ExtendJSONEncoder
 from common.utils.spa import spa_path_for_workflow
-from sql.engines.goinception import GoInceptionEngine
 from sql.models import QueryPrivilegesApply, QueryPrivileges, Instance, Team
 from sql.notify import notify_for_audit
 from sql.utils.team import user_groups, user_instances, user_member_groups
@@ -475,11 +474,19 @@ def _table_ref(sql_content, instance, db_name):
     :param db_name:
     :return:
     """
-    engine = GoInceptionEngine()
-    query_tree = engine.query_print(
-        instance=instance, db_name=db_name, sql=sql_content
-    ).get("query_tree")
-    return engine.get_table_ref(json.loads(query_tree), db_name=db_name)
+    table_ref = []
+    seen = set()
+    for table in extract_tables(sql_content):
+        schema = (table["schema"] or db_name or "").strip("`")
+        name = (table["name"] or "").strip("`")
+        if not schema or not name:
+            continue
+        key = (schema, name)
+        if key in seen:
+            continue
+        seen.add(key)
+        table_ref.append({"schema": schema, "name": name})
+    return table_ref
 
 
 def _db_priv(user, instance, db_name):
