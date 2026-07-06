@@ -44,10 +44,9 @@ def data_masking(instance, db_name, sql, sql_result):
                 sql=sql,
                 column_list=sql_result.column_list,
             )
-        # If UNION exists, call deduplication function.
-        select_list = (
-            del_repeat(select_list, keywords_count) if keywords_count else select_list
-        )
+        # build_select_list already maps one entry per result column.
+        if keywords_count and instance.db_type == "mongo":
+            select_list = del_repeat(select_list, keywords_count)
         # Analyze syntax tree to get columns matching masking rules.
         hit_columns = analyze_query_tree(select_list, instance)
         sql_result.mask_rule_hit = True if hit_columns else False
@@ -92,15 +91,21 @@ def data_masking(instance, db_name, sql, sql_result):
 
 def build_select_list(instance, db_name, sql, column_list):
     """Build best-effort select metadata compatible with masking rule lookup."""
-    table_refs = [
-        {
+    table_refs = []
+    seen_table_refs = set()
+    for table in extract_tables(sql):
+        if not table.name:
+            continue
+        source = {
             "schema": table.schema or db_name,
             "table": table.name,
             "alias": table.alias,
         }
-        for table in extract_tables(sql)
-        if table.name
-    ]
+        key = (source["schema"], source["table"], source["alias"])
+        if key in seen_table_refs:
+            continue
+        seen_table_refs.add(key)
+        table_refs.append(source)
     default_source = (
         table_refs[0]
         if len(table_refs) == 1

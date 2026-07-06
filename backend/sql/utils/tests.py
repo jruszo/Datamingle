@@ -691,6 +691,18 @@ class TestDataMasking(TestCase):
             [["188****8888"], ["188****8889"], ["188****8810"]],
         )
 
+    def test_data_masking_keeps_locally_built_union_metadata(self):
+        sql = "select phone from users " "union all " "select phone from users;"
+        rows = (("18888888888",), ("18888888889",), ("18888888810",))
+        query_result = ReviewSet(column_list=["phone"], rows=rows, full_sql=sql)
+
+        result = data_masking(self.ins, "archer_test", sql, query_result)
+
+        self.assertEqual(
+            result.rows,
+            [["188****8888"], ["188****8889"], ["188****8810"]],
+        )
+
 
 class TestTeam(TestCase):
     def setUp(self):

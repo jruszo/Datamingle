@@ -737,6 +737,17 @@ class MysqlEngine(EngineBase):
             check_result.rows.append(row)
             line += 1
 
+        if not check_result.rows:
+            check_result.rows.append(
+                ReviewResult(
+                    id=1,
+                    errlevel=2,
+                    stagestatus="Rejected empty SQL",
+                    errormessage="No executable SQL statements found.",
+                    sql=sql,
+                )
+            )
+
         check_result.checked = True
         for row in check_result.rows:
             if row.errlevel == 1:
@@ -882,7 +893,7 @@ class MysqlEngine(EngineBase):
         return execute_result
 
     def execute_direct_workflow(self, workflow, executor_id="direct"):
-        """Execute DDL statements natively without OSC tooling."""
+        """Execute reviewed statements natively without OSC tooling."""
         sql = workflow.sqlworkflowcontent.sql_content
         execute_result = ReviewSet(full_sql=sql)
         statements = self._direct_workflow_statements(workflow)
@@ -916,7 +927,6 @@ class MysqlEngine(EngineBase):
                 current_statement = statement
                 with FuncTimer() as timer:
                     cursor.execute(statement)
-                conn.commit()
                 rowcount = getattr(cursor, "rowcount", 0)
                 affected_rows = (
                     rowcount if isinstance(rowcount, int) and rowcount > 0 else 0
@@ -933,13 +943,14 @@ class MysqlEngine(EngineBase):
                         executor=executor_id,
                     )
                 )
+            conn.commit()
         except Exception as e:
             if conn:
                 try:
                     conn.rollback()
                 except Exception:
                     pass
-            logger.warning("%s direct DDL execution failed", self.name, exc_info=True)
+            logger.warning("%s direct execution failed", self.name, exc_info=True)
             execute_result.error = "Execution failed"
             execute_result.rows.append(
                 ReviewResult(

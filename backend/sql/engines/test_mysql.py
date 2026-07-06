@@ -401,6 +401,21 @@ class TestMysql(TestCase):
             check_result.rows[0].stagestatus, "Rejected unsupported statement"
         )
 
+    def test_execute_check_rejects_comment_only_sql(self):
+        sql = "-- only a comment\n/* and another comment */;"
+        new_engine = MysqlEngine(instance=self.ins1)
+
+        check_result = new_engine.execute_check(db_name="archery", sql=sql)
+
+        self.assertTrue(check_result.checked)
+        self.assertEqual(check_result.error_count, 1)
+        self.assertEqual(len(check_result.rows), 1)
+        self.assertEqual(check_result.rows[0].errlevel, 2)
+        self.assertEqual(check_result.rows[0].stagestatus, "Rejected empty SQL")
+        self.assertEqual(
+            check_result.rows[0].errormessage, "No executable SQL statements found."
+        )
+
     @patch.object(MysqlEngine, "get_connection")
     @patch.object(MysqlEngine, "query")
     def test_execute_workflow_direct_for_dml(self, mock_query, mock_get_connection):
@@ -437,6 +452,108 @@ class TestMysql(TestCase):
         self.assertEqual(execute_result.error, None)
         self.assertEqual(execute_result.rows[0].stagestatus, "Execute Successfully")
         self.assertEqual(execute_result.rows[0].affected_rows, 3)
+
+    @patch.object(MysqlEngine, "get_connection")
+    @patch.object(MysqlEngine, "query")
+    def test_execute_workflow_direct_for_dml_commits_once(
+        self, mock_query, mock_get_connection
+    ):
+        self.wf.syntax_type = 2
+        self.wf.sqlworkflowcontent.sql_content = (
+            "update user set id=1;delete from user where id=2;"
+        )
+        self.wf.sqlworkflowcontent.review_content = json.dumps(
+            [
+                {
+                    "id": 1,
+                    "errlevel": 0,
+                    "stagestatus": "Audit completed",
+                    "errormessage": "None",
+                    "sql": "update user set id=1",
+                    "affected_rows": 0,
+                    "execute_time": 0,
+                },
+                {
+                    "id": 2,
+                    "errlevel": 0,
+                    "stagestatus": "Audit completed",
+                    "errormessage": "None",
+                    "sql": "delete from user where id=2",
+                    "affected_rows": 0,
+                    "execute_time": 0,
+                },
+            ]
+        )
+        self.wf.save(update_fields=["syntax_type"])
+        self.wf.sqlworkflowcontent.save(update_fields=["sql_content", "review_content"])
+
+        mock_query.return_value.rows = ((0,),)
+        mock_conn = Mock()
+        mock_cursor = Mock()
+        mock_cursor.rowcount = 1
+        mock_conn.cursor.return_value = mock_cursor
+        mock_get_connection.return_value = mock_conn
+
+        new_engine = MysqlEngine(instance=self.ins1)
+        execute_result = new_engine.execute_workflow(self.wf)
+
+        self.assertEqual(
+            [call.args[0] for call in mock_cursor.execute.call_args_list],
+            ["update user set id=1", "delete from user where id=2"],
+        )
+        mock_conn.commit.assert_called_once()
+        mock_conn.rollback.assert_not_called()
+        self.assertEqual(execute_result.error, None)
+        self.assertEqual(len(execute_result.rows), 2)
+
+    @patch.object(MysqlEngine, "get_connection")
+    @patch.object(MysqlEngine, "query")
+    def test_execute_workflow_direct_for_dml_rolls_back_all_on_error(
+        self, mock_query, mock_get_connection
+    ):
+        self.wf.syntax_type = 2
+        self.wf.sqlworkflowcontent.sql_content = (
+            "update user set id=1;delete from user where id=2;"
+        )
+        self.wf.sqlworkflowcontent.review_content = json.dumps(
+            [
+                {
+                    "id": 1,
+                    "errlevel": 0,
+                    "stagestatus": "Audit completed",
+                    "errormessage": "None",
+                    "sql": "update user set id=1",
+                    "affected_rows": 0,
+                    "execute_time": 0,
+                },
+                {
+                    "id": 2,
+                    "errlevel": 0,
+                    "stagestatus": "Audit completed",
+                    "errormessage": "None",
+                    "sql": "delete from user where id=2",
+                    "affected_rows": 0,
+                    "execute_time": 0,
+                },
+            ]
+        )
+        self.wf.save(update_fields=["syntax_type"])
+        self.wf.sqlworkflowcontent.save(update_fields=["sql_content", "review_content"])
+
+        mock_query.return_value.rows = ((0,),)
+        mock_conn = Mock()
+        mock_cursor = Mock()
+        mock_cursor.execute.side_effect = [None, RuntimeError("boom")]
+        mock_conn.cursor.return_value = mock_cursor
+        mock_get_connection.return_value = mock_conn
+
+        new_engine = MysqlEngine(instance=self.ins1)
+        execute_result = new_engine.execute_workflow(self.wf)
+
+        mock_conn.commit.assert_not_called()
+        mock_conn.rollback.assert_called_once()
+        self.assertEqual(execute_result.error, "Execution failed")
+        self.assertEqual(execute_result.rows[-1].stagestatus, "Execute Failed")
 
     @patch.object(MysqlEngine, "get_connection")
     @patch.object(MysqlEngine, "query")

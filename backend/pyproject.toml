@@ -26,3 +26,6 @@ omit = [
     "sql/migrations/*",
     "venv*"
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"**/migrations/*.py" = ["RUF012"]
