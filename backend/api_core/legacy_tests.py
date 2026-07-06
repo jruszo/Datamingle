@@ -4572,6 +4572,10 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
         self.assertEqual(payload["settings"]["storage_type"], "local")
         self.assertNotIn("enable_backup_switch", payload["settings"])
         self.assertNotIn("inception_remote_backup_host", payload["settings"])
+        self.assertNotIn("go_inception_host", payload["settings"])
+        self.assertNotIn("go_inception_port", payload["settings"])
+        self.assertNotIn("go_inception_user", payload["settings"])
+        self.assertNotIn("go_inception_password", payload["settings"])
         auth_group_values = {
             option["value"] for option in payload["options"]["auth_groups"]
         }
@@ -4648,24 +4652,9 @@ class TestSystemSettings(CacheIsolatedAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("gh-ost binary", response.json()["gh_ost"][0])
 
-    @patch("api_admin.settings.validate_go_inception_payload")
-    def test_staff_can_run_go_inception_connection_test(self, validate_payload):
-        validate_payload.return_value = {"status": 0, "msg": "ok", "data": []}
-        self.authenticate("staff_user", "staff_password")
-
-        response = self.client.post(
-            "/api/v1/system-settings/tests/go-inception/",
-            {
-                "go_inception_host": "inception",
-                "go_inception_port": 4000,
-            },
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn(
-            "goinception connection test succeeded", response.json()["detail"].lower()
-        )
+    def test_go_inception_connection_test_endpoint_is_removed(self):
+        with self.assertRaises(Resolver404):
+            resolve("/api/v1/system-settings/tests/go-inception/")
 
     @patch("api_admin.settings.validate_email_payload")
     def test_staff_can_run_email_test(self, validate_payload):

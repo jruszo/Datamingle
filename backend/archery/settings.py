@@ -43,7 +43,6 @@ env = environ.Env(
         [
             "mysql",
             "clickhouse",
-            "goinception",
             "mssql",
             "redis",
             "pgsql",
@@ -105,7 +104,6 @@ AVAILABLE_ENGINES = {
     "mysql": {"path": "sql.engines.mysql:MysqlEngine"},
     "cassandra": {"path": "sql.engines.cassandra:CassandraEngine"},
     "clickhouse": {"path": "sql.engines.clickhouse:ClickHouseEngine"},
-    "goinception": {"path": "sql.engines.goinception:GoInceptionEngine"},
     "mssql": {"path": "sql.engines.mssql:MssqlEngine"},
     "redis": {"path": "sql.engines.redis:RedisEngine"},
     "pgsql": {"path": "sql.engines.pgsql:PgSQLEngine"},

@@ -258,6 +258,21 @@ class InstanceSerializerTests(TestCase):
 
         self.assertTrue(serializer.is_valid(), serializer.errors)
 
+    def test_instance_metadata_does_not_include_goinception(self):
+        user = get_user_model().objects.create_user(
+            username="metadata_user", password="test"
+        )
+        user.user_permissions.add(Permission.objects.get(codename="menu_instance"))
+        self.client.force_login(user)
+
+        response = self.client.get("/api/v1/instance/metadata/")
+
+        self.assertEqual(response.status_code, 200)
+        db_type_values = {
+            option["value"] for option in response.json()["data"]["db_types"]
+        }
+        self.assertNotIn("goinception", db_type_values)
+
 
 class DataDictionaryApiTests(TestCase):
     def setUp(self):

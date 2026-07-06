@@ -37,8 +37,8 @@ class ReviewResult:
         """
         Inception result columns = ['ID', 'stage', 'errlevel', 'stagestatus', 'errormessage', 'SQL', 'Affected_rows',
                                     'sequence','backup_dbname', 'execute_time', 'sqlsha1']
-        go_inception result columns = ['order_id', 'stage', 'error_level', 'stage_status', 'error_message', 'sql',
-                                       'affected_rows', 'sequence', 'backup_dbname', 'execute_time', 'sqlsha1', 'backup_time']
+        Legacy review result columns = ['order_id', 'stage', 'error_level', 'stage_status', 'error_message', 'sql',
+                                        'affected_rows', 'sequence', 'backup_dbname', 'execute_time', 'sqlsha1', 'backup_time']
         """
         if inception_result:
             self.id = inception_result[0] or 0

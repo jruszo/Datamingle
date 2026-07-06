@@ -20,7 +20,6 @@ export {
   fetchUser,
   fetchUsers,
   testSystemSettingsEmail,
-  testSystemSettingsGoInception,
   testSystemSettingsStorage,
   updateInstanceTag,
   updatePermissionLevel,

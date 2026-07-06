@@ -81,7 +81,7 @@ logger = logging.getLogger("default")
 
 DATA_DICTIONARY_DB_TYPES = ["mysql", "mssql", "oracle"]
 INSTANCE_OPERATION_DB_TYPES = ["mysql", "mongo"]
-INSTANCE_PARAMETER_DB_TYPES = ["mysql", "goinception"]
+INSTANCE_PARAMETER_DB_TYPES = ["mysql"]
 ALLOWED_PROCESSLIST_PARAMS = set()
 
 MYSQL_ACCOUNT_RE = re.compile(r"^`((?:``|[^`])*)`@`((?:``|[^`])*)`$")
@@ -1640,7 +1640,7 @@ class InstanceOperationParamInstanceList(views.APIView):
     @extend_schema(
         summary="Instance Operation Parameter Instances",
         responses={200: DataDictionaryInstanceSerializer(many=True)},
-        description="List MySQL and GoInception instances visible to the current parameter operator.",
+        description="List MySQL instances visible to the current parameter operator.",
     )
     @method_decorator(permission_required("sql.menu_param", raise_exception=True))
     def get(self, request):

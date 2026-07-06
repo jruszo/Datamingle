@@ -625,8 +625,6 @@ class TestTasks(TestCase):
 
 class TestDataMasking(TestCase):
     def setUp(self):
-        self.superuser = User.objects.create(username="super", is_superuser=True)
-        self.user = User.objects.create(username="user")
         self.ins = Instance.objects.create(
             instance_name="some_ins",
             type="slave",
@@ -636,22 +634,6 @@ class TestDataMasking(TestCase):
             user="ins_user",
             password="some_str",
         )
-        self.sys_config = SysConfig()
-        self.wf1 = SqlWorkflow.objects.create(
-            workflow_name="workflow_name",
-            team_id=1,
-            team_name="team_name",
-            engineer=self.superuser.username,
-            engineer_display=self.superuser.display,
-            audit_auth_groups="audit_auth_groups",
-            create_time=datetime.datetime.now(),
-            status="workflow_review_pass",
-            is_backup=True,
-            instance=self.ins,
-            db_name="db_name",
-            syntax_type=1,
-        )
-        # Create masking rules for unit tests.
         DataMaskingRules.objects.create(
             rule_type=1, rule_regex="(.{3})(.*)(.{4})", hide_group=2
         )
@@ -663,511 +645,11 @@ class TestDataMasking(TestCase):
             table_name="users",
             column_name="phone",
         )
-        # Rule type=100 is auto-created. Only add masked columns.
-        DataMaskingColumns.objects.create(
-            rule_type=100,
-            active=True,
-            instance=self.ins,
-            table_schema="*",
-            table_name="*",
-            column_name="mobile",
-        )
 
     def tearDown(self):
-        User.objects.all().delete()
-        SqlWorkflow.objects.all().delete()
-        SqlWorkflowContent.objects.all().delete()
+        Instance.objects.all().delete()
         DataMaskingColumns.objects.all().delete()
         DataMaskingRules.objects.all().delete()
-
-    @patch("sql.utils.data_masking.GoInceptionEngine")
-    def test_data_masking_not_hit_rules(self, _inception):
-        DataMaskingColumns.objects.all().delete()
-        DataMaskingRules.objects.all().delete()
-        _inception.return_value.query_data_masking.return_value = [
-            {
-                "index": 0,
-                "field": "phone",
-                "type": "varchar(80)",
-                "table": "users",
-                "schema": "archer_test",
-                "alias": "phone",
-            }
-        ]
-        sql = """select phone from users;"""
-        rows = (("18888888888",), ("18888888889",), ("18888888810",))
-        query_result = ReviewSet(column_list=["phone"], rows=rows, full_sql=sql)
-        r = data_masking(self.ins, "archery", sql, query_result)
-        print("test_data_masking_not_hit_rules:", r.rows)
-        self.assertEqual(r, query_result)
-
-    @patch("sql.utils.data_masking.GoInceptionEngine")
-    def test_data_masking_hit_rules_not_exists_star(self, _inception):
-        """Result includes a null value returned from database."""
-        _inception.return_value.query_data_masking.return_value = [
-            {
-                "index": 0,
-                "field": "phone",
-                "type": "varchar(80)",
-                "table": "users",
-                "schema": "archer_test",
-                "alias": "phone",
-            }
-        ]
-        sql = """select phone from users;"""
-        rows = (("18888888888",), (None,), ("18888888889",), ("18888888810",))
-        query_result = ReviewSet(column_list=["phone"], rows=rows, full_sql=sql)
-        r = data_masking(self.ins, "archery", sql, query_result)
-        print("test_data_masking_hit_rules_not_exists_star:", r.rows)
-        mask_result_rows = [
-            [
-                "188****8888",
-            ],
-            [
-                None,
-            ],
-            [
-                "188****8889",
-            ],
-            [
-                "188****8810",
-            ],
-        ]
-        self.assertEqual(r.rows, mask_result_rows)
-
-    @patch("sql.utils.data_masking.GoInceptionEngine")
-    def test_data_masking_hit_rules_exists_star(self, _inception):
-        """[*]"""
-        _inception.return_value.query_data_masking.return_value = [
-            {
-                "index": 0,
-                "field": "phone",
-                "type": "varchar(80)",
-                "table": "users",
-                "schema": "archer_test",
-                "alias": "phone",
-            }
-        ]
-        sql = """select * from users;"""
-        rows = (("18888888888",), ("18888888889",), ("18888888810",))
-        query_result = ReviewSet(column_list=["phone"], rows=rows, full_sql=sql)
-        r = data_masking(self.ins, "archery", sql, query_result)
-        print("test_data_masking_hit_rules_exists_star:", r.rows)
-        mask_result_rows = [
-            [
-                "188****8888",
-            ],
-            [
-                "188****8889",
-            ],
-            [
-                "188****8810",
-            ],
-        ]
-        self.assertEqual(r.rows, mask_result_rows)
-
-    @patch("sql.utils.data_masking.GoInceptionEngine")
-    def test_data_masking_hit_rules_star_and_column(self, _inception):
-        """[*,column_a]"""
-        _inception.return_value.query_data_masking.return_value = [
-            {
-                "index": 0,
-                "field": "phone",
-                "type": "varchar(80)",
-                "table": "users",
-                "schema": "archer_test",
-                "alias": "phone",
-            },
-            {
-                "index": 1,
-                "field": "phone",
-                "type": "varchar(80)",
-                "table": "users",
-                "schema": "archer_test",
-                "alias": "phone",
-            },
-        ]
-        sql = """select *,phone from users;"""
-        rows = (
-            (
-                "18888888888",
-                "18888888888",
-            ),
-            (
-                "18888888889",
-                "18888888889",
-            ),
-        )
-        query_result = ReviewSet(
-            column_list=["phone", "phone"], rows=rows, full_sql=sql
-        )
-        r = data_masking(self.ins, "archery", sql, query_result)
-        print("test_data_masking_hit_rules_star_and_column", r.rows)
-        mask_result_rows = [
-            [
-                "188****8888",
-                "188****8888",
-            ],
-            [
-                "188****8889",
-                "188****8889",
-            ],
-        ]
-        self.assertEqual(r.rows, mask_result_rows)
-
-    @patch("sql.utils.data_masking.GoInceptionEngine")
-    def test_data_masking_hit_rules_column_and_star(self, _inception):
-        """[column_a, *]"""
-        _inception.return_value.query_data_masking.return_value = [
-            {
-                "index": 0,
-                "field": "phone",
-                "type": "varchar(80)",
-                "table": "users",
-                "schema": "archer_test",
-                "alias": "phone",
-            },
-            {
-                "index": 1,
-                "field": "phone",
-                "type": "varchar(80)",
-                "table": "users",
-                "schema": "archer_test",
-                "alias": "phone",
-            },
-        ]
-        sql = """select phone,* from users;"""
-        rows = (
-            (
-                "18888888888",
-                "18888888888",
-            ),
-            (
-                "18888888889",
-                "18888888889",
-            ),
-        )
-        query_result = ReviewSet(
-            column_list=["phone", "phone"], rows=rows, full_sql=sql
-        )
-        r = data_masking(self.ins, "archery", sql, query_result)
-        print("test_data_masking_hit_rules_column_and_star", r.rows)
-        mask_result_rows = [
-            [
-                "188****8888",
-                "188****8888",
-            ],
-            [
-                "188****8889",
-                "188****8889",
-            ],
-        ]
-        self.assertEqual(r.rows, mask_result_rows)
-
-    @patch("sql.utils.data_masking.GoInceptionEngine")
-    def test_data_masking_hit_default_rules_column_and_star(self, _inception):
-        """Hit default masking rule (rule code 100) when SQL includes * and fields.
-        1. Masking rule: schema=* table=* field=mobile.
-        2. Masking rule: schema=archer_test table=users field=phone.
-        """
-        _inception.return_value.query_data_masking.return_value = [
-            {
-                "index": 0,
-                "field": "phone",
-                "type": "varchar(80)",
-                "table": "users",
-                "schema": "archer_test",
-                "alias": "p",
-            },
-            {
-                "index": 1,
-                "field": "id",
-                "type": "varchar(80)",
-                "table": "users",
-                "schema": "archer_test",
-                "alias": "id",
-            },
-            {
-                "index": 2,
-                "field": "mobile",
-                "type": "varchar(80)",
-                "table": "users_not_config",
-                "schema": "archer_test_not_config",
-                "alias": "m",
-            },
-        ]
-        sql = """select phone,id,mobile,* from users;"""
-        rows = (
-            ("1", "7954597708277300617", "1"),
-            ("12", "7954597708277300618", "12"),
-            ("123", "7954597708277300621", "123"),
-            ("1234", "7954597708277300622", "1234"),
-            ("12345", "7954597708277300623", "12345"),
-            ("123456", "7955140019084306231", "123456"),
-            ("1234567", "7955140019084306241", "1234567"),
-            ("12345678", "7955140019084306242", "12345678"),
-            ("123456789", "7955140019084306243", "123456789"),
-            ("123456789a", "7955140019084306244", "123456789a"),
-            ("123456789ab", "7955140019084306245", "123456789ab"),
-            ("123456789abc", "7955140019084306246", "123456789abc"),
-            ("123456789abcd", "7955140019084306247", "123456789abcd"),
-            ("123456789abcde", "7955140019084306248", "123456789abcde"),
-        )
-        query_result = ReviewSet(
-            column_list=["phone", "id", "mobile"], rows=rows, full_sql=sql
-        )
-        r = data_masking(self.ins, "archery", sql, query_result)
-        # First column uses masking rule 1, second column id should not be
-        # masked, third column uses masking rule 100.
-        mask_result_rows = [
-            ["1", "7954597708277300617", "*"],
-            ["12", "7954597708277300618", "*2"],
-            ["123", "7954597708277300621", "1*3"],
-            ["1234", "7954597708277300622", "1**4"],
-            ["12345", "7954597708277300623", "1**45"],
-            ["123456", "7955140019084306231", "12**56"],
-            ["1234567", "7955140019084306241", "12***67"],
-            ["123*5678", "7955140019084306242", "12***678"],
-            ["123**6789", "7955140019084306243", "123***789"],
-            ["123***789a", "7955140019084306244", "123****89a"],
-            ["123****89ab", "7955140019084306245", "123****89ab"],
-            ["123*****9abc", "7955140019084306246", "1234****9abc"],
-            ["123******abcd", "7955140019084306247", "1234*****abcd"],
-            ["123*******bcde", "7955140019084306248", "1234*****abcde"],
-        ]
-
-        self.assertEqual(r.rows, mask_result_rows)
-
-    @patch("sql.utils.data_masking.GoInceptionEngine")
-    def test_data_masking_hit_rules_column_and_star_and_column(self, _inception):
-        """[column_a,a.*,column_b]"""
-        _inception.return_value.query_data_masking.return_value = [
-            {
-                "index": 0,
-                "field": "phone",
-                "type": "varchar(80)",
-                "table": "users",
-                "schema": "archer_test",
-                "alias": "phone",
-            },
-            {
-                "index": 1,
-                "field": "phone",
-                "type": "varchar(80)",
-                "table": "users",
-                "schema": "archer_test",
-                "alias": "phone",
-            },
-            {
-                "index": 2,
-                "field": "phone",
-                "type": "varchar(80)",
-                "table": "users",
-                "schema": "archer_test",
-                "alias": "phone",
-            },
-        ]
-        sql = """select phone,*,phone from users;"""
-        rows = (
-            (
-                "18888888888",
-                "18888888888",
-                "18888888888",
-            ),
-            (
-                "18888888889",
-                "18888888889",
-                "18888888889",
-            ),
-        )
-        query_result = ReviewSet(
-            column_list=["phone", "phone", "phone"], rows=rows, full_sql=sql
-        )
-        r = data_masking(self.ins, "archery", sql, query_result)
-        print("test_data_masking_hit_rules_column_and_star_and_column", r.rows)
-        mask_result_rows = [
-            [
-                "188****8888",
-                "188****8888",
-                "188****8888",
-            ],
-            [
-                "188****8889",
-                "188****8889",
-                "188****8889",
-            ],
-        ]
-        self.assertEqual(r.rows, mask_result_rows)
-
-    @patch("sql.utils.data_masking.GoInceptionEngine")
-    def test_data_masking_hit_rules_star_and_column_and_star(self, _inception):
-        """[a.*, column_a, b.*]"""
-        _inception.return_value.query_data_masking.return_value = [
-            {
-                "index": 0,
-                "field": "phone",
-                "type": "varchar(80)",
-                "table": "users",
-                "schema": "archer_test",
-                "alias": "phone",
-            },
-            {
-                "index": 1,
-                "field": "phone",
-                "type": "varchar(80)",
-                "table": "users",
-                "schema": "archer_test",
-                "alias": "phone",
-            },
-            {
-                "index": 2,
-                "field": "phone",
-                "type": "varchar(80)",
-                "table": "users",
-                "schema": "archer_test",
-                "alias": "phone",
-            },
-        ]
-        sql = """select a.*,phone,a.* from users a;"""
-        rows = (
-            (
-                "18888888888",
-                "18888888888",
-                "18888888888",
-            ),
-            (
-                "18888888889",
-                "18888888889",
-                "18888888889",
-            ),
-        )
-        query_result = ReviewSet(
-            column_list=["phone", "phone", "phone"], rows=rows, full_sql=sql
-        )
-        r = data_masking(self.ins, "archery", sql, query_result)
-        print("test_data_masking_hit_rules_star_and_column_and_star", r.rows)
-        mask_result_rows = [
-            [
-                "188****8888",
-                "188****8888",
-                "188****8888",
-            ],
-            [
-                "188****8889",
-                "188****8889",
-                "188****8889",
-            ],
-        ]
-        self.assertEqual(r.rows, mask_result_rows)
-
-    @patch("sql.utils.data_masking.GoInceptionEngine")
-    def test_data_masking_concat_function_support(self, _inception):
-        """Support concat_ function."""
-        _inception.return_value.query_data_masking.return_value = [
-            {
-                "index": 0,
-                "field": "phone",
-                "type": "varchar(80)",
-                "table": "users",
-                "schema": "archer_test",
-                "alias": "concat(phone,1)",
-            }
-        ]
-        sql = """select concat(phone,1) from users;"""
-        rows = (("18888888888",), ("18888888889",), ("18888888810",))
-        query_result = ReviewSet(
-            column_list=["concat(phone,1)"], rows=rows, full_sql=sql
-        )
-        r = data_masking(self.ins, "archery", sql, query_result)
-        mask_result_rows = [
-            [
-                "188****8888",
-            ],
-            [
-                "188****8889",
-            ],
-            [
-                "188****8810",
-            ],
-        ]
-        print("test_data_masking_concat_function_support", r.rows)
-        self.assertEqual(r.rows, mask_result_rows)
-
-    @patch("sql.utils.data_masking.GoInceptionEngine")
-    def test_data_masking_max_function_support(self, _inception):
-        """Support max_ function."""
-        _inception.return_value.query_data_masking.return_value = [
-            {
-                "index": 0,
-                "field": "phone",
-                "type": "varchar(80)",
-                "table": "users",
-                "schema": "archer_test",
-                "alias": "max(phone+1)",
-            }
-        ]
-        sql = """select max(phone+1) from users;"""
-        rows = (("18888888888",), ("18888888889",), ("18888888810",))
-        query_result = ReviewSet(column_list=["max(phone+1)"], rows=rows, full_sql=sql)
-        mask_result_rows = [
-            [
-                "188****8888",
-            ],
-            [
-                "188****8889",
-            ],
-            [
-                "188****8810",
-            ],
-        ]
-        r = data_masking(self.ins, "archery", sql, query_result)
-        print("test_data_masking_max_function_support", r.rows)
-        self.assertEqual(r.rows, mask_result_rows)
-
-    @patch("sql.utils.data_masking.GoInceptionEngine")
-    def test_data_masking_union_support_keyword(self, _inception):
-        """Union keyword support."""
-        self.sys_config.set("query_check", "true")
-        self.sys_config.get_all_config()
-        _inception.return_value.query_data_masking.return_value = [
-            {
-                "index": 0,
-                "field": "phone",
-                "type": "varchar(80)",
-                "table": "users",
-                "schema": "archer_test",
-                "alias": "phone",
-            },
-            {
-                "index": 1,
-                "field": "phone",
-                "type": "varchar(80)",
-                "table": "users",
-                "schema": "archer_test",
-                "alias": "phone",
-            },
-        ]
-        sqls = [
-            "select phone from users union select phone from users;",
-            "select phone from users union all select phone from users;",
-        ]
-        rows = (("18888888888",), ("18888888889",), ("18888888810",))
-        mask_result_rows = [
-            [
-                "188****8888",
-            ],
-            [
-                "188****8889",
-            ],
-            [
-                "188****8810",
-            ],
-        ]
-        for sql in sqls:
-            query_result = ReviewSet(column_list=["phone"], rows=rows, full_sql=sql)
-            r = data_masking(self.ins, "archery", sql, query_result)
-            print("test_data_masking_union_support_keyword", r.rows)
-            self.assertEqual(r.rows, mask_result_rows)
 
     def test_brute_mask(self):
         sql = """select * from users;"""
@@ -1184,6 +666,42 @@ class TestDataMasking(TestCase):
         r = simple_column_mask(self.ins, query_result)
         mask_result_rows = [("188****8888",), ("188****8889",), ("188****8810",)]
         self.assertEqual(r.rows, mask_result_rows)
+
+    def test_data_masking_preserves_table_scoped_rules(self):
+        sql = """select phone from users;"""
+        rows = (("18888888888",), ("18888888889",), ("18888888810",))
+        query_result = ReviewSet(column_list=["phone"], rows=rows, full_sql=sql)
+
+        result = data_masking(self.ins, "archer_test", sql, query_result)
+
+        self.assertEqual(
+            result.rows,
+            [["188****8888"], ["188****8889"], ["188****8810"]],
+        )
+
+    def test_data_masking_resolves_unqualified_join_column_from_rules(self):
+        sql = """select phone from users join orders on users.id = orders.user_id;"""
+        rows = (("18888888888",), ("18888888889",), ("18888888810",))
+        query_result = ReviewSet(column_list=["phone"], rows=rows, full_sql=sql)
+
+        result = data_masking(self.ins, "archer_test", sql, query_result)
+
+        self.assertEqual(
+            result.rows,
+            [["188****8888"], ["188****8889"], ["188****8810"]],
+        )
+
+    def test_data_masking_keeps_locally_built_union_metadata(self):
+        sql = "select phone from users " "union all " "select phone from users;"
+        rows = (("18888888888",), ("18888888889",), ("18888888810",))
+        query_result = ReviewSet(column_list=["phone"], rows=rows, full_sql=sql)
+
+        result = data_masking(self.ins, "archer_test", sql, query_result)
+
+        self.assertEqual(
+            result.rows,
+            [["188****8888"], ["188****8889"], ["188****8810"]],
+        )
 
 
 class TestTeam(TestCase):

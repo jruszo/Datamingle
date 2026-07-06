@@ -4,11 +4,12 @@ import math
 
 import sqlparse
 from django.forms import model_to_dict
+from sqlparse.sql import Identifier, IdentifierList
 from sqlparse.tokens import Keyword
 import pandas as pd
 
-from sql.engines.goinception import GoInceptionEngine
 from sql.models import DataMaskingRules, DataMaskingColumns
+from sql.utils.extract_tables import extract_tables
 import re
 import traceback
 
@@ -37,15 +38,15 @@ def data_masking(instance, db_name, sql, sql_result):
                 for index, field in enumerate(sql_result.column_list)
             ]
         else:
-            # Get select list from goInception.
-            inception_engine = GoInceptionEngine()
-            select_list = inception_engine.query_data_masking(
-                instance=instance, db_name=db_name, sql=sql
+            select_list = build_select_list(
+                instance=instance,
+                db_name=db_name,
+                sql=sql,
+                column_list=sql_result.column_list,
             )
-        # If UNION exists, call deduplication function.
-        select_list = (
-            del_repeat(select_list, keywords_count) if keywords_count else select_list
-        )
+        # build_select_list already maps one entry per result column.
+        if keywords_count and instance.db_type == "mongo":
+            select_list = del_repeat(select_list, keywords_count)
         # Analyze syntax tree to get columns matching masking rules.
         hit_columns = analyze_query_tree(select_list, instance)
         sql_result.mask_rule_hit = True if hit_columns else False
@@ -88,8 +89,122 @@ def data_masking(instance, db_name, sql, sql_result):
     return sql_result
 
 
+def build_select_list(instance, db_name, sql, column_list):
+    """Build best-effort select metadata compatible with masking rule lookup."""
+    table_refs = []
+    seen_table_refs = set()
+    for table in extract_tables(sql):
+        if not table.name:
+            continue
+        source = {
+            "schema": table.schema or db_name,
+            "table": table.name,
+            "alias": table.alias,
+        }
+        key = (source["schema"], source["table"], source["alias"])
+        if key in seen_table_refs:
+            continue
+        seen_table_refs.add(key)
+        table_refs.append(source)
+    default_source = (
+        table_refs[0]
+        if len(table_refs) == 1
+        else {"schema": db_name, "table": "*", "alias": None}
+    )
+    source_by_name = {}
+    for source in table_refs:
+        source_by_name[source["table"]] = source
+        if source["alias"]:
+            source_by_name[source["alias"]] = source
+
+    selected_columns = parse_selected_columns(sql)
+    select_list = []
+    for index, output_field in enumerate(column_list):
+        selected = (
+            selected_columns[index]
+            if index < len(selected_columns)
+            else {"field": output_field, "qualifier": None}
+        )
+        field = selected.get("field") or output_field
+        if field == "*":
+            field = output_field
+        source = resolve_column_source(
+            instance=instance,
+            field=field,
+            selected=selected,
+            source_by_name=source_by_name,
+            table_refs=table_refs,
+            default_source=default_source,
+        )
+        select_list.append(
+            {
+                "index": index,
+                "field": field,
+                "type": "",
+                "table": source["table"],
+                "schema": source["schema"],
+                "alias": output_field,
+            }
+        )
+    return select_list
+
+
+def resolve_column_source(
+    instance, field, selected, source_by_name, table_refs, default_source
+):
+    qualifier = selected.get("qualifier")
+    if qualifier and qualifier in source_by_name:
+        return source_by_name[qualifier]
+    if len(table_refs) <= 1:
+        return default_source
+
+    matching_sources = []
+    for source in table_refs:
+        if DataMaskingColumns.objects.filter(
+            instance=instance,
+            active=True,
+            table_schema=source["schema"],
+            table_name=source["table"],
+            column_name__iexact=field,
+        ).exists():
+            matching_sources.append(source)
+    if len(matching_sources) == 1:
+        return matching_sources[0]
+    return default_source
+
+
+def parse_selected_columns(sql):
+    parsed = sqlparse.parse(sql)
+    if not parsed:
+        return []
+
+    columns = []
+    in_select = False
+    for token in parsed[0].tokens:
+        if token.ttype is Keyword and token.value.upper() == "FROM":
+            break
+        if in_select:
+            if isinstance(token, IdentifierList):
+                for identifier in token.get_identifiers():
+                    columns.append(parse_selected_identifier(identifier))
+            elif isinstance(token, Identifier):
+                columns.append(parse_selected_identifier(token))
+            elif token.value == "*":
+                columns.append({"field": "*", "qualifier": None})
+        elif token.value.upper() == "SELECT":
+            in_select = True
+    return columns
+
+
+def parse_selected_identifier(identifier):
+    return {
+        "field": identifier.get_real_name() or identifier.get_name(),
+        "qualifier": identifier.get_parent_name(),
+    }
+
+
 def del_repeat(select_list, keywords_count):
-    """Input data is list result from inception_engine.query_data_masking.
+    """Deduplicate select-list metadata for UNION queries.
     Before dedup:
     [{'index': 0, 'field': 'phone', 'type': 'varchar(80)', 'table': 'users', 'schema': 'db1', 'alias': 'phone'}, {'index': 1, 'field': 'phone', 'type': 'varchar(80)', 'table': 'users', 'schema': 'db1', 'alias': 'phone'}]
     After dedup:

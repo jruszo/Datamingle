@@ -728,7 +728,6 @@ DB_TYPE_CHOICES = (
     ("phoenix", "Phoenix"),
     ("odps", "ODPS"),
     ("clickhouse", "ClickHouse"),
-    ("goinception", "goInception"),
     ("cassandra", "Cassandra"),
     ("doris", "Doris"),
     ("elasticsearch", "Elasticsearch"),

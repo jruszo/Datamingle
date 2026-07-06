@@ -11,7 +11,6 @@ from rest_framework.response import Response
 from common.check import (
     validate_email_payload,
     validate_file_storage_payload,
-    validate_go_inception_payload,
 )
 from common.config import SysConfig
 from sql.inventory import (
@@ -53,10 +52,6 @@ MYSQL_TOPOLOGY_DRIFT_POLICY_OPTIONS = (
 )
 
 SYSTEM_SETTINGS_SCHEMA = (
-    {"name": "go_inception_host", "kind": "string", "default": ""},
-    {"name": "go_inception_port", "kind": "int", "default": None},
-    {"name": "go_inception_user", "kind": "string", "default": ""},
-    {"name": "go_inception_password", "kind": "string", "default": ""},
     {"name": "critical_ddl_regex", "kind": "string", "default": ""},
     {"name": "auto_review_wrong", "kind": "int", "default": None},
     {"name": "auto_review", "kind": "bool", "default": False},
@@ -432,13 +427,6 @@ class SystemSettingsSerializer(serializers.Serializer):
         return value
 
 
-class GoInceptionConnectionTestSerializer(serializers.Serializer):
-    go_inception_host = serializers.CharField(required=False, allow_blank=True)
-    go_inception_port = serializers.IntegerField(required=False, allow_null=True)
-    go_inception_user = serializers.CharField(required=False, allow_blank=True)
-    go_inception_password = serializers.CharField(required=False, allow_blank=True)
-
-
 class EmailConnectionTestSerializer(serializers.Serializer):
     mail = serializers.BooleanField(required=False, default=False)
     mail_ssl = serializers.BooleanField(required=False, default=False)
@@ -517,25 +505,6 @@ class SystemSettingsView(views.APIView):
                 "inventory_refresh_schedule_synced": schedule_synced,
             },
         )
-
-
-class SystemSettingsGoInceptionTestView(views.APIView):
-    permission_classes = [IsStaffOrSuperuser]
-
-    @extend_schema(
-        summary="Test goInception Configuration",
-        request=GoInceptionConnectionTestSerializer,
-        description="Test the configured goInception connection settings.",
-    )
-    def post(self, request):
-        serializer = GoInceptionConnectionTestSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        result = validate_go_inception_payload(serializer.validated_data)
-        if result["status"] != 0:
-            return Response(
-                {"errors": result["msg"]}, status=status.HTTP_400_BAD_REQUEST
-            )
-        return success_response(detail="goInception connection test succeeded.")
 
 
 class SystemSettingsEmailTestView(views.APIView):
