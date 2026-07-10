@@ -255,8 +255,10 @@ class ArchiveExecutionHelpersTest(TestCase):
                 "statistics": "SELECT 4\nDELETE 4",
             }
         )
+        self.archive.condition = "id > 10"
         self.archive.execution_state = ARCHIVE_EXECUTION_STATE_QUEUED
-        self.archive.save(update_fields=["execution_state"])
+        self.archive.save(update_fields=["condition", "execution_state"])
+        expected_condition = render_archive_condition(self.archive.condition)
 
         archive(self.archive.id, trigger="manual")
 
@@ -267,7 +269,7 @@ class ArchiveExecutionHelpersTest(TestCase):
         self.assertEqual(command_kwargs["payload"]["mode"], "purge")
         self.assertEqual(
             command_kwargs["payload"]["where"],
-            render_archive_condition(self.archive.condition),
+            expected_condition,
         )
 
     @patch("sql.archiver._record_archive_log")
@@ -276,8 +278,10 @@ class ArchiveExecutionHelpersTest(TestCase):
         self, run_agent_command_sync_mock, record_archive_log_mock
     ):
         run_agent_command_sync_mock.side_effect = RuntimeError("agent execution failed")
+        self.archive.condition = "id > 10"
         self.archive.execution_state = ARCHIVE_EXECUTION_STATE_QUEUED
-        self.archive.save(update_fields=["execution_state"])
+        self.archive.save(update_fields=["condition", "execution_state"])
+        expected_condition = render_archive_condition(self.archive.condition)
 
         with self.assertRaisesRegex(RuntimeError, "agent execution failed"):
             archive(self.archive.id, trigger="manual")
@@ -289,7 +293,7 @@ class ArchiveExecutionHelpersTest(TestCase):
         self.assertEqual(log_kwargs["error_info"], "agent execution failed")
         self.assertEqual(
             log_kwargs["condition"],
-            render_archive_condition(self.archive.condition),
+            expected_condition,
         )
 
     @patch("sql.archiver._record_archive_log")
