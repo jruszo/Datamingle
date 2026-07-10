@@ -12,8 +12,10 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	stdlibRuntime "runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -60,6 +62,8 @@ const (
 )
 
 var alterTablePattern = regexp.MustCompile(`(?is)^\s*alter\s+table\s+((?:` + "`[^`]+`" + `|[A-Za-z0-9_$]+)(?:\.(?:` + "`[^`]+`" + `|[A-Za-z0-9_$]+))?)\s+(.+?)\s*;?\s*$`)
+var archiveIdentifierPattern = regexp.MustCompile(`^[A-Za-z0-9_$-]+$`)
+var archiveStatisticPattern = regexp.MustCompile(`(?im)^(SELECT|INSERT|DELETE)\s+(\d+)\s*$`)
 
 func NewExecutor() *Executor {
 	return NewExecutorWithToolCache("")
@@ -143,9 +147,116 @@ func (e *Executor) Execute(ctx context.Context, command client.AgentCommand, cfg
 		return e.exportCheck(ctx, assignment, command, started)
 	case "export.execute":
 		return e.exportExecute(ctx, assignment, command, started)
+	case "archive.execute":
+		return e.archiveExecute(ctx, assignment, cfg, command, started)
 	default:
 		return Result{}, fmt.Errorf("unsupported command type %q", command.CommandType)
 	}
+}
+
+func (e *Executor) archiveExecute(ctx context.Context, assignment client.Assignment, cfg client.AgentConfig, command client.AgentCommand, started time.Time) (Result, error) {
+	toolPath, err := e.toolArtifactPath("pt-archiver", cfg)
+	if err != nil {
+		return Result{}, err
+	}
+	database := stringValueOrDefault(command.Payload, "db_name", assignment.Database)
+	table := stringValue(command.Payload, "table_name")
+	where := strings.TrimSpace(stringValue(command.Payload, "where"))
+	mode := stringValueOrDefault(command.Payload, "mode", "purge")
+	if !archiveIdentifierPattern.MatchString(database) || !archiveIdentifierPattern.MatchString(table) {
+		return Result{}, fmt.Errorf("archive database and table names contain unsupported characters")
+	}
+	if where == "" {
+		return Result{}, fmt.Errorf("archive condition is required")
+	}
+
+	sourceCredentials, cleanupSource, err := onlineSchemaCredentialFile(assignment)
+	if err != nil {
+		return Result{}, err
+	}
+	defer cleanupSource()
+	sourceDSN := archiveDSN(assignment, sourceCredentials, database, table)
+	if assignment.Charset != "" {
+		sourceDSN += ",A=" + assignment.Charset
+	}
+	args := []string{
+		fmt.Sprintf("--source=%s", sourceDSN),
+		fmt.Sprintf("--where=%s", where),
+		"--progress=5000",
+		"--statistics",
+		"--charset=utf8mb4",
+		"--no-check-charset",
+		"--limit=10000",
+		"--txn-size=1000",
+		fmt.Sprintf("--sleep=%d", intValue(command.Payload, "sleep", 1)),
+		"--no-version-check",
+	}
+
+	var cleanupDestination func()
+	switch mode {
+	case "purge":
+		args = append(args, "--purge")
+	case "dest":
+		destination, ok := assignmentForInstanceID(int64(intValue(command.Payload, "dest_instance_id", 0)), cfg)
+		if !ok {
+			return Result{}, fmt.Errorf("archive destination is not assigned to this agent")
+		}
+		destDatabase := stringValue(command.Payload, "dest_db_name")
+		destTable := stringValue(command.Payload, "dest_table_name")
+		if !archiveIdentifierPattern.MatchString(destDatabase) || !archiveIdentifierPattern.MatchString(destTable) {
+			return Result{}, fmt.Errorf("archive destination names contain unsupported characters")
+		}
+		destinationCredentials, cleanup, err := onlineSchemaCredentialFile(destination)
+		if err != nil {
+			return Result{}, err
+		}
+		cleanupDestination = cleanup
+		defer cleanupDestination()
+		destDSN := archiveDSN(destination, destinationCredentials, destDatabase, destTable)
+		args = append(args, "--dest="+destDSN)
+	case "file":
+		archiveDir := filepath.Join(filepath.Dir(e.toolCacheDir), "archives")
+		if err := os.MkdirAll(archiveDir, 0o750); err != nil {
+			return Result{}, err
+		}
+		args = append(args, fmt.Sprintf("--file=%s", filepath.Join(archiveDir, fmt.Sprintf("archive-%d.txt", command.ID))))
+	default:
+		return Result{}, fmt.Errorf("unsupported archive mode %q", mode)
+	}
+	if boolValue(command.Payload, "no_delete", false) {
+		args = append(args, "--no-delete")
+	}
+
+	output, runErr := e.runCommand(ctx, toolPath, args...)
+	statistics := strings.TrimSpace(string(output))
+	if runErr != nil {
+		return Result{}, fmt.Errorf("pt-archiver failed: %w: %s", runErr, statistics)
+	}
+	counts := map[string]int{"SELECT": 0, "INSERT": 0, "DELETE": 0}
+	for _, match := range archiveStatisticPattern.FindAllStringSubmatch(statistics, -1) {
+		if value, parseErr := strconv.Atoi(match[2]); parseErr == nil {
+			counts[strings.ToUpper(match[1])] = value
+		}
+	}
+	if !boolValue(command.Payload, "no_delete", false) {
+		if mode == "dest" && counts["INSERT"] != counts["DELETE"] {
+			return Result{}, fmt.Errorf("pt-archiver insert/delete counts do not match: %d != %d", counts["INSERT"], counts["DELETE"])
+		}
+		if mode != "dest" && counts["SELECT"] != counts["DELETE"] {
+			return Result{}, fmt.Errorf("pt-archiver select/delete counts do not match: %d != %d", counts["SELECT"], counts["DELETE"])
+		}
+	}
+
+	return Result{Message: "archive executed", Payload: map[string]any{
+		"statement":         fmt.Sprintf("pt-archiver %s %s.%s", mode, database, table),
+		"select_cnt":        counts["SELECT"],
+		"insert_cnt":        counts["INSERT"],
+		"delete_cnt":        counts["DELETE"],
+		"statistics":        statistics,
+		"success":           true,
+		"execution_seconds": e.now().Sub(started).Seconds(),
+		"command_id":        command.ID,
+	}}, nil
 }
 
 func (e *Executor) inventoryCollect(ctx context.Context, assignment client.Assignment, started time.Time) (Result, error) {
@@ -394,8 +505,12 @@ func intFromString(value string) int {
 }
 
 func assignmentForCommand(command client.AgentCommand, cfg client.AgentConfig) (client.Assignment, bool) {
+	return assignmentForInstanceID(command.InstanceID, cfg)
+}
+
+func assignmentForInstanceID(instanceID int64, cfg client.AgentConfig) (client.Assignment, bool) {
 	for _, assignment := range cfg.Assignments {
-		if assignment.InstanceID == command.InstanceID {
+		if assignment.InstanceID == instanceID {
 			return assignment, true
 		}
 	}
@@ -871,12 +986,16 @@ func (e *Executor) executeOnlineSchemaStatements(
 }
 
 func (e *Executor) onlineSchemaToolPath(executorID string, cfg client.AgentConfig) (string, error) {
-	if strings.TrimSpace(e.toolCacheDir) == "" {
-		return "", fmt.Errorf("%s artifact is not available: tool cache directory is not configured", onlineSchemaToolName(executorID))
-	}
 	toolName := onlineSchemaToolName(executorID)
 	if toolName == "" {
 		return "", fmt.Errorf("unsupported online schema executor %q", executorID)
+	}
+	return e.toolArtifactPath(toolName, cfg)
+}
+
+func (e *Executor) toolArtifactPath(toolName string, cfg client.AgentConfig) (string, error) {
+	if strings.TrimSpace(e.toolCacheDir) == "" {
+		return "", fmt.Errorf("%s artifact is not available: tool cache directory is not configured", toolName)
 	}
 	for _, artifact := range cfg.ToolArtifacts {
 		if artifact.ToolName != toolName {
@@ -1037,6 +1156,21 @@ func onlineSchemaCredentialFile(assignment client.Assignment) (string, func(), e
 		return "", nil, err
 	}
 	return path, cleanup, nil
+}
+
+func archiveDSN(assignment client.Assignment, credentialFile, database, table string) string {
+	parts := make([]string, 0, 7)
+	if credentialFile != "" {
+		parts = append(parts, "F="+credentialFile)
+	} else {
+		parts = append(parts,
+			"h="+assignment.Host,
+			fmt.Sprintf("P=%d", assignment.Port),
+			"u="+assignment.Username,
+		)
+	}
+	parts = append(parts, "D="+database, "t="+table)
+	return strings.Join(parts, ",")
 }
 
 func queryRows(ctx context.Context, assignment client.Assignment, database string, sqlText string, limit int) (queryData, error) {
@@ -1478,6 +1612,31 @@ func intValue(payload map[string]any, key string, fallback int) int {
 	default:
 		return fallback
 	}
+}
+
+func boolValue(payload map[string]any, key string, fallback bool) bool {
+	switch value := payload[key].(type) {
+	case bool:
+		return value
+	case int:
+		if value == 0 || value == 1 {
+			return value == 1
+		}
+	case int64:
+		if value == 0 || value == 1 {
+			return value == 1
+		}
+	case float64:
+		if value == 0 || value == 1 {
+			return value == 1
+		}
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+		if err == nil {
+			return parsed
+		}
+	}
+	return fallback
 }
 
 func intFromAny(value any) int {

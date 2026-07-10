@@ -45,7 +45,7 @@ const form = reactive({
   dbName: '',
   tableName: '',
   condition: '',
-  archiveMethod: 'dml' as 'dml' | 'pt_archiver',
+  archiveMethod: 'pt_archiver' as 'dml' | 'pt_archiver',
   executionMode: 'one_time' as 'one_time' | 'scheduled',
   scheduleFrequency: 'daily' as 'daily' | 'weekly',
   scheduleTime: '02:00',
@@ -116,7 +116,7 @@ const selectedInstance = computed(() => {
   return (metadata.value?.instances ?? []).find((instance) => instance.id === selectedInstanceId) ?? null
 })
 
-const availableMethods = computed(() => selectedInstance.value?.available_archive_methods ?? ['dml'])
+const availableMethods = computed(() => selectedInstance.value?.available_archive_methods ?? ['pt_archiver'])
 
 const weekdayOptions = computed(() => metadata.value?.weekdays ?? [])
 const requiresWeeklyWeekdays = computed(() => form.executionMode === 'scheduled' && form.scheduleFrequency === 'weekly')
@@ -283,7 +283,7 @@ watch(
 
     const instance = selectedInstance.value
     if (instance && !instance.available_archive_methods.includes(form.archiveMethod)) {
-      form.archiveMethod = instance.available_archive_methods[0] ?? 'dml'
+      form.archiveMethod = instance.available_archive_methods[0] ?? 'pt_archiver'
     }
     void loadDatabases(Number(instanceId))
   },

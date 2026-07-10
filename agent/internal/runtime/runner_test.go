@@ -3,10 +3,16 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	stdlibRuntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -72,6 +78,43 @@ func TestApplyConfigAllowsOnlineSchemaModuleWithoutEveryToolArtifact(t *testing.
 
 	if err != nil {
 		t.Fatalf("expected config without declared artifacts to apply, got %v", err)
+	}
+}
+
+func TestReconcileToolArtifactsDownloadsArchiverWithoutOnlineSchema(t *testing.T) {
+	body := []byte("#!/usr/bin/env perl\n")
+	sum := sha256.Sum256(body)
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	dataDir := t.TempDir()
+	runner := NewRunner(config.Config{DataDir: dataDir})
+	artifacts := []client.ToolArtifact{
+		{
+			ToolName: "pt-archiver", Version: "3.7.1-4",
+			Platform: stdlibRuntime.GOOS, Architecture: stdlibRuntime.GOARCH,
+			DownloadURL: server.URL + "/pt-archiver", SHA256: hex.EncodeToString(sum[:]),
+		},
+		{
+			ToolName: "pt-online-schema-change", Version: "3.7.1-4",
+			Platform: stdlibRuntime.GOOS, Architecture: stdlibRuntime.GOARCH,
+			DownloadURL: server.URL + "/pt-online-schema-change", SHA256: hex.EncodeToString(sum[:]),
+		},
+	}
+
+	if err := runner.reconcileToolArtifacts(context.Background(), client.AgentConfig{ToolArtifacts: artifacts}); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 {
+		t.Fatalf("expected only pt-archiver to be downloaded, got %d downloads", requests)
+	}
+	path := filepath.Join(dataDir, "tools", "pt-archiver", "3.7.1-4", stdlibRuntime.GOOS+"-"+stdlibRuntime.GOARCH, "pt-archiver")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected cached pt-archiver at %s: %v", path, err)
 	}
 }
 

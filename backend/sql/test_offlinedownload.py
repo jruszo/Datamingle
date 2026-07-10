@@ -80,148 +80,15 @@ class TestOfflineDownload(TestCase):
         Config.objects.all().delete()
         AuditEntry.objects.all().delete()
 
-    @patch("sql.offlinedownload.get_engine")
-    def test_pre_count_check_pass(self, mock_get_engine):
-        """
-        Test pre_count_check - normal pass.
-        """
-
-        # Mock database query result.
-        mock_engine = MagicMock()
-        mock_result_set = MagicMock()
-        mock_result_set.rows = [(500,)]
-        mock_result_set.error = None
-        mock_engine.query.return_value = mock_result_set
-        mock_get_engine.return_value = mock_engine
-
-        # Execute test.
+    def test_pre_count_check_rejects_direct_database_access(self):
         offline_download = OffLineDownLoad()
-        # Set workflow SQL for this test.
-        self.workflow.sql_content = "SELECT * FROM test_table"
-        self.workflow.schema_name = "analytics"
-        result = offline_download.pre_count_check(self.workflow)
+        with self.assertRaisesRegex(RuntimeError, "dispatch export.check"):
+            offline_download.pre_count_check(self.workflow)
 
-        # Verify result.
-        self.assertEqual(result.error_count, 0)
-        self.assertEqual(result.warning_count, 0)
-        self.assertEqual(result.rows[0].stagestatus, "Row count completed")
-        self.assertEqual(result.rows[0].affected_rows, 500)
-        self.assertEqual(mock_engine.query.call_args.kwargs["schema_name"], "analytics")
-
-    @patch("sql.offlinedownload.get_engine")
-    def test_pre_count_check_over_limit(self, mock_get_engine):
-        """
-        Test pre_count_check - row count exceeds threshold.
-        """
-
-        # Mock database query result.
-        mock_engine = MagicMock()
-        mock_result_set = MagicMock()
-        mock_result_set.rows = [(15000,)]
-        mock_result_set.error = None
-        mock_engine.query.return_value = mock_result_set
-        mock_get_engine.return_value = mock_engine
-
-        # Execute test.
+    def test_execute_offline_download_rejects_direct_database_access(self):
         offline_download = OffLineDownLoad()
-        self.workflow.sql_content = "SELECT * FROM test_table"
-        result = offline_download.pre_count_check(self.workflow)
-
-        # Verify result.
-        self.assertEqual(result.error_count, 1)
-        self.assertEqual(result.warning_count, 0)
-        self.assertIn("exceeds threshold", result.rows[0].errormessage)
-
-    @patch("sql.offlinedownload.get_engine")
-    def test_pre_count_check_invalid_sql(self, mock_get_engine):
-        """
-        Test pre_count_check - invalid SQL statement.
-        """
-
-        # Mock get_engine return value.
-        mock_engine = MagicMock()
-        mock_get_engine.return_value = mock_engine
-
-        offline_download = OffLineDownLoad()
-        self.workflow.sql_content = "DELETE FROM test_table"
-        result = offline_download.pre_count_check(self.workflow)
-
-        # Verify result.
-        self.assertEqual(result.error_count, 1)
-        self.assertEqual(result.warning_count, 0)
-        self.assertEqual(result.rows[0].errormessage, "Disallowed statement!")
-
-    @patch("sql.offlinedownload.get_engine")
-    @patch("sql.offlinedownload.DynamicStorage")
-    @patch("sql.offlinedownload.save_to_format_file")
-    @patch("builtins.open", new_callable=mock_open)
-    def test_execute_offline_download_success(
-        self, mock_open_file, mock_save_format, mock_storage, mock_get_engine
-    ):
-        """
-        Test execute_offline_download - success path.
-        """
-
-        # Mock dependencies.
-        mock_engine = MagicMock()
-        mock_result_set = MagicMock()
-        mock_result_set.error = None
-        mock_result_set.column_list = ["id", "name"]
-        mock_result_set.rows = [(1, "test1"), (2, "test2")]
-        mock_result_set.affected_rows = 2
-        mock_engine.query.return_value = mock_result_set
-        mock_get_engine.return_value = mock_engine
-
-        mock_save_format.return_value = "test_file.csv"
-
-        mock_storage_instance = MagicMock()
-        mock_storage.return_value = mock_storage_instance
-
-        # Mock file open.
-        mock_file = MagicMock()
-        mock_open_file.return_value = mock_file
-
-        # Execute test.
-        offline_download = OffLineDownLoad()
-        self.workflow.schema_name = "analytics"
-        result = offline_download.execute_offline_download(self.workflow)
-
-        # Verify result.
-        self.assertEqual(result.error, None)
-        self.assertEqual(result.rows[0].stagestatus, "Execution succeeded")
-        self.assertIn("test_file.csv", result.rows[0].errormessage)
-        self.assertEqual(mock_engine.query.call_args.kwargs["schema_name"], "analytics")
-
-        # Verify workflow update.
-        updated_workflow = SqlWorkflow.objects.get(id=self.workflow.id)
-        self.assertEqual(updated_workflow.file_name, "test_file.csv")
-
-    @patch("sql.offlinedownload.get_engine")
-    @patch("sql.offlinedownload.DynamicStorage")
-    def test_execute_offline_download_error(self, mock_storage, mock_get_engine):
-        """
-        Test execute_offline_download - failure path.
-        """
-
-        # Mock database query error.
-        mock_engine = MagicMock()
-        mock_result_set = MagicMock()
-        mock_result_set.error = "Database error"
-        mock_engine.query.return_value = mock_result_set
-        mock_get_engine.return_value = mock_engine
-
-        # Mock DynamicStorage.
-        mock_storage_instance = MagicMock()
-        mock_storage.return_value = mock_storage_instance
-
-        # Execute test.
-        offline_download = OffLineDownLoad()
-        result = offline_download.execute_offline_download(self.workflow)
-
-        # Verify result.
-        self.assertIsNotNone(result.error)
-        self.assertEqual(result.rows[0].stagestatus, "Aborted")
-        self.assertEqual(result.rows[0].errormessage, "Database error")
+        with self.assertRaisesRegex(RuntimeError, "dispatch export.execute"):
+            offline_download.execute_offline_download(self.workflow)
 
     def test_save_csv(self):
         """
@@ -516,31 +383,6 @@ class TestOfflineDownload(TestCase):
 
         # Cleanup.
         shutil.rmtree(temp_dir)
-
-    @patch("sql.offlinedownload.get_engine")
-    def test_execute_offline_download_empty_result(self, mock_get_engine):
-        """
-        Test execute_offline_download with empty result set.
-        """
-
-        # Mock dependencies.
-        mock_engine = MagicMock()
-        mock_result_set = MagicMock()
-        mock_result_set.error = None
-        mock_result_set.column_list = ["id", "name"]
-        mock_result_set.rows = []
-        mock_result_set.affected_rows = 0
-        mock_engine.query.return_value = mock_result_set
-        mock_get_engine.return_value = mock_engine
-
-        # Execute test.
-        offline_download = OffLineDownLoad()
-        result = offline_download.execute_offline_download(self.workflow)
-
-        # Verify result.
-        self.assertEqual(result.error, None)
-        self.assertEqual(result.rows[0].stagestatus, "Execution succeeded")
-        self.assertIn("Saved file", result.rows[0].errormessage)
 
     @patch("sql.offlinedownload.DynamicStorage")
     def test_offline_file_download_error(self, mock_storage):

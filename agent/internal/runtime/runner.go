@@ -291,19 +291,24 @@ func logMonitoringExpectation(payload client.AgentConfig) {
 }
 
 func (r *Runner) reconcileToolArtifacts(ctx context.Context, payload client.AgentConfig) error {
-	if !moduleEnabled(payload.Modules, "online_schema") {
-		return nil
-	}
 	cacheDir := filepath.Join(r.cfg.DataDir, "tools")
 	onlineSchemaTools := map[string]struct{}{
 		"gh-ost":                  {},
 		"pt-online-schema-change": {},
 	}
+	supportedTools := map[string]struct{}{
+		"gh-ost":                  {},
+		"pt-online-schema-change": {},
+		"pt-archiver":             {},
+	}
 	for _, artifact := range payload.ToolArtifacts {
 		if artifact.Platform != stdlibRuntime.GOOS || artifact.Architecture != stdlibRuntime.GOARCH {
 			continue
 		}
-		if _, supported := onlineSchemaTools[artifact.ToolName]; !supported {
+		if _, supported := supportedTools[artifact.ToolName]; !supported {
+			continue
+		}
+		if _, onlineSchemaTool := onlineSchemaTools[artifact.ToolName]; onlineSchemaTool && !moduleEnabled(payload.Modules, "online_schema") {
 			continue
 		}
 		_, err := tools.EnsureArtifact(ctx, cacheDir, tools.Artifact{

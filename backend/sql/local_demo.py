@@ -488,6 +488,40 @@ def _migrate_legacy_demo_agent(target_name, log):
 def _seed_agent_tool_artifacts(log):
     artifacts = [
         {
+            "tool_name": AgentToolArtifact.TOOL_GHOST,
+            "version": "1.1.10",
+            "platform": "darwin",
+            "architecture": "arm64",
+            "download_url": "https://github.com/github/gh-ost/releases/download/v1.1.10/gh-ost",
+            "sha256": "51252261fd96a695e42484108d6697ae06a2b27945ded85b94ded52686b03bf6",
+            "size_bytes": 18452962,
+            "notes": "Online MySQL schema change tool.",
+        },
+        {
+            "tool_name": AgentToolArtifact.TOOL_GHOST,
+            "version": "1.1.10",
+            "download_url": "https://github.com/github/gh-ost/releases/download/v1.1.10/gh-ost-binary-linux-amd64-20260604164252.tar.gz",
+            "sha256": "6dcc1d9a36b4de14c49490e710d244b75717fa80cc35c65f20e06d7e4efa28b2",
+            "size_bytes": 10062554,
+            "notes": "Online MySQL schema change tool.",
+        },
+        {
+            "tool_name": AgentToolArtifact.TOOL_PT_OSC,
+            "version": "3.7.1-4",
+            "download_url": "https://percona.com/get/pt-online-schema-change",
+            "sha256": "26fa107b0204c11d346e23e6ab42342c4442d085c5e181aa91fdbf4dc87d794d",
+            "size_bytes": 468143,
+            "notes": "Online MySQL schema change tool.",
+        },
+        {
+            "tool_name": AgentToolArtifact.TOOL_PT_ARCHIVER,
+            "version": "3.7.1-4",
+            "download_url": "https://percona.com/get/pt-archiver",
+            "sha256": "2695943b1843cfa0c65d85eb82efd0878df3e5aff918f3e4bde3c5b92c992c69",
+            "size_bytes": 283529,
+            "notes": "MySQL data archive tool.",
+        },
+        {
             "tool_name": AgentToolArtifact.TOOL_NODE_EXPORTER,
             "version": "1.11.1",
             "download_url": "https://github.com/prometheus/node_exporter/releases/download/v1.11.1/node_exporter-1.11.1.linux-amd64.tar.gz",
@@ -513,12 +547,12 @@ def _seed_agent_tool_artifacts(log):
         artifact, created = AgentToolArtifact.objects.update_or_create(
             tool_name=config["tool_name"],
             version=config["version"],
-            platform="linux",
-            architecture="amd64",
+            platform=config.get("platform", "linux"),
+            architecture=config.get("architecture", "amd64"),
             defaults={
                 "download_url": config["download_url"],
                 "sha256": config["sha256"],
-                "size_bytes": 0,
+                "size_bytes": config.get("size_bytes", 0),
                 "enabled": True,
                 "notes": config["notes"],
             },

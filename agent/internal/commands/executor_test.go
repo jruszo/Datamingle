@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -250,7 +251,7 @@ func TestWorkflowExecuteUsesGhostArtifactForDDL(t *testing.T) {
 		DownloadURL:  artifact.DownloadURL,
 		SHA256:       artifact.SHA256,
 	})
-	if err := os.MkdirAll(filepathDir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
@@ -336,7 +337,7 @@ func TestWorkflowExecuteRejectsMixedOnlineSchemaBatchBeforeRunningTools(t *testi
 		DownloadURL:  artifact.DownloadURL,
 		SHA256:       artifact.SHA256,
 	})
-	if err := os.MkdirAll(filepathDir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
@@ -409,6 +410,60 @@ func TestRunCommandReturnsOnlyBoundedOutputTailOnFailure(t *testing.T) {
 	}
 }
 
+func TestArchiveExecuteUsesManagedPtArchiverAndCredentialFile(t *testing.T) {
+	cacheDir := t.TempDir()
+	artifact := client.ToolArtifact{
+		ToolName: "pt-archiver", Version: "3.7.1-4",
+		Platform: runtime.GOOS, Architecture: runtime.GOARCH,
+		DownloadURL: "https://example.com/pt-archiver", SHA256: strings.Repeat("a", 64),
+	}
+	toolPath := tools.ArtifactPath(cacheDir, tools.Artifact{
+		ToolName: artifact.ToolName, Version: artifact.Version,
+		Platform: artifact.Platform, Architecture: artifact.Architecture,
+	})
+	if err := os.MkdirAll(filepath.Dir(toolPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(toolPath, []byte("#!/usr/bin/env perl\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	executor := NewExecutorWithToolCache(cacheDir)
+	executor.runCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name != toolPath {
+			t.Fatalf("expected managed pt-archiver path %q, got %q", toolPath, name)
+		}
+		joined := strings.Join(args, " ")
+		if strings.Contains(joined, "secret-password") {
+			t.Fatal("password leaked into pt-archiver arguments")
+		}
+		if !strings.Contains(joined, "--source=F=") || !strings.Contains(joined, "--purge") {
+			t.Fatalf("unexpected pt-archiver arguments: %s", joined)
+		}
+		return []byte("SELECT 12\nDELETE 12\n"), nil
+	}
+
+	result, err := executor.Execute(context.Background(), client.AgentCommand{
+		ID: 17, InstanceID: 7, CommandType: "archive.execute",
+		Payload: map[string]any{
+			"db_name": "billing", "table_name": "events", "where": "created_at < '2026-01-01'",
+			"mode": "purge", "sleep": float64(1),
+		},
+	}, client.AgentConfig{
+		Assignments: []client.Assignment{{
+			InstanceID: 7, DBType: "mysql", Host: "mysql", Port: 3306,
+			Username: "archiver", Password: "secret-password", Charset: "utf8mb4",
+		}},
+		ToolArtifacts: []client.ToolArtifact{artifact},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Payload["select_cnt"] != 12 || result.Payload["delete_cnt"] != 12 {
+		t.Fatalf("unexpected archive counts: %#v", result.Payload)
+	}
+}
+
 func TestWorkflowExecuteReportsMissingOnlineSchemaArtifact(t *testing.T) {
 	executor := NewExecutorWithToolCache(t.TempDir())
 
@@ -436,15 +491,33 @@ func TestWorkflowExecuteReportsMissingOnlineSchemaArtifact(t *testing.T) {
 	}
 }
 
+func TestBoolValueSupportsJSONRepresentations(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    any
+		fallback bool
+		want     bool
+	}{
+		{name: "boolean", value: true, want: true},
+		{name: "integer one", value: 1, want: true},
+		{name: "integer zero", value: 0, fallback: true, want: false},
+		{name: "float one", value: float64(1), want: true},
+		{name: "string true", value: "true", want: true},
+		{name: "string false", value: "false", fallback: true, want: false},
+		{name: "unsupported number", value: 2, fallback: true, want: true},
+		{name: "invalid string", value: "not-a-bool", fallback: true, want: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := boolValue(map[string]any{"no_delete": test.value}, "no_delete", test.fallback); got != test.want {
+				t.Fatalf("boolValue() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func sha256Hex(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
-}
-
-func filepathDir(path string) string {
-	index := strings.LastIndex(path, string(os.PathSeparator))
-	if index == -1 {
-		return "."
-	}
-	return path[:index]
 }

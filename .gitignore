@@ -37,4 +37,5 @@ frontend/e2e-screenshots/
 backend/static/
 /supervisord.pid
 agent/.tools/
+agent/dist/
 agent/coverage.out
