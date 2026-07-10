@@ -23,6 +23,22 @@ go test ./...
 go run ./cmd/datamingle-agent version
 ```
 
+## Package
+
+Build the Linux AMD64 agent package with its verified gh-ost,
+pt-online-schema-change, and pt-archiver executables:
+
+```bash
+cd agent
+./packaging/build-package.sh
+```
+
+The archive is written to `agent/dist/`. Its `data/tools` directory uses the
+same versioned layout as the agent runtime cache, so it can be installed below
+the configured agent base directory without another tool download. Percona's
+tools require Perl DBI and DBD::mysql on the agent host (`libdbi-perl` and
+`libdbd-mysql-perl` on Debian or Ubuntu).
+
 ## Example Config
 
 ```yaml

@@ -2,7 +2,7 @@ from django.contrib.auth.models import Group, Permission
 from django.core.management import call_command
 from django.test import TestCase
 
-from api_agents.models import Agent, AgentStatus
+from api_agents.models import Agent, AgentStatus, AgentToolArtifact
 from api_agents.services import agent_api_key_hash, authenticate_agent_api_key
 from common.utils.const import WorkflowType
 from sql.local_demo import (
@@ -62,6 +62,28 @@ class TestLocalDemoSeed(TestCase):
                 workflow_type=WorkflowType.ARCHIVE
             ).count(),
             len(managed_demo_team_names()),
+        )
+        expected_tool_urls = {
+            AgentToolArtifact.TOOL_GHOST: "https://github.com/github/gh-ost/releases/download/v1.1.10/gh-ost",
+            AgentToolArtifact.TOOL_PT_OSC: "https://percona.com/get/pt-online-schema-change",
+            AgentToolArtifact.TOOL_PT_ARCHIVER: "https://percona.com/get/pt-archiver",
+        }
+        for tool_name, download_url in expected_tool_urls.items():
+            self.assertTrue(
+                AgentToolArtifact.objects.filter(
+                    tool_name=tool_name,
+                    download_url=download_url,
+                    enabled=True,
+                ).exists()
+            )
+        self.assertTrue(
+            AgentToolArtifact.objects.filter(
+                tool_name=AgentToolArtifact.TOOL_GHOST,
+                version="1.1.10",
+                platform="linux",
+                architecture="amd64",
+                enabled=True,
+            ).exists()
         )
         superadmin_group = Group.objects.get(name="superadmin")
         self.assertEqual(

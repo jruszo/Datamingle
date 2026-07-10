@@ -1,14 +1,10 @@
 # -*- coding: UTF-8 -*-
 import logging
 import os
-import tempfile
 import csv
 import hashlib
-import shutil
 import datetime
 import xml.etree.ElementTree as ET
-import sqlparse
-import time
 
 import simplejson as json
 import pandas as pd
@@ -19,11 +15,8 @@ from django.shortcuts import get_object_or_404
 
 from sql.models import SqlWorkflow, AuditEntry
 from sql.engines import EngineBase
-from sql.engines.models import ReviewSet, ReviewResult
 from sql.storage import DynamicStorage
-from sql.engines import get_engine
 from sql.utils.sql_review import can_view
-from common.config import SysConfig
 
 logger = logging.getLogger("default")
 EXPORT_FORMATS = {"csv", "tsv", "sql", "xlsx", "json", "xml"}
@@ -40,91 +33,9 @@ class OffLineDownLoad(EngineBase):
         :param workflow: Workflow instance
         :return: Download result
         """
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # Get system configuration.
-            config = SysConfig()
-            # Validate max_execution_time configuration and fallback to default 60.
-            max_execution_time_str = config.get("max_export_rows", "60")
-            max_execution_time = (
-                int(max_execution_time_str) if max_execution_time_str else 60
-            )
-            # Get submitted SQL and related workflow information.
-            full_sql = workflow.sqlworkflowcontent.sql_content
-            full_sql = sqlparse.format(full_sql, strip_comments=True)
-            full_sql = sqlparse.split(full_sql)[0]
-            sql = full_sql.strip()
-            instance = workflow.instance
-            schema_name = getattr(workflow, "schema_name", None) or None
-            execute_result = ReviewSet(full_sql=sql)
-            check_engine = get_engine(instance=instance)
-
-            start_time = time.time()
-
-            try:
-                # Execute SQL query.
-                storage = DynamicStorage()
-                results = check_engine.query(
-                    db_name=workflow.db_name,
-                    sql=sql,
-                    schema_name=schema_name,
-                    max_execution_time=max_execution_time * 1000,
-                )
-                if results.error:
-                    raise Exception(results.error)
-                if results:
-                    columns = results.column_list
-                    result = results.rows
-                    actual_rows = results.affected_rows
-
-                # Save query result into the requested export artifact.
-                get_format_type = workflow.export_format
-                file_name = save_to_format_file(
-                    get_format_type, result, workflow, columns, temp_dir
-                )
-
-                # Save exported file to storage backend.
-                tmp_file = os.path.join(temp_dir, file_name)
-                with open(tmp_file, "rb") as f:
-                    storage.save(file_name, f)
-
-                end_time = time.time()  # Record end time.
-                elapsed_time = round(end_time - start_time, 3)
-                execute_result.rows = [
-                    ReviewResult(
-                        stage="Executed",
-                        errlevel=0,
-                        stagestatus="Execution succeeded",
-                        errormessage=f"Saved file: {file_name}",
-                        sql=full_sql,
-                        execute_time=elapsed_time,
-                        affected_rows=actual_rows,
-                    )
-                ]
-
-                change_workflow = SqlWorkflow.objects.get(id=workflow.id)
-                change_workflow.file_name = file_name
-                change_workflow.save()
-
-                return execute_result
-            except Exception as e:
-                # Return failed execution state and error details.
-                execute_result.rows = [
-                    ReviewResult(
-                        stage="Execute failed",
-                        error=1,
-                        errlevel=2,
-                        stagestatus="Aborted",
-                        errormessage=f"{e}",
-                        sql=full_sql,
-                    )
-                ]
-                execute_result.error = e
-                return execute_result
-            finally:
-                # Close storage connection (mainly required for SFTP after save).
-                storage.close()
-                # Clean local files and temporary directory.
-                shutil.rmtree(temp_dir)
+        raise RuntimeError(
+            "Direct export execution is disabled; dispatch export.execute to an agent."
+        )
 
     def pre_count_check(self, workflow):
         """
@@ -133,77 +44,9 @@ class OffLineDownLoad(EngineBase):
         :param workflow: Workflow instance
         :return: Validation result
         """
-        # Get system configuration.
-        config = SysConfig()
-        # Get submitted SQL and related workflow information.
-        full_sql = workflow.sql_content
-        full_sql = sqlparse.format(full_sql, strip_comments=True)
-        full_sql = sqlparse.split(full_sql)[0]
-        sql = full_sql.strip()
-        count_sql = f"SELECT COUNT(*) FROM ({sql.rstrip(';')}) t"
-        clean_sql = sql.strip().lower()
-        instance = workflow
-        schema_name = getattr(workflow, "schema_name", None) or None
-        check_result = ReviewSet(full_sql=sql)
-        check_result.syntax_type = 3
-        check_engine = get_engine(instance=instance)
-        result_set = check_engine.query(
-            db_name=workflow.db_name,
-            sql=count_sql,
-            schema_name=schema_name,
+        raise RuntimeError(
+            "Direct export review is disabled; dispatch export.check to an agent."
         )
-        actual_rows_check = result_set.rows[0][0]
-        max_export_rows_str = config.get("max_export_rows", "10000")
-        max_export_rows = int(max_export_rows_str) if max_export_rows_str else 10000
-
-        allowed_prefixes = ("select", "with")  # Only allow SELECT/WITH statements.
-        if not clean_sql.startswith(allowed_prefixes):
-            result = ReviewResult(
-                stage="Auto review failed",
-                errlevel=2,
-                stagestatus="Check failed!",
-                errormessage="Disallowed statement!",
-                affected_rows=actual_rows_check,
-                sql=full_sql,
-            )
-        elif result_set.error:
-            result = ReviewResult(
-                stage="Auto review failed",
-                errlevel=2,
-                stagestatus="Check failed!",
-                errormessage=result_set.error,
-                affected_rows=actual_rows_check,
-                sql=full_sql,
-            )
-        elif actual_rows_check > max_export_rows:
-            result = ReviewResult(
-                errlevel=2,
-                stagestatus="Check failed!",
-                errormessage=(
-                    f"Export row count ({actual_rows_check}) exceeds threshold "
-                    f"({max_export_rows})."
-                ),
-                affected_rows=actual_rows_check,
-                sql=full_sql,
-            )
-        else:
-            result = ReviewResult(
-                errlevel=0,
-                stagestatus="Row count completed",
-                errormessage="None",
-                sql=full_sql,
-                affected_rows=actual_rows_check,
-                execute_time=0,
-            )
-        check_result.rows = [result]
-        check_result.affected_rows = actual_rows_check
-        # Count warnings and errors.
-        for r in check_result.rows:
-            if r.errlevel == 1:
-                check_result.warning_count += 1
-            if r.errlevel == 2:
-                check_result.error_count += 1
-        return check_result
 
 
 def save_to_format_file(

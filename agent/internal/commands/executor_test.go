@@ -409,6 +409,60 @@ func TestRunCommandReturnsOnlyBoundedOutputTailOnFailure(t *testing.T) {
 	}
 }
 
+func TestArchiveExecuteUsesManagedPtArchiverAndCredentialFile(t *testing.T) {
+	cacheDir := t.TempDir()
+	artifact := client.ToolArtifact{
+		ToolName: "pt-archiver", Version: "3.7.1-4",
+		Platform: runtime.GOOS, Architecture: runtime.GOARCH,
+		DownloadURL: "https://example.com/pt-archiver", SHA256: strings.Repeat("a", 64),
+	}
+	toolPath := tools.ArtifactPath(cacheDir, tools.Artifact{
+		ToolName: artifact.ToolName, Version: artifact.Version,
+		Platform: artifact.Platform, Architecture: artifact.Architecture,
+	})
+	if err := os.MkdirAll(filepathDir(toolPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(toolPath, []byte("#!/usr/bin/env perl\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	executor := NewExecutorWithToolCache(cacheDir)
+	executor.runCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name != toolPath {
+			t.Fatalf("expected managed pt-archiver path %q, got %q", toolPath, name)
+		}
+		joined := strings.Join(args, " ")
+		if strings.Contains(joined, "secret-password") {
+			t.Fatal("password leaked into pt-archiver arguments")
+		}
+		if !strings.Contains(joined, "--source=F=") || !strings.Contains(joined, "--purge") {
+			t.Fatalf("unexpected pt-archiver arguments: %s", joined)
+		}
+		return []byte("SELECT 12\nDELETE 12\n"), nil
+	}
+
+	result, err := executor.Execute(context.Background(), client.AgentCommand{
+		ID: 17, InstanceID: 7, CommandType: "archive.execute",
+		Payload: map[string]any{
+			"db_name": "billing", "table_name": "events", "where": "created_at < '2026-01-01'",
+			"mode": "purge", "sleep": float64(1),
+		},
+	}, client.AgentConfig{
+		Assignments: []client.Assignment{{
+			InstanceID: 7, DBType: "mysql", Host: "mysql", Port: 3306,
+			Username: "archiver", Password: "secret-password", Charset: "utf8mb4",
+		}},
+		ToolArtifacts: []client.ToolArtifact{artifact},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Payload["select_cnt"] != 12 || result.Payload["delete_cnt"] != 12 {
+		t.Fatalf("unexpected archive counts: %#v", result.Payload)
+	}
+}
+
 func TestWorkflowExecuteReportsMissingOnlineSchemaArtifact(t *testing.T) {
 	executor := NewExecutorWithToolCache(t.TempDir())
 

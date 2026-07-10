@@ -19,7 +19,6 @@ from sql.archiver import (
     calculate_next_archive_run,
     queue_archive_execution,
     render_archive_condition,
-    _build_pt_archiver_args,
 )
 from sql.models import (
     Instance,
@@ -79,28 +78,6 @@ class ArchiveExecutionHelpersTest(TestCase):
         self.archive.condition = "id > 10; DROP TABLE orders"
         with self.assertRaises(ValueError):
             build_archive_delete_sql(self.archive)
-
-    @patch("sql.archiver.get_engine")
-    def test_pt_archiver_args_enforce_delete_only_purge_mode(self, get_engine_mock):
-        fake_table = SimpleNamespace(
-            options={"charset": SimpleNamespace(value="utf8mb4")}
-        )
-        fake_database = SimpleNamespace(tables={"orders": fake_table})
-        fake_engine = SimpleNamespace(
-            schema_object=SimpleNamespace(databases={"demo_orders": fake_database}),
-            close=lambda: None,
-        )
-        get_engine_mock.return_value = fake_engine
-
-        args = _build_pt_archiver_args(self.archive)
-
-        self.assertEqual(
-            args["where"], render_archive_condition(self.archive.condition)
-        )
-        self.assertTrue(args["purge"])
-        self.assertNotIn("file", args)
-        self.assertNotIn("dest", args)
-        self.assertNotIn("no-delete", args)
 
     def test_calculate_next_archive_run_supports_daily_and_weekly(self):
         daily_archive = SimpleNamespace(
@@ -265,8 +242,19 @@ class ArchiveExecutionHelpersTest(TestCase):
         )
         async_task_mock.assert_called_once()
 
-    @patch("sql.archiver._execute_dml_archive", return_value={"success": True})
-    def test_archive_resets_execution_state_after_running(self, _execute_dml_archive):
+    @patch("api_agents.services.run_agent_command_sync")
+    def test_archive_dispatches_pt_archiver_agent_command_and_resets_state(
+        self, run_agent_command_sync_mock
+    ):
+        run_agent_command_sync_mock.return_value = SimpleNamespace(
+            result={
+                "statement": "pt-archiver purge demo_orders.orders",
+                "select_cnt": 4,
+                "insert_cnt": 0,
+                "delete_cnt": 4,
+                "statistics": "SELECT 4\nDELETE 4",
+            }
+        )
         self.archive.execution_state = ARCHIVE_EXECUTION_STATE_QUEUED
         self.archive.save(update_fields=["execution_state"])
 
@@ -274,3 +262,10 @@ class ArchiveExecutionHelpersTest(TestCase):
 
         self.archive.refresh_from_db()
         self.assertEqual(self.archive.execution_state, ARCHIVE_EXECUTION_STATE_IDLE)
+        command_kwargs = run_agent_command_sync_mock.call_args.kwargs
+        self.assertEqual(str(command_kwargs["command_type"]), "archive.execute")
+        self.assertEqual(command_kwargs["payload"]["mode"], "purge")
+        self.assertEqual(
+            command_kwargs["payload"]["where"],
+            render_archive_condition(self.archive.condition),
+        )

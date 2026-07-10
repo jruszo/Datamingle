@@ -305,6 +305,7 @@ class AgentCommandType(models.TextChoices):
     WORKFLOW_EXECUTE = "workflow.execute", "Workflow Execute"
     EXPORT_CHECK = "export.check", "Export Check"
     EXPORT_EXECUTE = "export.execute", "Export Execute"
+    ARCHIVE_EXECUTE = "archive.execute", "Archive Execute"
 
 
 class AgentCommand(models.Model):
@@ -379,12 +380,14 @@ class AgentCommandEvent(models.Model):
 class AgentToolArtifact(models.Model):
     TOOL_GHOST = "gh-ost"
     TOOL_PT_OSC = "pt-online-schema-change"
+    TOOL_PT_ARCHIVER = "pt-archiver"
     TOOL_NODE_EXPORTER = "node_exporter"
     TOOL_MYSQLD_EXPORTER = "mysqld_exporter"
     TOOL_POSTGRES_EXPORTER = "postgres_exporter"
     TOOL_CHOICES = (
         (TOOL_GHOST, "gh-ost"),
         (TOOL_PT_OSC, "pt-online-schema-change"),
+        (TOOL_PT_ARCHIVER, "pt-archiver"),
         (TOOL_NODE_EXPORTER, "node_exporter"),
         (TOOL_MYSQLD_EXPORTER, "mysqld_exporter"),
         (TOOL_POSTGRES_EXPORTER, "postgres_exporter"),

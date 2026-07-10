@@ -1267,8 +1267,11 @@ class AgentFacingApiTests(APITestCase):
 
     @patch.dict(os.environ, {"RUN_LOCAL_DEMO_SEED": "1"})
     @patch("sql.engines.get_engine")
-    @patch("api_agents.services.dispatch_agent_command")
-    def test_local_demo_export_check_command_completes_directly(
+    @patch(
+        "api_agents.services.dispatch_agent_command",
+        side_effect=AgentCommandDispatchError("agent unavailable"),
+    )
+    def test_local_demo_export_check_requires_agent_dispatch(
         self,
         mock_dispatch_agent_command,
         mock_get_engine,
@@ -1285,62 +1288,20 @@ class AgentFacingApiTests(APITestCase):
             instance=instance,
             command_enabled=True,
         )
-        mock_get_engine.return_value.query.return_value = ResultSet(
-            full_sql="SELECT COUNT(*) FROM (SELECT 1) t",
-            rows=[(2,)],
-            column_list=["count"],
-            affected_rows=1,
-        )
-
-        command = run_agent_command_sync(
-            instance=instance,
-            command_type=AgentCommandType.EXPORT_CHECK,
-            workflow_type="export.check",
-            workflow_id="local-demo-export-check",
-            payload={
-                "db_name": "demo_billing",
-                "sql": "SELECT invoice_number FROM invoices;",
-                "submitted_by": "demo_requester",
-            },
-        )
-
-        self.assertEqual(command.status, AgentCommandStatus.SUCCEEDED)
-        self.assertEqual(command.result["syntax_type"], 3)
-        self.assertEqual(command.result["affected_rows"], 2)
-        self.assertEqual(command.result["rows"][0]["stagestatus"], "Ready")
-        mock_dispatch_agent_command.assert_not_called()
-        mock_get_engine.return_value.close.assert_called_once()
-
-    @patch.dict(os.environ, {"RUN_LOCAL_DEMO_SEED": "1"})
-    @patch("sql.engines.get_engine")
-    @patch("api_agents.services.dispatch_agent_command")
-    def test_local_demo_export_check_command_fails_terminally_on_review_exception(
-        self,
-        mock_dispatch_agent_command,
-        mock_get_engine,
-    ):
-        instance = self.create_seeded_local_demo_assignment()
-        mock_get_engine.return_value.query.side_effect = RuntimeError("count failed")
-
-        with self.assertRaises(AgentCommandExecutionError) as exc_context:
+        with self.assertRaises(AgentCommandDispatchError):
             run_agent_command_sync(
                 instance=instance,
                 command_type=AgentCommandType.EXPORT_CHECK,
                 workflow_type="export.check",
-                workflow_id="local-demo-export-check-failed",
+                workflow_id="local-demo-export-check",
                 payload={
                     "db_name": "demo_billing",
                     "sql": "SELECT invoice_number FROM invoices;",
                     "submitted_by": "demo_requester",
                 },
             )
-
-        command = exc_context.exception.command
-        self.assertEqual(command.status, AgentCommandStatus.FAILED)
-        self.assertEqual(command.error["message"], "count failed")
-        self.assertTrue(command.events.filter(event_type="command.failed").exists())
-        mock_dispatch_agent_command.assert_not_called()
-        mock_get_engine.return_value.close.assert_called_once()
+        mock_dispatch_agent_command.assert_called_once()
+        mock_get_engine.assert_not_called()
 
     @patch.dict(os.environ, {"RUN_LOCAL_DEMO_SEED": "1"})
     @patch(

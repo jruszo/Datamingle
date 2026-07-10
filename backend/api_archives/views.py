@@ -57,20 +57,29 @@ from sql.utils.workflow_audit import Audit, AuditException, AuditV2, get_auditor
 from api_core.pagination import CustomizedPagination
 from api_core.response import success_response
 from common.task_queue import async_task
+from api_agents.models import AgentToolArtifact
+from api_agents.services import command_capable_assignment_for_instance
 
 logger = logging.getLogger("default")
 ARCHIVE_APPLY_PERMISSION = "sql.archive_apply"
 ARCHIVE_REVIEW_PERMISSION = "sql.archive_review"
 ARCHIVE_MANAGE_PERMISSION = "sql.archive_mgt"
 
-ARCHIVE_SUPPORTED_DB_TYPES = (
-    "mysql",
-    "pgsql",
-    "mssql",
-    "oracle",
-    "clickhouse",
-    "doris",
-)
+ARCHIVE_SUPPORTED_DB_TYPES = ("mysql",)
+
+
+def _archive_agent_assignment(instance_id):
+    assignment = command_capable_assignment_for_instance(instance_id, db_type="mysql")
+    if assignment is None:
+        return None
+    if not AgentToolArtifact.objects.filter(
+        enabled=True,
+        tool_name=AgentToolArtifact.TOOL_PT_ARCHIVER,
+        platform=assignment.agent.platform,
+        architecture=assignment.agent.architecture,
+    ).exists():
+        return None
+    return assignment
 
 
 def _sync_archive_mailbox_notifications_safe(workflow):
@@ -241,11 +250,7 @@ def _archive_submission_scope(user):
                 "label": f"{instance.instance_name} | {instance.db_type} | {instance.host}",
                 "team_ids": [team_id for team_id, _ in sorted_groups],
                 "team_names": [team_name for _, team_name in sorted_groups],
-                "available_archive_methods": (
-                    [ARCHIVE_METHOD_DML, ARCHIVE_METHOD_PT_ARCHIVER]
-                    if instance.db_type == "mysql"
-                    else [ARCHIVE_METHOD_DML]
-                ),
+                "available_archive_methods": [ARCHIVE_METHOD_PT_ARCHIVER],
             }
         )
 
@@ -502,8 +507,8 @@ class ArchiveCreateSerializer(serializers.Serializer):
     table_name = serializers.CharField(max_length=64)
     condition = serializers.CharField(max_length=1000)
     archive_method = serializers.ChoiceField(
-        choices=[ARCHIVE_METHOD_DML, ARCHIVE_METHOD_PT_ARCHIVER],
-        default=ARCHIVE_METHOD_DML,
+        choices=[ARCHIVE_METHOD_PT_ARCHIVER],
+        default=ARCHIVE_METHOD_PT_ARCHIVER,
     )
     execution_mode = serializers.ChoiceField(
         choices=[ARCHIVE_EXECUTION_ONE_TIME, ARCHIVE_EXECUTION_SCHEDULED],
@@ -537,11 +542,10 @@ class ArchiveCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError({"errors": "Instance does not exist."})
 
         attrs["instance"] = instance
-        if instance.db_type != "mysql" and archive_method == ARCHIVE_METHOD_PT_ARCHIVER:
+        if instance.db_type != "mysql":
             raise serializers.ValidationError(
                 {"errors": "pt-archiver is only available for MySQL instances."}
             )
-
         if execution_mode == ARCHIVE_EXECUTION_SCHEDULED:
             if not attrs.get("schedule_frequency") or not attrs.get("schedule_time"):
                 raise serializers.ValidationError(
@@ -995,6 +999,15 @@ class ArchiveRunNow(views.APIView):
                 raise serializers.ValidationError(
                     {"errors": "Archive execution is already queued or running."}
                 )
+            if _archive_agent_assignment(archive_config.src_instance_id) is None:
+                raise serializers.ValidationError(
+                    {
+                        "errors": (
+                            "No online command-capable agent with pt-archiver is "
+                            "available for this instance."
+                        )
+                    }
+                )
 
             archive_config.execution_state = ARCHIVE_EXECUTION_STATE_QUEUED
             archive_config.save(update_fields=["execution_state"])
@@ -1049,6 +1062,18 @@ class ArchiveStateUpdate(views.APIView):
             )
 
         enabled = serializer.validated_data["enabled"]
+        if (
+            enabled
+            and _archive_agent_assignment(archive_config.src_instance_id) is None
+        ):
+            raise serializers.ValidationError(
+                {
+                    "errors": (
+                        "No online command-capable agent with pt-archiver is "
+                        "available for this instance."
+                    )
+                }
+            )
         with transaction.atomic():
             archive_config.state = enabled
             if enabled:

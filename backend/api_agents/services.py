@@ -1079,9 +1079,6 @@ def _is_local_demo_direct_review_command(command):
     return (
         command.command_type == AgentCommandType.WORKFLOW_CHECK
         and command.workflow_type == "workflow.check"
-    ) or (
-        command.command_type == AgentCommandType.EXPORT_CHECK
-        and command.workflow_type == "export.check"
     )
 
 
@@ -1196,74 +1193,6 @@ def _local_demo_review_rows(sql, db_type="mysql"):
     return rows, summary_syntax_type
 
 
-def _local_demo_export_review_result(command):
-    from sql.engines import get_engine
-
-    payload = command.payload or {}
-    full_sql = (payload.get("sql") or "").strip()
-    clean_sql = full_sql.lower()
-    row = {
-        "id": 1,
-        "errlevel": 0,
-        "stagestatus": "Ready",
-        "errormessage": "None",
-        "sql": full_sql,
-        "affected_rows": 0,
-    }
-    error_count = 0
-    affected_rows = 0
-
-    if not clean_sql.startswith(("select", "with")):
-        row.update(
-            {
-                "errlevel": 2,
-                "stagestatus": "Check failed!",
-                "errormessage": "Disallowed statement!",
-            }
-        )
-        error_count = 1
-    else:
-        count_sql = f"SELECT COUNT(*) FROM ({full_sql.rstrip(';')}) t"
-        engine = None
-        try:
-            engine = get_engine(instance=command.instance)
-            result_set = engine.query(
-                db_name=payload.get("db_name") or None,
-                sql=count_sql,
-            )
-        finally:
-            if engine is not None:
-                engine.close()
-        if result_set.error:
-            row.update(
-                {
-                    "errlevel": 2,
-                    "stagestatus": "Check failed!",
-                    "errormessage": result_set.error,
-                }
-            )
-            error_count = 1
-        elif result_set.rows:
-            affected_rows = int(result_set.rows[0][0])
-            row["affected_rows"] = affected_rows
-
-    return {
-        "full_sql": full_sql,
-        "checked": True,
-        "warning": None,
-        "error": None,
-        "warning_count": 0,
-        "error_count": error_count,
-        "is_critical": False,
-        "syntax_type": 3,
-        "rows": [row],
-        "review_rows": [row],
-        "column_list": ["id", "errlevel", "stagestatus", "errormessage", "sql"],
-        "status": "Ready" if error_count == 0 else "Check failed!",
-        "affected_rows": affected_rows,
-    }
-
-
 def _local_demo_workflow_review_result(command):
     payload = command.payload or {}
     full_sql = (payload.get("sql") or "").strip()
@@ -1298,10 +1227,7 @@ def _complete_local_demo_review_command(command):
     )
 
     try:
-        if command.command_type == AgentCommandType.EXPORT_CHECK:
-            result = _local_demo_export_review_result(command)
-        else:
-            result = _local_demo_workflow_review_result(command)
+        result = _local_demo_workflow_review_result(command)
     except Exception as exc:
         logger.exception("Local demo direct review execution failed.")
         return _fail_local_demo_direct_command(command, str(exc))

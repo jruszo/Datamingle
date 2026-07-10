@@ -8,10 +8,7 @@
 
 import datetime
 import logging
-import os
 import re
-import traceback
-import time
 
 import simplejson as json
 import sqlparse
@@ -29,12 +26,8 @@ from common.task_queue import async_task, schedule, delete_schedule, task_info
 from common.utils.const import WorkflowStatus, WorkflowType, WorkflowAction
 from common.utils.extend_json_encoder import ExtendJSONEncoder
 from common.utils.spa import spa_path_for_workflow
-from common.utils.timer import FuncTimer
-from sql.engines import get_engine
-from sql.engines.models import ReviewSet, ReviewResult
 from sql.mailbox import emit_execution_finished_notifications, resolve_mailbox_items
 from sql.notify import notify_for_audit
-from sql.plugins.pt_archiver import PtArchiver
 from sql.utils.team import user_instances, user_groups
 from sql.models import ArchiveConfig, ArchiveLog, Instance, Team
 from sql.utils.workflow_audit import get_auditor, AuditException, Audit
@@ -228,69 +221,6 @@ def cancel_archive_schedule(archive_id):
     ArchiveConfig.objects.filter(id=archive_id).update(next_run_at=None)
 
 
-def _get_source_charset(archive_info):
-    source_engine = get_engine(archive_info.src_instance)
-    source_db = source_engine.schema_object.databases[archive_info.src_db_name]
-    source_tb = source_db.tables[archive_info.src_table_name]
-    source_charset = source_tb.options["charset"].value
-    if source_charset is None:
-        source_charset = source_db.options["charset"].value
-    return source_engine, source_charset
-
-
-def _build_pt_archiver_args(archive_info):
-    source_engine, source_charset = _get_source_charset(archive_info)
-    source = (
-        rf"h={archive_info.src_instance.host},u={archive_info.src_instance.user},"
-        rf"p={archive_info.src_instance.password},P={archive_info.src_instance.port},"
-        rf"D={archive_info.src_db_name},t={archive_info.src_table_name},A={source_charset}"
-    )
-    args = {
-        "no-version-check": True,
-        "source": source,
-        "where": render_archive_condition(archive_info.condition),
-        "progress": 5000,
-        "statistics": True,
-        "charset": "utf8",
-        "limit": 10000,
-        "txn-size": 1000,
-        "sleep": archive_info.sleep,
-    }
-
-    if archive_info.mode == "dest":
-        dest_instance = archive_info.dest_instance
-        schema_object = get_engine(dest_instance).schema_object
-        dest_db = schema_object.databases[archive_info.dest_db_name]
-        dest_tb = dest_db.tables[archive_info.dest_table_name]
-        dest_charset = dest_tb.options["charset"].value
-        if dest_charset is None:
-            dest_charset = dest_db.options["charset"].value
-        schema_object.connection.close()
-        args["dest"] = (
-            rf"h={dest_instance.host},u={dest_instance.user},p={dest_instance.password},"
-            rf"P={dest_instance.port},D={archive_info.dest_db_name},"
-            rf"t={archive_info.dest_table_name},A={dest_charset}"
-        )
-        if archive_info.no_delete:
-            args["no-delete"] = True
-    elif archive_info.mode == "file":
-        output_directory = os.path.join(settings.BASE_DIR, "downloads/archiver")
-        os.makedirs(output_directory, exist_ok=True)
-        args["file"] = (
-            f"{output_directory}/"
-            f"{archive_info.src_instance.instance_name}-"
-            f"{archive_info.src_db_name}-"
-            f"{archive_info.src_table_name}.txt"
-        )
-        if archive_info.no_delete:
-            args["no-delete"] = True
-    else:
-        args["purge"] = True
-
-    source_engine.close()
-    return args
-
-
 def _record_archive_log(
     archive_info,
     cmd,
@@ -325,138 +255,6 @@ def _record_archive_log(
         start_time=start_time,
         end_time=end_time,
     )
-
-
-def _execute_pt_archiver_archive(archive_info):
-    pt_archiver = PtArchiver()
-    args = _build_pt_archiver_args(archive_info)
-    args_check_result = pt_archiver.check_args(args)
-    if args_check_result["status"] == 1:
-        raise RuntimeError(args_check_result["msg"])
-
-    cmd_args = pt_archiver.generate_args2cmd(args)
-    select_cnt = 0
-    insert_cnt = 0
-    delete_cnt = 0
-    with FuncTimer() as timer:
-        process = pt_archiver.execute_cmd(cmd_args)
-        stdout = ""
-        for line in iter(process.stdout.readline, ""):
-            if re.match(r"^SELECT\s(\d+)$", line, re.I):
-                select_cnt = re.findall(r"^SELECT\s(\d+)$", line)
-            elif re.match(r"^INSERT\s(\d+)$", line, re.I):
-                insert_cnt = re.findall(r"^INSERT\s(\d+)$", line)
-            elif re.match(r"^DELETE\s(\d+)$", line, re.I):
-                delete_cnt = re.findall(r"^DELETE\s(\d+)$", line)
-            stdout += f"{line}\n"
-        stderr = process.stderr.read()
-
-    statistics = stdout + stderr if stderr else stdout
-    select_cnt = int(select_cnt[0]) if select_cnt else 0
-    insert_cnt = int(insert_cnt[0]) if insert_cnt else 0
-    delete_cnt = int(delete_cnt[0]) if delete_cnt else 0
-    error_info = ""
-    success = True
-
-    if stderr:
-        error_info = f"Command execution error: {stderr}"
-        success = False
-    if archive_info.mode == "dest" and not archive_info.no_delete:
-        if insert_cnt != delete_cnt:
-            error_info = (
-                f"Delete and insert counts do not match: {insert_cnt}!={delete_cnt}"
-            )
-            success = False
-    elif archive_info.mode == "file" and not archive_info.no_delete:
-        if select_cnt != delete_cnt:
-            error_info = (
-                f"Select and delete counts do not match: {select_cnt}!={delete_cnt}"
-            )
-            success = False
-    elif archive_info.mode == "purge" and select_cnt != delete_cnt:
-        error_info = (
-            f"Select and delete counts do not match: {select_cnt}!={delete_cnt}"
-        )
-        success = False
-
-    source_password = archive_info.src_instance.password or ""
-    shell_cmd = " ".join(cmd_args).replace(source_password, "***")
-    if archive_info.dest_instance and archive_info.dest_instance.password:
-        shell_cmd = shell_cmd.replace(archive_info.dest_instance.password, "***")
-    _record_archive_log(
-        archive_info=archive_info,
-        cmd=shell_cmd,
-        select_cnt=select_cnt,
-        insert_cnt=insert_cnt,
-        delete_cnt=delete_cnt,
-        statistics=statistics,
-        success=success,
-        error_info=error_info,
-        start_time=timer.start,
-        end_time=timer.end,
-        archive_method=ARCHIVE_METHOD_PT_ARCHIVER,
-    )
-    if not success:
-        raise RuntimeError(f"{error_info}\n{statistics}")
-    return {
-        "statement": shell_cmd,
-        "select_cnt": select_cnt,
-        "insert_cnt": insert_cnt,
-        "delete_cnt": delete_cnt,
-        "success": True,
-        "statistics": statistics,
-    }
-
-
-def _execute_dml_archive(archive_info):
-    delete_sql = build_archive_delete_sql(archive_info)
-    query_engine = get_engine(instance=archive_info.src_instance)
-    query_check = getattr(query_engine, "query_check", None)
-    if callable(query_check):
-        check_result = query_check(db_name=archive_info.src_db_name, sql=delete_sql)
-        if check_result.get("bad_query"):
-            raise RuntimeError(
-                check_result.get("msg", "Blocked archive delete statement.")
-            )
-
-    with FuncTimer() as timer:
-        execute_result = query_engine.execute(
-            db_name=archive_info.src_db_name,
-            sql=delete_sql,
-        )
-
-    success = not bool(getattr(execute_result, "error", None))
-    delete_cnt = int(getattr(execute_result, "affected_rows", 0) or 0)
-    statistics = (
-        execute_result.json()
-        if hasattr(execute_result, "json")
-        else json.dumps(getattr(execute_result, "__dict__", {}), default=str)
-    )
-    error_info = getattr(execute_result, "error", "") or ""
-    _record_archive_log(
-        archive_info=archive_info,
-        cmd=delete_sql,
-        select_cnt=0,
-        insert_cnt=0,
-        delete_cnt=delete_cnt,
-        statistics=statistics,
-        success=success,
-        error_info=error_info,
-        start_time=timer.start,
-        end_time=timer.end,
-        condition=render_archive_condition(archive_info.condition),
-        archive_method=ARCHIVE_METHOD_DML,
-    )
-    if not success:
-        raise RuntimeError(error_info or "Archive execution failed.")
-    return {
-        "statement": delete_sql,
-        "select_cnt": 0,
-        "insert_cnt": 0,
-        "delete_cnt": delete_cnt,
-        "success": True,
-        "statistics": statistics,
-    }
 
 
 def queue_archive_execution(archive_id, trigger="manual"):
@@ -954,12 +752,74 @@ def archive(archive_id, trigger="manual"):
                 ),
             )
 
-        if (
-            archive_info.mode in ("file", "dest")
-            or archive_info.archive_method == ARCHIVE_METHOD_PT_ARCHIVER
-        ):
-            return _execute_pt_archiver_archive(archive_info)
-        return _execute_dml_archive(archive_info)
+        from api_agents.models import AgentCommandType
+        from api_agents.services import (
+            AgentCommandExecutionError,
+            run_agent_command_sync,
+        )
+
+        rendered_condition = render_archive_condition(archive_info.condition)
+        started = timezone.now()
+        try:
+            command = run_agent_command_sync(
+                instance=archive_info.src_instance,
+                command_type=AgentCommandType.ARCHIVE_EXECUTE,
+                workflow_type="archive",
+                workflow_id=str(archive_info.id),
+                payload={
+                    "archive_id": archive_info.id,
+                    "db_name": archive_info.src_db_name,
+                    "table_name": archive_info.src_table_name,
+                    "where": rendered_condition,
+                    "mode": archive_info.mode,
+                    "no_delete": archive_info.no_delete,
+                    "sleep": archive_info.sleep,
+                    "dest_instance_id": archive_info.dest_instance_id or 0,
+                    "dest_db_name": archive_info.dest_db_name or "",
+                    "dest_table_name": archive_info.dest_table_name or "",
+                },
+                timeout_seconds=86400,
+            )
+            result = command.result or {}
+            ended = timezone.now()
+            _record_archive_log(
+                archive_info=archive_info,
+                cmd=result.get("statement") or "pt-archiver",
+                select_cnt=int(result.get("select_cnt") or 0),
+                insert_cnt=int(result.get("insert_cnt") or 0),
+                delete_cnt=int(result.get("delete_cnt") or 0),
+                statistics=result.get("statistics") or "",
+                success=True,
+                error_info="",
+                start_time=started,
+                end_time=ended,
+                condition=rendered_condition,
+                archive_method=ARCHIVE_METHOD_PT_ARCHIVER,
+            )
+            return result
+        except Exception as exc:
+            ended = timezone.now()
+            command = (
+                exc.command if isinstance(exc, AgentCommandExecutionError) else None
+            )
+            result = (
+                command.result if command and isinstance(command.result, dict) else {}
+            )
+            _record_archive_log(
+                archive_info=archive_info,
+                cmd=result.get("statement") or "pt-archiver",
+                select_cnt=int(result.get("select_cnt") or 0),
+                insert_cnt=int(result.get("insert_cnt") or 0),
+                delete_cnt=int(result.get("delete_cnt") or 0),
+                statistics=result.get("statistics") or "",
+                success=False,
+                error_info=str(exc),
+                start_time=started,
+                end_time=ended,
+                condition=rendered_condition,
+                archive_method=ARCHIVE_METHOD_PT_ARCHIVER,
+            )
+            raise
     finally:
         if marked_running or (trigger != "scheduled" and queued_state_seen):
             ArchiveConfig.objects.filter(id=archive_id).update(
