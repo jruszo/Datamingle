@@ -60,9 +60,11 @@ services:
     command:
       - "-storageDataPath=/victoria-metrics-data"
       - "-opentelemetry.usePrometheusNaming=true"
+      - "-promscrape.config=/etc/victoriametrics/promscrape.yml"
     ports:
       - "8428:8428"
     volumes:
+      - "./config/victoriametrics/promscrape.yml:/etc/victoriametrics/promscrape.yml:ro"
       - shared_victoriametrics_local_dev_data:/victoria-metrics-data
     networks:
       - datamingle
@@ -127,27 +129,6 @@ services:
     networks:
       - datamingle
 
-  prometheus:
-    image: prom/prometheus:v2.54.1
-    container_name: datamingle-shared-prometheus
-    restart: always
-    depends_on:
-      victoriametrics-local-dev:
-        condition: service_started
-      quickwit:
-        condition: service_started
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-      - "--web.enable-lifecycle"
-    ports:
-      - "9090:9090"
-    volumes:
-      - "./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro"
-      - shared_prometheus_data:/prometheus
-    networks:
-      - datamingle
-
   grafana:
     image: grafana/grafana-oss:11.5.2
     container_name: datamingle-shared-grafana
@@ -179,7 +160,6 @@ networks:
 volumes:
   shared_grafana_data:
   shared_minio_data:
-  shared_prometheus_data:
   shared_victoriametrics_local_dev_data:
   shared_quickwit_node_1_data:
   shared_quickwit_node_2_data:
