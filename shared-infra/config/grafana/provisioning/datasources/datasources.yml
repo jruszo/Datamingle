@@ -1,6 +1,10 @@
 apiVersion: 1
 prune: true
 
+deleteDatasources:
+  - name: Prometheus Local
+    orgId: 1
+
 datasources:
   - name: VictoriaMetrics local-dev
     type: prometheus
@@ -9,11 +13,6 @@ datasources:
     isDefault: true
     jsonData:
       timeInterval: 15s
-
-  - name: Prometheus Local
-    type: prometheus
-    access: proxy
-    url: http://prometheus:9090
 
   - name: Quickwit Traces
     type: quickwit-quickwit-datasource

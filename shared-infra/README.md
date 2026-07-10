@@ -6,11 +6,10 @@ The Docker Compose project name is pinned to `datamingle-shared-infra`, so Docke
 
 ## Services
 
-- VictoriaMetrics on http://localhost:8428 for Prometheus remote-write metrics in the local `local-dev` tenant installation.
+- VictoriaMetrics on http://localhost:8428 for metrics storage and local infrastructure scraping in the `local-dev` tenant installation.
 - Quickwit on http://localhost:7280 with two local nodes, PostgreSQL metastore, MinIO object storage, OTLP ingest, and Jaeger storage enabled.
-- Grafana on http://localhost:3000 with anonymous admin access and provisioned VictoriaMetrics, Prometheus, Quickwit, and Jaeger datasources.
+- Grafana on http://localhost:3000 with anonymous admin access and provisioned VictoriaMetrics, Quickwit, and Jaeger datasources.
 - Jaeger UI on http://localhost:16686 backed by Quickwit gRPC storage.
-- Prometheus on http://localhost:9090 as a local metrics producer that remote-writes to the local-dev VictoriaMetrics instance.
 - MinIO console on http://localhost:9001 with `minioadmin` / `minioadmin` for inspecting local object storage.
 
 ## Start
@@ -25,17 +24,17 @@ docker-compose -f shared-infra/docker-compose.yml up -d
 docker-compose -f shared-infra/docker-compose.yml down
 ```
 
-Use `down -v` only when you want to delete local VictoriaMetrics, Quickwit, Grafana, Prometheus, PostgreSQL, and MinIO data.
+Use `down -v` only when you want to delete local VictoriaMetrics, Quickwit, Grafana, PostgreSQL, and MinIO data.
 
 ## Test Metrics
 
-Prometheus remote-writes scraped metrics into VictoriaMetrics. Query the local-dev VictoriaMetrics instance directly with:
+VictoriaMetrics scrapes its own, Quickwit, and Grafana infrastructure metrics. Query the local-dev VictoriaMetrics instance directly with:
 
 ```bash
 curl "http://localhost:8428/prometheus/api/v1/query?query=up"
 ```
 
-In Grafana, use the `VictoriaMetrics local-dev` datasource for stored metrics and the `Prometheus Local` datasource to inspect the local scrape source.
+In Grafana, use the `VictoriaMetrics local-dev` datasource for stored and scraped metrics.
 
 ## Per-Tenant Metrics
 

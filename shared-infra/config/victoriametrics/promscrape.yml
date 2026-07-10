@@ -1,16 +1,7 @@
 global:
   scrape_interval: 15s
-  evaluation_interval: 15s
-
-remote_write:
-  - url: http://victoriametrics-local-dev:8428/api/v1/write
 
 scrape_configs:
-  - job_name: prometheus
-    static_configs:
-      - targets:
-          - prometheus:9090
-
   - job_name: victoriametrics-local-dev
     metrics_path: /metrics
     static_configs:

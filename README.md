@@ -21,7 +21,7 @@ This repository is organized as a monorepo:
 
 - `backend/` contains the Django API, local Docker files, demo database compose files, and backend Python dependencies.
 - `frontend/` contains the Vue/Vite SPA.
-- `shared-infra/` contains the local shared observability stack for per-tenant VictoriaMetrics, Quickwit, Grafana, Jaeger, Prometheus, and MinIO.
+- `shared-infra/` contains the local shared observability stack for per-tenant VictoriaMetrics, Quickwit, Grafana, Jaeger, and MinIO.
 - `agent/` contains the Datamingle worker that runs assigned database commands and
   monitoring collectors near managed services.
 - `scripts/` contains repo-level helper scripts.
@@ -261,7 +261,7 @@ Dependencies
 - MyBatis XML parsing [mybatis-mapper2sql](https://github.com/hhyo/mybatis-mapper2sql)
 - Field encryption [cryptography](https://github.com/pyca/cryptography)
 - MySQL data masking and query permission checks [goInception](https://github.com/hanchuanchuan/goInception)
-- Observability [VictoriaMetrics](https://github.com/VictoriaMetrics/VictoriaMetrics), [Quickwit](https://github.com/quickwit-oss/quickwit), [Grafana](https://github.com/grafana/grafana), [Prometheus](https://github.com/prometheus/prometheus), and [Jaeger](https://github.com/jaegertracing/jaeger)
+- Observability [VictoriaMetrics](https://github.com/VictoriaMetrics/VictoriaMetrics), [Quickwit](https://github.com/quickwit-oss/quickwit), [Grafana](https://github.com/grafana/grafana), and [Jaeger](https://github.com/jaegertracing/jaeger)
 
 Contributing
 ===============
