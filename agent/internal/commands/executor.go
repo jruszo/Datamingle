@@ -66,7 +66,6 @@ const (
 var alterTablePattern = regexp.MustCompile(`(?is)^\s*alter\s+table\s+((?:` + "`[^`]+`" + `|[A-Za-z0-9_$]+)(?:\.(?:` + "`[^`]+`" + `|[A-Za-z0-9_$]+))?)\s+(.+?)\s*;?\s*$`)
 var archiveIdentifierPattern = regexp.MustCompile(`^[A-Za-z0-9_$-]+$`)
 var archiveStatisticPattern = regexp.MustCompile(`(?im)^(SELECT|INSERT|DELETE)\s+(\d+)\s*$`)
-var postgresCTEOperationPattern = regexp.MustCompile(`(?is)^with\b.+\)\s*(select|insert|update|delete)\b`)
 
 func NewExecutor() *Executor {
 	return NewExecutorWithToolCache("")
@@ -293,7 +292,9 @@ func (e *Executor) postgresArchiveExecute(ctx context.Context, assignment client
 	for {
 		var count int
 		if boolValue(command.Payload, "no_delete", false) {
-			err = db.QueryRowContext(ctx, fmt.Sprintf("SELECT count(*) FROM (SELECT 1 FROM %s WHERE %s LIMIT %d) AS datamingle_archive", quotedTable, where, batchSize)).Scan(&count)
+			if err = db.QueryRowContext(ctx, fmt.Sprintf("SELECT count(*) FROM %s WHERE %s", quotedTable, where)).Scan(&count); err != nil {
+				return Result{}, fmt.Errorf("PostgreSQL archive count failed: %w", err)
+			}
 			selected += count
 			break
 		}
@@ -1397,8 +1398,8 @@ func isReadOnlySQL(sqlText string) bool {
 	if hasSQLPrefix(normalized, "show grants") {
 		return false
 	}
-	if match := postgresCTEOperationPattern.FindStringSubmatch(normalized); len(match) == 2 {
-		return strings.EqualFold(match[1], "select")
+	if operation, mutating, ok := classifyPostgresCTE(normalized); ok {
+		return operation == "select" && !mutating
 	}
 	return hasSQLPrefix(normalized, "select") ||
 		hasSQLPrefix(normalized, "explain") ||
@@ -1412,8 +1413,8 @@ func isExportSQL(sqlText string) bool {
 	if !ok {
 		return false
 	}
-	if match := postgresCTEOperationPattern.FindStringSubmatch(normalized); len(match) == 2 {
-		return strings.EqualFold(match[1], "select")
+	if operation, mutating, ok := classifyPostgresCTE(normalized); ok {
+		return operation == "select" && !mutating
 	}
 	return hasSQLPrefix(normalized, "select")
 }
@@ -1431,8 +1432,8 @@ func isSafeDDL(sqlText string) bool {
 
 func classifyWorkflowSyntax(sqlText string) int {
 	normalized := normalizeSQLStatement(sqlText)
-	if match := postgresCTEOperationPattern.FindStringSubmatch(normalized); len(match) == 2 {
-		if !strings.EqualFold(match[1], "select") {
+	if operation, mutating, ok := classifyPostgresCTE(normalized); ok {
+		if mutating || operation != "select" {
 			return 2
 		}
 		return 0
@@ -1459,6 +1460,61 @@ func classifyWorkflowSyntax(sqlText string) int {
 	default:
 		return 0
 	}
+}
+
+func classifyPostgresCTE(sqlText string) (operation string, mutating bool, ok bool) {
+	if !hasSQLPrefix(sqlText, "with") && !hasSQLPrefix(sqlText, "with recursive") {
+		return "", false, false
+	}
+	depth := 0
+	completedBody := false
+	for i := 0; i < len(sqlText); {
+		switch sqlText[i] {
+		case '\'', '"':
+			quote := sqlText[i]
+			i++
+			for i < len(sqlText) {
+				if sqlText[i] == quote {
+					if i+1 < len(sqlText) && sqlText[i+1] == quote {
+						i += 2
+						continue
+					}
+					i++
+					break
+				}
+				i++
+			}
+		case '(':
+			depth++
+			i++
+		case ')':
+			if depth == 1 {
+				completedBody = true
+			}
+			if depth > 0 {
+				depth--
+			}
+			i++
+		default:
+			if !unicode.IsLetter(rune(sqlText[i])) && sqlText[i] != '_' {
+				i++
+				continue
+			}
+			start := i
+			for i < len(sqlText) && (unicode.IsLetter(rune(sqlText[i])) || unicode.IsDigit(rune(sqlText[i])) || sqlText[i] == '_') {
+				i++
+			}
+			token := strings.ToLower(sqlText[start:i])
+			isMutation := token == "insert" || token == "update" || token == "delete"
+			if depth > 0 && isMutation {
+				mutating = true
+			}
+			if depth == 0 && completedBody && (token == "select" || isMutation) {
+				return token, mutating, true
+			}
+		}
+	}
+	return "", mutating, true
 }
 
 func normalizeSingleSQLStatement(sqlText string) (string, bool) {

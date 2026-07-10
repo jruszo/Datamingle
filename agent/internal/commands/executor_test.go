@@ -179,6 +179,7 @@ func TestIsReadOnlySQL(t *testing.T) {
 		"select ';' as semicolon",
 		"show databases",
 		"show create table users",
+		"WITH active AS (SELECT id FROM users) SELECT * FROM active",
 	} {
 		if !isReadOnlySQL(sqlText) {
 			t.Fatalf("expected %q to be read-only", sqlText)
@@ -192,6 +193,8 @@ func TestIsReadOnlySQL(t *testing.T) {
 		"select 1; update users set name = 'x'",
 		"select 1; select 2",
 		"show grants",
+		"WITH removed AS (DELETE FROM users RETURNING id) SELECT * FROM removed",
+		"WITH changed AS (UPDATE users SET name = 'x' RETURNING id) SELECT * FROM changed",
 	} {
 		if isReadOnlySQL(sqlText) {
 			t.Fatalf("expected %q to be rejected", sqlText)
@@ -216,6 +219,8 @@ func TestClassifyWorkflowSyntax(t *testing.T) {
 		"update users set name = 'x'",
 		"delete from users where id = 1",
 		"replace into users(id) values (1)",
+		"WITH removed AS (DELETE FROM users RETURNING id) SELECT * FROM removed",
+		"WITH source AS (SELECT id FROM users) UPDATE users SET name = 'x' FROM source WHERE users.id = source.id",
 	} {
 		if classifyWorkflowSyntax(sqlText) != 2 {
 			t.Fatalf("expected %q to be DML", sqlText)
@@ -229,6 +234,15 @@ func TestClassifyWorkflowSyntax(t *testing.T) {
 		if classifyWorkflowSyntax(sqlText) != 0 {
 			t.Fatalf("expected %q to be rejected", sqlText)
 		}
+	}
+}
+
+func TestIsExportSQLRejectsMutatingCTE(t *testing.T) {
+	if !isExportSQL("WITH rows AS (SELECT id FROM users) SELECT * FROM rows") {
+		t.Fatal("expected read-only CTE export to be accepted")
+	}
+	if isExportSQL("WITH removed AS (DELETE FROM users RETURNING id) SELECT * FROM removed") {
+		t.Fatal("expected data-modifying CTE export to be rejected")
 	}
 }
 
