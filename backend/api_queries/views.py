@@ -446,7 +446,7 @@ class QueryInstanceList(views.APIView):
             db_type=db_type or None,
         )
         queryset = (
-            filter_agent_runnable_instances(queryset)
+            filter_agent_runnable_instances(queryset, db_type=("mysql", "pgsql"))
             .filter(queryable=True)
             .order_by("instance_name")
         )

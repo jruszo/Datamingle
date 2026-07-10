@@ -815,6 +815,17 @@ def has_active_agent_websocket(agent):
     return bool(agent_active_websocket_channel(agent))
 
 
+AGENT_COMMAND_DB_TYPES = ("mysql", "pgsql")
+
+
+def _command_db_types(db_type):
+    if db_type is None:
+        return AGENT_COMMAND_DB_TYPES
+    if isinstance(db_type, (tuple, list, set)):
+        return tuple(db_type)
+    return (db_type,)
+
+
 def command_capable_assignments(db_type="mysql", require_websocket=True):
     assignments = (
         AgentInstanceAssignment.objects.select_related("agent", "instance")
@@ -823,7 +834,7 @@ def command_capable_assignments(db_type="mysql", require_websocket=True):
             command_enabled=True,
             agent__enabled=True,
             agent__status=AgentStatus.ONLINE,
-            instance__db_type=db_type,
+            instance__db_type__in=_command_db_types(db_type),
         )
         .order_by("-agent__last_seen_at", "agent_id")
     )
@@ -850,7 +861,7 @@ def command_capable_instance_ids(db_type="mysql", require_websocket=True):
 
 def filter_agent_runnable_instances(queryset, db_type="mysql", require_websocket=True):
     return queryset.filter(
-        db_type=db_type,
+        db_type__in=_command_db_types(db_type),
         id__in=command_capable_instance_ids(
             db_type=db_type, require_websocket=require_websocket
         ),

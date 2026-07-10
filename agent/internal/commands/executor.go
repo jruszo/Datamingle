@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +23,7 @@ import (
 	"unicode"
 
 	"github.com/go-sql-driver/mysql"
+	_ "github.com/lib/pq"
 
 	"github.com/jruszo/datamingle/agent/internal/client"
 	"github.com/jruszo/datamingle/agent/internal/tools"
@@ -64,6 +66,7 @@ const (
 var alterTablePattern = regexp.MustCompile(`(?is)^\s*alter\s+table\s+((?:` + "`[^`]+`" + `|[A-Za-z0-9_$]+)(?:\.(?:` + "`[^`]+`" + `|[A-Za-z0-9_$]+))?)\s+(.+?)\s*;?\s*$`)
 var archiveIdentifierPattern = regexp.MustCompile(`^[A-Za-z0-9_$-]+$`)
 var archiveStatisticPattern = regexp.MustCompile(`(?im)^(SELECT|INSERT|DELETE)\s+(\d+)\s*$`)
+var postgresCTEOperationPattern = regexp.MustCompile(`(?is)^with\b.+\)\s*(select|insert|update|delete)\b`)
 
 func NewExecutor() *Executor {
 	return NewExecutorWithToolCache("")
@@ -125,7 +128,7 @@ func (e *Executor) Execute(ctx context.Context, command client.AgentCommand, cfg
 	if !ok {
 		return Result{}, fmt.Errorf("instance %d is not assigned to this agent", command.InstanceID)
 	}
-	if assignment.DBType != "mysql" {
+	if assignment.DBType != "mysql" && assignment.DBType != "pgsql" {
 		return Result{}, fmt.Errorf("unsupported database type %q", assignment.DBType)
 	}
 
@@ -155,6 +158,9 @@ func (e *Executor) Execute(ctx context.Context, command client.AgentCommand, cfg
 }
 
 func (e *Executor) archiveExecute(ctx context.Context, assignment client.Assignment, cfg client.AgentConfig, command client.AgentCommand, started time.Time) (Result, error) {
+	if assignment.DBType == "pgsql" {
+		return e.postgresArchiveExecute(ctx, assignment, command, started)
+	}
 	toolPath, err := e.toolArtifactPath("pt-archiver", cfg)
 	if err != nil {
 		return Result{}, err
@@ -259,27 +265,101 @@ func (e *Executor) archiveExecute(ctx context.Context, assignment client.Assignm
 	}}, nil
 }
 
+func (e *Executor) postgresArchiveExecute(ctx context.Context, assignment client.Assignment, command client.AgentCommand, started time.Time) (Result, error) {
+	database := stringValueOrDefault(command.Payload, "db_name", assignment.Database)
+	table := stringValue(command.Payload, "table_name")
+	where := strings.TrimSpace(stringValue(command.Payload, "where"))
+	mode := stringValueOrDefault(command.Payload, "mode", "purge")
+	quotedTable, identifierOK := quotePostgresIdentifier(table)
+	if !archiveIdentifierPattern.MatchString(database) || !identifierOK {
+		return Result{}, fmt.Errorf("archive database and table names contain unsupported characters")
+	}
+	if where == "" {
+		return Result{}, fmt.Errorf("archive condition is required")
+	}
+	if mode != "purge" {
+		return Result{}, fmt.Errorf("PostgreSQL archiving currently supports purge mode")
+	}
+	db, err := openDatabase(assignment, database)
+	if err != nil {
+		return Result{}, err
+	}
+	defer db.Close()
+	if err := ensureWritable(ctx, assignment.DBType, db); err != nil {
+		return Result{}, err
+	}
+	batchSize := 1000
+	selected, deleted := 0, 0
+	for {
+		var count int
+		if boolValue(command.Payload, "no_delete", false) {
+			err = db.QueryRowContext(ctx, fmt.Sprintf("SELECT count(*) FROM (SELECT 1 FROM %s WHERE %s LIMIT %d) AS datamingle_archive", quotedTable, where, batchSize)).Scan(&count)
+			selected += count
+			break
+		}
+		statement := fmt.Sprintf("WITH candidates AS (SELECT ctid FROM %s WHERE %s LIMIT %d FOR UPDATE SKIP LOCKED), deleted AS (DELETE FROM %s target USING candidates WHERE target.ctid = candidates.ctid RETURNING 1) SELECT count(*) FROM deleted", quotedTable, where, batchSize, quotedTable)
+		if err = db.QueryRowContext(ctx, statement).Scan(&count); err != nil {
+			return Result{}, fmt.Errorf("PostgreSQL archive batch failed: %w", err)
+		}
+		selected += count
+		deleted += count
+		if count < batchSize {
+			break
+		}
+		if sleep := intValue(command.Payload, "sleep", 1); sleep > 0 {
+			select {
+			case <-ctx.Done():
+				return Result{}, ctx.Err()
+			case <-time.After(time.Duration(sleep) * time.Second):
+			}
+		}
+	}
+	statement := fmt.Sprintf("PostgreSQL batched archive purge %s.%s", database, table)
+	return Result{Message: "archive executed", Payload: map[string]any{"statement": statement, "select_cnt": selected, "insert_cnt": 0, "delete_cnt": deleted, "statistics": fmt.Sprintf("SELECT %d\nDELETE %d", selected, deleted), "success": true, "execution_seconds": e.now().Sub(started).Seconds(), "command_id": command.ID}}, nil
+}
+
+func quotePostgresIdentifier(identifier string) (string, bool) {
+	parts := strings.Split(identifier, ".")
+	if len(parts) == 0 || len(parts) > 2 {
+		return "", false
+	}
+	quoted := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if !archiveIdentifierPattern.MatchString(part) {
+			return "", false
+		}
+		quoted = append(quoted, `"`+strings.ReplaceAll(part, `"`, `""`)+`"`)
+	}
+	return strings.Join(quoted, "."), true
+}
+
 func (e *Executor) inventoryCollect(ctx context.Context, assignment client.Assignment, started time.Time) (Result, error) {
-	db, err := openMySQL(assignment, assignment.Database)
+	db, err := openDatabase(assignment, assignment.Database)
 	if err != nil {
 		return Result{}, err
 	}
 	defer db.Close()
 
-	var hostname string
-	var version string
-	if err := db.QueryRowContext(ctx, "SELECT @@hostname, VERSION()").Scan(&hostname, &version); err != nil {
+	var hostname, version string
+	query := "SELECT @@hostname, VERSION()"
+	if assignment.DBType == "pgsql" {
+		query = "SELECT COALESCE(inet_server_addr()::text, current_setting('listen_addresses')), version()"
+	}
+	if err := db.QueryRowContext(ctx, query).Scan(&hostname, &version); err != nil {
 		return Result{}, err
 	}
-	mysqlTopology := collectMySQLTopology(ctx, db)
+	payload := map[string]any{"hostname": hostname, "version": version, "execution_seconds": e.now().Sub(started).Seconds()}
+	if assignment.DBType == "mysql" {
+		payload["mysql_topology"] = collectMySQLTopology(ctx, db)
+	} else {
+		var recovery bool
+		if err := db.QueryRowContext(ctx, "SELECT pg_is_in_recovery()").Scan(&recovery); err == nil {
+			payload["postgresql_topology"] = map[string]any{"in_recovery": recovery, "role": map[bool]string{true: "replica", false: "primary"}[recovery]}
+		}
+	}
 	return Result{
 		Message: "inventory collected",
-		Payload: map[string]any{
-			"hostname":          hostname,
-			"version":           version,
-			"mysql_topology":    mysqlTopology,
-			"execution_seconds": e.now().Sub(started).Seconds(),
-		},
+		Payload: payload,
 	}, nil
 }
 
@@ -518,7 +598,7 @@ func assignmentForInstanceID(instanceID int64, cfg client.AgentConfig) (client.A
 }
 
 func (e *Executor) connectionTest(ctx context.Context, assignment client.Assignment, started time.Time) (Result, error) {
-	db, err := openMySQL(assignment, assignment.Database)
+	db, err := openDatabase(assignment, assignment.Database)
 	if err != nil {
 		return Result{}, err
 	}
@@ -581,6 +661,9 @@ func (e *Executor) schemaChange(ctx context.Context, assignment client.Assignmen
 	}
 	executor := stringValueOrDefault(command.Payload, "executor", "direct")
 	if executor != "direct" {
+		if assignment.DBType != "mysql" {
+			return Result{}, fmt.Errorf("online schema executors are only supported for MySQL")
+		}
 		statements, ok := singleSQLStatement(sqlText)
 		if !ok {
 			return Result{}, fmt.Errorf("schema.change only allows one DDL statement")
@@ -599,12 +682,12 @@ func (e *Executor) schemaChange(ctx context.Context, assignment client.Assignmen
 	if !isSafeDDL(sqlText) {
 		return Result{}, fmt.Errorf("schema.change only allows approved single-statement DDL")
 	}
-	db, err := openMySQL(assignment, stringValueOrDefault(command.Payload, "db_name", assignment.Database))
+	db, err := openDatabase(assignment, stringValueOrDefault(command.Payload, "db_name", assignment.Database))
 	if err != nil {
 		return Result{}, err
 	}
 	defer db.Close()
-	if err := ensureWritableMySQL(ctx, db); err != nil {
+	if err := ensureWritable(ctx, assignment.DBType, db); err != nil {
 		return Result{}, err
 	}
 	tx, err := db.BeginTx(ctx, nil)
@@ -726,12 +809,12 @@ func (e *Executor) workflowExecute(ctx context.Context, assignment client.Assign
 		)
 	}
 
-	db, err := openMySQL(assignment, stringValueOrDefault(command.Payload, "db_name", assignment.Database))
+	db, err := openDatabase(assignment, stringValueOrDefault(command.Payload, "db_name", assignment.Database))
 	if err != nil {
 		return Result{}, err
 	}
 	defer db.Close()
-	if err := ensureWritableMySQL(ctx, db); err != nil {
+	if err := ensureWritable(ctx, assignment.DBType, db); err != nil {
 		return Result{}, err
 	}
 
@@ -796,7 +879,7 @@ func (e *Executor) exportCheck(ctx context.Context, assignment client.Assignment
 		maxRows = 10000
 	}
 
-	db, err := openMySQL(assignment, stringValueOrDefault(command.Payload, "db_name", assignment.Database))
+	db, err := openDatabase(assignment, stringValueOrDefault(command.Payload, "db_name", assignment.Database))
 	if err != nil {
 		return Result{}, err
 	}
@@ -1174,7 +1257,7 @@ func archiveDSN(assignment client.Assignment, credentialFile, database, table st
 }
 
 func queryRows(ctx context.Context, assignment client.Assignment, database string, sqlText string, limit int) (queryData, error) {
-	db, err := openMySQL(assignment, database)
+	db, err := openDatabase(assignment, database)
 	if err != nil {
 		return queryData{}, err
 	}
@@ -1256,6 +1339,41 @@ func openMySQL(assignment client.Assignment, database string) (*sql.DB, error) {
 	return sql.Open("mysql", cfg.FormatDSN())
 }
 
+func openDatabase(assignment client.Assignment, database string) (*sql.DB, error) {
+	if assignment.DBType == "mysql" {
+		return openMySQL(assignment, database)
+	}
+	if assignment.DBType != "pgsql" {
+		return nil, fmt.Errorf("unsupported database type %q", assignment.DBType)
+	}
+	if database == "" {
+		database = "postgres"
+	}
+	u := &url.URL{Scheme: "postgres", User: url.UserPassword(assignment.Username, assignment.Password), Host: net.JoinHostPort(assignment.Host, strconv.Itoa(assignment.Port)), Path: "/" + database}
+	q := u.Query()
+	q.Set("connect_timeout", "10")
+	q.Set("sslmode", "disable")
+	if assignment.SSL.Enabled {
+		q.Set("sslmode", map[bool]string{true: "verify-full", false: "require"}[assignment.SSL.Verify])
+	}
+	u.RawQuery = q.Encode()
+	return sql.Open("postgres", u.String())
+}
+
+func ensureWritable(ctx context.Context, dbType string, db *sql.DB) error {
+	if dbType == "mysql" {
+		return ensureWritableMySQL(ctx, db)
+	}
+	var readOnly, recovery bool
+	if err := db.QueryRowContext(ctx, "SELECT current_setting('transaction_read_only')::boolean, pg_is_in_recovery()").Scan(&readOnly, &recovery); err != nil {
+		return fmt.Errorf("unable to verify PostgreSQL writable state: %w", err)
+	}
+	if readOnly || recovery {
+		return fmt.Errorf("PostgreSQL target is read-only or in recovery")
+	}
+	return nil
+}
+
 func ensureWritableMySQL(ctx context.Context, db *sql.DB) error {
 	var readOnly int
 	if err := db.QueryRowContext(ctx, "SELECT @@global.read_only").Scan(&readOnly); err != nil {
@@ -1279,6 +1397,9 @@ func isReadOnlySQL(sqlText string) bool {
 	if hasSQLPrefix(normalized, "show grants") {
 		return false
 	}
+	if match := postgresCTEOperationPattern.FindStringSubmatch(normalized); len(match) == 2 {
+		return strings.EqualFold(match[1], "select")
+	}
 	return hasSQLPrefix(normalized, "select") ||
 		hasSQLPrefix(normalized, "explain") ||
 		hasSQLPrefix(normalized, "describe") ||
@@ -1288,7 +1409,13 @@ func isReadOnlySQL(sqlText string) bool {
 
 func isExportSQL(sqlText string) bool {
 	normalized, ok := normalizeSingleSQLStatement(sqlText)
-	return ok && hasSQLPrefix(normalized, "select")
+	if !ok {
+		return false
+	}
+	if match := postgresCTEOperationPattern.FindStringSubmatch(normalized); len(match) == 2 {
+		return strings.EqualFold(match[1], "select")
+	}
+	return hasSQLPrefix(normalized, "select")
 }
 
 func isSafeDDL(sqlText string) bool {
@@ -1304,6 +1431,12 @@ func isSafeDDL(sqlText string) bool {
 
 func classifyWorkflowSyntax(sqlText string) int {
 	normalized := normalizeSQLStatement(sqlText)
+	if match := postgresCTEOperationPattern.FindStringSubmatch(normalized); len(match) == 2 {
+		if !strings.EqualFold(match[1], "select") {
+			return 2
+		}
+		return 0
+	}
 	switch {
 	case normalized == "":
 		return 0

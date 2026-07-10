@@ -53,6 +53,29 @@ func TestExecuteSupportsInventoryCollection(t *testing.T) {
 	}
 }
 
+func TestExecuteAcceptsPostgreSQLWorkflowCommands(t *testing.T) {
+	executor := NewExecutor()
+	result, err := executor.Execute(
+		context.Background(),
+		client.AgentCommand{InstanceID: 42, CommandType: "workflow.check", Payload: map[string]any{"sql": "CREATE TABLE audit_events (id bigint);"}},
+		client.AgentConfig{Assignments: []client.Assignment{{InstanceID: 42, DBType: "pgsql"}}},
+	)
+	if err != nil {
+		t.Fatalf("PostgreSQL workflow command was rejected: %v", err)
+	}
+	if result.Payload["syntax_type"] != 1 {
+		t.Fatalf("expected DDL syntax type, got %#v", result.Payload["syntax_type"])
+	}
+}
+
+func TestOpenDatabaseSupportsPostgreSQL(t *testing.T) {
+	db, err := openDatabase(client.Assignment{DBType: "pgsql", Host: "localhost", Port: 5432, Username: "user", Password: "secret", SSL: client.SSLConfig{Enabled: true}}, "app")
+	if err != nil {
+		t.Fatalf("open PostgreSQL: %v", err)
+	}
+	db.Close()
+}
+
 func TestBuildMySQLTopologyPayloadUsesReplicaStatusAliases(t *testing.T) {
 	payload := buildMySQLTopologyPayload(
 		"server-uuid",
