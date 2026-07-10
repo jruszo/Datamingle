@@ -24,7 +24,10 @@ const inventoryModule: FeatureModule = {
       path: '/inventory/data-dictionary',
       name: 'inventory-data-dictionary',
       component: DataDictionaryPage,
-      meta: { title: 'Data Dictionary', access: { anyPermissions: ['sql.menu_data_dictionary'] } },
+      meta: {
+        title: 'Data Dictionary',
+        access: { anyPermissions: ['sql.menu_data_dictionary', 'sql.menu_database'] },
+      },
     },
     {
       path: '/inventory/:instanceId',
@@ -50,7 +53,7 @@ const inventoryModule: FeatureModule = {
       icon: BookOpen,
       group: { id: 'database', label: 'Database', icon: Database, order: 25 },
       order: 20,
-      access: { anyPermissions: ['sql.menu_data_dictionary'] },
+      access: { anyPermissions: ['sql.menu_data_dictionary', 'sql.menu_database'] },
     },
   ],
 }

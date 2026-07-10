@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   getFeatureModules,
+  getFeatureRoutes,
   getFirstVisibleSettingsItem,
   getNavigationItems,
   getVisibleNavigationItems,
@@ -59,13 +60,13 @@ describe('feature registry', () => {
       'Metrics Explorer',
       'Instances',
       'Data Dictionary',
-      'Databases',
       'Accounts',
       'Parameters',
       'Diagnostics',
       'Queries',
       'Archives',
       'Workflows',
+      'Workflow Policies',
       'Permissions',
       'Reports',
       'Audit',
@@ -83,6 +84,25 @@ describe('feature registry', () => {
     expect(labels).toContain('Instances')
     expect(labels).toContain('Archives')
     expect(labels).not.toContain('Permissions')
+  })
+
+  it('shows the merged data dictionary entry to database managers', () => {
+    const labels = getVisibleNavigationItems(
+      'primary',
+      buildUser({ permissions: ['sql.menu_database'] }),
+    ).map((item) => item.label)
+
+    expect(labels).toContain('Data Dictionary')
+    expect(labels).not.toContain('Databases')
+  })
+
+  it('keeps legacy database management redirects free of duplicate route metadata', () => {
+    const redirectRoute = getFeatureRoutes().find(
+      (route) => route.path === '/instance-operations/databases',
+    )
+
+    expect(redirectRoute?.redirect).toBe('/inventory/data-dictionary')
+    expect(redirectRoute?.meta).toBeUndefined()
   })
 
   it('resolves the first settings route from visible settings entries', () => {
