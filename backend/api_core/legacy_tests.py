@@ -33,6 +33,7 @@ from api_agents.models import (
     AgentStatus,
     AgentToolArtifact,
 )
+from api_archives.views import _archive_agent_assignment
 from sql.models import (
     Team,
     Instance,
@@ -4838,6 +4839,52 @@ class ArchiveApiTests(CacheIsolatedAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         archive_id = assert_success_envelope(self, response)["id"]
         return ArchiveConfig.objects.get(id=archive_id)
+
+    def assert_archive_agent_unavailable(self):
+        self.assertIsNone(_archive_agent_assignment(self.mysql_instance.id))
+        archive = self.create_pending_archive()
+        archive.status = WorkflowStatus.PASSED
+        archive.state = True
+        archive.save(update_fields=["status", "state"])
+        self.authenticate(self.reviewer)
+
+        with patch("api_archives.views.async_task") as async_task_mock:
+            response = self.client.post(
+                f"/api/v1/archive/{archive.id}/run/",
+                {},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.json()["errors"],
+            "No online command-capable agent with pt-archiver is available for this instance.",
+        )
+        async_task_mock.assert_not_called()
+
+    def test_archive_agent_gating_rejects_missing_assignment(self):
+        AgentInstanceAssignment.objects.filter(instance=self.mysql_instance).delete()
+
+        self.assert_archive_agent_unavailable()
+
+    def test_archive_agent_gating_rejects_offline_agent(self):
+        self.archive_agent.status = AgentStatus.OFFLINE
+        self.archive_agent.save(update_fields=["status"])
+
+        self.assert_archive_agent_unavailable()
+
+    def test_archive_agent_gating_rejects_agent_without_websocket(self):
+        self.archive_agent.metadata = {}
+        self.archive_agent.save(update_fields=["metadata"])
+
+        self.assert_archive_agent_unavailable()
+
+    def test_archive_agent_gating_rejects_missing_tool_artifact(self):
+        AgentToolArtifact.objects.filter(
+            tool_name=AgentToolArtifact.TOOL_PT_ARCHIVER
+        ).delete()
+
+        self.assert_archive_agent_unavailable()
 
     def test_archive_metadata_requires_archive_permission(self):
         self.authenticate(self.outsider)

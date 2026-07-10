@@ -82,6 +82,18 @@ def _archive_agent_assignment(instance_id):
     return assignment
 
 
+def _require_archive_agent(archive_config):
+    if _archive_agent_assignment(archive_config.src_instance_id) is None:
+        raise serializers.ValidationError(
+            {
+                "errors": (
+                    "No online command-capable agent with pt-archiver is available "
+                    "for this instance."
+                )
+            }
+        )
+
+
 def _sync_archive_mailbox_notifications_safe(workflow):
     try:
         sync_approval_notifications(workflow)
@@ -999,15 +1011,7 @@ class ArchiveRunNow(views.APIView):
                 raise serializers.ValidationError(
                     {"errors": "Archive execution is already queued or running."}
                 )
-            if _archive_agent_assignment(archive_config.src_instance_id) is None:
-                raise serializers.ValidationError(
-                    {
-                        "errors": (
-                            "No online command-capable agent with pt-archiver is "
-                            "available for this instance."
-                        )
-                    }
-                )
+            _require_archive_agent(archive_config)
 
             archive_config.execution_state = ARCHIVE_EXECUTION_STATE_QUEUED
             archive_config.save(update_fields=["execution_state"])
@@ -1062,18 +1066,8 @@ class ArchiveStateUpdate(views.APIView):
             )
 
         enabled = serializer.validated_data["enabled"]
-        if (
-            enabled
-            and _archive_agent_assignment(archive_config.src_instance_id) is None
-        ):
-            raise serializers.ValidationError(
-                {
-                    "errors": (
-                        "No online command-capable agent with pt-archiver is "
-                        "available for this instance."
-                    )
-                }
-            )
+        if enabled:
+            _require_archive_agent(archive_config)
         with transaction.atomic():
             archive_config.state = enabled
             if enabled:

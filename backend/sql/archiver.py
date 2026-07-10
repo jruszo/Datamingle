@@ -758,9 +758,10 @@ def archive(archive_id, trigger="manual"):
             run_agent_command_sync,
         )
 
-        rendered_condition = render_archive_condition(archive_info.condition)
-        started = timezone.now()
+        rendered_condition = None
         try:
+            started = timezone.now()
+            rendered_condition = render_archive_condition(archive_info.condition)
             command = run_agent_command_sync(
                 instance=archive_info.src_instance,
                 command_type=AgentCommandType.ARCHIVE_EXECUTE,

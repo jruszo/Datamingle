@@ -1615,11 +1615,28 @@ func intValue(payload map[string]any, key string, fallback int) int {
 }
 
 func boolValue(payload map[string]any, key string, fallback bool) bool {
-	value, ok := payload[key].(bool)
-	if !ok {
-		return fallback
+	switch value := payload[key].(type) {
+	case bool:
+		return value
+	case int:
+		if value == 0 || value == 1 {
+			return value == 1
+		}
+	case int64:
+		if value == 0 || value == 1 {
+			return value == 1
+		}
+	case float64:
+		if value == 0 || value == 1 {
+			return value == 1
+		}
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+		if err == nil {
+			return parsed
+		}
 	}
-	return value
+	return fallback
 }
 
 func intFromAny(value any) int {

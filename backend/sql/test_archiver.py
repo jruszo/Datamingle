@@ -269,3 +269,49 @@ class ArchiveExecutionHelpersTest(TestCase):
             command_kwargs["payload"]["where"],
             render_archive_condition(self.archive.condition),
         )
+
+    @patch("sql.archiver._record_archive_log")
+    @patch("api_agents.services.run_agent_command_sync")
+    def test_archive_records_agent_command_failure_and_resets_state(
+        self, run_agent_command_sync_mock, record_archive_log_mock
+    ):
+        run_agent_command_sync_mock.side_effect = RuntimeError("agent execution failed")
+        self.archive.execution_state = ARCHIVE_EXECUTION_STATE_QUEUED
+        self.archive.save(update_fields=["execution_state"])
+
+        with self.assertRaisesRegex(RuntimeError, "agent execution failed"):
+            archive(self.archive.id, trigger="manual")
+
+        self.archive.refresh_from_db()
+        self.assertEqual(self.archive.execution_state, ARCHIVE_EXECUTION_STATE_IDLE)
+        log_kwargs = record_archive_log_mock.call_args.kwargs
+        self.assertFalse(log_kwargs["success"])
+        self.assertEqual(log_kwargs["error_info"], "agent execution failed")
+        self.assertEqual(
+            log_kwargs["condition"],
+            render_archive_condition(self.archive.condition),
+        )
+
+    @patch("sql.archiver._record_archive_log")
+    @patch("api_agents.services.run_agent_command_sync")
+    def test_archive_records_condition_render_failure_and_resets_state(
+        self, run_agent_command_sync_mock, record_archive_log_mock
+    ):
+        self.archive.condition = "created_at < {{ unsupported }}"
+        self.archive.execution_state = ARCHIVE_EXECUTION_STATE_QUEUED
+        self.archive.save(update_fields=["condition", "execution_state"])
+
+        with self.assertRaisesRegex(
+            ValueError, "Unsupported archive condition variable: unsupported"
+        ):
+            archive(self.archive.id, trigger="manual")
+
+        run_agent_command_sync_mock.assert_not_called()
+        self.archive.refresh_from_db()
+        self.assertEqual(self.archive.execution_state, ARCHIVE_EXECUTION_STATE_IDLE)
+        log_kwargs = record_archive_log_mock.call_args.kwargs
+        self.assertFalse(log_kwargs["success"])
+        self.assertIn(
+            "Unsupported archive condition variable", log_kwargs["error_info"]
+        )
+        self.assertIsNone(log_kwargs["condition"])
