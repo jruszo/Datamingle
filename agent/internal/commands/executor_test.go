@@ -267,22 +267,25 @@ func TestPostgresCTEClassificationIgnoresDollarQuotesAndComments(t *testing.T) {
 
 func TestQuotePostgresIdentifier(t *testing.T) {
 	tests := []struct {
+		name  string
 		input string
 		want  string
 		ok    bool
 	}{
-		{input: "events", want: `"events"`, ok: true},
-		{input: "audit.events", want: `"audit"."events"`, ok: true},
-		{input: "audit.events.extra", ok: false},
-		{input: "", ok: false},
-		{input: `events"drop`, ok: false},
-		{input: "audit.", ok: false},
+		{name: "single part", input: "events", want: `"events"`, ok: true},
+		{name: "schema qualified", input: "audit.events", want: `"audit"."events"`, ok: true},
+		{name: "too many parts", input: "audit.events.extra", ok: false},
+		{name: "empty", input: "", ok: false},
+		{name: "embedded quote", input: `events"drop`, ok: false},
+		{name: "empty table", input: "audit.", ok: false},
 	}
 	for _, test := range tests {
-		got, ok := quotePostgresIdentifier(test.input)
-		if got != test.want || ok != test.ok {
-			t.Fatalf("quotePostgresIdentifier(%q) = (%q, %v), want (%q, %v)", test.input, got, ok, test.want, test.ok)
-		}
+		t.Run(test.name, func(t *testing.T) {
+			got, ok := quotePostgresIdentifier(test.input)
+			if got != test.want || ok != test.ok {
+				t.Errorf("quotePostgresIdentifier(%q) = (%q, %v), want (%q, %v)", test.input, got, ok, test.want, test.ok)
+			}
+		})
 	}
 }
 
