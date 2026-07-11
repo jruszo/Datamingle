@@ -57,20 +57,20 @@ describe('feature registry', () => {
       'Home',
       'Dashboards',
       'Nodes',
+      'Cluster topology',
       'Metrics Explorer',
       'Instances',
       'Data Dictionary',
       'Accounts',
       'Parameters',
       'Diagnostics',
-      'Queries',
+      'Query history',
       'Archives',
-      'Workflows',
-      'Workflow Policies',
-      'Permissions',
+      'Workflow requests',
+      'Policies',
+      'Access requests',
       'Reports',
       'Audit',
-      'Profile',
     ])
   })
 
@@ -83,7 +83,7 @@ describe('feature registry', () => {
     expect(labels).toContain('Nodes')
     expect(labels).toContain('Instances')
     expect(labels).toContain('Archives')
-    expect(labels).not.toContain('Permissions')
+    expect(labels).not.toContain('Access requests')
   })
 
   it('shows the merged data dictionary entry to database managers', () => {

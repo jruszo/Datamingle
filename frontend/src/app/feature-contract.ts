@@ -21,6 +21,7 @@ export type FeatureNavigationItem = {
   order?: number
   access?: AccessRequirement
   matchPrefix?: string
+  exactMatch?: boolean
 }
 
 export type AppRouteMeta = {

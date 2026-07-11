@@ -1,6 +1,7 @@
-import { Database, ShieldCheck } from 'lucide-vue-next'
+import { ShieldCheck } from 'lucide-vue-next'
 
 import type { FeatureModule } from '@/app/feature-contract'
+import { workNavigationGroup } from '@/app/navigation-groups'
 import PermissionManagementPage from '@/features/permissions/pages/PermissionManagementPage.vue'
 
 const permissionsModule: FeatureModule = {
@@ -19,11 +20,11 @@ const permissionsModule: FeatureModule = {
   navigation: [
     {
       to: '/permission-management',
-      label: 'Permissions',
+      label: 'Access requests',
       section: 'primary',
       icon: ShieldCheck,
-      group: { id: 'database', label: 'Database', icon: Database, order: 25 },
-      order: 100,
+      group: workNavigationGroup,
+      order: 50,
       access: { anyPermissions: ['sql.menu_queryapplylist'] },
     },
   ],

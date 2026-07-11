@@ -672,8 +672,8 @@ export function fetchPermissionLevel(levelId: number, token: string) {
 }
 
 export function fetchAvailableTeamPermissions(token: string) {
-  return apiGet<unknown>('/v1/permission-levels/available-permissions/', { token }).then((payload) =>
-    extractData<PermissionCategoryRecord[]>(payload),
+  return apiGet<unknown>('/v1/permission-levels/available-permissions/', { token }).then(
+    (payload) => extractData<PermissionCategoryRecord[]>(payload),
   )
 }
 
@@ -694,8 +694,8 @@ export function updatePermissionLevel(
 }
 
 export function deletePermissionLevel(levelId: number, token: string) {
-  return apiDelete<unknown>(`/v1/permission-levels/${levelId}/`, { token }).then(
-    (payload) => extractDetail(payload, 'Permission level deleted successfully.'),
+  return apiDelete<unknown>(`/v1/permission-levels/${levelId}/`, { token }).then((payload) =>
+    extractDetail(payload, 'Permission level deleted successfully.'),
   )
 }
 
@@ -740,19 +740,15 @@ export function createTeam(payload: TeamUpsertPayload, token: string) {
   )
 }
 
-export function updateTeam(
-  teamId: number,
-  payload: TeamUpsertPayload,
-  token: string,
-) {
-  return apiPut<unknown>(`/v1/teams/${teamId}/`, payload, { token }).then(
-    (responsePayload) => extractData<TeamDetailRecord>(responsePayload),
+export function updateTeam(teamId: number, payload: TeamUpsertPayload, token: string) {
+  return apiPut<unknown>(`/v1/teams/${teamId}/`, payload, { token }).then((responsePayload) =>
+    extractData<TeamDetailRecord>(responsePayload),
   )
 }
 
 export function deleteTeam(teamId: number, token: string) {
-  return apiDelete<unknown>(`/v1/teams/${teamId}/`, { token }).then(
-    (payload) => extractDetail(payload, 'Team deleted successfully.'),
+  return apiDelete<unknown>(`/v1/teams/${teamId}/`, { token }).then((payload) =>
+    extractDetail(payload, 'Team deleted successfully.'),
   )
 }
 
@@ -1528,19 +1524,26 @@ export function fetchDataDictionaryInstances(token: string) {
   )
 }
 
-export function fetchDataDictionaryDatabases(instanceId: number, token: string) {
+export function fetchDataDictionaryDatabases(instanceId: number, token: string, search = '') {
   const params = new URLSearchParams({ instance_id: `${instanceId}` })
+  if (search.trim()) params.set('search', search.trim())
 
   return apiGet<unknown>(`/v1/instance/data-dictionary/databases/?${params.toString()}`, {
     token,
   }).then((payload) => extractData<DataDictionaryDatabaseList>(payload))
 }
 
-export function fetchDataDictionaryTables(instanceId: number, dbName: string, token: string) {
+export function fetchDataDictionaryTables(
+  instanceId: number,
+  dbName: string,
+  token: string,
+  search = '',
+) {
   const params = new URLSearchParams({
     instance_id: `${instanceId}`,
     db_name: dbName,
   })
+  if (search.trim()) params.set('search', search.trim())
 
   return apiGet<unknown>(`/v1/instance/data-dictionary/tables/?${params.toString()}`, {
     token,
@@ -1718,12 +1721,13 @@ export function fetchInstanceOperationDatabaseInstances(token: string) {
 
 export function fetchInstanceOperationDatabases(
   token: string,
-  options: { instance_id: number; saved?: boolean },
+  options: { instance_id: number; saved?: boolean; search?: string },
 ) {
   const params = new URLSearchParams({ instance_id: `${options.instance_id}` })
   if (options.saved !== undefined) {
     params.set('saved', `${options.saved}`)
   }
+  if (options.search?.trim()) params.set('search', options.search.trim())
 
   return apiGet<unknown>(`/v1/instance-operations/database/?${params.toString()}`, { token }).then(
     (payload) => extractData<InstanceOperationDatabaseList>(payload),
@@ -1756,12 +1760,13 @@ export function fetchInstanceOperationAccountInstances(token: string) {
 
 export function fetchInstanceOperationAccounts(
   token: string,
-  options: { instance_id: number; saved?: boolean },
+  options: { instance_id: number; saved?: boolean; search?: string },
 ) {
   const params = new URLSearchParams({ instance_id: `${options.instance_id}` })
   if (options.saved !== undefined) {
     params.set('saved', `${options.saved}`)
   }
+  if (options.search?.trim()) params.set('search', options.search.trim())
 
   return apiGet<unknown>(`/v1/instance-operations/account/?${params.toString()}`, { token }).then(
     (payload) => extractData<InstanceOperationAccountList>(payload),
@@ -2664,8 +2669,10 @@ export async function fetchWorkflowPolicies(token: string) {
   let next: string | null = null
 
   do {
-    const payload = await apiGet<unknown>(`/v1/workflow/policies/?page=${page}&size=${size}`, { token }).then(
-      (responsePayload) => extractData<PaginatedResponse<WorkflowPolicyRecord>>(responsePayload),
+    const payload = await apiGet<unknown>(`/v1/workflow/policies/?page=${page}&size=${size}`, {
+      token,
+    }).then((responsePayload) =>
+      extractData<PaginatedResponse<WorkflowPolicyRecord>>(responsePayload),
     )
     count = payload.count
     next = payload.next
@@ -2674,6 +2681,14 @@ export async function fetchWorkflowPolicies(token: string) {
   } while (results.length < count && next)
 
   return { count, next: null, previous: null, results }
+}
+
+export function searchWorkflowPolicies(token: string, search = '') {
+  const params = new URLSearchParams({ page: '1', size: '100' })
+  if (search.trim()) params.set('search', search.trim())
+  return apiGet<unknown>(`/v1/workflow/policies/?${params.toString()}`, { token }).then((payload) =>
+    extractData<PaginatedResponse<WorkflowPolicyRecord>>(payload),
+  )
 }
 
 export function fetchWorkflowPolicyMetadata(token: string) {
@@ -2688,9 +2703,13 @@ export function createWorkflowPolicy(payload: WorkflowPolicyPayload, token: stri
   )
 }
 
-export function updateWorkflowPolicy(policyId: number, payload: Partial<WorkflowPolicyPayload>, token: string) {
-  return apiPatch<unknown>(`/v1/workflow/policies/${policyId}/`, payload, { token }).then((responsePayload) =>
-    extractData<WorkflowPolicyRecord>(responsePayload),
+export function updateWorkflowPolicy(
+  policyId: number,
+  payload: Partial<WorkflowPolicyPayload>,
+  token: string,
+) {
+  return apiPatch<unknown>(`/v1/workflow/policies/${policyId}/`, payload, { token }).then(
+    (responsePayload) => extractData<WorkflowPolicyRecord>(responsePayload),
   )
 }
 

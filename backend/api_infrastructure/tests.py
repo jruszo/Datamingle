@@ -196,6 +196,17 @@ class InfrastructureNodeApiTests(APITestCase):
         visible_service.mysql_cluster = visible_cluster
         visible_service.save(update_fields=["mysql_cluster", "update_time"])
         visible_service.resource_group.set([visible_team])
+        hidden_visible_cluster_primary = create_instance(
+            "hidden-visible-cluster-primary",
+            node=create_node("hidden-shared-node", "10.0.0.11"),
+        )
+        hidden_visible_cluster_primary.mysql_cluster = visible_cluster
+        hidden_visible_cluster_primary.save(
+            update_fields=["mysql_cluster", "update_time"]
+        )
+        hidden_visible_cluster_primary.resource_group.set([hidden_team])
+        visible_cluster.primary_instance = hidden_visible_cluster_primary
+        visible_cluster.save(update_fields=["primary_instance", "update_time"])
         MysqlTopologyAlert.objects.create(
             cluster=visible_cluster,
             alert_type=MysqlTopologyAlert.TYPE_MISSING_MASTER,
@@ -225,12 +236,76 @@ class InfrastructureNodeApiTests(APITestCase):
         names = {row["name"] for row in response.json()["data"]["results"]}
         self.assertEqual(names, {"visible-cluster"})
         visible_payload = response.json()["data"]["results"][0]
+        self.assertEqual(
+            [member["name"] for member in visible_payload["members"]],
+            [visible_service.instance_name],
+        )
+        self.assertNotIn(
+            hidden_visible_cluster_primary.instance_name,
+            [member["name"] for member in visible_payload["members"]],
+        )
+        self.assertIsNone(visible_payload["primary_instance"])
+        self.assertEqual(visible_payload["primary_instance_name"], "")
         self.assertEqual(visible_payload["active_alert_count"], 1)
         self.assertEqual(
             visible_payload["active_alerts"][0]["alert_type"],
             MysqlTopologyAlert.TYPE_MISSING_MASTER,
         )
         self.assertEqual(hidden_response.status_code, status.HTTP_404_NOT_FOUND)
+
+        visible_search = self.client.get(
+            "/api/v1/infrastructure/mysql-topology/?search=visible-primary"
+        )
+        hidden_search = self.client.get(
+            "/api/v1/infrastructure/mysql-topology/?search=hidden"
+        )
+        self.assertEqual(visible_search.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [cluster["name"] for cluster in visible_search.json()["data"]["clusters"]],
+            [visible_cluster.name],
+        )
+        self.assertEqual(
+            [
+                member["name"]
+                for member in visible_search.json()["data"]["clusters"][0]["members"]
+            ],
+            [visible_service.instance_name],
+        )
+        self.assertEqual(hidden_search.status_code, status.HTTP_200_OK)
+        self.assertEqual(hidden_search.json()["data"]["clusters"], [])
+        self.assertEqual(hidden_search.json()["data"]["standalone_services"], [])
+        self.assertEqual(hidden_search.json()["data"]["summary"]["cluster_count"], 1)
+        self.assertEqual(hidden_search.json()["data"]["summary"]["service_count"], 1)
+
+    def test_mysql_topology_includes_standalone_services(self):
+        node = create_node("standalone-node", "10.0.0.30")
+        service = create_instance("standalone-mysql", node=node)
+        service.mysql_topology_role = Instance.MYSQL_ROLE_STANDALONE
+        service.mysql_topology_status = Instance.MYSQL_STATUS_STANDALONE
+        service.save(
+            update_fields=[
+                "mysql_topology_role",
+                "mysql_topology_status",
+                "update_time",
+            ]
+        )
+
+        response = self.client.get(
+            "/api/v1/infrastructure/mysql-topology/?search=standalone"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        payload = response.json()["data"]
+        self.assertEqual(payload["summary"]["service_count"], 1)
+        self.assertEqual(payload["clusters"], [])
+        self.assertEqual(len(payload["standalone_services"]), 1)
+        self.assertEqual(
+            payload["standalone_services"][0]["name"], service.instance_name
+        )
+        self.assertEqual(payload["standalone_services"][0]["node_name"], node.name)
+        self.assertEqual(
+            payload["standalone_services"][0]["topology_status"], "standalone"
+        )
 
     def test_create_service_under_node_syncs_local_agent_assignment(self):
         node = create_node()

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { Database, Edit3, Plus, RefreshCw, Save, X } from 'lucide-vue-next'
 
 import { Badge } from '@/components/ui/badge'
@@ -33,6 +33,8 @@ const error = ref('')
 const feedback = ref('')
 const activeFormMode = ref<FormMode | null>(null)
 const suppressDatabaseWatcher = ref(false)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+let databasesRequestSequence = 0
 
 const form = reactive({
   dbName: '',
@@ -80,29 +82,9 @@ function cellValue(value: unknown) {
 
 const canManageDatabases = computed(() => hasPermission('sql.menu_database'))
 
-const selectedInstance = computed(() =>
-  instances.value.find((instance) => instance.id === selectedInstanceId.value) ?? null,
+const selectedInstance = computed(
+  () => instances.value.find((instance) => instance.id === selectedInstanceId.value) ?? null,
 )
-
-const filteredDatabases = computed(() => {
-  const query = search.value.trim().toLowerCase()
-  if (!query) {
-    return databases.value
-  }
-
-  return databases.value.filter((databaseRecord) =>
-    [
-      databaseRecord.db_name,
-      databaseRecord.owner,
-      databaseRecord.owner_display,
-      databaseRecord.remark,
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase()
-      .includes(query),
-  )
-})
 
 function resetForm() {
   form.dbName = ''
@@ -154,17 +136,24 @@ async function loadDatabases() {
 
   loadingDatabases.value = true
   error.value = ''
+  const requestSequence = ++databasesRequestSequence
+  const instanceId = selectedInstanceId.value
 
   try {
     const response = await fetchInstanceOperationDatabases(requireToken(), {
-      instance_id: selectedInstanceId.value,
+      instance_id: instanceId,
       saved: savedOnly.value,
+      search: search.value,
     })
-    databases.value = response.results
+    if (requestSequence === databasesRequestSequence && selectedInstanceId.value === instanceId) {
+      databases.value = response.results
+    }
   } catch (errorValue) {
-    error.value = toUserFacingMessage(errorValue, 'Failed to load databases.')
+    if (requestSequence === databasesRequestSequence) {
+      error.value = toUserFacingMessage(errorValue, 'Failed to load databases.')
+    }
   } finally {
-    loadingDatabases.value = false
+    if (requestSequence === databasesRequestSequence) loadingDatabases.value = false
   }
 }
 
@@ -241,6 +230,16 @@ watch([selectedInstanceId, savedOnly], () => {
   }
   void loadDatabases()
 })
+
+watch(search, () => {
+  if (suppressDatabaseWatcher.value || !canManageDatabases.value) return
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => void loadDatabases(), 300)
+})
+
+onBeforeUnmount(() => {
+  if (searchTimer) clearTimeout(searchTimer)
+})
 </script>
 
 <template>
@@ -253,7 +252,13 @@ watch([selectedInstanceId, savedOnly], () => {
         </p>
       </div>
       <div class="flex flex-wrap gap-2">
-        <Button variant="outline" type="button" class="gap-2" :disabled="loadingInstances || loadingDatabases" @click="void refreshDatabases()">
+        <Button
+          variant="outline"
+          type="button"
+          class="gap-2"
+          :disabled="loadingInstances || loadingDatabases"
+          @click="void refreshDatabases()"
+        >
           <RefreshCw class="h-4 w-4" />
           Refresh
         </Button>
@@ -264,7 +269,10 @@ watch([selectedInstanceId, savedOnly], () => {
       </div>
     </div>
 
-    <p v-if="error" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+    <p
+      v-if="error"
+      class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+    >
       {{ error }}
     </p>
     <p
@@ -277,13 +285,19 @@ watch([selectedInstanceId, savedOnly], () => {
     <Card class="border-slate-200">
       <CardHeader>
         <CardTitle>Scope</CardTitle>
-        <CardDescription>Select an operational instance before editing database metadata.</CardDescription>
+        <CardDescription
+          >Select an operational instance before editing database metadata.</CardDescription
+        >
       </CardHeader>
       <CardContent>
         <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,0.8fr)]">
           <label class="grid gap-2">
             <span class="text-sm font-medium text-slate-700">Instance</span>
-            <select v-model.number="selectedInstanceId" :class="selectClass" :disabled="loadingInstances">
+            <select
+              v-model.number="selectedInstanceId"
+              :class="selectClass"
+              :disabled="loadingInstances"
+            >
               <option v-if="instances.length === 0" :value="null">No available instances</option>
               <option v-for="instance in instances" :key="instance.id" :value="instance.id">
                 {{ instance.label }}
@@ -295,7 +309,7 @@ watch([selectedInstanceId, savedOnly], () => {
             <Input v-model="search" placeholder="Database, owner, or remark" />
           </label>
           <label class="flex items-end gap-2 pb-2 text-sm text-slate-700">
-            <input v-model="savedOnly" type="checkbox" class="h-4 w-4 rounded border-slate-300">
+            <input v-model="savedOnly" type="checkbox" class="h-4 w-4 rounded border-slate-300" />
             Saved metadata only
           </label>
         </div>
@@ -310,14 +324,12 @@ watch([selectedInstanceId, savedOnly], () => {
             Databases
           </CardTitle>
           <CardDescription>
-            {{ filteredDatabases.length }} shown for {{ selectedInstance?.instance_name || 'no instance' }}
+            {{ databases.length }} shown for {{ selectedInstance?.instance_name || 'no instance' }}
           </CardDescription>
         </CardHeader>
         <CardContent class="p-0">
-          <div v-if="loadingDatabases" class="p-6 text-sm text-slate-500">
-            Loading databases...
-          </div>
-          <div v-else-if="filteredDatabases.length === 0" class="p-6 text-sm text-slate-500">
+          <div v-if="loadingDatabases" class="p-6 text-sm text-slate-500">Loading databases...</div>
+          <div v-else-if="databases.length === 0" class="p-6 text-sm text-slate-500">
             No databases match the current filters.
           </div>
           <div v-else class="overflow-x-auto">
@@ -333,19 +345,33 @@ watch([selectedInstanceId, savedOnly], () => {
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-100 bg-white">
-                <tr v-for="databaseRecord in filteredDatabases" :key="databaseRecord.db_name">
+                <tr v-for="databaseRecord in databases" :key="databaseRecord.db_name">
                   <td class="px-4 py-3">
                     <div class="flex flex-wrap items-center gap-2">
                       <span class="font-medium text-slate-900">{{ databaseRecord.db_name }}</span>
                       <Badge v-if="databaseRecord.saved" variant="outline">Saved</Badge>
                     </div>
                   </td>
-                  <td class="px-4 py-3 text-slate-600">{{ databaseRecord.owner_display || databaseRecord.owner || '-' }}</td>
-                  <td class="px-4 py-3 text-slate-600">{{ cellValue(databaseRecord.table_rows) }}</td>
-                  <td class="px-4 py-3 text-slate-600">{{ cellValue(databaseRecord.data_total) }}</td>
-                  <td class="max-w-[20rem] truncate px-4 py-3 text-slate-600">{{ databaseRecord.remark || '-' }}</td>
+                  <td class="px-4 py-3 text-slate-600">
+                    {{ databaseRecord.owner_display || databaseRecord.owner || '-' }}
+                  </td>
+                  <td class="px-4 py-3 text-slate-600">
+                    {{ cellValue(databaseRecord.table_rows) }}
+                  </td>
+                  <td class="px-4 py-3 text-slate-600">
+                    {{ cellValue(databaseRecord.data_total) }}
+                  </td>
+                  <td class="max-w-[20rem] truncate px-4 py-3 text-slate-600">
+                    {{ databaseRecord.remark || '-' }}
+                  </td>
                   <td class="px-4 py-3 text-right">
-                    <Button variant="outline" type="button" size="sm" class="gap-2" @click="openEditForm(databaseRecord)">
+                    <Button
+                      variant="outline"
+                      type="button"
+                      size="sm"
+                      class="gap-2"
+                      @click="openEditForm(databaseRecord)"
+                    >
                       <Edit3 class="h-4 w-4" />
                       Edit
                     </Button>
@@ -359,16 +385,26 @@ watch([selectedInstanceId, savedOnly], () => {
 
       <Card v-if="activeFormMode" class="border-slate-200">
         <CardHeader>
-          <CardTitle>{{ activeFormMode === 'create' ? 'Create database' : 'Edit metadata' }}</CardTitle>
+          <CardTitle>{{
+            activeFormMode === 'create' ? 'Create database' : 'Edit metadata'
+          }}</CardTitle>
           <CardDescription>
-            {{ activeFormMode === 'create' ? 'Create a database and save ownership metadata.' : 'Update ownership metadata for an existing database.' }}
+            {{
+              activeFormMode === 'create'
+                ? 'Create a database and save ownership metadata.'
+                : 'Update ownership metadata for an existing database.'
+            }}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form class="grid gap-4" @submit.prevent="void submitDatabaseForm()">
             <label class="grid gap-2">
               <span class="text-sm font-medium text-slate-700">Database name</span>
-              <Input v-model="form.dbName" :disabled="activeFormMode === 'edit'" placeholder="appdb" />
+              <Input
+                v-model="form.dbName"
+                :disabled="activeFormMode === 'edit'"
+                placeholder="appdb"
+              />
             </label>
             <label class="grid gap-2">
               <span class="text-sm font-medium text-slate-700">Owner username</span>

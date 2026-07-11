@@ -1,4 +1,4 @@
-import { ChartNoAxesCombined } from 'lucide-vue-next'
+import { ChartNoAxesCombined, ChartSpline } from 'lucide-vue-next'
 
 import type { FeatureModule } from '@/app/feature-contract'
 import ReportsPage from '@/features/reports/pages/ReportsPage.vue'
@@ -14,7 +14,8 @@ const reportsModule: FeatureModule = {
       label: 'Reports',
       section: 'primary',
       icon: ChartNoAxesCombined,
-      order: 70,
+      group: { id: 'insights', label: 'Insights', icon: ChartSpline, order: 40 },
+      order: 10,
     },
   ],
 }

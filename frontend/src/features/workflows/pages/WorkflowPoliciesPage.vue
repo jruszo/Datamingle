@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   ArrowDown,
   ArrowRight,
@@ -22,7 +22,7 @@ import { useAuthStore } from '@/stores/auth'
 import {
   createWorkflowPolicy,
   deleteWorkflowPolicy,
-  fetchWorkflowPolicies,
+  searchWorkflowPolicies,
   fetchWorkflowPolicyMetadata,
   updateWorkflowPolicy,
   type WorkflowPolicyRecord,
@@ -42,6 +42,8 @@ const deleting = ref(false)
 const error = ref('')
 const feedback = ref('')
 const search = ref('')
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+let loadRequestSequence = 0
 
 const form = reactive({
   name: '',
@@ -52,16 +54,6 @@ const form = reactive({
 
 const selectedPolicy = computed(() => {
   return policies.value.find((policy) => policy.id === selectedPolicyId.value) ?? null
-})
-
-const filteredPolicies = computed(() => {
-  const needle = search.value.trim().toLowerCase()
-  if (!needle) {
-    return policies.value
-  }
-  return policies.value.filter((policy) =>
-    `${policy.name} ${policy.description}`.toLowerCase().includes(needle),
-  )
 })
 
 const canEdit = computed(() => {
@@ -139,11 +131,13 @@ function moveStep(index: number, direction: -1 | 1) {
 async function loadData() {
   loading.value = true
   error.value = ''
+  const requestSequence = ++loadRequestSequence
   try {
     const [policyPayload, metadata] = await Promise.all([
-      fetchWorkflowPolicies(requireToken()),
+      searchWorkflowPolicies(requireToken(), search.value),
       fetchWorkflowPolicyMetadata(requireToken()),
     ])
+    if (requestSequence !== loadRequestSequence) return
     policies.value = policyPayload.results
     permissionGroups.value = metadata.permission_groups
     if (selectedPolicyId.value) {
@@ -167,9 +161,11 @@ async function loadData() {
       }
     }
   } catch (errorValue) {
-    error.value = toUserFacingMessage(errorValue, 'Failed to load workflow policies.')
+    if (requestSequence === loadRequestSequence) {
+      error.value = toUserFacingMessage(errorValue, 'Failed to load workflow policies.')
+    }
   } finally {
-    loading.value = false
+    if (requestSequence === loadRequestSequence) loading.value = false
   }
 }
 
@@ -232,6 +228,15 @@ async function deletePolicyAction() {
 
 onMounted(() => {
   void loadData()
+})
+
+watch(search, () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => void loadData(), 300)
+})
+
+onBeforeUnmount(() => {
+  if (searchTimer) clearTimeout(searchTimer)
 })
 </script>
 
@@ -297,7 +302,7 @@ onMounted(() => {
             Loading policies…
           </p>
           <button
-            v-for="policy in filteredPolicies"
+            v-for="policy in policies"
             :key="policy.id"
             type="button"
             class="group mb-1 flex w-full items-start gap-3 rounded-lg border px-3 py-3 text-left transition"
@@ -331,7 +336,7 @@ onMounted(() => {
               class="mt-0.5 h-4 w-4 shrink-0 text-slate-900"
             />
           </button>
-          <div v-if="!loading && filteredPolicies.length === 0" class="px-4 py-12 text-center">
+          <div v-if="!loading && policies.length === 0" class="px-4 py-12 text-center">
             <Search class="mx-auto h-5 w-5 text-slate-400" />
             <p class="mt-2 text-sm font-medium text-slate-700">No policies found</p>
             <p class="mt-1 text-xs text-slate-500">Try a different search.</p>

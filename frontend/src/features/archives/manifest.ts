@@ -1,6 +1,7 @@
-import { Archive, Database } from 'lucide-vue-next'
+import { Archive } from 'lucide-vue-next'
 
 import type { FeatureModule } from '@/app/feature-contract'
+import { workNavigationGroup } from '@/app/navigation-groups'
 import ArchiveCreatePage from '@/features/archives/pages/ArchiveCreatePage.vue'
 import ArchiveDetailPage from '@/features/archives/pages/ArchiveDetailPage.vue'
 import ArchivesPage from '@/features/archives/pages/ArchivesPage.vue'
@@ -33,8 +34,8 @@ const archivesModule: FeatureModule = {
       label: 'Archives',
       section: 'primary',
       icon: Archive,
-      group: { id: 'database', label: 'Database', icon: Database, order: 25 },
-      order: 80,
+      group: workNavigationGroup,
+      order: 20,
       access: { anyPermissions: ['sql.menu_archive'] },
     },
   ],

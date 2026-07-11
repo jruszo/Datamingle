@@ -1,27 +1,41 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import {
-  BarChart,
-  LineChart,
-  PieChart,
-} from 'echarts/charts'
-import {
-  GridComponent,
-  LegendComponent,
-  TooltipComponent,
-} from 'echarts/components'
+import { BarChart, LineChart, PieChart } from 'echarts/charts'
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { use } from 'echarts/core'
-import { Database, FileCheck2, Search, Users } from 'lucide-vue-next'
+import {
+  ArrowRight,
+  CalendarDays,
+  Database,
+  FileCheck2,
+  RefreshCw,
+  Search,
+  Users,
+} from 'lucide-vue-next'
 import VChart from 'vue-echarts'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { fetchCurrentUserContext, fetchDashboard, type CurrentUserContext, type DashboardPayload } from '../api'
+import ChartEmptyState from '@/features/dashboard/components/ChartEmptyState.vue'
+import {
+  fetchCurrentUserContext,
+  fetchDashboard,
+  type CurrentUserContext,
+  type DashboardPayload,
+} from '../api'
 import { useAuthStore } from '@/stores/auth'
 
-use([CanvasRenderer, BarChart, LineChart, PieChart, GridComponent, TooltipComponent, LegendComponent])
+use([
+  CanvasRenderer,
+  BarChart,
+  LineChart,
+  PieChart,
+  GridComponent,
+  TooltipComponent,
+  LegendComponent,
+])
 
 const authStore = useAuthStore()
 
@@ -64,7 +78,8 @@ async function loadDashboard() {
     currentUser.value = profile
     dashboard.value = payload
   } catch (requestError) {
-    error.value = requestError instanceof Error ? requestError.message : 'Failed to load dashboard data'
+    error.value =
+      requestError instanceof Error ? requestError.message : 'Failed to load dashboard data'
   } finally {
     loading.value = false
   }
@@ -104,33 +119,6 @@ const summaryCards = computed(() => {
       value: summary?.query_workflow_count ?? 0,
       icon: Search,
       gradient: 'linear-gradient(120deg, #5ed8cc 0%, #20b39f 100%)',
-    },
-  ]
-})
-
-const profileRows = computed(() => {
-  const profile = currentUser.value
-  if (!profile) {
-    return []
-  }
-
-  const groups = profile.groups ?? []
-  const teams = profile.teams ?? []
-
-  return [
-    { label: 'User', value: profile.username },
-    { label: 'Display', value: profile.display || '-' },
-    { label: 'Email', value: profile.email || '-' },
-    {
-      label: 'Groups',
-      value: groups.length > 0 ? groups.map((group) => group.name).join(', ') : '-',
-    },
-    {
-      label: 'Teams',
-      value:
-        teams.length > 0
-          ? teams.map((team) => team.team_name).join(', ')
-          : '-',
     },
   ]
 })
@@ -290,171 +278,353 @@ const topDatabases = computed(() => {
   }))
 })
 
+const dateRangeLabel = computed(() => {
+  const formatter = new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
+  const start = new Date(`${startDate.value}T00:00:00`)
+  const end = new Date(`${endDate.value}T00:00:00`)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 'Selected period'
+  return `${formatter.format(start)} – ${formatter.format(end)}`
+})
+
+const teamNames = computed(() => currentUser.value?.teams?.map((team) => team.team_name) ?? [])
+
+function hasValues(values: number[] | undefined): boolean {
+  return Boolean(values?.some((value) => value > 0))
+}
+
+const chartHasData = computed(() => ({
+  instanceType: hasValues(dashboard.value?.charts.instance_type_distribution?.values),
+  instanceEnv: Boolean(
+    dashboard.value?.charts.instance_env_distribution?.series?.some((entry) =>
+      hasValues(entry.values),
+    ),
+  ),
+  queryActivity:
+    hasValues(dashboard.value?.charts.query_activity?.scanned_rows) ||
+    hasValues(dashboard.value?.charts.query_activity?.query_count),
+  syntaxType: hasValues(dashboard.value?.charts.syntax_type?.values),
+  workflowTrend: hasValues(dashboard.value?.charts.workflow_by_date?.values),
+  workflowStatus: hasValues(dashboard.value?.charts.workflow_status?.values),
+  queryRowsByUser: hasValues(dashboard.value?.charts.query_rows_by_user?.values),
+}))
+
 onMounted(() => {
   loadDashboard()
 })
 </script>
 
 <template>
-  <section class="space-y-4">
-    <div class="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 md:flex-row md:items-end md:justify-between">
+  <section class="space-y-5 pb-6">
+    <div
+      class="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm md:flex-row md:items-center md:justify-between"
+    >
       <div>
-        <h2 class="text-lg font-semibold text-slate-900">Home</h2>
-        <p class="text-sm text-slate-500">
-          Real-time overview based on backend dashboard metrics and workload statistics.
+        <p class="text-xs font-semibold uppercase tracking-wider text-violet-600">
+          Workspace overview
+        </p>
+        <h2 class="mt-1 text-xl font-semibold text-slate-950">
+          Welcome back<span v-if="currentUser?.display">, {{ currentUser.display }}</span>
+        </h2>
+        <p class="mt-1 text-sm text-slate-500">
+          Monitor data sources, SQL activity, and workflow health in one place.
         </p>
       </div>
-      <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <Input v-model="startDate" type="date" class="w-full sm:w-44" />
-        <Input v-model="endDate" type="date" class="w-full sm:w-44" />
-        <Button :disabled="loading" @click="refreshDashboard">
-          {{ loading ? 'Loading...' : 'Refresh' }}
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
+        <label class="grid gap-1 text-xs font-medium text-slate-600">
+          From
+          <Input v-model="startDate" type="date" class="w-full sm:w-40" />
+        </label>
+        <label class="grid gap-1 text-xs font-medium text-slate-600">
+          To
+          <Input v-model="endDate" type="date" class="w-full sm:w-40" />
+        </label>
+        <Button class="gap-2" :disabled="loading" @click="refreshDashboard">
+          <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" />
+          {{ loading ? 'Updating' : 'Apply' }}
         </Button>
       </div>
     </div>
 
-    <p v-if="error" class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+    <p
+      v-if="error"
+      class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+    >
       {{ error }}
     </p>
 
-    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      <Card v-for="card in summaryCards" :key="card.label" class="relative overflow-hidden border-0 text-white shadow-sm">
-        <CardContent class="relative p-5">
-          <div class="absolute inset-0" :style="{ background: card.gradient }" />
-          <div class="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-white/20" />
-          <div class="absolute -bottom-8 right-12 h-24 w-24 rounded-full bg-white/15" />
-          <div class="relative flex items-start justify-between">
+    <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <Card
+        v-for="card in summaryCards"
+        :key="card.label"
+        class="overflow-hidden border-slate-200 shadow-sm"
+      >
+        <CardContent class="p-5">
+          <div class="flex items-start justify-between">
             <div>
-              <p class="text-xs uppercase tracking-wide text-white/80">{{ card.label }}</p>
-              <p class="mt-3 text-4xl font-semibold">{{ card.value }}</p>
+              <p class="text-sm font-medium text-slate-500">{{ card.label }}</p>
+              <p class="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
+                {{ card.value }}
+              </p>
             </div>
-            <component :is="card.icon" class="h-5 w-5 text-white/90" />
+            <span
+              class="grid h-10 w-10 place-items-center rounded-lg text-white"
+              :style="{ background: card.gradient }"
+            >
+              <component :is="card.icon" class="h-5 w-5" />
+            </span>
           </div>
-        </CardContent>
-      </Card>
-    </div>
-
-    <div class="grid gap-4 xl:grid-cols-12">
-      <Card class="xl:col-span-4">
-        <CardHeader class="pb-3">
-          <CardTitle>Profile</CardTitle>
-          <CardDescription>Current user context from <code>/api/v1/me/</code>.</CardDescription>
-        </CardHeader>
-        <CardContent class="space-y-3">
-          <div
-            v-for="row in profileRows"
-            :key="row.label"
-            class="flex items-center justify-between border-b border-slate-100 pb-2"
-          >
-            <span class="text-sm text-slate-500">{{ row.label }}</span>
-            <span class="text-sm font-medium text-slate-900">{{ row.value }}</span>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card class="xl:col-span-4">
-        <CardHeader class="pb-3">
-          <CardTitle>Instance Type Distribution</CardTitle>
-          <CardDescription>Equivalent to legacy dashboard pie chart.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <VChart class="h-72 w-full" :option="instanceTypeOption" autoresize />
-        </CardContent>
-      </Card>
-
-      <Card class="xl:col-span-4">
-        <CardHeader class="pb-3">
-          <CardTitle>Instance Environment Matrix</CardTitle>
-          <CardDescription>Stacked view of DB type by deployment type.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <VChart class="h-72 w-full" :option="instanceEnvOption" autoresize />
         </CardContent>
       </Card>
     </div>
 
     <div class="grid gap-4 xl:grid-cols-12">
       <Card class="xl:col-span-8">
-        <CardHeader class="pb-3">
-          <CardTitle>SQL Query Activity</CardTitle>
-          <CardDescription>Rows scanned and query count over selected dates.</CardDescription>
+        <CardHeader class="flex flex-row items-start justify-between space-y-0 pb-2">
+          <div>
+            <CardTitle>Query activity</CardTitle>
+            <CardDescription class="mt-1"
+              >Rows scanned and queries executed during this period.</CardDescription
+            >
+          </div>
+          <span class="hidden items-center gap-1.5 text-xs text-slate-500 sm:flex">
+            <CalendarDays class="h-3.5 w-3.5" />{{ dateRangeLabel }}
+          </span>
         </CardHeader>
-        <CardContent>
-          <VChart class="h-80 w-full" :option="queryActivityOption" autoresize />
+        <CardContent class="relative min-h-80">
+          <VChart
+            v-if="chartHasData.queryActivity"
+            class="h-80 w-full"
+            :option="queryActivityOption"
+            autoresize
+          />
+          <ChartEmptyState
+            v-else
+            :icon="Search"
+            title="No query activity"
+            subtitle="Try a wider date range or run a query."
+            height="20rem"
+          />
         </CardContent>
       </Card>
 
       <Card class="xl:col-span-4">
-        <CardHeader class="pb-3">
-          <CardTitle>SQL Syntax Types</CardTitle>
-          <CardDescription>DDL/DML/Other breakdown.</CardDescription>
+        <CardHeader class="pb-2">
+          <CardTitle>Database types</CardTitle>
+          <CardDescription>Connected data sources by engine.</CardDescription>
+        </CardHeader>
+        <CardContent class="relative min-h-80">
+          <VChart
+            v-if="chartHasData.instanceType"
+            class="h-80 w-full"
+            :option="instanceTypeOption"
+            autoresize
+          />
+          <ChartEmptyState
+            v-else
+            :icon="Database"
+            title="No data sources yet"
+            subtitle="Connected databases will appear here."
+            height="20rem"
+          />
+        </CardContent>
+      </Card>
+    </div>
+
+    <div class="grid gap-4 xl:grid-cols-12">
+      <Card class="xl:col-span-7">
+        <CardHeader class="pb-2">
+          <CardTitle>Workflow activity</CardTitle>
+          <CardDescription>SQL workflow submissions by day.</CardDescription>
         </CardHeader>
         <CardContent>
-          <VChart class="h-80 w-full" :option="syntaxTypeOption" autoresize />
+          <VChart
+            v-if="chartHasData.workflowTrend"
+            class="h-72 w-full"
+            :option="workflowTrendOption"
+            autoresize
+          />
+          <ChartEmptyState
+            v-else
+            :icon="FileCheck2"
+            title="No workflow submissions"
+            subtitle="Activity for this period will appear here."
+          />
+        </CardContent>
+      </Card>
+
+      <Card class="xl:col-span-5">
+        <CardHeader class="pb-2">
+          <CardTitle>Workflow status</CardTitle>
+          <CardDescription>Current workflow workload by status.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <VChart
+            v-if="chartHasData.workflowStatus"
+            class="h-72 w-full"
+            :option="workflowStatusOption"
+            autoresize
+          />
+          <ChartEmptyState
+            v-else
+            :icon="FileCheck2"
+            title="No workflow status data"
+            subtitle="Workflow states will appear here."
+          />
+        </CardContent>
+      </Card>
+    </div>
+
+    <div class="grid gap-4 xl:grid-cols-12">
+      <Card class="xl:col-span-5">
+        <CardHeader class="pb-2">
+          <CardTitle>Deployment environments</CardTitle>
+          <CardDescription>Database engines across each environment.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <VChart
+            v-if="chartHasData.instanceEnv"
+            class="h-72 w-full"
+            :option="instanceEnvOption"
+            autoresize
+          />
+          <div
+            v-else
+            class="grid h-72 place-items-center rounded-lg border border-dashed border-slate-200 bg-slate-50/60 text-center"
+          >
+            <div>
+              <Database class="mx-auto h-7 w-7 text-slate-300" />
+              <p class="mt-2 text-sm font-medium text-slate-700">No environment data</p>
+              <p class="mt-1 text-xs text-slate-500">Classify data sources to see the breakdown.</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card class="xl:col-span-3">
+        <CardHeader class="pb-2">
+          <CardTitle>SQL operations</CardTitle>
+          <CardDescription>Queries grouped by statement type.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <VChart
+            v-if="chartHasData.syntaxType"
+            class="h-72 w-full"
+            :option="syntaxTypeOption"
+            autoresize
+          />
+          <div
+            v-else
+            class="grid h-72 place-items-center rounded-lg border border-dashed border-slate-200 bg-slate-50/60 text-center"
+          >
+            <div>
+              <Search class="mx-auto h-7 w-7 text-slate-300" />
+              <p class="mt-2 text-sm font-medium text-slate-700">No SQL operations</p>
+              <p class="mt-1 text-xs text-slate-500">Statement types will appear here.</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card class="xl:col-span-4">
+        <CardHeader class="pb-2">
+          <CardTitle>Your workspace</CardTitle>
+          <CardDescription>Account and team access at a glance.</CardDescription>
+        </CardHeader>
+        <CardContent class="space-y-4">
+          <div class="rounded-lg bg-slate-50 p-3">
+            <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Signed in as</p>
+            <p class="mt-1 truncate text-sm font-medium text-slate-900">
+              {{ currentUser?.email || currentUser?.username || '—' }}
+            </p>
+          </div>
+          <div>
+            <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Teams</p>
+            <div v-if="teamNames.length" class="mt-2 flex flex-wrap gap-2">
+              <span
+                v-for="team in teamNames"
+                :key="team"
+                class="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-700"
+                >{{ team }}</span
+              >
+            </div>
+            <p v-else class="mt-2 text-sm text-slate-500">No teams assigned.</p>
+          </div>
+          <RouterLink
+            to="/profile"
+            class="inline-flex items-center gap-1 text-sm font-medium text-violet-700 hover:text-violet-900"
+            >View profile <ArrowRight class="h-4 w-4"
+          /></RouterLink>
         </CardContent>
       </Card>
     </div>
 
     <div class="grid gap-4 xl:grid-cols-12">
       <Card class="xl:col-span-6">
-        <CardHeader class="pb-3">
-          <CardTitle>SQL Release Trend</CardTitle>
-          <CardDescription>Daily workflow submission count.</CardDescription>
-        </CardHeader>
+        <CardHeader class="pb-2"
+          ><CardTitle>Most active users</CardTitle
+          ><CardDescription
+            >Users scanning the most rows during this period.</CardDescription
+          ></CardHeader
+        >
         <CardContent>
-          <VChart class="h-72 w-full" :option="workflowTrendOption" autoresize />
+          <VChart
+            v-if="chartHasData.queryRowsByUser"
+            class="h-72 w-full"
+            :option="queryRowsByUserOption"
+            autoresize
+          />
+          <div
+            v-else
+            class="grid h-72 place-items-center rounded-lg border border-dashed border-slate-200 bg-slate-50/60 text-center"
+          >
+            <div>
+              <Users class="mx-auto h-7 w-7 text-slate-300" />
+              <p class="mt-2 text-sm font-medium text-slate-700">No user activity</p>
+              <p class="mt-1 text-xs text-slate-500">Query usage will appear here.</p>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
       <Card class="xl:col-span-6">
-        <CardHeader class="pb-3">
-          <CardTitle>Workflow Status Distribution</CardTitle>
-          <CardDescription>Current state spread across SQL workflows.</CardDescription>
-        </CardHeader>
+        <CardHeader class="pb-2"
+          ><CardTitle>Most active databases</CardTitle
+          ><CardDescription
+            >Databases returning the most rows during this period.</CardDescription
+          ></CardHeader
+        >
         <CardContent>
-          <VChart class="h-72 w-full" :option="workflowStatusOption" autoresize />
+          <div class="overflow-hidden rounded-md border border-slate-200">
+            <table class="w-full text-left text-sm">
+              <thead class="bg-slate-50 text-slate-600">
+                <tr>
+                  <th class="px-3 py-2 font-medium">Database</th>
+                  <th class="px-3 py-2 font-medium">Rows</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="database in topDatabases"
+                  :key="database.name"
+                  class="border-t border-slate-200"
+                >
+                  <td class="px-3 py-2 text-slate-700">{{ database.name }}</td>
+                  <td class="px-3 py-2 font-semibold text-slate-900">{{ database.rows }}</td>
+                </tr>
+                <tr v-if="topDatabases.length === 0" class="border-t border-slate-200">
+                  <td colspan="2" class="px-3 py-10 text-center text-slate-500">
+                    No database activity in this period.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </CardContent>
       </Card>
     </div>
-
-    <div class="grid gap-4 xl:grid-cols-12">
-      <Card class="xl:col-span-6">
-        <CardHeader class="pb-3">
-          <CardTitle>Rows Retrieved by User</CardTitle>
-          <CardDescription>Top users by scanned rows.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <VChart class="h-72 w-full" :option="queryRowsByUserOption" autoresize />
-        </CardContent>
-      </Card>
-    </div>
-
-    <Card>
-      <CardHeader class="pb-3">
-        <CardTitle>Top Databases by Rows Retrieved</CardTitle>
-        <CardDescription>Equivalent to high-frequency database block on legacy dashboard.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div class="overflow-hidden rounded-md border border-slate-200">
-          <table class="w-full text-left text-sm">
-            <thead class="bg-slate-50 text-slate-600">
-              <tr>
-                <th class="px-3 py-2 font-medium">Database</th>
-                <th class="px-3 py-2 font-medium">Rows</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="database in topDatabases" :key="database.name" class="border-t border-slate-200">
-                <td class="px-3 py-2 text-slate-700">{{ database.name }}</td>
-                <td class="px-3 py-2 font-semibold text-slate-900">{{ database.rows }}</td>
-              </tr>
-              <tr v-if="topDatabases.length === 0" class="border-t border-slate-200">
-                <td colspan="2" class="px-3 py-3 text-center text-slate-500">No data in selected date range.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </CardContent>
-    </Card>
   </section>
 </template>

@@ -1,6 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { BookOpen, Database, Download, Edit3, Plus, RefreshCw, Save, Table2, X } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import {
+  BookOpen,
+  Database,
+  Download,
+  Edit3,
+  Plus,
+  RefreshCw,
+  Save,
+  Table2,
+  X,
+} from 'lucide-vue-next'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -49,6 +59,10 @@ const selectedDbName = ref('')
 const selectedTableName = ref('')
 const databaseSearch = ref('')
 const tableSearch = ref('')
+let databaseSearchTimer: ReturnType<typeof setTimeout> | null = null
+let tableSearchTimer: ReturnType<typeof setTimeout> | null = null
+let databaseRequestSequence = 0
+let tableRequestSequence = 0
 
 const loadingInstances = ref(false)
 const loadingDatabases = ref(false)
@@ -106,57 +120,22 @@ const canUseMergedWorkspace = computed(
   () => canViewDataDictionary.value || canManageDatabases.value,
 )
 
-const selectedInstance = computed(() =>
-  instances.value.find((instance) => instance.id === selectedInstanceId.value) ?? null,
+const selectedInstance = computed(
+  () => instances.value.find((instance) => instance.id === selectedInstanceId.value) ?? null,
 )
 
-const selectedDatabase = computed(() =>
-  databaseRows.value.find((databaseRecord) => databaseRecord.db_name === selectedDbName.value)
-    ?? null,
+const selectedDatabase = computed(
+  () =>
+    databaseRows.value.find((databaseRecord) => databaseRecord.db_name === selectedDbName.value) ??
+    null,
 )
 
 const canBrowseSelectedDatabase = computed(
   () =>
-    canViewDataDictionary.value
-    && selectedInstance.value?.canViewDictionary === true
-    && selectedDatabase.value?.dictionaryVisible === true,
+    canViewDataDictionary.value &&
+    selectedInstance.value?.canViewDictionary === true &&
+    selectedDatabase.value?.dictionaryVisible === true,
 )
-
-const filteredDatabaseRows = computed(() => {
-  const query = databaseSearch.value.trim().toLowerCase()
-  if (!query) {
-    return databaseRows.value
-  }
-
-  return databaseRows.value.filter((databaseRecord) =>
-    [
-      databaseRecord.db_name,
-      databaseRecord.owner,
-      databaseRecord.owner_display,
-      databaseRecord.remark,
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase()
-      .includes(query),
-  )
-})
-
-const filteredTableGroups = computed(() => {
-  const query = tableSearch.value.trim().toLowerCase()
-  if (!query) {
-    return tableGroups.value
-  }
-
-  return tableGroups.value
-    .map((group) => ({
-      ...group,
-      tables: group.tables.filter(([tableName, tableComment]) =>
-        `${tableName} ${tableComment ?? ''}`.toLowerCase().includes(query),
-      ),
-    }))
-    .filter((group) => group.tables.length > 0)
-})
 
 function normalizeRows(resultSet: DataDictionaryResultSet | null | undefined) {
   const rows = resultSet?.rows
@@ -271,9 +250,7 @@ async function loadInstances() {
           mergeInstance(instancesById, instance, 'canViewDictionary'),
         )
       } catch (errorValue) {
-        failures.push(
-          toUserFacingMessage(errorValue, 'Failed to load data dictionary instances.'),
-        )
+        failures.push(toUserFacingMessage(errorValue, 'Failed to load data dictionary instances.'))
       }
     }
 
@@ -295,8 +272,8 @@ async function loadInstances() {
     )
 
     if (
-      !selectedInstanceId.value
-      || !instances.value.some((instance) => instance.id === selectedInstanceId.value)
+      !selectedInstanceId.value ||
+      !instances.value.some((instance) => instance.id === selectedInstanceId.value)
     ) {
       selectedInstanceId.value = instances.value[0]?.id ?? null
     }
@@ -324,12 +301,15 @@ async function loadDatabases() {
 
   const rowsByName = new Map<string, DatabaseRow>()
   const failures: string[] = []
+  const requestSequence = ++databaseRequestSequence
+  const instanceId = instance.id
 
   try {
     if (canManageDatabases.value && instance.canManageDatabases) {
       try {
         const response = await fetchInstanceOperationDatabases(requireToken(), {
           instance_id: instance.id,
+          search: databaseSearch.value,
         })
         response.results.forEach((databaseRecord) => {
           rowsByName.set(databaseRecord.db_name, {
@@ -344,7 +324,11 @@ async function loadDatabases() {
 
     if (canViewDataDictionary.value && instance.canViewDictionary) {
       try {
-        const response = await fetchDataDictionaryDatabases(instance.id, requireToken())
+        const response = await fetchDataDictionaryDatabases(
+          instance.id,
+          requireToken(),
+          databaseSearch.value,
+        )
         response.result.forEach((databaseName) => {
           const existingDatabase = rowsByName.get(databaseName)
           rowsByName.set(databaseName, {
@@ -360,6 +344,9 @@ async function loadDatabases() {
       }
     }
 
+    if (requestSequence !== databaseRequestSequence || selectedInstance.value?.id !== instanceId) {
+      return
+    }
     databaseRows.value = Array.from(rowsByName.values())
     selectedDbName.value = databaseRows.value[0]?.db_name ?? ''
 
@@ -371,7 +358,7 @@ async function loadDatabases() {
       await loadTables()
     }
   } finally {
-    loadingDatabases.value = false
+    if (requestSequence === databaseRequestSequence) loadingDatabases.value = false
   }
 }
 
@@ -387,18 +374,30 @@ async function loadTables() {
   error.value = ''
   selectedTableName.value = ''
   tableDetail.value = null
+  const requestSequence = ++tableRequestSequence
+  const instanceId = selectedInstance.value.id
+  const databaseName = selectedDbName.value
 
   try {
     const response = await fetchDataDictionaryTables(
-      selectedInstance.value.id,
-      selectedDbName.value,
+      instanceId,
+      databaseName,
       requireToken(),
+      tableSearch.value,
     )
-    tableGroups.value = response.result
+    if (
+      requestSequence === tableRequestSequence &&
+      selectedInstance.value?.id === instanceId &&
+      selectedDbName.value === databaseName
+    ) {
+      tableGroups.value = response.result
+    }
   } catch (errorValue) {
-    error.value = toUserFacingMessage(errorValue, 'Failed to load tables.')
+    if (requestSequence === tableRequestSequence) {
+      error.value = toUserFacingMessage(errorValue, 'Failed to load tables.')
+    }
   } finally {
-    loadingTables.value = false
+    if (requestSequence === tableRequestSequence) loadingTables.value = false
   }
 }
 
@@ -446,7 +445,11 @@ function selectDatabase(databaseName: string) {
 }
 
 async function exportSelectedDictionary() {
-  if (!selectedInstance.value || !canExportDataDictionary.value || !canBrowseSelectedDatabase.value) {
+  if (
+    !selectedInstance.value ||
+    !canExportDataDictionary.value ||
+    !canBrowseSelectedDatabase.value
+  ) {
     return
   }
 
@@ -550,6 +553,23 @@ watch(selectedDbName, () => {
   }
   void loadTables()
 })
+
+watch(databaseSearch, () => {
+  if (!canUseMergedWorkspace.value || refreshing.value) return
+  if (databaseSearchTimer) clearTimeout(databaseSearchTimer)
+  databaseSearchTimer = setTimeout(() => void loadDatabases(), 300)
+})
+
+watch(tableSearch, () => {
+  if (!canUseMergedWorkspace.value || loadingDatabases.value || refreshing.value) return
+  if (tableSearchTimer) clearTimeout(tableSearchTimer)
+  tableSearchTimer = setTimeout(() => void loadTables(), 300)
+})
+
+onBeforeUnmount(() => {
+  if (databaseSearchTimer) clearTimeout(databaseSearchTimer)
+  if (tableSearchTimer) clearTimeout(tableSearchTimer)
+})
 </script>
 
 <template>
@@ -562,7 +582,13 @@ watch(selectedDbName, () => {
         </p>
       </div>
       <div class="flex flex-wrap gap-2">
-        <Button variant="outline" type="button" class="gap-2" :disabled="refreshing || loadingInstances || loadingDatabases" @click="void refreshDataDictionary()">
+        <Button
+          variant="outline"
+          type="button"
+          class="gap-2"
+          :disabled="refreshing || loadingInstances || loadingDatabases"
+          @click="void refreshDataDictionary()"
+        >
           <RefreshCw class="h-4 w-4" />
           Refresh
         </Button>
@@ -589,7 +615,10 @@ watch(selectedDbName, () => {
       </div>
     </div>
 
-    <p v-if="error" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+    <p
+      v-if="error"
+      class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+    >
       {{ error }}
     </p>
     <p
@@ -602,13 +631,19 @@ watch(selectedDbName, () => {
     <Card class="border-slate-200">
       <CardHeader>
         <CardTitle>Scope</CardTitle>
-        <CardDescription>Select an instance before opening database and table metadata.</CardDescription>
+        <CardDescription
+          >Select an instance before opening database and table metadata.</CardDescription
+        >
       </CardHeader>
       <CardContent>
         <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.6fr)_minmax(0,1fr)]">
           <label class="grid gap-2">
             <span class="text-sm font-medium text-slate-700">Instance</span>
-            <select v-model.number="selectedInstanceId" :class="selectClass" :disabled="loadingInstances">
+            <select
+              v-model.number="selectedInstanceId"
+              :class="selectClass"
+              :disabled="loadingInstances"
+            >
               <option v-if="instances.length === 0" :value="null">No available instances</option>
               <option v-for="instance in instances" :key="instance.id" :value="instance.id">
                 {{ instance.label }}
@@ -617,7 +652,9 @@ watch(selectedDbName, () => {
           </label>
           <div class="grid gap-2">
             <span class="text-sm font-medium text-slate-700">Engine</span>
-            <div class="flex h-10 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700">
+            <div
+              class="flex h-10 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700"
+            >
               {{ selectedInstance?.db_type || '-' }}
             </div>
           </div>
@@ -629,7 +666,9 @@ watch(selectedDbName, () => {
       </CardContent>
     </Card>
 
-    <div class="grid gap-6 xl:grid-cols-[minmax(17rem,0.3fr)_minmax(17rem,0.28fr)_minmax(0,0.42fr)]">
+    <div
+      class="grid gap-6 xl:grid-cols-[minmax(17rem,0.3fr)_minmax(17rem,0.28fr)_minmax(0,0.42fr)]"
+    >
       <div class="grid content-start gap-6">
         <Card class="border-slate-200">
           <CardHeader>
@@ -638,22 +677,33 @@ watch(selectedDbName, () => {
               Databases
             </CardTitle>
             <CardDescription>
-              {{ filteredDatabaseRows.length }} shown for {{ selectedInstance?.instance_name || 'no instance' }}
+              {{ databaseRows.length }} shown for
+              {{ selectedInstance?.instance_name || 'no instance' }}
             </CardDescription>
           </CardHeader>
           <CardContent class="space-y-3">
-            <div v-if="loadingDatabases" class="rounded-md border border-slate-200 p-4 text-sm text-slate-500">
+            <div
+              v-if="loadingDatabases"
+              class="rounded-md border border-slate-200 p-4 text-sm text-slate-500"
+            >
               Loading databases...
             </div>
-            <div v-else-if="filteredDatabaseRows.length === 0" class="rounded-md border border-slate-200 p-4 text-sm text-slate-500">
+            <div
+              v-else-if="databaseRows.length === 0"
+              class="rounded-md border border-slate-200 p-4 text-sm text-slate-500"
+            >
               No databases match the current filters.
             </div>
             <div v-else class="max-h-[44rem] space-y-2 overflow-y-auto pr-1">
               <div
-                v-for="databaseRecord in filteredDatabaseRows"
+                v-for="databaseRecord in databaseRows"
                 :key="databaseRecord.db_name"
                 class="grid grid-cols-[minmax(0,1fr)_auto] gap-2 rounded-md border p-2"
-                :class="selectedDbName === databaseRecord.db_name ? 'border-slate-400 bg-slate-50' : 'border-slate-200 bg-white'"
+                :class="
+                  selectedDbName === databaseRecord.db_name
+                    ? 'border-slate-400 bg-slate-50'
+                    : 'border-slate-200 bg-white'
+                "
               >
                 <button
                   type="button"
@@ -661,16 +711,23 @@ watch(selectedDbName, () => {
                   @click="selectDatabase(databaseRecord.db_name)"
                 >
                   <span class="flex min-w-0 flex-wrap items-center gap-2">
-                    <span class="truncate text-sm font-medium text-slate-900">{{ databaseRecord.db_name }}</span>
+                    <span class="truncate text-sm font-medium text-slate-900">{{
+                      databaseRecord.db_name
+                    }}</span>
                     <Badge v-if="databaseRecord.saved" variant="outline">Saved</Badge>
-                    <Badge v-if="!databaseRecord.dictionaryVisible && canViewDataDictionary" variant="secondary">No dictionary</Badge>
+                    <Badge
+                      v-if="!databaseRecord.dictionaryVisible && canViewDataDictionary"
+                      variant="secondary"
+                      >No dictionary</Badge
+                    >
                   </span>
                   <span class="mt-1 block truncate text-xs text-slate-500">
                     {{ databaseRecord.owner_display || databaseRecord.owner || '-' }}
                     <span v-if="databaseRecord.remark"> - {{ databaseRecord.remark }}</span>
                   </span>
                   <span class="mt-1 block text-xs text-slate-500">
-                    Rows {{ cellValue(databaseRecord.table_rows) }} · Data {{ cellValue(databaseRecord.data_total) }}
+                    Rows {{ cellValue(databaseRecord.table_rows) }} · Data
+                    {{ cellValue(databaseRecord.data_total) }}
                   </span>
                 </button>
                 <Button
@@ -688,7 +745,6 @@ watch(selectedDbName, () => {
             </div>
           </CardContent>
         </Card>
-
       </div>
 
       <Card class="border-slate-200">
@@ -697,25 +753,46 @@ watch(selectedDbName, () => {
             <BookOpen class="h-5 w-5" />
             Tables
           </CardTitle>
-          <CardDescription>{{ tableGroups.reduce((total, group) => total + group.tables.length, 0) }} tables</CardDescription>
+          <CardDescription
+            >{{
+              tableGroups.reduce((total, group) => total + group.tables.length, 0)
+            }}
+            tables</CardDescription
+          >
         </CardHeader>
         <CardContent class="space-y-4">
-          <Input v-model="tableSearch" placeholder="Search tables or comments" :disabled="!canBrowseSelectedDatabase" />
+          <Input
+            v-model="tableSearch"
+            placeholder="Search tables or comments"
+            :disabled="!canBrowseSelectedDatabase"
+          />
 
-          <div v-if="!canViewDataDictionary" class="rounded-md border border-slate-200 p-4 text-sm text-slate-500">
+          <div
+            v-if="!canViewDataDictionary"
+            class="rounded-md border border-slate-200 p-4 text-sm text-slate-500"
+          >
             Data dictionary browsing requires Data Dictionary permission.
           </div>
-          <div v-else-if="selectedDbName && !canBrowseSelectedDatabase" class="rounded-md border border-slate-200 p-4 text-sm text-slate-500">
+          <div
+            v-else-if="selectedDbName && !canBrowseSelectedDatabase"
+            class="rounded-md border border-slate-200 p-4 text-sm text-slate-500"
+          >
             No table dictionary metadata is available for this database.
           </div>
-          <div v-else-if="loadingTables" class="rounded-md border border-slate-200 p-4 text-sm text-slate-500">
+          <div
+            v-else-if="loadingTables"
+            class="rounded-md border border-slate-200 p-4 text-sm text-slate-500"
+          >
             Loading tables...
           </div>
-          <div v-else-if="filteredTableGroups.length === 0" class="rounded-md border border-slate-200 p-4 text-sm text-slate-500">
+          <div
+            v-else-if="tableGroups.length === 0"
+            class="rounded-md border border-slate-200 p-4 text-sm text-slate-500"
+          >
             No tables found.
           </div>
           <div v-else class="max-h-[48rem] space-y-4 overflow-y-auto pr-1">
-            <div v-for="group in filteredTableGroups" :key="group.group" class="space-y-2">
+            <div v-for="group in tableGroups" :key="group.group" class="space-y-2">
               <Badge variant="secondary">{{ group.group }}</Badge>
               <div class="grid gap-2">
                 <button
@@ -723,11 +800,17 @@ watch(selectedDbName, () => {
                   :key="tableName"
                   type="button"
                   class="rounded-md border px-3 py-2 text-left transition hover:border-slate-300 hover:bg-slate-50"
-                  :class="selectedTableName === tableName ? 'border-slate-400 bg-slate-50' : 'border-slate-200 bg-white'"
+                  :class="
+                    selectedTableName === tableName
+                      ? 'border-slate-400 bg-slate-50'
+                      : 'border-slate-200 bg-white'
+                  "
                   @click="void loadTableDetail(tableName)"
                 >
                   <span class="block text-sm font-medium text-slate-900">{{ tableName }}</span>
-                  <span class="block truncate text-xs text-slate-500">{{ tableComment || '-' }}</span>
+                  <span class="block truncate text-xs text-slate-500">{{
+                    tableComment || '-'
+                  }}</span>
                 </button>
               </div>
             </div>
@@ -744,13 +827,22 @@ watch(selectedDbName, () => {
           <CardDescription>{{ selectedDbName || 'No database selected' }}</CardDescription>
         </CardHeader>
         <CardContent>
-          <div v-if="loadingDetail" class="rounded-md border border-slate-200 p-4 text-sm text-slate-500">
+          <div
+            v-if="loadingDetail"
+            class="rounded-md border border-slate-200 p-4 text-sm text-slate-500"
+          >
             Loading table detail...
           </div>
-          <div v-else-if="!canBrowseSelectedDatabase" class="rounded-md border border-slate-200 p-4 text-sm text-slate-500">
+          <div
+            v-else-if="!canBrowseSelectedDatabase"
+            class="rounded-md border border-slate-200 p-4 text-sm text-slate-500"
+          >
             Select a dictionary-visible database to view table metadata.
           </div>
-          <div v-else-if="!tableDetail" class="rounded-md border border-slate-200 p-4 text-sm text-slate-500">
+          <div
+            v-else-if="!tableDetail"
+            class="rounded-md border border-slate-200 p-4 text-sm text-slate-500"
+          >
             Select a table to view metadata.
           </div>
           <div v-else class="space-y-6">
@@ -788,8 +880,15 @@ watch(selectedDbName, () => {
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-slate-100 bg-white">
-                    <tr v-for="(row, rowIndex) in normalizeRows(tableDetail.desc)" :key="`desc-${rowIndex}`">
-                      <td v-for="(column, columnIndex) in tableDetail.desc.column_list ?? []" :key="`desc-cell-${rowIndex}-${columnIndex}`" class="px-3 py-2 text-slate-900">
+                    <tr
+                      v-for="(row, rowIndex) in normalizeRows(tableDetail.desc)"
+                      :key="`desc-${rowIndex}`"
+                    >
+                      <td
+                        v-for="(column, columnIndex) in tableDetail.desc.column_list ?? []"
+                        :key="`desc-cell-${rowIndex}-${columnIndex}`"
+                        class="px-3 py-2 text-slate-900"
+                      >
                         {{ cellValue(row[columnIndex]) }}
                       </td>
                     </tr>
@@ -814,8 +913,15 @@ watch(selectedDbName, () => {
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-slate-100 bg-white">
-                    <tr v-for="(row, rowIndex) in normalizeRows(tableDetail.index)" :key="`index-${rowIndex}`">
-                      <td v-for="(column, columnIndex) in tableDetail.index.column_list ?? []" :key="`index-cell-${rowIndex}-${columnIndex}`" class="px-3 py-2 text-slate-900">
+                    <tr
+                      v-for="(row, rowIndex) in normalizeRows(tableDetail.index)"
+                      :key="`index-${rowIndex}`"
+                    >
+                      <td
+                        v-for="(column, columnIndex) in tableDetail.index.column_list ?? []"
+                        :key="`index-cell-${rowIndex}-${columnIndex}`"
+                        class="px-3 py-2 text-slate-900"
+                      >
                         {{ cellValue(row[columnIndex]) }}
                       </td>
                     </tr>
@@ -826,7 +932,10 @@ watch(selectedDbName, () => {
 
             <div v-if="createSqlText(tableDetail)" class="space-y-3">
               <h3 class="text-base font-semibold text-slate-900">Create SQL</h3>
-              <pre class="overflow-x-auto rounded-md border border-slate-200 bg-slate-950 p-4 text-xs text-slate-100">{{ createSqlText(tableDetail) }}</pre>
+              <pre
+                class="overflow-x-auto rounded-md border border-slate-200 bg-slate-950 p-4 text-xs text-slate-100"
+                >{{ createSqlText(tableDetail) }}</pre
+              >
             </div>
           </div>
         </CardContent>
@@ -851,7 +960,11 @@ watch(selectedDbName, () => {
                 {{ activeFormMode === 'create' ? 'Create database' : 'Edit metadata' }}
               </h3>
               <p class="text-sm text-slate-600">
-                {{ activeFormMode === 'create' ? 'Create a database and save ownership metadata.' : 'Update ownership metadata for an existing database.' }}
+                {{
+                  activeFormMode === 'create'
+                    ? 'Create a database and save ownership metadata.'
+                    : 'Update ownership metadata for an existing database.'
+                }}
               </p>
             </div>
             <Button variant="ghost" size="icon" type="button" @click="closeForm">
@@ -861,7 +974,11 @@ watch(selectedDbName, () => {
           <form class="grid gap-4 px-5 py-5" @submit.prevent="void submitDatabaseForm()">
             <label class="grid gap-2">
               <span class="text-sm font-medium text-slate-700">Database name</span>
-              <Input v-model="form.dbName" :disabled="activeFormMode === 'edit'" placeholder="appdb" />
+              <Input
+                v-model="form.dbName"
+                :disabled="activeFormMode === 'edit'"
+                placeholder="appdb"
+              />
             </label>
             <label class="grid gap-2">
               <span class="text-sm font-medium text-slate-700">Owner username</span>

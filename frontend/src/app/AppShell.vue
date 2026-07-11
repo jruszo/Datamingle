@@ -48,8 +48,9 @@ const route = useRoute()
 const showAppShell = computed(() => authStore.isAuthenticated)
 const isSidebarCollapsed = ref(false)
 const openNavigationGroups = ref<Record<string, boolean>>({
-  database: true,
   infrastructure: true,
+  catalog: true,
+  work: true,
 })
 const isSettingsMenuOpen = ref(route.path.startsWith('/settings'))
 const settingsSubmenuId = 'settings-submenu'
@@ -141,8 +142,11 @@ function buildPrimaryNavigationEntries(items: FeatureNavigationItem[]) {
   return entries.sort((left, right) => left.order - right.order)
 }
 
-function isNavigationItemActive(to: string, matchPrefix?: string) {
-  return matchesNavigationItem({ to, matchPrefix, label: '', section: 'primary' }, route.path)
+function isNavigationItemActive(to: string, matchPrefix?: string, exactMatch?: boolean) {
+  return matchesNavigationItem(
+    { to, matchPrefix, exactMatch, label: '', section: 'primary' },
+    route.path,
+  )
 }
 
 function isNavigationGroupActive(items: FeatureNavigationItem[]) {
@@ -363,14 +367,20 @@ watch(
           </div>
         </div>
 
-        <nav class="flex-1 space-y-0.5 p-3">
+        <nav class="flex-1 space-y-1 overflow-y-auto p-3" aria-label="Main navigation">
           <template v-for="entry in primaryNavigationEntries" :key="entry.key">
             <RouterLink
               v-if="entry.type === 'item'"
               :to="entry.item.to"
               :title="isSidebarCollapsed ? entry.item.label : undefined"
               :class="
-                navigationItemClass(isNavigationItemActive(entry.item.to, entry.item.matchPrefix))
+                navigationItemClass(
+                  isNavigationItemActive(
+                    entry.item.to,
+                    entry.item.matchPrefix,
+                    entry.item.exactMatch,
+                  ),
+                )
               "
             >
               <component :is="entry.item.icon" v-if="entry.item.icon" class="h-4 w-4 shrink-0" />
@@ -406,7 +416,11 @@ watch(
                   v-for="item in entry.items"
                   :key="item.to"
                   :to="item.to"
-                  :class="navigationSubItemClass(isNavigationItemActive(item.to, item.matchPrefix))"
+                  :class="
+                    navigationSubItemClass(
+                      isNavigationItemActive(item.to, item.matchPrefix, item.exactMatch),
+                    )
+                  "
                 >
                   <component :is="item.icon" v-if="item.icon" class="h-3.5 w-3.5 shrink-0" />
                   <span>{{ item.label }}</span>
