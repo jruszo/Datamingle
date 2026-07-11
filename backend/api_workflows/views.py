@@ -1278,11 +1278,17 @@ class WorkflowPolicyList(generics.ListCreateAPIView):
     pagination_class = CustomizedPagination
 
     def get_queryset(self):
-        return (
+        queryset = (
             WorkflowPolicy.objects.select_related("created_by", "updated_by")
             .prefetch_related("steps__permission_group")
             .order_by("name", "id")
         )
+        search = self.request.query_params.get("search", "").strip()
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search) | Q(description__icontains=search)
+            )
+        return queryset
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)

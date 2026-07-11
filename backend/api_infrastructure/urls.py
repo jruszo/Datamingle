@@ -24,6 +24,11 @@ urlpatterns = [
         name="infrastructure-mysql-cluster-list",
     ),
     path(
+        "v1/infrastructure/mysql-topology/",
+        views.MysqlTopologyView.as_view(),
+        name="infrastructure-mysql-topology",
+    ),
+    path(
         "v1/infrastructure/mysql-clusters/<int:cluster_id>/",
         views.MysqlClusterDetailView.as_view(),
         name="infrastructure-mysql-cluster-detail",

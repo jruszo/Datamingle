@@ -81,6 +81,10 @@ export function getFirstVisibleSettingsItem(currentUser: CurrentUserContext | nu
 export function matchesNavigationItem(item: FeatureNavigationItem, currentPath: string) {
   const targetPath = item.matchPrefix ?? item.to
 
+  if (item.exactMatch) {
+    return currentPath === targetPath
+  }
+
   if (targetPath === '/') {
     return currentPath === '/'
   }

@@ -1,4 +1,4 @@
-import { Database, FileText } from 'lucide-vue-next'
+import { FileCheck2, ListChecks, ListTodo } from 'lucide-vue-next'
 
 import type { FeatureModule } from '@/app/feature-contract'
 import DdlWorkflowCreatePage from '@/features/workflows/pages/DdlWorkflowCreatePage.vue'
@@ -51,19 +51,19 @@ const workflowsModule: FeatureModule = {
   navigation: [
     {
       to: '/workflows',
-      label: 'Workflows',
+      label: 'Workflow requests',
       section: 'primary',
-      icon: FileText,
-      group: { id: 'database', label: 'Database', icon: Database, order: 25 },
-      order: 90,
+      icon: ListChecks,
+      group: { id: 'work', label: 'Work', icon: ListTodo, order: 30 },
+      order: 30,
     },
     {
       to: '/workflows/policies',
-      label: 'Workflow Policies',
+      label: 'Policies',
       section: 'primary',
-      icon: FileText,
-      group: { id: 'database', label: 'Database', icon: Database, order: 25 },
-      order: 91,
+      icon: FileCheck2,
+      group: { id: 'work', label: 'Work', icon: ListTodo, order: 30 },
+      order: 40,
     },
   ],
 }

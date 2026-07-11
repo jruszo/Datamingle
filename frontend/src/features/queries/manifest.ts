@@ -1,4 +1,4 @@
-import { Database } from 'lucide-vue-next'
+import { ListTodo, SearchCode } from 'lucide-vue-next'
 
 import type { FeatureModule } from '@/app/feature-contract'
 import QueriesPage from '@/features/queries/pages/QueriesPage.vue'
@@ -11,11 +11,11 @@ const queriesModule: FeatureModule = {
   navigation: [
     {
       to: '/queries',
-      label: 'Queries',
+      label: 'Query history',
       section: 'primary',
-      icon: Database,
-      group: { id: 'database', label: 'Database', icon: Database, order: 25 },
-      order: 70,
+      icon: SearchCode,
+      group: { id: 'work', label: 'Work', icon: ListTodo, order: 30 },
+      order: 10,
     },
   ],
 }

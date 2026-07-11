@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   Edit3,
   KeyRound,
@@ -49,6 +49,8 @@ const error = ref('')
 const feedback = ref('')
 const activeFormMode = ref<FormMode | null>(null)
 const selectedAccount = ref<InstanceOperationAccountRecord | null>(null)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+let accountsRequestSequence = 0
 
 const accountForm = reactive({
   user: '',
@@ -101,31 +103,9 @@ function toUserFacingMessage(errorValue: unknown, fallback: string) {
 const canViewAccounts = computed(() => hasPermission('sql.menu_instance_account'))
 const canManageAccounts = computed(() => hasPermission('sql.instance_account_manage'))
 
-const selectedInstance = computed(() =>
-  instances.value.find((instance) => instance.id === selectedInstanceId.value) ?? null,
+const selectedInstance = computed(
+  () => instances.value.find((instance) => instance.id === selectedInstanceId.value) ?? null,
 )
-
-const filteredAccounts = computed(() => {
-  const query = search.value.trim().toLowerCase()
-  if (!query) {
-    return accounts.value
-  }
-
-  return accounts.value.filter((account) =>
-    [
-      account.user,
-      account.host,
-      account.db_name,
-      account.user_host,
-      account.db_name_user,
-      account.remark,
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase()
-      .includes(query),
-  )
-})
 
 const gridColsClass = computed(() =>
   activeFormMode.value ? 'xl:grid-cols-[minmax(0,1fr)_minmax(21rem,0.34fr)]' : 'xl:grid-cols-1',
@@ -183,7 +163,10 @@ function openCreateForm() {
   feedback.value = ''
 }
 
-function openAccountForm(mode: Exclude<FormMode, 'create'>, account: InstanceOperationAccountRecord) {
+function openAccountForm(
+  mode: Exclude<FormMode, 'create'>,
+  account: InstanceOperationAccountRecord,
+) {
   resetForms()
   selectedAccount.value = account
   accountForm.user = account.user
@@ -224,17 +207,24 @@ async function loadAccounts() {
 
   loadingAccounts.value = true
   error.value = ''
+  const requestSequence = ++accountsRequestSequence
+  const instanceId = selectedInstanceId.value
 
   try {
     const response = await fetchInstanceOperationAccounts(requireToken(), {
-      instance_id: selectedInstanceId.value,
+      instance_id: instanceId,
       saved: savedOnly.value,
+      search: search.value,
     })
-    accounts.value = response.results
+    if (requestSequence === accountsRequestSequence && selectedInstanceId.value === instanceId) {
+      accounts.value = response.results
+    }
   } catch (errorValue) {
-    error.value = toUserFacingMessage(errorValue, 'Failed to load accounts.')
+    if (requestSequence === accountsRequestSequence) {
+      error.value = toUserFacingMessage(errorValue, 'Failed to load accounts.')
+    }
   } finally {
-    loadingAccounts.value = false
+    if (requestSequence === accountsRequestSequence) loadingAccounts.value = false
   }
 }
 
@@ -351,7 +341,8 @@ async function submitGrant() {
   feedback.value = ''
 
   const scope = Number(grantForm.scope) as 0 | 1 | 2 | 3
-  const privilegeKey = scope === 0 ? 'global_privs' : scope === 1 ? 'db_privs' : scope === 2 ? 'tb_privs' : 'col_privs'
+  const privilegeKey =
+    scope === 0 ? 'global_privs' : scope === 1 ? 'db_privs' : scope === 2 ? 'tb_privs' : 'col_privs'
 
   try {
     const result = await grantInstanceOperationAccount(
@@ -370,7 +361,9 @@ async function submitGrant() {
       },
       requireToken(),
     )
-    feedback.value = result.grant_sql ? `Privileges updated: ${result.grant_sql}` : 'Privileges updated.'
+    feedback.value = result.grant_sql
+      ? `Privileges updated: ${result.grant_sql}`
+      : 'Privileges updated.'
     closeForm()
     await loadAccounts()
   } catch (errorValue) {
@@ -453,7 +446,18 @@ watch([selectedInstanceId, savedOnly], () => {
   if (!canViewAccounts.value) {
     return
   }
+  if (searchTimer) clearTimeout(searchTimer)
   void loadAccounts()
+})
+
+watch(search, () => {
+  if (!canViewAccounts.value) return
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => void loadAccounts(), 300)
+})
+
+onBeforeUnmount(() => {
+  if (searchTimer) clearTimeout(searchTimer)
 })
 </script>
 
@@ -462,7 +466,10 @@ watch([selectedInstanceId, savedOnly], () => {
     <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
       <div class="space-y-1">
         <div class="flex flex-wrap items-center gap-2">
-          <RouterLink to="/inventory/data-dictionary" class="text-sm font-medium text-slate-500 hover:text-slate-900">
+          <RouterLink
+            to="/inventory/data-dictionary"
+            class="text-sm font-medium text-slate-500 hover:text-slate-900"
+          >
             Data Dictionary
           </RouterLink>
           <span class="text-slate-300">/</span>
@@ -474,18 +481,32 @@ watch([selectedInstanceId, savedOnly], () => {
         </p>
       </div>
       <div class="flex flex-wrap gap-2">
-        <Button variant="outline" type="button" class="gap-2" :disabled="loadingInstances || loadingAccounts" @click="void refreshAccounts()">
+        <Button
+          variant="outline"
+          type="button"
+          class="gap-2"
+          :disabled="loadingInstances || loadingAccounts"
+          @click="void refreshAccounts()"
+        >
           <RefreshCw class="h-4 w-4" />
           Refresh
         </Button>
-        <Button type="button" class="gap-2" :disabled="!selectedInstanceId || !canManageAccounts" @click="openCreateForm">
+        <Button
+          type="button"
+          class="gap-2"
+          :disabled="!selectedInstanceId || !canManageAccounts"
+          @click="openCreateForm"
+        >
           <Plus class="h-4 w-4" />
           New account
         </Button>
       </div>
     </div>
 
-    <p v-if="error" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+    <p
+      v-if="error"
+      class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+    >
       {{ error }}
     </p>
     <p
@@ -498,13 +519,20 @@ watch([selectedInstanceId, savedOnly], () => {
     <Card class="border-slate-200">
       <CardHeader>
         <CardTitle>Scope</CardTitle>
-        <CardDescription>Select an operational instance before changing account metadata or grants.</CardDescription>
+        <CardDescription
+          >Select an operational instance before changing account metadata or
+          grants.</CardDescription
+        >
       </CardHeader>
       <CardContent>
         <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,0.8fr)]">
           <label class="grid gap-2">
             <span class="text-sm font-medium text-slate-700">Instance</span>
-            <select v-model.number="selectedInstanceId" :class="selectClass" :disabled="loadingInstances">
+            <select
+              v-model.number="selectedInstanceId"
+              :class="selectClass"
+              :disabled="loadingInstances"
+            >
               <option v-if="instances.length === 0" :value="null">No available instances</option>
               <option v-for="instance in instances" :key="instance.id" :value="instance.id">
                 {{ instance.label }}
@@ -516,7 +544,7 @@ watch([selectedInstanceId, savedOnly], () => {
             <Input v-model="search" placeholder="User, host, database, or remark" />
           </label>
           <label class="flex items-end gap-2 pb-2 text-sm text-slate-700">
-            <input v-model="savedOnly" type="checkbox" class="h-4 w-4 rounded border-slate-300">
+            <input v-model="savedOnly" type="checkbox" class="h-4 w-4 rounded border-slate-300" />
             Saved metadata only
           </label>
         </div>
@@ -531,14 +559,12 @@ watch([selectedInstanceId, savedOnly], () => {
             Accounts
           </CardTitle>
           <CardDescription>
-            {{ filteredAccounts.length }} shown for {{ selectedInstance?.instance_name || 'no instance' }}
+            {{ accounts.length }} shown for {{ selectedInstance?.instance_name || 'no instance' }}
           </CardDescription>
         </CardHeader>
         <CardContent class="p-0">
-          <div v-if="loadingAccounts" class="p-6 text-sm text-slate-500">
-            Loading accounts...
-          </div>
-          <div v-else-if="filteredAccounts.length === 0" class="p-6 text-sm text-slate-500">
+          <div v-if="loadingAccounts" class="p-6 text-sm text-slate-500">Loading accounts...</div>
+          <div v-else-if="accounts.length === 0" class="p-6 text-sm text-slate-500">
             No accounts match the current filters.
           </div>
           <div v-else class="overflow-x-auto">
@@ -553,7 +579,7 @@ watch([selectedInstanceId, savedOnly], () => {
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-100 bg-white">
-                <tr v-for="account in filteredAccounts" :key="accountIdentity(account)">
+                <tr v-for="account in accounts" :key="accountIdentity(account)">
                   <td class="px-4 py-3">
                     <div class="flex flex-wrap items-center gap-2">
                       <span class="font-medium text-slate-900">{{ accountIdentity(account) }}</span>
@@ -562,19 +588,44 @@ watch([selectedInstanceId, savedOnly], () => {
                     </div>
                   </td>
                   <td class="px-4 py-3 text-slate-600">{{ account.db_name || '-' }}</td>
-                  <td class="max-w-[18rem] truncate px-4 py-3 text-slate-600">{{ privilegeText(account) }}</td>
-                  <td class="max-w-[16rem] truncate px-4 py-3 text-slate-600">{{ account.remark || '-' }}</td>
+                  <td class="max-w-[18rem] truncate px-4 py-3 text-slate-600">
+                    {{ privilegeText(account) }}
+                  </td>
+                  <td class="max-w-[16rem] truncate px-4 py-3 text-slate-600">
+                    {{ account.remark || '-' }}
+                  </td>
                   <td class="px-4 py-3 text-right">
                     <div class="flex flex-wrap justify-end gap-2">
-                      <Button variant="outline" type="button" size="sm" class="gap-2" :disabled="!canManageAccounts" @click="openAccountForm('edit', account)">
+                      <Button
+                        variant="outline"
+                        type="button"
+                        size="sm"
+                        class="gap-2"
+                        :disabled="!canManageAccounts"
+                        @click="openAccountForm('edit', account)"
+                      >
                         <Edit3 class="h-4 w-4" />
                         Edit
                       </Button>
-                      <Button variant="outline" type="button" size="sm" class="gap-2" :disabled="!canManageAccounts" @click="openAccountForm('password', account)">
+                      <Button
+                        variant="outline"
+                        type="button"
+                        size="sm"
+                        class="gap-2"
+                        :disabled="!canManageAccounts"
+                        @click="openAccountForm('password', account)"
+                      >
                         <KeyRound class="h-4 w-4" />
                         Password
                       </Button>
-                      <Button variant="outline" type="button" size="sm" class="gap-2" :disabled="!canManageAccounts" @click="openAccountForm('grant', account)">
+                      <Button
+                        variant="outline"
+                        type="button"
+                        size="sm"
+                        class="gap-2"
+                        :disabled="!canManageAccounts"
+                        @click="openAccountForm('grant', account)"
+                      >
                         <ShieldCheck class="h-4 w-4" />
                         Grants
                       </Button>
@@ -591,7 +642,14 @@ watch([selectedInstanceId, savedOnly], () => {
                         <Lock v-else class="h-4 w-4" />
                         {{ account.is_locked === 'Y' ? 'Unlock' : 'Lock' }}
                       </Button>
-                      <Button variant="destructive" type="button" size="sm" class="gap-2" :disabled="!canManageAccounts || submitting" @click="void removeAccount(account)">
+                      <Button
+                        variant="destructive"
+                        type="button"
+                        size="sm"
+                        class="gap-2"
+                        :disabled="!canManageAccounts || submitting"
+                        @click="void removeAccount(account)"
+                      >
                         <Trash2 class="h-4 w-4" />
                         Delete
                       </Button>
@@ -607,29 +665,59 @@ watch([selectedInstanceId, savedOnly], () => {
       <Card v-if="activeFormMode" class="border-slate-200">
         <CardHeader>
           <CardTitle>
-            {{ activeFormMode === 'create' ? 'Create account' : activeFormMode === 'edit' ? 'Edit metadata' : activeFormMode === 'password' ? 'Reset password' : 'Change grants' }}
+            {{
+              activeFormMode === 'create'
+                ? 'Create account'
+                : activeFormMode === 'edit'
+                  ? 'Edit metadata'
+                  : activeFormMode === 'password'
+                    ? 'Reset password'
+                    : 'Change grants'
+            }}
           </CardTitle>
           <CardDescription>
-            {{ selectedAccount ? accountIdentity(selectedAccount) : selectedInstance?.instance_name }}
+            {{
+              selectedAccount ? accountIdentity(selectedAccount) : selectedInstance?.instance_name
+            }}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form v-if="activeFormMode === 'create' || activeFormMode === 'edit'" class="grid gap-4" @submit.prevent="void submitAccountForm()">
+          <form
+            v-if="activeFormMode === 'create' || activeFormMode === 'edit'"
+            class="grid gap-4"
+            @submit.prevent="void submitAccountForm()"
+          >
             <label class="grid gap-2">
               <span class="text-sm font-medium text-slate-700">User</span>
-              <Input v-model="accountForm.user" :disabled="activeFormMode === 'edit'" placeholder="app_user" />
+              <Input
+                v-model="accountForm.user"
+                :disabled="activeFormMode === 'edit'"
+                placeholder="app_user"
+              />
             </label>
             <label v-if="selectedInstance?.db_type === 'mysql'" class="grid gap-2">
               <span class="text-sm font-medium text-slate-700">Host</span>
-              <Input v-model="accountForm.host" :disabled="activeFormMode === 'edit'" placeholder="%" />
+              <Input
+                v-model="accountForm.host"
+                :disabled="activeFormMode === 'edit'"
+                placeholder="%"
+              />
             </label>
             <label v-else class="grid gap-2">
               <span class="text-sm font-medium text-slate-700">Database</span>
-              <Input v-model="accountForm.dbName" :disabled="activeFormMode === 'edit'" placeholder="appdb" />
+              <Input
+                v-model="accountForm.dbName"
+                :disabled="activeFormMode === 'edit'"
+                placeholder="appdb"
+              />
             </label>
             <label class="grid gap-2">
               <span class="text-sm font-medium text-slate-700">Password</span>
-              <Input v-model="accountForm.password" type="password" :placeholder="activeFormMode === 'create' ? 'Required' : 'Optional metadata update'" />
+              <Input
+                v-model="accountForm.password"
+                type="password"
+                :placeholder="activeFormMode === 'create' ? 'Required' : 'Optional metadata update'"
+              />
             </label>
             <label class="grid gap-2">
               <span class="text-sm font-medium text-slate-700">Remark</span>
@@ -647,7 +735,11 @@ watch([selectedInstanceId, savedOnly], () => {
             </div>
           </form>
 
-          <form v-else-if="activeFormMode === 'password'" class="grid gap-4" @submit.prevent="void submitPasswordReset()">
+          <form
+            v-else-if="activeFormMode === 'password'"
+            class="grid gap-4"
+            @submit.prevent="void submitPasswordReset()"
+          >
             <label class="grid gap-2">
               <span class="text-sm font-medium text-slate-700">New password</span>
               <Input v-model="accountForm.password" type="password" placeholder="New password" />

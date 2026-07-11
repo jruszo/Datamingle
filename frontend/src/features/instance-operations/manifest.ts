@@ -1,4 +1,4 @@
-import { Database, SlidersHorizontal, SquareActivity, UserRound } from 'lucide-vue-next'
+import { Library, SlidersHorizontal, SquareActivity, UserRound } from 'lucide-vue-next'
 
 import type { FeatureModule } from '@/app/feature-contract'
 import AccountManagementPage from '@/features/instance-operations/pages/AccountManagementPage.vue'
@@ -41,7 +41,7 @@ const instanceOperationsModule: FeatureModule = {
       label: 'Accounts',
       section: 'primary',
       icon: UserRound,
-      group: { id: 'database', label: 'Database', icon: Database, order: 25 },
+      group: { id: 'catalog', label: 'Data catalog', icon: Library, order: 25 },
       order: 40,
       access: { anyPermissions: ['sql.menu_instance_account'] },
     },
@@ -50,7 +50,7 @@ const instanceOperationsModule: FeatureModule = {
       label: 'Parameters',
       section: 'primary',
       icon: SlidersHorizontal,
-      group: { id: 'database', label: 'Database', icon: Database, order: 25 },
+      group: { id: 'catalog', label: 'Data catalog', icon: Library, order: 25 },
       order: 50,
       access: { anyPermissions: ['sql.menu_param'] },
     },
@@ -59,7 +59,7 @@ const instanceOperationsModule: FeatureModule = {
       label: 'Diagnostics',
       section: 'primary',
       icon: SquareActivity,
-      group: { id: 'database', label: 'Database', icon: Database, order: 25 },
+      group: { id: 'catalog', label: 'Data catalog', icon: Library, order: 25 },
       order: 60,
       access: { anyPermissions: ['sql.menu_dbdiagnostic'] },
     },

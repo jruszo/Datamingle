@@ -13,6 +13,7 @@ export {
   fetchWorkflowDetail,
   fetchWorkflowExportSubmissionMetadata,
   fetchWorkflowPolicies,
+  searchWorkflowPolicies,
   fetchWorkflowPolicyMetadata,
   fetchWorkflowSubmissionMetadata,
   fetchWorkflows,

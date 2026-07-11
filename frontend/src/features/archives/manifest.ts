@@ -1,4 +1,4 @@
-import { Archive, Database } from 'lucide-vue-next'
+import { Archive, ListTodo } from 'lucide-vue-next'
 
 import type { FeatureModule } from '@/app/feature-contract'
 import ArchiveCreatePage from '@/features/archives/pages/ArchiveCreatePage.vue'
@@ -33,8 +33,8 @@ const archivesModule: FeatureModule = {
       label: 'Archives',
       section: 'primary',
       icon: Archive,
-      group: { id: 'database', label: 'Database', icon: Database, order: 25 },
-      order: 80,
+      group: { id: 'work', label: 'Work', icon: ListTodo, order: 30 },
+      order: 20,
       access: { anyPermissions: ['sql.menu_archive'] },
     },
   ],

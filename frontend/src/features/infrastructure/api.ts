@@ -141,6 +141,20 @@ export type MysqlClusterPayload = {
   label_value: string
 }
 
+export type MysqlTopologyMember = {
+  id: number
+  name: string
+  node_id: number | null
+  node_name: string
+  host: string
+  port: number
+  role: string
+  topology_status: string
+  last_seen_at: string | null
+  write_eligible: boolean
+  block_reason: string
+}
+
 export type MysqlClusterRecord = MysqlClusterPayload & {
   id: number
   topology_status: string
@@ -151,6 +165,17 @@ export type MysqlClusterRecord = MysqlClusterPayload & {
   member_count: number
   active_alert_count: number
   last_seen_at: string | null
+  members: MysqlTopologyMember[]
+}
+
+export type MysqlTopologyRecord = {
+  summary: {
+    cluster_count: number
+    healthy_cluster_count: number
+    service_count: number
+  }
+  clusters: MysqlClusterRecord[]
+  standalone_services: MysqlTopologyMember[]
 }
 
 function extractData<T>(payload: unknown): T {
@@ -192,6 +217,21 @@ export function fetchInfrastructureNodes(token: string, options: InfrastructureL
   return apiGet<unknown>(buildInfrastructureListPath(options), { token }).then((payload) =>
     extractData<PaginatedResponse<InfrastructureNodeRecord>>(payload),
   )
+}
+
+export function fetchMysqlClusters(token: string) {
+  return apiGet<unknown>('/v1/infrastructure/mysql-clusters/?size=100', { token }).then((payload) =>
+    extractData<PaginatedResponse<MysqlClusterRecord>>(payload),
+  )
+}
+
+export function fetchMysqlTopology(token: string, search = '') {
+  const params = new URLSearchParams()
+  if (search.trim()) params.set('search', search.trim())
+  const query = params.toString()
+  return apiGet<unknown>(`/v1/infrastructure/mysql-topology/${query ? `?${query}` : ''}`, {
+    token,
+  }).then((payload) => extractData<MysqlTopologyRecord>(payload))
 }
 
 export function fetchInfrastructureNodeLabelNames(token: string) {
@@ -246,14 +286,10 @@ export function updateDatabaseService(
   )
 }
 
-export function updateMysqlCluster(
-  clusterId: number,
-  payload: MysqlClusterPayload,
-  token: string,
-) {
-  return apiPatch<unknown>(`/v1/infrastructure/mysql-clusters/${clusterId}/`, payload, { token }).then(
-    (responsePayload) => extractData<MysqlClusterRecord>(responsePayload),
-  )
+export function updateMysqlCluster(clusterId: number, payload: MysqlClusterPayload, token: string) {
+  return apiPatch<unknown>(`/v1/infrastructure/mysql-clusters/${clusterId}/`, payload, {
+    token,
+  }).then((responsePayload) => extractData<MysqlClusterRecord>(responsePayload))
 }
 
 export function discoverInfrastructureNodeServices(nodeId: number, token: string) {

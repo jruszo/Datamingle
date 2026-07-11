@@ -23,6 +23,7 @@ from api_infrastructure.serializers import (
     InfrastructureNodeSerializer,
     InfrastructureNodeWriteSerializer,
     MysqlClusterSerializer,
+    MysqlTopologyMemberSerializer,
     RecommendationStatusSerializer,
     ServiceRecommendationSerializer,
 )
@@ -302,8 +303,66 @@ class MysqlClusterListView(generics.ListAPIView):
         return super().get(request)
 
 
+class MysqlTopologyView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        _require_any_permission(request, *INFRASTRUCTURE_MENU_PERMISSIONS)
+        search = request.query_params.get("search", "").strip()
+        visible_services = user_instances(request.user, db_type=["mysql"])
+        all_clusters = mysql_cluster_queryset_for_request(request)
+        standalone_services = (
+            visible_services.filter(mysql_cluster__isnull=True)
+            .select_related("node")
+            .order_by("instance_name", "id")
+        )
+
+        if search:
+            cluster_matches = (
+                Q(name__icontains=search)
+                | Q(label_value__icontains=search)
+                | Q(topology_status__icontains=search)
+            )
+            matching_member_cluster_ids = visible_services.filter(
+                Q(instance_name__icontains=search)
+                | Q(host__icontains=search)
+                | Q(node__name__icontains=search)
+                | Q(mysql_topology_status__icontains=search),
+                mysql_cluster__isnull=False,
+            ).values("mysql_cluster_id")
+            clusters = all_clusters.filter(
+                cluster_matches | Q(id__in=matching_member_cluster_ids)
+            )[:50]
+            standalone_services = standalone_services.filter(
+                Q(instance_name__icontains=search)
+                | Q(host__icontains=search)
+                | Q(node__name__icontains=search)
+                | Q(mysql_topology_status__icontains=search)
+            )[:50]
+        else:
+            clusters = all_clusters.none()
+            standalone_services = standalone_services.none()
+
+        return success_response(
+            data={
+                "summary": {
+                    "cluster_count": all_clusters.count(),
+                    "healthy_cluster_count": all_clusters.filter(
+                        topology_status=MysqlCluster.STATUS_OK
+                    ).count(),
+                    "service_count": visible_services.count(),
+                },
+                "clusters": MysqlClusterSerializer(clusters, many=True).data,
+                "standalone_services": MysqlTopologyMemberSerializer(
+                    standalone_services, many=True
+                ).data,
+            }
+        )
+
+
 def mysql_cluster_queryset_for_request(request):
-    visible_service_ids = user_instances(request.user, db_type=["mysql"]).values("id")
+    visible_services = user_instances(request.user, db_type=["mysql"])
+    visible_service_ids = visible_services.values("id")
     queryset = MysqlCluster.objects.select_related("primary_instance")
     member_count = Count("instances", distinct=True)
     active_alert_filter = Q(alerts__status=MysqlTopologyAlert.STATUS_ACTIVE)
@@ -335,10 +394,17 @@ def mysql_cluster_queryset_for_request(request):
         )
         .prefetch_related(
             Prefetch(
+                "instances",
+                queryset=visible_services.select_related("node").order_by(
+                    "mysql_topology_role", "instance_name", "id"
+                ),
+                to_attr="visible_members",
+            ),
+            Prefetch(
                 "alerts",
                 queryset=active_alerts.select_related("instance"),
                 to_attr="active_alert_records",
-            )
+            ),
         )
         .order_by("name", "id")
     )

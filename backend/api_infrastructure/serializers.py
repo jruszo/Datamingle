@@ -428,15 +428,70 @@ class MysqlTopologyAlertSerializer(serializers.ModelSerializer):
         )
 
 
-class MysqlClusterSerializer(serializers.ModelSerializer):
-    primary_instance_name = serializers.CharField(
-        source="primary_instance.instance_name", read_only=True, default=""
+class MysqlTopologyMemberSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(source="instance_name", read_only=True)
+    node_name = serializers.CharField(source="node.name", read_only=True, default="")
+    role = serializers.CharField(source="mysql_topology_role", read_only=True)
+    topology_status = serializers.CharField(
+        source="mysql_topology_status", read_only=True
     )
+    last_seen_at = serializers.DateTimeField(
+        source="mysql_topology_last_seen_at", read_only=True
+    )
+    write_eligible = serializers.BooleanField(
+        source="mysql_ddl_dml_eligible", read_only=True
+    )
+    block_reason = serializers.CharField(
+        source="mysql_ddl_dml_block_reason", read_only=True
+    )
+
+    class Meta:
+        model = Instance
+        fields = (
+            "id",
+            "name",
+            "node_id",
+            "node_name",
+            "host",
+            "port",
+            "role",
+            "topology_status",
+            "last_seen_at",
+            "write_eligible",
+            "block_reason",
+        )
+
+
+class MysqlClusterSerializer(serializers.ModelSerializer):
+    primary_instance = serializers.SerializerMethodField()
+    primary_instance_name = serializers.SerializerMethodField()
     member_count = serializers.IntegerField(read_only=True)
     active_alert_count = serializers.IntegerField(read_only=True)
     active_alerts = MysqlTopologyAlertSerializer(
         source="active_alert_records", many=True, read_only=True
     )
+    members = serializers.SerializerMethodField()
+
+    def _visible_primary(self, obj):
+        visible_member_ids = {
+            member.id for member in getattr(obj, "visible_members", [])
+        }
+        if obj.primary_instance_id in visible_member_ids:
+            return obj.primary_instance
+        return None
+
+    def get_primary_instance(self, obj):
+        primary = self._visible_primary(obj)
+        return primary.id if primary else None
+
+    def get_primary_instance_name(self, obj):
+        primary = self._visible_primary(obj)
+        return primary.instance_name if primary else ""
+
+    def get_members(self, obj):
+        return MysqlTopologyMemberSerializer(
+            getattr(obj, "visible_members", []), many=True
+        ).data
 
     class Meta:
         model = MysqlCluster
@@ -453,6 +508,7 @@ class MysqlClusterSerializer(serializers.ModelSerializer):
             "member_count",
             "active_alert_count",
             "active_alerts",
+            "members",
             "last_seen_at",
             "create_time",
             "update_time",

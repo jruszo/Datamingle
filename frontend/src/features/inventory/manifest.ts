@@ -1,4 +1,4 @@
-import { BookOpen, Database, Server } from 'lucide-vue-next'
+import { BookOpen, Library, Server } from 'lucide-vue-next'
 
 import type { FeatureModule } from '@/app/feature-contract'
 import DataDictionaryPage from '@/features/inventory/pages/DataDictionaryPage.vue'
@@ -42,7 +42,7 @@ const inventoryModule: FeatureModule = {
       label: 'Instances',
       section: 'primary',
       icon: Server,
-      group: { id: 'database', label: 'Database', icon: Database, order: 25 },
+      group: { id: 'catalog', label: 'Data catalog', icon: Library, order: 25 },
       order: 10,
       access: { anyPermissions: ['sql.menu_instance'] },
     },
@@ -51,7 +51,7 @@ const inventoryModule: FeatureModule = {
       label: 'Data Dictionary',
       section: 'primary',
       icon: BookOpen,
-      group: { id: 'database', label: 'Database', icon: Database, order: 25 },
+      group: { id: 'catalog', label: 'Data catalog', icon: Library, order: 25 },
       order: 20,
       access: { anyPermissions: ['sql.menu_data_dictionary', 'sql.menu_database'] },
     },

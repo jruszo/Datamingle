@@ -736,6 +736,7 @@ class DataDictionaryDatabaseList(views.APIView):
     )
     def get(self, request):
         instance_id = request.query_params.get("instance_id")
+        search = request.query_params.get("search", "").strip().lower()
         if not instance_id:
             raise serializers.ValidationError(
                 {"instance_id": "This field is required."}
@@ -769,7 +770,18 @@ class DataDictionaryDatabaseList(views.APIView):
         if databases.error:
             raise serializers.ValidationError({"errors": databases.error})
 
-        payload = {"count": len(databases.rows), "result": databases.rows}
+        rows = databases.rows
+        if search:
+            rows = [
+                row
+                for row in rows
+                if search
+                in " ".join(
+                    str(value or "")
+                    for value in (row.values() if isinstance(row, dict) else row)
+                ).lower()
+            ]
+        payload = {"count": len(rows), "result": rows}
         return success_response(data=DataDictionaryDatabaseListSerializer(payload).data)
 
 
@@ -803,6 +815,7 @@ class DataDictionaryTableList(views.APIView):
     def get(self, request):
         instance_id = request.query_params.get("instance_id")
         db_name = request.query_params.get("db_name", "").strip()
+        search = request.query_params.get("search", "").strip().lower()
         if not instance_id:
             raise serializers.ValidationError(
                 {"instance_id": "This field is required."}
@@ -830,6 +843,25 @@ class DataDictionaryTableList(views.APIView):
                 query_engine.close()
 
         table_groups = _table_groups_to_list(grouped_tables)
+        if search:
+            table_groups = [
+                {
+                    **group,
+                    "tables": [
+                        table
+                        for table in group["tables"]
+                        if search
+                        in " ".join(
+                            str(value or "")
+                            for value in (
+                                table.values() if isinstance(table, dict) else table
+                            )
+                        ).lower()
+                    ],
+                }
+                for group in table_groups
+            ]
+            table_groups = [group for group in table_groups if group["tables"]]
         payload = {
             "count": sum(len(item["tables"]) for item in table_groups),
             "result": table_groups,
@@ -1090,6 +1122,7 @@ class InstanceOperationDatabaseListCreate(views.APIView):
     def get(self, request):
         instance_id = request.query_params.get("instance_id")
         saved_only = request.query_params.get("saved") == "true"
+        search = request.query_params.get("search", "").strip().lower()
         if not instance_id:
             return success_response(data={"count": 0, "results": []})
 
@@ -1124,7 +1157,11 @@ class InstanceOperationDatabaseListCreate(views.APIView):
             if database_name in configured_databases:
                 merged_row.update(configured_databases[database_name])
             if not saved_only or merged_row["saved"]:
-                rows.append(merged_row)
+                haystack = " ".join(
+                    str(value or "") for value in merged_row.values()
+                ).lower()
+                if not search or search in haystack:
+                    rows.append(merged_row)
 
         payload = {"count": len(rows), "results": rows}
         return success_response(data=InstanceDatabaseListSerializer(payload).data)
@@ -1275,6 +1312,7 @@ class InstanceOperationAccountListCreate(views.APIView):
     def get(self, request):
         instance_id = request.query_params.get("instance_id")
         saved_only = request.query_params.get("saved") == "true"
+        search = request.query_params.get("search", "").strip().lower()
         if not instance_id:
             return success_response(data={"count": 0, "results": []})
 
@@ -1311,7 +1349,11 @@ class InstanceOperationAccountListCreate(views.APIView):
             if row.get(key) in configured_accounts:
                 merged_row.update(configured_accounts[row[key]])
             if not saved_only or merged_row["saved"]:
-                rows.append(merged_row)
+                haystack = " ".join(
+                    str(value or "") for value in merged_row.values()
+                ).lower()
+                if not search or search in haystack:
+                    rows.append(merged_row)
 
         payload = {"count": len(rows), "results": rows}
         return success_response(data=InstanceAccountListSerializer(payload).data)
