@@ -65,13 +65,20 @@ ARCHIVE_APPLY_PERMISSION = "sql.archive_apply"
 ARCHIVE_REVIEW_PERMISSION = "sql.archive_review"
 ARCHIVE_MANAGE_PERMISSION = "sql.archive_mgt"
 
-ARCHIVE_SUPPORTED_DB_TYPES = ("mysql",)
+ARCHIVE_SUPPORTED_DB_TYPES = ("mysql", "pgsql")
 
 
 def _archive_agent_assignment(instance_id):
-    assignment = command_capable_assignment_for_instance(instance_id, db_type="mysql")
+    instance = Instance.objects.filter(pk=instance_id).only("db_type").first()
+    if instance is None or instance.db_type not in ARCHIVE_SUPPORTED_DB_TYPES:
+        return None
+    assignment = command_capable_assignment_for_instance(
+        instance_id, db_type=instance.db_type
+    )
     if assignment is None:
         return None
+    if instance.db_type == "pgsql":
+        return assignment
     if not AgentToolArtifact.objects.filter(
         enabled=True,
         tool_name=AgentToolArtifact.TOOL_PT_ARCHIVER,
@@ -84,14 +91,14 @@ def _archive_agent_assignment(instance_id):
 
 def _require_archive_agent(archive_config):
     if _archive_agent_assignment(archive_config.src_instance_id) is None:
-        raise serializers.ValidationError(
-            {
-                "errors": (
-                    "No online command-capable agent with pt-archiver is available "
-                    "for this instance."
-                )
-            }
-        )
+        if archive_config.src_instance.db_type == "mysql":
+            message = (
+                "No online command-capable agent with pt-archiver is available "
+                "for this instance."
+            )
+        else:
+            message = "No compatible online command-capable agent is available for this instance."
+        raise serializers.ValidationError({"errors": message})
 
 
 def _sync_archive_mailbox_notifications_safe(workflow):
@@ -262,7 +269,11 @@ def _archive_submission_scope(user):
                 "label": f"{instance.instance_name} | {instance.db_type} | {instance.host}",
                 "team_ids": [team_id for team_id, _ in sorted_groups],
                 "team_names": [team_name for _, team_name in sorted_groups],
-                "available_archive_methods": [ARCHIVE_METHOD_PT_ARCHIVER],
+                "available_archive_methods": (
+                    [ARCHIVE_METHOD_PT_ARCHIVER]
+                    if instance.db_type == "mysql"
+                    else [ARCHIVE_METHOD_DML]
+                ),
             }
         )
 
@@ -519,7 +530,7 @@ class ArchiveCreateSerializer(serializers.Serializer):
     table_name = serializers.CharField(max_length=64)
     condition = serializers.CharField(max_length=1000)
     archive_method = serializers.ChoiceField(
-        choices=[ARCHIVE_METHOD_PT_ARCHIVER],
+        choices=[ARCHIVE_METHOD_PT_ARCHIVER, ARCHIVE_METHOD_DML],
         default=ARCHIVE_METHOD_PT_ARCHIVER,
     )
     execution_mode = serializers.ChoiceField(
@@ -554,9 +565,23 @@ class ArchiveCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError({"errors": "Instance does not exist."})
 
         attrs["instance"] = instance
-        if instance.db_type != "mysql":
+        expected_method = (
+            ARCHIVE_METHOD_PT_ARCHIVER
+            if instance.db_type == "mysql"
+            else ARCHIVE_METHOD_DML
+        )
+        if instance.db_type not in ARCHIVE_SUPPORTED_DB_TYPES:
             raise serializers.ValidationError(
-                {"errors": "pt-archiver is only available for MySQL instances."}
+                {"errors": "Archiving is only available for MySQL and PostgreSQL."}
+            )
+        if archive_method != expected_method:
+            raise serializers.ValidationError(
+                {
+                    "errors": (
+                        "pt-archiver is only available for MySQL; "
+                        f"use {expected_method} for {instance.get_db_type_display()}."
+                    )
+                }
             )
         if execution_mode == ARCHIVE_EXECUTION_SCHEDULED:
             if not attrs.get("schedule_frequency") or not attrs.get("schedule_time"):

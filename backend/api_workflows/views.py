@@ -85,6 +85,7 @@ from api_workflows.serializers import (
 )
 from api_agents.models import AgentCommandType, AgentToolArtifact
 from api_agents.services import (
+    AGENT_COMMAND_DB_TYPES,
     AgentCommandDispatchError,
     AgentCommandExecutionError,
     command_capable_assignment_for_instance,
@@ -703,9 +704,9 @@ def _workflow_submission_scope(user):
     )
     instances = (
         mysql_workflow_target_filter(
-            filter_agent_runnable_instances(user_instances(user)).filter(
-                workflow_enabled=True, workflow_policy__is_active=True
-            )
+            filter_agent_runnable_instances(
+                user_instances(user), db_type=AGENT_COMMAND_DB_TYPES
+            ).filter(workflow_enabled=True, workflow_policy__is_active=True)
         )
         .select_related("workflow_policy", "mysql_cluster")
         .prefetch_related("resource_group")
@@ -817,7 +818,9 @@ def _workflow_submission_scope(user):
 
 def _export_submission_scope(user):
     instances = (
-        filter_agent_runnable_instances(user_instances(user))
+        filter_agent_runnable_instances(
+            user_instances(user), db_type=AGENT_COMMAND_DB_TYPES
+        )
         .filter(queryable=True)
         .select_related("workflow_policy")
         .prefetch_related("resource_group")
@@ -1255,9 +1258,9 @@ class WorkflowMetadata(views.APIView):
             "manual_execution_enabled": bool(SysConfig().get("manual")),
             "teams": _workflow_metadata_teams(request.user),
             "instances": mysql_workflow_target_filter(
-                filter_agent_runnable_instances(user_instances(request.user)).filter(
-                    workflow_enabled=True, workflow_policy__is_active=True
-                )
+                filter_agent_runnable_instances(
+                    user_instances(request.user), db_type=AGENT_COMMAND_DB_TYPES
+                ).filter(workflow_enabled=True, workflow_policy__is_active=True)
             )
             .select_related("workflow_policy", "mysql_cluster")
             .prefetch_related("resource_group")

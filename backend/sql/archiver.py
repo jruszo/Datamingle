@@ -759,6 +759,11 @@ def archive(archive_id, trigger="manual"):
         )
 
         rendered_condition = None
+        archive_method = (
+            ARCHIVE_METHOD_DML
+            if archive_info.src_instance.db_type == "pgsql"
+            else ARCHIVE_METHOD_PT_ARCHIVER
+        )
         try:
             started = timezone.now()
             rendered_condition = render_archive_condition(archive_info.condition)
@@ -795,7 +800,7 @@ def archive(archive_id, trigger="manual"):
                 start_time=started,
                 end_time=ended,
                 condition=rendered_condition,
-                archive_method=ARCHIVE_METHOD_PT_ARCHIVER,
+                archive_method=archive_method,
             )
             return result
         except Exception as exc:
@@ -818,7 +823,7 @@ def archive(archive_id, trigger="manual"):
                 start_time=started,
                 end_time=ended,
                 condition=rendered_condition,
-                archive_method=ARCHIVE_METHOD_PT_ARCHIVER,
+                archive_method=archive_method,
             )
             raise
     finally:

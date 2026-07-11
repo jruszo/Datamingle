@@ -519,8 +519,8 @@ class TestPgSQL(TestCase):
     @patch("psycopg2.connect")
     def test_engine_base_info(self, _conn):
         new_engine = PgSQLEngine(instance=self.ins)
-        self.assertEqual(new_engine.name, "PgSQL")
-        self.assertEqual(new_engine.info, "PgSQL engine")
+        self.assertEqual(new_engine.name, "PostgreSQL")
+        self.assertEqual(new_engine.info, "PostgreSQL engine")
 
     @patch("psycopg2.connect")
     def test_get_connection(self, _conn):

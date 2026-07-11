@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"os"
@@ -10,7 +11,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/go-sql-driver/mysql"
 
 	"github.com/jruszo/datamingle/agent/internal/client"
@@ -51,6 +54,29 @@ func TestExecuteSupportsInventoryCollection(t *testing.T) {
 	if strings.Contains(err.Error(), "unsupported command type") {
 		t.Fatalf("inventory command was not dispatched: %v", err)
 	}
+}
+
+func TestExecuteAcceptsPostgreSQLWorkflowCommands(t *testing.T) {
+	executor := NewExecutor()
+	result, err := executor.Execute(
+		context.Background(),
+		client.AgentCommand{InstanceID: 42, CommandType: "workflow.check", Payload: map[string]any{"sql": "CREATE TABLE audit_events (id bigint);"}},
+		client.AgentConfig{Assignments: []client.Assignment{{InstanceID: 42, DBType: "pgsql"}}},
+	)
+	if err != nil {
+		t.Fatalf("PostgreSQL workflow command was rejected: %v", err)
+	}
+	if result.Payload["syntax_type"] != 1 {
+		t.Fatalf("expected DDL syntax type, got %#v", result.Payload["syntax_type"])
+	}
+}
+
+func TestOpenDatabaseSupportsPostgreSQL(t *testing.T) {
+	db, err := openDatabase(client.Assignment{DBType: "pgsql", Host: "localhost", Port: 5432, Username: "user", Password: "secret", SSL: client.SSLConfig{Enabled: true}}, "app")
+	if err != nil {
+		t.Fatalf("open PostgreSQL: %v", err)
+	}
+	db.Close()
 }
 
 func TestBuildMySQLTopologyPayloadUsesReplicaStatusAliases(t *testing.T) {
@@ -156,6 +182,7 @@ func TestIsReadOnlySQL(t *testing.T) {
 		"select ';' as semicolon",
 		"show databases",
 		"show create table users",
+		"WITH active AS (SELECT id FROM users) SELECT * FROM active",
 	} {
 		if !isReadOnlySQL(sqlText) {
 			t.Fatalf("expected %q to be read-only", sqlText)
@@ -169,6 +196,8 @@ func TestIsReadOnlySQL(t *testing.T) {
 		"select 1; update users set name = 'x'",
 		"select 1; select 2",
 		"show grants",
+		"WITH removed AS (DELETE FROM users RETURNING id) SELECT * FROM removed",
+		"WITH changed AS (UPDATE users SET name = 'x' RETURNING id) SELECT * FROM changed",
 	} {
 		if isReadOnlySQL(sqlText) {
 			t.Fatalf("expected %q to be rejected", sqlText)
@@ -193,6 +222,8 @@ func TestClassifyWorkflowSyntax(t *testing.T) {
 		"update users set name = 'x'",
 		"delete from users where id = 1",
 		"replace into users(id) values (1)",
+		"WITH removed AS (DELETE FROM users RETURNING id) SELECT * FROM removed",
+		"WITH source AS (SELECT id FROM users) UPDATE users SET name = 'x' FROM source WHERE users.id = source.id",
 	} {
 		if classifyWorkflowSyntax(sqlText) != 2 {
 			t.Fatalf("expected %q to be DML", sqlText)
@@ -206,6 +237,130 @@ func TestClassifyWorkflowSyntax(t *testing.T) {
 		if classifyWorkflowSyntax(sqlText) != 0 {
 			t.Fatalf("expected %q to be rejected", sqlText)
 		}
+	}
+}
+
+func TestIsExportSQLRejectsMutatingCTE(t *testing.T) {
+	if !isExportSQL("WITH rows AS (SELECT id FROM users) SELECT * FROM rows") {
+		t.Fatal("expected read-only CTE export to be accepted")
+	}
+	if isExportSQL("WITH removed AS (DELETE FROM users RETURNING id) SELECT * FROM removed") {
+		t.Fatal("expected data-modifying CTE export to be rejected")
+	}
+}
+
+func TestPostgresCTEClassificationIgnoresDollarQuotesAndComments(t *testing.T) {
+	for _, sqlText := range []string{
+		"WITH value AS (SELECT $$DELETE FROM users$$ AS text) SELECT * FROM value",
+		"WITH value AS (SELECT $body$UPDATE users; DELETE users$body$ AS text) SELECT * FROM value",
+		"WITH value AS (SELECT 1 /* DELETE FROM users */) SELECT * FROM value",
+		"WITH value AS (SELECT 1 -- DELETE FROM users\n) SELECT * FROM value",
+	} {
+		if !isReadOnlySQL(sqlText) {
+			t.Fatalf("expected literal/comment tokens in %q to be ignored", sqlText)
+		}
+		if classifyWorkflowSyntax(sqlText) != 0 {
+			t.Fatalf("expected %q to remain read-only workflow syntax", sqlText)
+		}
+	}
+}
+
+func TestQuotePostgresIdentifier(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+		ok    bool
+	}{
+		{name: "single part", input: "events", want: `"events"`, ok: true},
+		{name: "schema qualified", input: "audit.events", want: `"audit"."events"`, ok: true},
+		{name: "too many parts", input: "audit.events.extra", ok: false},
+		{name: "empty", input: "", ok: false},
+		{name: "embedded quote", input: `events"drop`, ok: false},
+		{name: "empty table", input: "audit.", ok: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, ok := quotePostgresIdentifier(test.input)
+			if got != test.want || ok != test.ok {
+				t.Errorf("quotePostgresIdentifier(%q) = (%q, %v), want (%q, %v)", test.input, got, ok, test.want, test.ok)
+			}
+		})
+	}
+}
+
+func TestPostgresArchiveExecuteBatchesDeletes(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	executor := NewExecutor()
+	executor.openDB = func(client.Assignment, string) (*sql.DB, error) { return db, nil }
+	mock.ExpectQuery("SELECT current_setting('transaction_read_only')::boolean, pg_is_in_recovery()").WillReturnRows(sqlmock.NewRows([]string{"read_only", "recovery"}).AddRow(false, false))
+	statement := `WITH candidates AS (SELECT ctid FROM "audit"."events" WHERE created_at < now() LIMIT 1000 FOR UPDATE SKIP LOCKED), deleted AS (DELETE FROM "audit"."events" target USING candidates WHERE target.ctid = candidates.ctid RETURNING 1) SELECT count(*) FROM deleted`
+	mock.ExpectQuery(statement).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1000))
+	mock.ExpectQuery(statement).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	result, err := executor.postgresArchiveExecute(context.Background(), client.Assignment{DBType: "pgsql", Database: "app"}, client.AgentCommand{Payload: map[string]any{"table_name": "audit.events", "where": "created_at < now()", "sleep": 0}}, time.Now())
+	if err != nil {
+		t.Fatalf("archive execute: %v", err)
+	}
+	if result.Payload["delete_cnt"] != 1002 || result.Payload["select_cnt"] != 1002 {
+		t.Fatalf("unexpected archive counts: %#v", result.Payload)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPostgresArchiveExecuteNoDeleteCountsAllRows(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	executor := NewExecutor()
+	executor.openDB = func(client.Assignment, string) (*sql.DB, error) { return db, nil }
+	mock.ExpectQuery("SELECT current_setting('transaction_read_only')::boolean, pg_is_in_recovery()").WillReturnRows(sqlmock.NewRows([]string{"read_only", "recovery"}).AddRow(false, false))
+	mock.ExpectQuery(`SELECT count(*) FROM "events" WHERE id > 0`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1200))
+	result, err := executor.postgresArchiveExecute(context.Background(), client.Assignment{DBType: "pgsql", Database: "app"}, client.AgentCommand{Payload: map[string]any{"table_name": "events", "where": "id > 0", "no_delete": true}}, time.Now())
+	if err != nil {
+		t.Fatalf("archive count: %v", err)
+	}
+	if result.Payload["select_cnt"] != 1200 || result.Payload["delete_cnt"] != 0 {
+		t.Fatalf("unexpected dry-run counts: %#v", result.Payload)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPostgresArchiveExecuteRejectsUnsafeConditionBeforeOpeningDatabase(t *testing.T) {
+	executor := NewExecutor()
+	opened := false
+	executor.openDB = func(client.Assignment, string) (*sql.DB, error) { opened = true; return nil, nil }
+	_, err := executor.postgresArchiveExecute(context.Background(), client.Assignment{DBType: "pgsql", Database: "app"}, client.AgentCommand{Payload: map[string]any{"table_name": "events", "where": "1=1; DROP TABLE users--"}}, time.Now())
+	if err == nil || !strings.Contains(err.Error(), "unsupported SQL delimiters") {
+		t.Fatalf("expected validation error, got %v", err)
+	}
+	if opened {
+		t.Fatal("unsafe condition reached database open")
+	}
+}
+
+func TestPostgresArchiveExecuteHonorsCanceledContext(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	executor := NewExecutor()
+	executor.openDB = func(client.Assignment, string) (*sql.DB, error) { return db, nil }
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = executor.postgresArchiveExecute(ctx, client.Assignment{DBType: "pgsql", Database: "app"}, client.AgentCommand{Payload: map[string]any{"table_name": "events", "where": "id > 0"}}, time.Now())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled context, got %v", err)
 	}
 }
 

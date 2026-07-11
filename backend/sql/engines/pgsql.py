@@ -43,9 +43,9 @@ class PgSQLEngine(EngineBase):
         )
         return self.conn
 
-    name = "PgSQL"
+    name = "PostgreSQL"
 
-    info = "PgSQL engine"
+    info = "PostgreSQL engine"
 
     def get_inventory_details(self):
         default_details = super().get_inventory_details()

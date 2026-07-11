@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +23,7 @@ import (
 	"unicode"
 
 	"github.com/go-sql-driver/mysql"
+	_ "github.com/lib/pq"
 
 	"github.com/jruszo/datamingle/agent/internal/client"
 	"github.com/jruszo/datamingle/agent/internal/tools"
@@ -31,6 +33,7 @@ type Executor struct {
 	now          func() time.Time
 	toolCacheDir string
 	runCommand   func(ctx context.Context, name string, args ...string) ([]byte, error)
+	openDB       func(assignment client.Assignment, database string) (*sql.DB, error)
 }
 
 type Result struct {
@@ -70,7 +73,7 @@ func NewExecutor() *Executor {
 }
 
 func NewExecutorWithToolCache(toolCacheDir string) *Executor {
-	executor := &Executor{now: time.Now, toolCacheDir: toolCacheDir}
+	executor := &Executor{now: time.Now, toolCacheDir: toolCacheDir, openDB: openDatabase}
 	executor.runCommand = runCommandStreamingTail
 	return executor
 }
@@ -125,7 +128,7 @@ func (e *Executor) Execute(ctx context.Context, command client.AgentCommand, cfg
 	if !ok {
 		return Result{}, fmt.Errorf("instance %d is not assigned to this agent", command.InstanceID)
 	}
-	if assignment.DBType != "mysql" {
+	if assignment.DBType != "mysql" && assignment.DBType != "pgsql" {
 		return Result{}, fmt.Errorf("unsupported database type %q", assignment.DBType)
 	}
 
@@ -155,6 +158,9 @@ func (e *Executor) Execute(ctx context.Context, command client.AgentCommand, cfg
 }
 
 func (e *Executor) archiveExecute(ctx context.Context, assignment client.Assignment, cfg client.AgentConfig, command client.AgentCommand, started time.Time) (Result, error) {
+	if assignment.DBType == "pgsql" {
+		return e.postgresArchiveExecute(ctx, assignment, command, started)
+	}
 	toolPath, err := e.toolArtifactPath("pt-archiver", cfg)
 	if err != nil {
 		return Result{}, err
@@ -169,7 +175,6 @@ func (e *Executor) archiveExecute(ctx context.Context, assignment client.Assignm
 	if where == "" {
 		return Result{}, fmt.Errorf("archive condition is required")
 	}
-
 	sourceCredentials, cleanupSource, err := onlineSchemaCredentialFile(assignment)
 	if err != nil {
 		return Result{}, err
@@ -259,27 +264,113 @@ func (e *Executor) archiveExecute(ctx context.Context, assignment client.Assignm
 	}}, nil
 }
 
+func (e *Executor) postgresArchiveExecute(ctx context.Context, assignment client.Assignment, command client.AgentCommand, started time.Time) (Result, error) {
+	database := stringValueOrDefault(command.Payload, "db_name", assignment.Database)
+	table := stringValue(command.Payload, "table_name")
+	where := strings.TrimSpace(stringValue(command.Payload, "where"))
+	mode := stringValueOrDefault(command.Payload, "mode", "purge")
+	quotedTable, identifierOK := quotePostgresIdentifier(table)
+	if !archiveIdentifierPattern.MatchString(database) || !identifierOK {
+		return Result{}, fmt.Errorf("archive database and table names contain unsupported characters")
+	}
+	if where == "" {
+		return Result{}, fmt.Errorf("archive condition is required")
+	}
+	if err := validatePostgresArchiveCondition(where); err != nil {
+		return Result{}, err
+	}
+	if mode != "purge" {
+		return Result{}, fmt.Errorf("PostgreSQL archiving currently supports purge mode")
+	}
+	db, err := e.openDB(assignment, database)
+	if err != nil {
+		return Result{}, err
+	}
+	defer db.Close()
+	if err := ensureWritable(ctx, assignment.DBType, db); err != nil {
+		return Result{}, err
+	}
+	batchSize := 1000
+	selected, deleted := 0, 0
+	for {
+		var count int
+		if boolValue(command.Payload, "no_delete", false) {
+			if err = db.QueryRowContext(ctx, fmt.Sprintf("SELECT count(*) FROM %s WHERE %s", quotedTable, where)).Scan(&count); err != nil {
+				return Result{}, fmt.Errorf("PostgreSQL archive count failed: %w", err)
+			}
+			selected += count
+			break
+		}
+		statement := fmt.Sprintf("WITH candidates AS (SELECT ctid FROM %s WHERE %s LIMIT %d FOR UPDATE SKIP LOCKED), deleted AS (DELETE FROM %s target USING candidates WHERE target.ctid = candidates.ctid RETURNING 1) SELECT count(*) FROM deleted", quotedTable, where, batchSize, quotedTable)
+		if err = db.QueryRowContext(ctx, statement).Scan(&count); err != nil {
+			return Result{}, fmt.Errorf("PostgreSQL archive batch failed: %w", err)
+		}
+		selected += count
+		deleted += count
+		if count < batchSize {
+			break
+		}
+		if sleep := intValue(command.Payload, "sleep", 1); sleep > 0 {
+			select {
+			case <-ctx.Done():
+				return Result{}, ctx.Err()
+			case <-time.After(time.Duration(sleep) * time.Second):
+			}
+		}
+	}
+	statement := fmt.Sprintf("PostgreSQL batched archive purge %s.%s", database, table)
+	return Result{Message: "archive executed", Payload: map[string]any{"statement": statement, "select_cnt": selected, "insert_cnt": 0, "delete_cnt": deleted, "statistics": fmt.Sprintf("SELECT %d\nDELETE %d", selected, deleted), "success": true, "execution_seconds": e.now().Sub(started).Seconds(), "command_id": command.ID}}, nil
+}
+
+func quotePostgresIdentifier(identifier string) (string, bool) {
+	parts := strings.Split(identifier, ".")
+	if len(parts) > 2 {
+		return "", false
+	}
+	quoted := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if !archiveIdentifierPattern.MatchString(part) {
+			return "", false
+		}
+		quoted = append(quoted, `"`+strings.ReplaceAll(part, `"`, `""`)+`"`)
+	}
+	return strings.Join(quoted, "."), true
+}
+
+func validatePostgresArchiveCondition(condition string) error {
+	if strings.ContainsRune(condition, '\x00') || strings.Contains(condition, ";") || strings.Contains(condition, "--") || strings.Contains(condition, "/*") || strings.Contains(condition, "*/") {
+		return fmt.Errorf("archive condition contains unsupported SQL delimiters or comment markers")
+	}
+	return nil
+}
+
 func (e *Executor) inventoryCollect(ctx context.Context, assignment client.Assignment, started time.Time) (Result, error) {
-	db, err := openMySQL(assignment, assignment.Database)
+	db, err := openDatabase(assignment, assignment.Database)
 	if err != nil {
 		return Result{}, err
 	}
 	defer db.Close()
 
-	var hostname string
-	var version string
-	if err := db.QueryRowContext(ctx, "SELECT @@hostname, VERSION()").Scan(&hostname, &version); err != nil {
+	var hostname, version string
+	query := "SELECT @@hostname, VERSION()"
+	if assignment.DBType == "pgsql" {
+		query = "SELECT COALESCE(inet_server_addr()::text, current_setting('listen_addresses')), version()"
+	}
+	if err := db.QueryRowContext(ctx, query).Scan(&hostname, &version); err != nil {
 		return Result{}, err
 	}
-	mysqlTopology := collectMySQLTopology(ctx, db)
+	payload := map[string]any{"hostname": hostname, "version": version, "execution_seconds": e.now().Sub(started).Seconds()}
+	if assignment.DBType == "mysql" {
+		payload["mysql_topology"] = collectMySQLTopology(ctx, db)
+	} else {
+		var recovery bool
+		if err := db.QueryRowContext(ctx, "SELECT pg_is_in_recovery()").Scan(&recovery); err == nil {
+			payload["postgresql_topology"] = map[string]any{"in_recovery": recovery, "role": map[bool]string{true: "replica", false: "primary"}[recovery]}
+		}
+	}
 	return Result{
 		Message: "inventory collected",
-		Payload: map[string]any{
-			"hostname":          hostname,
-			"version":           version,
-			"mysql_topology":    mysqlTopology,
-			"execution_seconds": e.now().Sub(started).Seconds(),
-		},
+		Payload: payload,
 	}, nil
 }
 
@@ -518,7 +609,7 @@ func assignmentForInstanceID(instanceID int64, cfg client.AgentConfig) (client.A
 }
 
 func (e *Executor) connectionTest(ctx context.Context, assignment client.Assignment, started time.Time) (Result, error) {
-	db, err := openMySQL(assignment, assignment.Database)
+	db, err := openDatabase(assignment, assignment.Database)
 	if err != nil {
 		return Result{}, err
 	}
@@ -581,6 +672,9 @@ func (e *Executor) schemaChange(ctx context.Context, assignment client.Assignmen
 	}
 	executor := stringValueOrDefault(command.Payload, "executor", "direct")
 	if executor != "direct" {
+		if assignment.DBType != "mysql" {
+			return Result{}, fmt.Errorf("online schema executors are only supported for MySQL")
+		}
 		statements, ok := singleSQLStatement(sqlText)
 		if !ok {
 			return Result{}, fmt.Errorf("schema.change only allows one DDL statement")
@@ -599,12 +693,12 @@ func (e *Executor) schemaChange(ctx context.Context, assignment client.Assignmen
 	if !isSafeDDL(sqlText) {
 		return Result{}, fmt.Errorf("schema.change only allows approved single-statement DDL")
 	}
-	db, err := openMySQL(assignment, stringValueOrDefault(command.Payload, "db_name", assignment.Database))
+	db, err := openDatabase(assignment, stringValueOrDefault(command.Payload, "db_name", assignment.Database))
 	if err != nil {
 		return Result{}, err
 	}
 	defer db.Close()
-	if err := ensureWritableMySQL(ctx, db); err != nil {
+	if err := ensureWritable(ctx, assignment.DBType, db); err != nil {
 		return Result{}, err
 	}
 	tx, err := db.BeginTx(ctx, nil)
@@ -726,12 +820,12 @@ func (e *Executor) workflowExecute(ctx context.Context, assignment client.Assign
 		)
 	}
 
-	db, err := openMySQL(assignment, stringValueOrDefault(command.Payload, "db_name", assignment.Database))
+	db, err := openDatabase(assignment, stringValueOrDefault(command.Payload, "db_name", assignment.Database))
 	if err != nil {
 		return Result{}, err
 	}
 	defer db.Close()
-	if err := ensureWritableMySQL(ctx, db); err != nil {
+	if err := ensureWritable(ctx, assignment.DBType, db); err != nil {
 		return Result{}, err
 	}
 
@@ -796,7 +890,7 @@ func (e *Executor) exportCheck(ctx context.Context, assignment client.Assignment
 		maxRows = 10000
 	}
 
-	db, err := openMySQL(assignment, stringValueOrDefault(command.Payload, "db_name", assignment.Database))
+	db, err := openDatabase(assignment, stringValueOrDefault(command.Payload, "db_name", assignment.Database))
 	if err != nil {
 		return Result{}, err
 	}
@@ -1174,7 +1268,7 @@ func archiveDSN(assignment client.Assignment, credentialFile, database, table st
 }
 
 func queryRows(ctx context.Context, assignment client.Assignment, database string, sqlText string, limit int) (queryData, error) {
-	db, err := openMySQL(assignment, database)
+	db, err := openDatabase(assignment, database)
 	if err != nil {
 		return queryData{}, err
 	}
@@ -1256,6 +1350,41 @@ func openMySQL(assignment client.Assignment, database string) (*sql.DB, error) {
 	return sql.Open("mysql", cfg.FormatDSN())
 }
 
+func openDatabase(assignment client.Assignment, database string) (*sql.DB, error) {
+	if assignment.DBType == "mysql" {
+		return openMySQL(assignment, database)
+	}
+	if assignment.DBType != "pgsql" {
+		return nil, fmt.Errorf("unsupported database type %q", assignment.DBType)
+	}
+	if database == "" {
+		database = "postgres"
+	}
+	u := &url.URL{Scheme: "postgres", User: url.UserPassword(assignment.Username, assignment.Password), Host: net.JoinHostPort(assignment.Host, strconv.Itoa(assignment.Port)), Path: "/" + database}
+	q := u.Query()
+	q.Set("connect_timeout", "10")
+	q.Set("sslmode", "disable")
+	if assignment.SSL.Enabled {
+		q.Set("sslmode", map[bool]string{true: "verify-full", false: "require"}[assignment.SSL.Verify])
+	}
+	u.RawQuery = q.Encode()
+	return sql.Open("postgres", u.String())
+}
+
+func ensureWritable(ctx context.Context, dbType string, db *sql.DB) error {
+	if dbType == "mysql" {
+		return ensureWritableMySQL(ctx, db)
+	}
+	var readOnly, recovery bool
+	if err := db.QueryRowContext(ctx, "SELECT current_setting('transaction_read_only')::boolean, pg_is_in_recovery()").Scan(&readOnly, &recovery); err != nil {
+		return fmt.Errorf("unable to verify PostgreSQL writable state: %w", err)
+	}
+	if readOnly || recovery {
+		return fmt.Errorf("PostgreSQL target is read-only or in recovery")
+	}
+	return nil
+}
+
 func ensureWritableMySQL(ctx context.Context, db *sql.DB) error {
 	var readOnly int
 	if err := db.QueryRowContext(ctx, "SELECT @@global.read_only").Scan(&readOnly); err != nil {
@@ -1279,6 +1408,9 @@ func isReadOnlySQL(sqlText string) bool {
 	if hasSQLPrefix(normalized, "show grants") {
 		return false
 	}
+	if operation, mutating, ok := classifyPostgresCTE(normalized); ok {
+		return operation == "select" && !mutating
+	}
 	return hasSQLPrefix(normalized, "select") ||
 		hasSQLPrefix(normalized, "explain") ||
 		hasSQLPrefix(normalized, "describe") ||
@@ -1288,7 +1420,13 @@ func isReadOnlySQL(sqlText string) bool {
 
 func isExportSQL(sqlText string) bool {
 	normalized, ok := normalizeSingleSQLStatement(sqlText)
-	return ok && hasSQLPrefix(normalized, "select")
+	if !ok {
+		return false
+	}
+	if operation, mutating, ok := classifyPostgresCTE(normalized); ok {
+		return operation == "select" && !mutating
+	}
+	return hasSQLPrefix(normalized, "select")
 }
 
 func isSafeDDL(sqlText string) bool {
@@ -1303,7 +1441,13 @@ func isSafeDDL(sqlText string) bool {
 }
 
 func classifyWorkflowSyntax(sqlText string) int {
-	normalized := normalizeSQLStatement(sqlText)
+	normalized := normalizeSQLStatement(stripSQLComments(sqlText))
+	if operation, mutating, ok := classifyPostgresCTE(normalized); ok {
+		if mutating || operation != "select" {
+			return 2
+		}
+		return 0
+	}
 	switch {
 	case normalized == "":
 		return 0
@@ -1326,6 +1470,98 @@ func classifyWorkflowSyntax(sqlText string) int {
 	default:
 		return 0
 	}
+}
+
+func classifyPostgresCTE(sqlText string) (operation string, mutating bool, ok bool) {
+	if !hasSQLPrefix(sqlText, "with") && !hasSQLPrefix(sqlText, "with recursive") {
+		return "", false, false
+	}
+	depth := 0
+	completedBody := false
+	for i := 0; i < len(sqlText); {
+		if delimiter, found := postgresDollarQuoteDelimiter(sqlText, i); found {
+			closing := strings.Index(sqlText[i+len(delimiter):], delimiter)
+			if closing < 0 {
+				return "", false, true
+			}
+			i += len(delimiter) + closing + len(delimiter)
+			continue
+		}
+		if strings.HasPrefix(sqlText[i:], "--") {
+			if newline := strings.IndexByte(sqlText[i+2:], '\n'); newline >= 0 {
+				i += newline + 3
+				continue
+			}
+			break
+		}
+		if strings.HasPrefix(sqlText[i:], "/*") {
+			if closing := strings.Index(sqlText[i+2:], "*/"); closing >= 0 {
+				i += closing + 4
+				continue
+			}
+			break
+		}
+		switch sqlText[i] {
+		case '\'', '"':
+			quote := sqlText[i]
+			i++
+			for i < len(sqlText) {
+				if sqlText[i] == quote {
+					if i+1 < len(sqlText) && sqlText[i+1] == quote {
+						i += 2
+						continue
+					}
+					i++
+					break
+				}
+				i++
+			}
+		case '(':
+			depth++
+			i++
+		case ')':
+			if depth == 1 {
+				completedBody = true
+			}
+			if depth > 0 {
+				depth--
+			}
+			i++
+		default:
+			if !unicode.IsLetter(rune(sqlText[i])) && sqlText[i] != '_' {
+				i++
+				continue
+			}
+			start := i
+			for i < len(sqlText) && (unicode.IsLetter(rune(sqlText[i])) || unicode.IsDigit(rune(sqlText[i])) || sqlText[i] == '_') {
+				i++
+			}
+			token := strings.ToLower(sqlText[start:i])
+			isMutation := token == "insert" || token == "update" || token == "delete"
+			if depth > 0 && isMutation {
+				mutating = true
+			}
+			if depth == 0 && completedBody && (token == "select" || isMutation) {
+				return token, mutating, true
+			}
+		}
+	}
+	return "", mutating, true
+}
+
+func postgresDollarQuoteDelimiter(sqlText string, start int) (string, bool) {
+	if start >= len(sqlText) || sqlText[start] != '$' {
+		return "", false
+	}
+	for i := start + 1; i < len(sqlText); i++ {
+		if sqlText[i] == '$' {
+			return sqlText[start : i+1], true
+		}
+		if !unicode.IsLetter(rune(sqlText[i])) && !unicode.IsDigit(rune(sqlText[i])) && sqlText[i] != '_' {
+			return "", false
+		}
+	}
+	return "", false
 }
 
 func normalizeSingleSQLStatement(sqlText string) (string, bool) {
@@ -1403,6 +1639,16 @@ func splitSQLStatements(sqlText string) ([]string, bool) {
 			}
 			continue
 		}
+		if delimiter, found := postgresDollarQuoteDelimiter(stripped, i); found {
+			closing := strings.Index(stripped[i+len(delimiter):], delimiter)
+			if closing < 0 {
+				return nil, false
+			}
+			end := i + len(delimiter) + closing + len(delimiter)
+			current.WriteString(stripped[i:end])
+			i = end - 1
+			continue
+		}
 
 		switch ch {
 		case '\'':
@@ -1478,6 +1724,17 @@ func stripSQLComments(sqlText string) string {
 			if ch == '`' {
 				inBacktick = false
 			}
+			continue
+		}
+		if delimiter, found := postgresDollarQuoteDelimiter(sqlText, i); found {
+			closing := strings.Index(sqlText[i+len(delimiter):], delimiter)
+			if closing < 0 {
+				out.WriteString(sqlText[i:])
+				break
+			}
+			end := i + len(delimiter) + closing + len(delimiter)
+			out.WriteString(sqlText[i:end])
+			i = end - 1
 			continue
 		}
 
