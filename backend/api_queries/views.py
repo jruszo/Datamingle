@@ -56,6 +56,7 @@ from api_core.pagination import CustomizedPagination
 from api_core.response import success_response
 from api_agents.models import AgentCommandType
 from api_agents.services import (
+    AGENT_COMMAND_DB_TYPES,
     AgentCommandDispatchError,
     AgentCommandExecutionError,
     filter_agent_runnable_instances,
@@ -446,7 +447,7 @@ class QueryInstanceList(views.APIView):
             db_type=db_type or None,
         )
         queryset = (
-            filter_agent_runnable_instances(queryset, db_type=("mysql", "pgsql"))
+            filter_agent_runnable_instances(queryset, db_type=AGENT_COMMAND_DB_TYPES)
             .filter(queryable=True)
             .order_by("instance_name")
         )

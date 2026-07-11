@@ -759,6 +759,11 @@ def archive(archive_id, trigger="manual"):
         )
 
         rendered_condition = None
+        archive_method = (
+            ARCHIVE_METHOD_DML
+            if archive_info.src_instance.db_type == "pgsql"
+            else ARCHIVE_METHOD_PT_ARCHIVER
+        )
         try:
             started = timezone.now()
             rendered_condition = render_archive_condition(archive_info.condition)
@@ -782,11 +787,6 @@ def archive(archive_id, trigger="manual"):
                 timeout_seconds=86400,
             )
             result = command.result or {}
-            archive_method = (
-                ARCHIVE_METHOD_DML
-                if archive_info.src_instance.db_type == "pgsql"
-                else ARCHIVE_METHOD_PT_ARCHIVER
-            )
             ended = timezone.now()
             _record_archive_log(
                 archive_info=archive_info,
@@ -823,11 +823,7 @@ def archive(archive_id, trigger="manual"):
                 start_time=started,
                 end_time=ended,
                 condition=rendered_condition,
-                archive_method=(
-                    ARCHIVE_METHOD_DML
-                    if archive_info.src_instance.db_type == "pgsql"
-                    else ARCHIVE_METHOD_PT_ARCHIVER
-                ),
+                archive_method=archive_method,
             )
             raise
     finally:

@@ -33,6 +33,7 @@ type Executor struct {
 	now          func() time.Time
 	toolCacheDir string
 	runCommand   func(ctx context.Context, name string, args ...string) ([]byte, error)
+	openDB       func(assignment client.Assignment, database string) (*sql.DB, error)
 }
 
 type Result struct {
@@ -72,7 +73,7 @@ func NewExecutor() *Executor {
 }
 
 func NewExecutorWithToolCache(toolCacheDir string) *Executor {
-	executor := &Executor{now: time.Now, toolCacheDir: toolCacheDir}
+	executor := &Executor{now: time.Now, toolCacheDir: toolCacheDir, openDB: openDatabase}
 	executor.runCommand = runCommandStreamingTail
 	return executor
 }
@@ -174,7 +175,6 @@ func (e *Executor) archiveExecute(ctx context.Context, assignment client.Assignm
 	if where == "" {
 		return Result{}, fmt.Errorf("archive condition is required")
 	}
-
 	sourceCredentials, cleanupSource, err := onlineSchemaCredentialFile(assignment)
 	if err != nil {
 		return Result{}, err
@@ -276,10 +276,13 @@ func (e *Executor) postgresArchiveExecute(ctx context.Context, assignment client
 	if where == "" {
 		return Result{}, fmt.Errorf("archive condition is required")
 	}
+	if err := validatePostgresArchiveCondition(where); err != nil {
+		return Result{}, err
+	}
 	if mode != "purge" {
 		return Result{}, fmt.Errorf("PostgreSQL archiving currently supports purge mode")
 	}
-	db, err := openDatabase(assignment, database)
+	db, err := e.openDB(assignment, database)
 	if err != nil {
 		return Result{}, err
 	}
@@ -321,7 +324,7 @@ func (e *Executor) postgresArchiveExecute(ctx context.Context, assignment client
 
 func quotePostgresIdentifier(identifier string) (string, bool) {
 	parts := strings.Split(identifier, ".")
-	if len(parts) == 0 || len(parts) > 2 {
+	if len(parts) > 2 {
 		return "", false
 	}
 	quoted := make([]string, 0, len(parts))
@@ -332,6 +335,13 @@ func quotePostgresIdentifier(identifier string) (string, bool) {
 		quoted = append(quoted, `"`+strings.ReplaceAll(part, `"`, `""`)+`"`)
 	}
 	return strings.Join(quoted, "."), true
+}
+
+func validatePostgresArchiveCondition(condition string) error {
+	if strings.ContainsRune(condition, '\x00') || strings.Contains(condition, ";") || strings.Contains(condition, "--") || strings.Contains(condition, "/*") || strings.Contains(condition, "*/") {
+		return fmt.Errorf("archive condition contains unsupported SQL delimiters or comment markers")
+	}
+	return nil
 }
 
 func (e *Executor) inventoryCollect(ctx context.Context, assignment client.Assignment, started time.Time) (Result, error) {
@@ -1431,7 +1441,7 @@ func isSafeDDL(sqlText string) bool {
 }
 
 func classifyWorkflowSyntax(sqlText string) int {
-	normalized := normalizeSQLStatement(sqlText)
+	normalized := normalizeSQLStatement(stripSQLComments(sqlText))
 	if operation, mutating, ok := classifyPostgresCTE(normalized); ok {
 		if mutating || operation != "select" {
 			return 2
@@ -1469,6 +1479,28 @@ func classifyPostgresCTE(sqlText string) (operation string, mutating bool, ok bo
 	depth := 0
 	completedBody := false
 	for i := 0; i < len(sqlText); {
+		if delimiter, found := postgresDollarQuoteDelimiter(sqlText, i); found {
+			closing := strings.Index(sqlText[i+len(delimiter):], delimiter)
+			if closing < 0 {
+				return "", false, true
+			}
+			i += len(delimiter) + closing + len(delimiter)
+			continue
+		}
+		if strings.HasPrefix(sqlText[i:], "--") {
+			if newline := strings.IndexByte(sqlText[i+2:], '\n'); newline >= 0 {
+				i += newline + 3
+				continue
+			}
+			break
+		}
+		if strings.HasPrefix(sqlText[i:], "/*") {
+			if closing := strings.Index(sqlText[i+2:], "*/"); closing >= 0 {
+				i += closing + 4
+				continue
+			}
+			break
+		}
 		switch sqlText[i] {
 		case '\'', '"':
 			quote := sqlText[i]
@@ -1515,6 +1547,21 @@ func classifyPostgresCTE(sqlText string) (operation string, mutating bool, ok bo
 		}
 	}
 	return "", mutating, true
+}
+
+func postgresDollarQuoteDelimiter(sqlText string, start int) (string, bool) {
+	if start >= len(sqlText) || sqlText[start] != '$' {
+		return "", false
+	}
+	for i := start + 1; i < len(sqlText); i++ {
+		if sqlText[i] == '$' {
+			return sqlText[start : i+1], true
+		}
+		if !unicode.IsLetter(rune(sqlText[i])) && !unicode.IsDigit(rune(sqlText[i])) && sqlText[i] != '_' {
+			return "", false
+		}
+	}
+	return "", false
 }
 
 func normalizeSingleSQLStatement(sqlText string) (string, bool) {
@@ -1592,6 +1639,16 @@ func splitSQLStatements(sqlText string) ([]string, bool) {
 			}
 			continue
 		}
+		if delimiter, found := postgresDollarQuoteDelimiter(stripped, i); found {
+			closing := strings.Index(stripped[i+len(delimiter):], delimiter)
+			if closing < 0 {
+				return nil, false
+			}
+			end := i + len(delimiter) + closing + len(delimiter)
+			current.WriteString(stripped[i:end])
+			i = end - 1
+			continue
+		}
 
 		switch ch {
 		case '\'':
@@ -1667,6 +1724,17 @@ func stripSQLComments(sqlText string) string {
 			if ch == '`' {
 				inBacktick = false
 			}
+			continue
+		}
+		if delimiter, found := postgresDollarQuoteDelimiter(sqlText, i); found {
+			closing := strings.Index(sqlText[i+len(delimiter):], delimiter)
+			if closing < 0 {
+				out.WriteString(sqlText[i:])
+				break
+			}
+			end := i + len(delimiter) + closing + len(delimiter)
+			out.WriteString(sqlText[i:end])
+			i = end - 1
 			continue
 		}
 
