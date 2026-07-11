@@ -57,6 +57,7 @@ const workflowsModule: FeatureModule = {
       icon: ListChecks,
       group: workNavigationGroup,
       order: 30,
+      exactMatch: true,
     },
     {
       to: '/workflows/policies',
