@@ -1,4 +1,4 @@
-import { Library, Network, Server, Workflow } from 'lucide-vue-next'
+import { Network, Server, Workflow } from 'lucide-vue-next'
 
 import type { FeatureModule } from '@/app/feature-contract'
 import InfrastructurePage from '@/features/infrastructure/pages/InfrastructurePage.vue'
@@ -42,7 +42,7 @@ const infrastructureModule: FeatureModule = {
       label: 'Cluster topology',
       section: 'primary',
       icon: Workflow,
-      group: { id: 'catalog', label: 'Data catalog', icon: Library, order: 25 },
+      group: { id: 'infrastructure', label: 'Infrastructure', icon: Network, order: 20 },
       order: 15,
       access: { anyPermissions: ['sql.menu_infrastructure', 'sql.menu_instance'] },
     },

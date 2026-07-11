@@ -18,6 +18,7 @@ import VChart from 'vue-echarts'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import ChartEmptyState from '@/features/dashboard/components/ChartEmptyState.vue'
 import {
   fetchCurrentUserContext,
   fetchDashboard,
@@ -400,16 +401,13 @@ onMounted(() => {
             :option="queryActivityOption"
             autoresize
           />
-          <div
+          <ChartEmptyState
             v-else
-            class="grid h-80 place-items-center rounded-lg border border-dashed border-slate-200 bg-slate-50/60 text-center"
-          >
-            <div>
-              <Search class="mx-auto h-7 w-7 text-slate-300" />
-              <p class="mt-2 text-sm font-medium text-slate-700">No query activity</p>
-              <p class="mt-1 text-xs text-slate-500">Try a wider date range or run a query.</p>
-            </div>
-          </div>
+            :icon="Search"
+            title="No query activity"
+            subtitle="Try a wider date range or run a query."
+            height="20rem"
+          />
         </CardContent>
       </Card>
 
@@ -425,16 +423,13 @@ onMounted(() => {
             :option="instanceTypeOption"
             autoresize
           />
-          <div
+          <ChartEmptyState
             v-else
-            class="grid h-80 place-items-center rounded-lg border border-dashed border-slate-200 bg-slate-50/60 text-center"
-          >
-            <div>
-              <Database class="mx-auto h-7 w-7 text-slate-300" />
-              <p class="mt-2 text-sm font-medium text-slate-700">No data sources yet</p>
-              <p class="mt-1 text-xs text-slate-500">Connected databases will appear here.</p>
-            </div>
-          </div>
+            :icon="Database"
+            title="No data sources yet"
+            subtitle="Connected databases will appear here."
+            height="20rem"
+          />
         </CardContent>
       </Card>
     </div>
@@ -452,16 +447,12 @@ onMounted(() => {
             :option="workflowTrendOption"
             autoresize
           />
-          <div
+          <ChartEmptyState
             v-else
-            class="grid h-72 place-items-center rounded-lg border border-dashed border-slate-200 bg-slate-50/60 text-center"
-          >
-            <div>
-              <FileCheck2 class="mx-auto h-7 w-7 text-slate-300" />
-              <p class="mt-2 text-sm font-medium text-slate-700">No workflow submissions</p>
-              <p class="mt-1 text-xs text-slate-500">Activity for this period will appear here.</p>
-            </div>
-          </div>
+            :icon="FileCheck2"
+            title="No workflow submissions"
+            subtitle="Activity for this period will appear here."
+          />
         </CardContent>
       </Card>
 
@@ -477,16 +468,12 @@ onMounted(() => {
             :option="workflowStatusOption"
             autoresize
           />
-          <div
+          <ChartEmptyState
             v-else
-            class="grid h-72 place-items-center rounded-lg border border-dashed border-slate-200 bg-slate-50/60 text-center"
-          >
-            <div>
-              <FileCheck2 class="mx-auto h-7 w-7 text-slate-300" />
-              <p class="mt-2 text-sm font-medium text-slate-700">No workflow status data</p>
-              <p class="mt-1 text-xs text-slate-500">Workflow states will appear here.</p>
-            </div>
-          </div>
+            :icon="FileCheck2"
+            title="No workflow status data"
+            subtitle="Workflow states will appear here."
+          />
         </CardContent>
       </Card>
     </div>

@@ -1,6 +1,7 @@
-import { ListTodo, SearchCode } from 'lucide-vue-next'
+import { SearchCode } from 'lucide-vue-next'
 
 import type { FeatureModule } from '@/app/feature-contract'
+import { workNavigationGroup } from '@/app/navigation-groups'
 import QueriesPage from '@/features/queries/pages/QueriesPage.vue'
 
 const queriesModule: FeatureModule = {
@@ -14,7 +15,7 @@ const queriesModule: FeatureModule = {
       label: 'Query history',
       section: 'primary',
       icon: SearchCode,
-      group: { id: 'work', label: 'Work', icon: ListTodo, order: 30 },
+      group: workNavigationGroup,
       order: 10,
     },
   ],

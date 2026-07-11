@@ -79,6 +79,22 @@ from api_instances.serializers import (
 
 logger = logging.getLogger("default")
 
+
+def _row_matches_search(row, search, visible_fields=None):
+    if not search:
+        return True
+    if isinstance(row, dict):
+        values = (
+            (row.get(field) for field in visible_fields)
+            if visible_fields is not None
+            else row.values()
+        )
+    else:
+        values = row
+    haystack = " ".join(str(value or "") for value in values).lower()
+    return search in haystack
+
+
 DATA_DICTIONARY_DB_TYPES = ["mysql", "mssql", "oracle"]
 INSTANCE_OPERATION_DB_TYPES = ["mysql", "mongo"]
 INSTANCE_PARAMETER_DB_TYPES = ["mysql"]
@@ -772,15 +788,7 @@ class DataDictionaryDatabaseList(views.APIView):
 
         rows = databases.rows
         if search:
-            rows = [
-                row
-                for row in rows
-                if search
-                in " ".join(
-                    str(value or "")
-                    for value in (row.values() if isinstance(row, dict) else row)
-                ).lower()
-            ]
+            rows = [row for row in rows if _row_matches_search(row, search)]
         payload = {"count": len(rows), "result": rows}
         return success_response(data=DataDictionaryDatabaseListSerializer(payload).data)
 
@@ -850,13 +858,7 @@ class DataDictionaryTableList(views.APIView):
                     "tables": [
                         table
                         for table in group["tables"]
-                        if search
-                        in " ".join(
-                            str(value or "")
-                            for value in (
-                                table.values() if isinstance(table, dict) else table
-                            )
-                        ).lower()
+                        if _row_matches_search(table, search)
                     ],
                 }
                 for group in table_groups
@@ -1157,10 +1159,18 @@ class InstanceOperationDatabaseListCreate(views.APIView):
             if database_name in configured_databases:
                 merged_row.update(configured_databases[database_name])
             if not saved_only or merged_row["saved"]:
-                haystack = " ".join(
-                    str(value or "") for value in merged_row.values()
-                ).lower()
-                if not search or search in haystack:
+                if _row_matches_search(
+                    merged_row,
+                    search,
+                    (
+                        "db_name",
+                        "owner",
+                        "owner_display",
+                        "table_rows",
+                        "data_total",
+                        "remark",
+                    ),
+                ):
                     rows.append(merged_row)
 
         payload = {"count": len(rows), "results": rows}
@@ -1349,10 +1359,11 @@ class InstanceOperationAccountListCreate(views.APIView):
             if row.get(key) in configured_accounts:
                 merged_row.update(configured_accounts[row[key]])
             if not saved_only or merged_row["saved"]:
-                haystack = " ".join(
-                    str(value or "") for value in merged_row.values()
-                ).lower()
-                if not search or search in haystack:
+                if _row_matches_search(
+                    merged_row,
+                    search,
+                    ("user", "host", "db_name", "user_host", "db_name_user", "remark"),
+                ):
                     rows.append(merged_row)
 
         payload = {"count": len(rows), "results": rows}

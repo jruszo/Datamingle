@@ -130,6 +130,8 @@ function selectTopologyEntry(key: string) {
 }
 
 function handleSearchInput() {
+  latestRequest += 1
+  loading.value = false
   selectedEntry.value = ''
   clusters.value = []
   standaloneServices.value = []
@@ -372,7 +374,15 @@ onClickOutside(searchContainer, () => {
                   </p>
                 </div>
               </div>
-              <Badge v-if="member.write_eligible" class="bg-emerald-600">Writable</Badge>
+              <div class="grid justify-items-end gap-1">
+                <Badge v-if="member.write_eligible" class="bg-emerald-600">Writable</Badge>
+                <Badge v-else variant="outline" class="border-slate-200 bg-white text-slate-600"
+                  >Not writable</Badge
+                >
+                <p v-if="member.block_reason" class="max-w-56 text-right text-xs text-slate-500">
+                  {{ member.block_reason }}
+                </p>
+              </div>
             </div>
           </div>
           <div
@@ -405,6 +415,15 @@ onClickOutside(searchContainer, () => {
                 {{ member.node_name || 'Unassigned node' }} ·
                 {{ member.role === 'replica' ? 'Replica' : statusLabel(member.topology_status) }}
               </p>
+              <div class="mt-2 flex items-start justify-between gap-2">
+                <Badge v-if="member.write_eligible" class="bg-emerald-600">Writable</Badge>
+                <Badge v-else variant="outline" class="border-slate-200 bg-slate-50 text-slate-600"
+                  >Not writable</Badge
+                >
+                <p v-if="member.block_reason" class="text-right text-xs text-slate-500">
+                  {{ member.block_reason }}
+                </p>
+              </div>
             </div>
           </div>
 
@@ -469,9 +488,18 @@ onClickOutside(searchContainer, () => {
                 </p>
               </div>
             </div>
-            <Badge variant="outline" class="border-slate-200 bg-slate-50 text-slate-600"
-              >Standalone</Badge
-            >
+            <div class="grid justify-items-end gap-1">
+              <Badge v-if="selectedService.write_eligible" class="bg-emerald-600">Writable</Badge>
+              <Badge v-else variant="outline" class="border-slate-200 bg-slate-50 text-slate-600"
+                >Not writable</Badge
+              >
+              <p
+                v-if="selectedService.block_reason"
+                class="max-w-56 text-right text-xs text-slate-500"
+              >
+                {{ selectedService.block_reason }}
+              </p>
+            </div>
           </div>
           <div
             class="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500"

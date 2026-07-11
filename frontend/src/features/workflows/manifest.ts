@@ -1,6 +1,7 @@
-import { FileCheck2, ListChecks, ListTodo } from 'lucide-vue-next'
+import { FileCheck2, ListChecks } from 'lucide-vue-next'
 
 import type { FeatureModule } from '@/app/feature-contract'
+import { workNavigationGroup } from '@/app/navigation-groups'
 import DdlWorkflowCreatePage from '@/features/workflows/pages/DdlWorkflowCreatePage.vue'
 import DmlWorkflowCreatePage from '@/features/workflows/pages/DmlWorkflowCreatePage.vue'
 import ExportWorkflowCreatePage from '@/features/workflows/pages/ExportWorkflowCreatePage.vue'
@@ -15,7 +16,7 @@ const workflowsModule: FeatureModule = {
       path: '/workflows',
       name: 'workflows',
       component: WorkflowsPage,
-      meta: { title: 'Workflows' },
+      meta: { title: 'Workflow requests' },
     },
     {
       path: '/workflows/ddl/new',
@@ -39,7 +40,7 @@ const workflowsModule: FeatureModule = {
       path: '/workflows/policies',
       name: 'workflow-policies',
       component: WorkflowPoliciesPage,
-      meta: { title: 'Workflow Policies' },
+      meta: { title: 'Policies' },
     },
     {
       path: '/workflows/:workflowId',
@@ -54,7 +55,7 @@ const workflowsModule: FeatureModule = {
       label: 'Workflow requests',
       section: 'primary',
       icon: ListChecks,
-      group: { id: 'work', label: 'Work', icon: ListTodo, order: 30 },
+      group: workNavigationGroup,
       order: 30,
     },
     {
@@ -62,7 +63,7 @@ const workflowsModule: FeatureModule = {
       label: 'Policies',
       section: 'primary',
       icon: FileCheck2,
-      group: { id: 'work', label: 'Work', icon: ListTodo, order: 30 },
+      group: workNavigationGroup,
       order: 40,
     },
   ],

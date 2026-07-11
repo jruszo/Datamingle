@@ -236,6 +236,14 @@ class InfrastructureNodeApiTests(APITestCase):
         names = {row["name"] for row in response.json()["data"]["results"]}
         self.assertEqual(names, {"visible-cluster"})
         visible_payload = response.json()["data"]["results"][0]
+        self.assertEqual(
+            [member["name"] for member in visible_payload["members"]],
+            [visible_service.instance_name],
+        )
+        self.assertNotIn(
+            hidden_visible_cluster_primary.instance_name,
+            [member["name"] for member in visible_payload["members"]],
+        )
         self.assertIsNone(visible_payload["primary_instance"])
         self.assertEqual(visible_payload["primary_instance_name"], "")
         self.assertEqual(visible_payload["active_alert_count"], 1)
@@ -244,6 +252,30 @@ class InfrastructureNodeApiTests(APITestCase):
             MysqlTopologyAlert.TYPE_MISSING_MASTER,
         )
         self.assertEqual(hidden_response.status_code, status.HTTP_404_NOT_FOUND)
+
+        visible_search = self.client.get(
+            "/api/v1/infrastructure/mysql-topology/?search=visible-primary"
+        )
+        hidden_search = self.client.get(
+            "/api/v1/infrastructure/mysql-topology/?search=hidden"
+        )
+        self.assertEqual(visible_search.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [cluster["name"] for cluster in visible_search.json()["data"]["clusters"]],
+            [visible_cluster.name],
+        )
+        self.assertEqual(
+            [
+                member["name"]
+                for member in visible_search.json()["data"]["clusters"][0]["members"]
+            ],
+            [visible_service.instance_name],
+        )
+        self.assertEqual(hidden_search.status_code, status.HTTP_200_OK)
+        self.assertEqual(hidden_search.json()["data"]["clusters"], [])
+        self.assertEqual(hidden_search.json()["data"]["standalone_services"], [])
+        self.assertEqual(hidden_search.json()["data"]["summary"]["cluster_count"], 1)
+        self.assertEqual(hidden_search.json()["data"]["summary"]["service_count"], 1)
 
     def test_mysql_topology_includes_standalone_services(self):
         node = create_node("standalone-node", "10.0.0.30")
