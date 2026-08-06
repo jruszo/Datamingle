@@ -136,7 +136,7 @@ UI.
 
 - Git
 - Docker Engine or Docker Desktop
-- Docker Compose with the `docker-compose` command
+- Docker Compose v2 with the `docker compose` command
 - At least 8 GB of memory available to Docker for the full three-stack setup
 - These host ports available:
 
@@ -149,12 +149,10 @@ UI.
 | Demo PostgreSQL | `5433` |
 | Grafana | `3000` |
 | VictoriaMetrics | `8428` |
+| Shared Redis | `6379` |
 | Quickwit HTTP / OTLP gRPC | `7280` / `7281` |
 | Jaeger UI | `16686` |
 | MinIO API / console | `9000` / `9001` |
-
-If your system exposes Compose as `docker compose`, replace
-`docker-compose` with `docker compose` in the commands below.
 
 ### 1. Clone and prepare local configuration
 
@@ -192,27 +190,27 @@ them before exposing any service beyond your machine.
 Start the optional observability stack first so the metrics backend is ready:
 
 ```bash
-docker-compose -f shared-infra/docker-compose.yml up -d
+docker compose -f shared-infra/docker-compose.yml up -d
 ```
 
 Start the MySQL and PostgreSQL databases used by the seeded examples:
 
 ```bash
-docker-compose -f backend/src/docker-compose/docker-compose.demo-dbs.yml up -d
+docker compose -f backend/src/docker-compose/docker-compose.demo-dbs.yml up -d
 ```
 
 Build and start the application database, Redis, Django, Celery worker, Celery
 Beat, and Vue frontend:
 
 ```bash
-docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml up -d --build
+docker compose -f backend/src/docker-compose/docker-compose.local-dev.yml up -d --build
 ```
 
 The first application start applies Django migrations, collects static assets,
 and runs the idempotent local demo seed. Follow startup progress with:
 
 ```bash
-docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml logs -f datamingle
+docker compose -f backend/src/docker-compose/docker-compose.local-dev.yml logs -f datamingle
 ```
 
 Wait until Daphne is listening, then press `Ctrl-C` to stop following the logs.
@@ -220,8 +218,8 @@ Wait until Daphne is listening, then press `Ctrl-C` to stop following the logs.
 ### 3. Verify the environment
 
 ```bash
-docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml ps
-docker-compose -f backend/src/docker-compose/docker-compose.demo-dbs.yml ps
+docker compose -f backend/src/docker-compose/docker-compose.local-dev.yml ps
+docker compose -f backend/src/docker-compose/docker-compose.demo-dbs.yml ps
 docker exec -w /opt/datamingle/backend datamingle-app python manage.py smoke_local_demo
 curl -fsS http://127.0.0.1:5173/ >/dev/null && echo "frontend: ready"
 curl -fsS "http://127.0.0.1:8428/prometheus/api/v1/query?query=up"
@@ -301,7 +299,7 @@ agent commands and database-exporter metrics require a running agent. See
 ### Rebuild the app and frontend
 
 ```bash
-docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend
+docker compose -f backend/src/docker-compose/docker-compose.local-dev.yml up -d --build datamingle frontend
 ```
 
 The backend source tree is bind-mounted. Rebuild when dependencies, the image,
@@ -320,17 +318,17 @@ docker exec -w /opt/datamingle/backend datamingle-app python manage.py smoke_loc
 ### Inspect logs
 
 ```bash
-docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml logs -f datamingle
-docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml logs -f celery celerybeat
-docker-compose -f shared-infra/docker-compose.yml logs -f victoriametrics-local-dev
+docker compose -f backend/src/docker-compose/docker-compose.local-dev.yml logs -f datamingle
+docker compose -f backend/src/docker-compose/docker-compose.local-dev.yml logs -f celery celerybeat
+docker compose -f shared-infra/docker-compose.yml logs -f victoriametrics-local-dev
 ```
 
 ### Stop without deleting data
 
 ```bash
-docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml down
-docker-compose -f backend/src/docker-compose/docker-compose.demo-dbs.yml down
-docker-compose -f shared-infra/docker-compose.yml down
+docker compose -f backend/src/docker-compose/docker-compose.local-dev.yml down
+docker compose -f backend/src/docker-compose/docker-compose.demo-dbs.yml down
+docker compose -f shared-infra/docker-compose.yml down
 ```
 
 ### Reset the disposable local environment
@@ -339,16 +337,16 @@ The following removes local Compose volumes and recreates the seeded databases.
 Do not run it against an environment containing data you need:
 
 ```bash
-docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml down -v
-docker-compose -f backend/src/docker-compose/docker-compose.demo-dbs.yml down -v
-docker-compose -f backend/src/docker-compose/docker-compose.demo-dbs.yml up -d
-docker-compose -f backend/src/docker-compose/docker-compose.local-dev.yml up -d --build
+docker compose -f backend/src/docker-compose/docker-compose.local-dev.yml down -v
+docker compose -f backend/src/docker-compose/docker-compose.demo-dbs.yml down -v
+docker compose -f backend/src/docker-compose/docker-compose.demo-dbs.yml up -d
+docker compose -f backend/src/docker-compose/docker-compose.local-dev.yml up -d --build
 ```
 
 Shared observability data is retained unless you explicitly run:
 
 ```bash
-docker-compose -f shared-infra/docker-compose.yml down -v
+docker compose -f shared-infra/docker-compose.yml down -v
 ```
 
 If you have local data from before the Archery-to-Datamingle database rename,
